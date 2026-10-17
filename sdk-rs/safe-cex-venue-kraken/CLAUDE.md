@@ -404,3 +404,9 @@ fills, positions and balance frames with native Store/event assertions.
 A compiled xhr-assignment mutation fails the production startup regression;
 exact restoration passes. Retained composition tests cover live class factories
 and polling rather than the deleted wrappers.
+
+The concrete book host uses the shared Js iterator after the source falsy-to-empty
+fallback. String sides are iterable: Futures/Spot snapshots skip their NaN quantities
+and emit an empty side, while Spot deltas retain a NaN level. The constructed
+public-book regression compares those actual source cases through real subscriptions
+and raw socket frames, retaining native price/amount bits before JSON projection.
