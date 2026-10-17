@@ -346,7 +346,7 @@ pub(crate) fn mutation_ops(scope: &OkxScope) -> Rc<OrderMutationOps<Js, Thrown>>
     let s = scope.clone();
     Rc::new(OrderMutationOps {
         value: market_ops(scope),
-        has: Rc::new(|k, v| Ok(v.has_own(k))),
+        has: Rc::new(|k, v| safe_cex_exchange::js_runtime::library::in_operator(v, k)),
         filter: Rc::new(|v, f| {
             let mut out = vec![];
             for x in items(&v)? {
