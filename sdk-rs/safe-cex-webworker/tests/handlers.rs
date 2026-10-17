@@ -897,3 +897,14 @@ fn actual_source_command_admission_and_position_error_strings() {
         );
     }
 }
+
+#[test]
+fn market_timeout_never_projects_its_error_into_the_json_post_channel() {
+    let (venue,runtime,_) = venue();
+    let posts = Rc::new(RefCell::new(Vec::new()));
+    let capture = posts.clone();
+    let handler = safe_cex_webworker::subscriptions::OHLCVSubscriptionsHandler::new(venue,Rc::new(move |payload|capture.borrow_mut().push(payload)));
+    handler.handle(StoreWorkerPayload { op:StoreWorkerOp::SubscribeOHLCV,instance_id:None,data:Some(json!({"symbol":"BTC","interval":"1m","subId":"s"})) }).unwrap();
+    runtime.advance(130_000);
+    assert!(posts.borrow().is_empty(),"WORKER-NATIVE-ERROR timeout Error must use the native object post capability, never JSON data");
+}

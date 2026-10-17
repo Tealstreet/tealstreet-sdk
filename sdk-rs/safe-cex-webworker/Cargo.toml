@@ -16,3 +16,7 @@ indexmap = { version = "=2.14.2", features = ["serde"] }
 
 [lints]
 workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+js-sys = "0.3.106"
