@@ -27,7 +27,7 @@ async fn stream(method: &str, args: Value, channel: &str, data: Value) {
         Rc::new(|_| {}),
     );
     let id = h.ok(method, args).await;
-    assert!(id.is_u64(), "native callback cleanup handle: {id}");
+    assert_eq!(id.as_f64(), Some(1.0), "native callback cleanup handle");
     support::eventually("native gateway subscription", || {
         subscribed(&h, "subscribe", channel)
     })
@@ -102,7 +102,7 @@ fn bulk_candles_reach_binances_source_base_noop() {
                 json!([{"symbols":["BTCUSDT"],"interval":"1m"}]),
             )
             .await;
-        assert!(id.is_u64());
+        assert_eq!(id.as_f64(), Some(1.0));
         h.ok("unlisten", json!([id])).await;
         assert!(!subscribed(&h, "subscribe", "candle"));
         assert!(h.seen.borrow().is_empty());

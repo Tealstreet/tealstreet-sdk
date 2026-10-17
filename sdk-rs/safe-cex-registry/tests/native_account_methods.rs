@@ -211,11 +211,14 @@ fn hosted_signer_signs_native_query_requests() {
         assert_eq!(wire["accountName"], "mexc-hosted");
         assert_eq!(
             wire["config"]["params"],
-            json!({"symbol":"BTC_USDT","page_num":1,"page_size":100})
+            json!({"symbol":"BTC_USDT","page_num":1.0,"page_size":100.0})
         );
         let seen = seen.take();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].headers["x-hosted-signature"], "host-signed");
+        let query: Vec<_> = seen[0].query.split('&').collect();
+        assert!(query.contains(&"page_num=1"), "{}", seen[0].query);
+        assert!(query.contains(&"page_size=100"), "{}", seen[0].query);
         assert!(
             seen[0].query.contains("symbol=BTC_USDT"),
             "{}",
