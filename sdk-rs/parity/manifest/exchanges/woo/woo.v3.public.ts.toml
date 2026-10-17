@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.public.ts"
-rust_files = ["safe-cex-venue-woo/src/v3_public.rs"]
+rust_files = [ "safe-cex-venue-woo/src/v3_public.rs" ]
 
 [[symbol]]
 ts = "WooV3FuturesRow"

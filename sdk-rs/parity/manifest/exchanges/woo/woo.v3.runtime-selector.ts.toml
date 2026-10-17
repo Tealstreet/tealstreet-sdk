@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.runtime-selector.ts"
-rust_files = ["safe-cex-venue-woo/src/runtime_selector.rs"]
+rust_files = [ "safe-cex-venue-woo/src/runtime_selector.rs" ]
 
 [[symbol]]
 ts = "WooV3MigrationRouteId"

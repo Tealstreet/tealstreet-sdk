@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.public-parity.ts"
-rust_files = ["safe-cex-venue-woo/src/public_canonical.rs", "safe-cex-venue-woo/src/public_parity.rs"]
+rust_files = [ "safe-cex-venue-woo/src/public_canonical.rs", "safe-cex-venue-woo/src/public_parity.rs" ]
 
 [[symbol]]
 ts = "WooV3PublicParityRouteId"
