@@ -1019,3 +1019,70 @@ fn private_topic_spot_positions_preserve_real_synthetic_store_without_fill() {
         "unsupported position topic must not trigger HTTP"
     );
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+fn native_ticker_coercion(spot: bool) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let name = if spot { "kucoinspot" } else { "kucoin" };
+    let source = ticker_coercion::source(name);
+    assert_eq!(
+        source["cases"].as_array().unwrap().len(),
+        if spot { 96 } else { 72 }
+    );
+    let (venue, f, _) = private_topic_fixture(spot);
+    let socket = f
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|socket| {
+            socket.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text).is_ok_and(|value| {
+                    value["type"] == "subscribe" && value["privateChannel"] == false
+                })
+            })
+        })
+        .expect("constructed public subscription")
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed(name)),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            f.runtime.pump();
+        }
+        ticker_coercion::assert_native(&f.store.tickers(), case);
+    }
+    assert!(
+        f.runtime.errors.borrow().is_empty(),
+        "{:?}",
+        f.runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    native_ticker_coercion(false);
+}
+
+#[test]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    native_ticker_coercion(true);
+}

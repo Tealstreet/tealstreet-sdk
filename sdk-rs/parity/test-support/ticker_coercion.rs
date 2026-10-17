@@ -28,7 +28,12 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
                 "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
                 "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),
                 "apexomni" => (format!("{asset}-USDC"), format!("{asset}USDC")),
-                "weex" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                "weex" | "phemex" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                "kucoin" => (
+                    format!("{}USDTM", if asset == "BTC" { "XBT" } else { asset }),
+                    format!("{asset}USDT"),
+                ),
+                "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
                 _ => panic!("unsupported ticker seed {venue}"),
             };
             serde_json::from_value(json!({"id":id,"symbol":symbol,"bid":101,"ask":102,
