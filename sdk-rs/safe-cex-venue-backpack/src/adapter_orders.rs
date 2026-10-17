@@ -107,7 +107,7 @@ impl BackpackExchange {
                 move |ev, e| {
                     emit.base.emit(
                         ev,
-                        safe_cex_exchange::js_runtime::value::Js::str(&e.message),
+                        safe_cex_exchange::js_runtime::value::Thrown::from(e).value,
                     )
                 },
                 move || {
