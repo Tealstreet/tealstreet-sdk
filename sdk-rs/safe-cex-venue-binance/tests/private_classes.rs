@@ -4289,7 +4289,8 @@ fn market_asset_refusal_case(venue: Venue) {
                 );
                 let errors = errors.borrow();
                 assert_eq!(errors.len(), 1, "one visible row refusal");
-                let message = errors[0].as_str().unwrap();
+                let message = String::from_utf16(errors[0].as_str().unwrap())
+                    .expect("market refusal is a scalar Unicode message");
                 let expected = value
                     .as_ref()
                     .map_or_else(|| "undefined".into(), Value::to_string);
