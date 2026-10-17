@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order"
 status = "ported"
-note = "Preserves preflight/delegation order, payload splitting, native client-ID guard and original unknown-outcome errors. Source attached TP consults slTriggerType; compacted successful responses retain source payload indexing. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order."
+note = "The production missingMarket intrinsic now constructs the source named error; three compiled master-red real-binding controls cover limit and full-position SL/TP. Preserves preflight/delegation order, payload splitting, native client-ID guard and original unknown-outcome errors. Source attached TP consults slTriggerType; compacted successful responses retain source payload indexing. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeOrders"
@@ -328,7 +328,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit."
+note = "The production missingMarket intrinsic now constructs the source named error; three compiled master-red real-binding controls cover limit and full-position SL/TP. Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeTrailingStopLoss"
@@ -376,7 +376,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order"
 status = "ported"
-note = "Preserves native raw-info and shallow extra aliases, remainingNative, inverse precision, Full-mode amount, virtual protection rows and distinct clock calls. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order."
+note = "Actual REST/private-frame witnesses retain tpslOrder/OcoOrder/BidirectionalTpslOrder rows as own Undefined type and omit type on serialization, exercising the shared ModelField repair. Preserves native raw-info and shallow extra aliases, remainingNative, inverse precision, Full-mode amount, virtual protection rows and distinct clock calls. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order."
 
 [[symbol]]
 ts = "BybitSpotExchange#getOrderPositionIdx"

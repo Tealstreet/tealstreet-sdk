@@ -807,3 +807,8 @@ Primary/demo and Spot defer typed asset refusals until source mapping completes;
 dedicated inverse admits assets after building its native rows. Each refused row
 reports its identity and field values, while valid siblings survive fetch/refresh.
 This intentionally differs from TS retaining malformed asset fields.
+
+Spot's missing-market intrinsic constructs the source message before the caller
+wraps it in Error. Real placement witnesses cover ordinary limit and full-position
+SL/TP routes. The REST/private-frame unknown stopOrderType witness retains all
+three unlisted stop kinds as own Undefined through the ModelField Store bridge.
