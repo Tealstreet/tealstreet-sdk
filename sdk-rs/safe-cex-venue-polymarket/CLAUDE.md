@@ -250,3 +250,9 @@ crypto. This measures the Node dependency profile, not a new browser-profile cla
 Private order frames assert Store orders and matched fills; trade frames assert
 fill delivery and authoritative position refresh. The source has no private
 balance topic, so those frames retain the REST account balance until its poll.
+
+Private-read binding snapshot checks preserve every serialized store field except
+request outcome counters, whose exact deltas are checked independently against
+the maintained `safeCexAxiosCreate` interceptor running with installed Axios.
+Each successful cursor page increments `ok`; a rejected HTTP 503 increments
+`other`. These telemetry updates do not commit positions, orders, or balances.
