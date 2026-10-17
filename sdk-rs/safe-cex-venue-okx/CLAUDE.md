@@ -174,3 +174,9 @@ code membership compares UTF-16 directly, without invoking conversion hooks.
 The actual constructed HTTP witness compares36 GET profiles and one write guard
 with the maintained wrapper and installed dependencies. All30 denial-set codes
 and ERR_CANCELED stop after one attempt; allowed socket errors still retry.
+
+Amendment field presence uses the existing shared fallible `in_operator`, so
+inherited price/amount values participate and primitive updates throw before HTTP.
+`tests/support/amendment_binding.rs` compares eight real assembled-binding scenes
+with actual source: regular/conditional amendments, inherited/own-shadowed/absent
+fields and primitive rejection, including exact signed payloads and errors.

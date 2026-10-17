@@ -407,3 +407,7 @@ impl Exchange for OkxExchange {
 #[cfg(test)]
 #[path = "../../tests/support/callback_binding.rs"]
 mod callback_binding;
+
+#[cfg(test)]
+#[path = "../../tests/support/amendment_binding.rs"]
+mod amendment_binding;
