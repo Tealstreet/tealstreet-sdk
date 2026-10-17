@@ -1,3 +1,7 @@
+Private-position freshness timestamps read the shared virtualClock, matching the
+REST request-start clock. The synced-clock private_binding_frames regression feeds
+an actual position frame and reconciles an older signed REST reply through Store.
+
 The concrete order and position mapper callbacks read the shared VirtualClock.
 `tests/native_clock.rs` checks synchronized timestamps through signed REST reads
 for Classic, USDC, inverse and both UTA routes; inverse positions already used it.
