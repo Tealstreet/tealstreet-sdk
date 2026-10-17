@@ -4691,7 +4691,7 @@
       }
     },
     "category": "decoder",
-    "evidence": "Numeric text decoder for the actual typed &str API. Source parseFloat prefixes, finite-input refusal and Math.round scaling determine admitted output; native results are observed by IEEE754 bits before JSON can normalize negative zero or infinity. These independently authored inputs include parse-prefix zero, signed zero, a half-unit and multiplication overflow after a finite parse. Live source builder-helpers tests supply the wider source comparison. Selected production observations pass on native and wasm; whole-crate source/alias discovery remains separate.",
+    "evidence": "Numeric text decoder for the actual typed &str API. Source parseFloat prefixes, finite-input refusal and Math.round scaling determine admitted output; native results are observed by IEEE754 bits before JSON can normalize negative zero or infinity. These independently authored inputs include parse-prefix zero, signed zero, positive and negative half-units and multiplication overflow after a finite parse. Live source builder-helpers tests supply the wider source comparison. Selected production observations pass on native and wasm; whole-crate source/alias discovery remains separate.",
     "call": "{match $type($value.as_str().expect(\"reviewed text input\")){Ok(d)=>serde_json::json!({\"bits\":format!(\"{:016x}\",d.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})}}",
     "cases": [
       {
@@ -4704,6 +4704,24 @@
         "input": "-0",
         "output": {
           "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "-0.00015",
+        "output": {
+          "bits": "bff0000000000000"
+        }
+      },
+      {
+        "input": "-0.00005",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "-0.00025",
+        "output": {
+          "bits": "c000000000000000"
         }
       },
       {
@@ -7468,7 +7486,7 @@
     },
     "category": "decoder",
     "evidence": "Reviewed twelve exact own interval mappings and source ordinary-object inherited values; only missing entries choose one minute. Observations match each native interval variant and inherited ProtoMember identity before output projection. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
-    "call": "{match $type($value.as_str().unwrap()){safe_cex_num::TableHit::Mapped(d)=>serde_json::json!({\"mapped\":match d{crate::types::GrvtCandlestickInterval::Ci1M=>\"Ci1M\",crate::types::GrvtCandlestickInterval::Ci3M=>\"Ci3M\",crate::types::GrvtCandlestickInterval::Ci5M=>\"Ci5M\",crate::types::GrvtCandlestickInterval::Ci15M=>\"Ci15M\",crate::types::GrvtCandlestickInterval::Ci30M=>\"Ci30M\",crate::types::GrvtCandlestickInterval::Ci1H=>\"Ci1H\",crate::types::GrvtCandlestickInterval::Ci2H=>\"Ci2H\",crate::types::GrvtCandlestickInterval::Ci4H=>\"Ci4H\",crate::types::GrvtCandlestickInterval::Ci6H=>\"Ci6H\",crate::types::GrvtCandlestickInterval::Ci12H=>\"Ci12H\",crate::types::GrvtCandlestickInterval::Ci1D=>\"Ci1D\",crate::types::GrvtCandlestickInterval::Ci1W=>\"Ci1W\",crate::types::GrvtCandlestickInterval::Ci8H=>\"Ci8H\",crate::types::GrvtCandlestickInterval::Ci3D=>\"Ci3D\",crate::types::GrvtCandlestickInterval::Ci5D=>\"Ci5D\",crate::types::GrvtCandlestickInterval::Ci2W=>\"Ci2W\",crate::types::GrvtCandlestickInterval::Ci3W=>\"Ci3W\",crate::types::GrvtCandlestickInterval::Ci4W=>\"Ci4W\"}}),safe_cex_num::TableHit::Inherited(d)=>serde_json::json!({\"inherited\":match d{safe_cex_num::ProtoMember::ToString=>\"toString\",safe_cex_num::ProtoMember::Prototype=>\"prototype\",_=>panic!(\"unreviewed inherited test value\")}}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"missing\":true})}}",
+    "call": "{match $type($value.as_str().unwrap()){safe_cex_num::TableHit::Mapped(d)=>serde_json::json!({\"mapped\":match d{crate::types::GrvtCandlestickInterval::Ci1M=>\"Ci1M\",crate::types::GrvtCandlestickInterval::Ci3M=>\"Ci3M\",crate::types::GrvtCandlestickInterval::Ci5M=>\"Ci5M\",crate::types::GrvtCandlestickInterval::Ci15M=>\"Ci15M\",crate::types::GrvtCandlestickInterval::Ci30M=>\"Ci30M\",crate::types::GrvtCandlestickInterval::Ci1H=>\"Ci1H\",crate::types::GrvtCandlestickInterval::Ci2H=>\"Ci2H\",crate::types::GrvtCandlestickInterval::Ci4H=>\"Ci4H\",crate::types::GrvtCandlestickInterval::Ci6H=>\"Ci6H\",crate::types::GrvtCandlestickInterval::Ci12H=>\"Ci12H\",crate::types::GrvtCandlestickInterval::Ci1D=>\"Ci1D\",crate::types::GrvtCandlestickInterval::Ci1W=>\"Ci1W\",crate::types::GrvtCandlestickInterval::Ci8H=>\"Ci8H\",crate::types::GrvtCandlestickInterval::Ci3D=>\"Ci3D\",crate::types::GrvtCandlestickInterval::Ci5D=>\"Ci5D\",crate::types::GrvtCandlestickInterval::Ci2W=>\"Ci2W\",crate::types::GrvtCandlestickInterval::Ci3W=>\"Ci3W\",crate::types::GrvtCandlestickInterval::Ci4W=>\"Ci4W\"}}),safe_cex_num::TableHit::Inherited(d)=>serde_json::json!({\"inherited\":match d{safe_cex_num::ProtoMember::ToString=>\"toString\",safe_cex_num::ProtoMember::Prototype=>\"prototype\",safe_cex_num::ProtoMember::Constructor=>\"constructor\",safe_cex_num::ProtoMember::DefineGetter=>\"__defineGetter__\",safe_cex_num::ProtoMember::DefineSetter=>\"__defineSetter__\",safe_cex_num::ProtoMember::HasOwnProperty=>\"hasOwnProperty\",safe_cex_num::ProtoMember::LookupGetter=>\"__lookupGetter__\",safe_cex_num::ProtoMember::LookupSetter=>\"__lookupSetter__\",safe_cex_num::ProtoMember::IsPrototypeOf=>\"isPrototypeOf\",safe_cex_num::ProtoMember::PropertyIsEnumerable=>\"propertyIsEnumerable\",safe_cex_num::ProtoMember::ValueOf=>\"valueOf\",safe_cex_num::ProtoMember::ToLocaleString=>\"toLocaleString\"}}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"missing\":true})}}",
     "cases": [
       {
         "input": "1m",
@@ -7570,6 +7588,66 @@
         "input": "__proto__",
         "output": {
           "inherited": "prototype"
+        }
+      },
+      {
+        "input": "constructor",
+        "output": {
+          "inherited": "constructor"
+        }
+      },
+      {
+        "input": "__defineGetter__",
+        "output": {
+          "inherited": "__defineGetter__"
+        }
+      },
+      {
+        "input": "__defineSetter__",
+        "output": {
+          "inherited": "__defineSetter__"
+        }
+      },
+      {
+        "input": "hasOwnProperty",
+        "output": {
+          "inherited": "hasOwnProperty"
+        }
+      },
+      {
+        "input": "__lookupGetter__",
+        "output": {
+          "inherited": "__lookupGetter__"
+        }
+      },
+      {
+        "input": "__lookupSetter__",
+        "output": {
+          "inherited": "__lookupSetter__"
+        }
+      },
+      {
+        "input": "isPrototypeOf",
+        "output": {
+          "inherited": "isPrototypeOf"
+        }
+      },
+      {
+        "input": "propertyIsEnumerable",
+        "output": {
+          "inherited": "propertyIsEnumerable"
+        }
+      },
+      {
+        "input": "valueOf",
+        "output": {
+          "inherited": "valueOf"
+        }
+      },
+      {
+        "input": "toLocaleString",
+        "output": {
+          "inherited": "toLocaleString"
         }
       }
     ]

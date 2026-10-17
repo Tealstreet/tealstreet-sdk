@@ -872,7 +872,13 @@ Factory profiles are copied before the venue interceptor; no global array format
 is assumed. Query JSON diagnostic projection is separate from URL rendering.
 
 Shared journal intervals and fold projection live in position_intervals and
-fold_position_adapter. Reconstruction is path-dependent: seeds remain incomplete,
+fold_position_adapter. PositionInterval's camelCase Serde bridge lets production
+venue bindings pass the canonical interval through native JS values; optional
+fields omit absence and the shared native serializer retains floating-point values.
+Its private remote decoder requires an object and uses the existing numeric ingress
+pipeline; raw number spelling and native nonfinite/signed-zero bits must survive.
+No second interval model or fold implementation is introduced.
+Reconstruction is path-dependent: seeds remain incomplete,
 partial missing reducing PnL refuses a total, and crossing fills split fees by
 size while assigning all realized PnL to the closing interval. Funding includes
 both endpoints and remains unattributed for hedges/incomplete/open intervals.
@@ -1222,8 +1228,44 @@ The native-host `js_sort` target checks the compiled master panic and error coun
 plus Node ordering across merge boundaries. Ordering under an inconsistent
 comparator remains implementation-dependent under ECMAScript.
 
+Ordinary numeric conversion of live objects/functions calls `valueOf` before
+`toString`, reading each member only when reached and retaining the original
+receiver and thrown value. String conversion uses the same private primitive
+conversion algorithm with its string-hint ordering. Object results and
+non-callable members advance to the next method; no primitive result throws.
+The production native-host `js_number_coercion` witness compares Node traces,
+negative-zero/NaN results, inheritance, live lookup and conversion failures.
+
 The JS Number `toFixed` builtin delegates to `safe_cex_num::js_to_fixed` after
 ordinary digits coercion. Exact binary ties round away from zero; negative zero,
 nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
 `tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
 Polymarket's concrete binding witness checks the resulting signed order amounts.
+
+JS socket listener throws are host exceptions, never transport errors. Plain
+EventTarget dispatch continues after each throw; source ReconnectingWebSocket
+(header/relay/configured wrapper) dispatch stops its grouped callback at the
+throw. The resolved connection records that choice before delivery. Returned
+promises do not enter the socket-error path; general unhandled-rejection
+reporting is a separate runtime concern. `tests/js_socket_listener_errors.rs`
+compares eight real native loopback open/message cases with Node EventTarget
+and the maintained RWS implementation, and checks the native exception output.
+
+The shared `qs.stringify` binding consumes arrayFormat (indices/repeat/comma/
+brackets), callable sort, RFC3986/RFC1738 format and the encode boolean. It
+sorts keys at every object/array level before reading child values and keeps
+undefined omissions. Comparator failures propagate; native sorting does not
+claim V8's comparator call schedule. `tests/js_qs_options.rs` executes the actual
+installed qs package over 96 option/input combinations. The BingX registry
+regression additionally observes final signed GET query ordering through the
+production HTTP client and verifies the signature against the source preimage.
+Other qs options remain outside this imported runtime surface.
+
+Both JS `virtualClock` getters delegate to the shared synced singleton.
+`getCurrentTime` wraps `VirtualClock::get_current_time` in the existing dayjs
+object, retaining date clipping and arithmetic; `getCurrentTimeMs` remains the
+numeric hot path. Source `Date.now()` still reads the runtime wall clock.
+Registry `native_host_phemex_clock` exercises the real dayjs consumer through a
+signed native HTTP request, verifying its HMAC and expiry after a 90-second
+server correction. The core virtual-clock regression checks both getters and
+the independent raw Date clock.
