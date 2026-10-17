@@ -358,3 +358,24 @@ owner identity. New traits/conversions/inherent APIs must refuse. Other records,
 functions, aliases, receiver policies, feature and wasm behavior remain separate
 accepted-set obligations. Follow ../safe-cex-parity/accepted-set/MAP-ONLY-INGRESS.md and
 MANIFEST-SPEC#numeric-ingress-defect rather than adding a new primitive.
+
+
+The transaction/order/signer map cohort contains all19 transaction structs,
+CreateOrderOptionsObject, OrderResponseObject and TxEthSignature. Their private
+remote schemas preserve numeric0|1 flag validation, the exact two-number fee
+rate tuple, optional/nullable distinctions, native enum/union/timestamp variants
+and all existing numeric ingress/output behavior. Signing/packing/range checks
+remain separate APIs. WithPrice and OrderWithClientId still have independent
+undefined-only admission obligations; invalid null array slots are not evidence
+of a complete valid positional array.
+
+`tests/accepted_transaction_records.rs` uses independent raw-token fixture bases
+and deltas, actual native fields/variants/presence/bits and fixed per-owner case
+and route counts. Its complete array literals follow each original Serde field
+order. Run `scripts/accepted-transaction-record-controls.py` serially; it reuses
+the reviewed exact-span `guard_removed` selector, requires one isolated compiled
+named array-admission failure per owner and restores all source bytes with all22
+native tests passing after each control. The fresh production runner is
+`scripts/accepted-transaction-record-contracts.mjs`. ChangePubKeyOnchain has one
+actual field; its maintained ordinary observation directly matches that native
+variant before the wire audit. Do not invent a second native field or exempt it.
