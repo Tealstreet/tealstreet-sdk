@@ -850,3 +850,69 @@ fn private_account_frame_refreshes_balance_from_rest() {
     assert_eq!(h.store.balance().free, 120.0);
     assert_eq!(h.store.balance().upnl, 3.0);
 }
+
+#[test]
+fn gap_snapshot_rejection_is_silent_and_keeps_the_existing_book() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(options(), |http| {
+        script(http);
+        http.route(
+            "GET",
+            endpoint("DEPTH"),
+            400,
+            json!({"msg":"snapshot unavailable"}),
+        );
+    });
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let logs = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let delivered = logs.clone();
+    h.venue().base().on(
+        "log",
+        Rc::new(move |_, message| {
+            delivered.borrow_mut().push(message.clone());
+            Ok(())
+        }),
+    );
+    let books = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let delivered = books.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            "BTCUSDT".into(),
+            Rc::new(move |book| delivered.borrow_mut().push(book)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    assert_eq!(books.borrow().len(), 1);
+    assert_eq!(books.borrow()[0].bids[0].amount, 2.0);
+    assert_eq!(h.http.calls(endpoint("DEPTH")).len(), 1);
+    assert!(logs.borrow().is_empty());
+    let socket = h.venue().base().get_public_sockets()[0].clone();
+    socket
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"depth","s":"BTCUSDT","U":20,"u":20,"b":[["101.4","99"]],"a":[]})
+                .to_string(),
+        ))
+        .unwrap();
+    h.runtime.pump();
+    assert_eq!(h.http.calls(endpoint("DEPTH")).len(), 2);
+    assert_eq!(
+        books.borrow().len(),
+        1,
+        "failed gap snapshot does not publish a book"
+    );
+    assert!(
+        logs.borrow().is_empty(),
+        "source gap catch is silent: {:?}",
+        logs.borrow()
+    );
+    socket
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"depth","s":"BTCUSDT","U":18,"u":18,"b":[["101.4","4"]],"a":[]}).to_string(),
+        ))
+        .unwrap();
+    assert_eq!(books.borrow().last().unwrap().bids[0].amount, 4.0);
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}
