@@ -3579,6 +3579,34 @@ fn production_native_private_position_frames_update_the_real_store() {
 
 #[test]
 #[cfg(feature = "native")]
+fn production_native_pm_position_info_does_not_grow_per_frame() {
+    let owner = production_native_owner(Venue::PM);
+    let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{
+        "s":"BTCUSDT","pa":"2","ep":"110","up":"7","ps":"BOTH"
+    }],"B":[]}})
+    .to_string();
+    let mut first_depth = None;
+    for index in 0..8 {
+        owner.private.on_message(string(frame.clone())).unwrap();
+        let positions = owner.base.store.positions();
+        let position = positions.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+        assert_eq!((position.contracts, position.entry_price), (2.0, 110.0));
+        let mut info = position.info.as_ref();
+        let mut depth = 0;
+        while let Some(value) = info {
+            depth += 1;
+            info = value.get("info");
+        }
+        let expected = *first_depth.get_or_insert(depth);
+        assert_eq!(
+            depth, expected,
+            "identical PM frame {index} must not append a previous-position info snapshot"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
 fn production_native_private_balance_frames_follow_each_source_family() {
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let owner = production_native_owner(venue);
