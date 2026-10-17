@@ -996,3 +996,70 @@ fn real_journal_default_window_uses_the_runtime_clock() {
     );
     h.venue().dispose().unwrap();
 }
+
+fn assert_unsupported_private_topics_preserve_store(topics: &[&str], data: Value) {
+    let (h, private) = authed("HEDGE_MODE", |_| {});
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{
+        "symbol":"PERP_BTC_USDT","orderId":777,"side":"BUY","type":"LIMIT",
+        "quantity":2,"price":100,"reduceOnly":false,"status":"NEW",
+        "executedQuantity":0,"executedPrice":0}}),
+    );
+    assert!(
+        order(&h, "777").is_some(),
+        "known private order makes preservation non-vacuous"
+    );
+    let orders = h.store.orders().to_vec();
+    let positions = h.store.positions().to_vec();
+    let balance = h.store.balance().clone();
+    assert!(balance.total > 0.0);
+    let fills = Rc::new(std::cell::Cell::new(0usize));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    for topic in topics {
+        push(&h, &private, json!({"topic":topic,"data":data}));
+        assert_eq!(
+            h.store.orders().to_vec(),
+            orders,
+            "{topic} cannot change source orders"
+        );
+        assert_eq!(
+            h.store.positions().to_vec(),
+            positions,
+            "{topic} has no source position handler"
+        );
+        assert_eq!(
+            *h.store.balance(),
+            balance,
+            "{topic} has no source balance handler"
+        );
+        assert_eq!(fills.get(), 0, "unsupported {topic} cannot invent a fill");
+    }
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn private_position_topics_preserve_the_rest_owned_store() {
+    assert_unsupported_private_topics_preserve_store(
+        &["position", "positions"],
+        json!({
+        "symbol":"PERP_BTC_USDT","holding":99,"averageOpenPrice":999,
+        "positions":[{"symbol":"PERP_BTC_USDT","holding":99,"averageOpenPrice":999}]}),
+    );
+}
+#[test]
+fn private_balance_topics_preserve_the_rest_owned_store() {
+    assert_unsupported_private_topics_preserve_store(
+        &["balance", "account"],
+        json!({
+        "totalAccountValue":999999,"freeCollateral":888888,"totalCollateral":777777}),
+    );
+}
