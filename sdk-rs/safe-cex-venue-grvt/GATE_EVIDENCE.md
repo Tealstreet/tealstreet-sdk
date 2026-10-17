@@ -29,6 +29,12 @@ ratchet. Strict host all-target/all-feature and Wasm all-feature clippy, package
 formatting and three pure inherited-policy tests also pass. This verifies the
 existing 134 stored owners; the remaining unreviewed owners stay open.
 
+The complete `venue-oracle:grvt` command also passes: 245 tests across the unit
+and 42 integration binaries, plus two compile-fail doctests, with no ignored
+tests. Set both `SAFE_CEX_TYPESCRIPT_PATH` and `SAFE_CEX_CRYPTO_ORACLE_DEPS` to
+their absolute installed package/dependency directories; the builder-address
+oracle refuses an omitted crypto installation before evaluating source.
+
 Reproduce the 27 scoped tests with `SAFE_CEX_TYPESCRIPT_PATH` set to the actual
 TypeScript package, using `cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml
 --locked -p safe-cex-venue-grvt --jobs 2 --test exchange_binding --test markets`.
