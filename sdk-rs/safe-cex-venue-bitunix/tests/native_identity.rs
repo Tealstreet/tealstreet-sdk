@@ -178,7 +178,7 @@ fn native_nonfinite_placement_amounts_reach_the_source_formatter() {
         let mut opts = order();
         opts.amount = amount;
         opts.client_order_id = Some("caller1".into());
-        drive(&rt, venue.base().place_order(venue.as_ref(), opts)).unwrap();
+        let outcome = drive(&rt, venue.base().place_order(venue.as_ref(), opts));
         let requests = wire.requests.lock().unwrap();
         let requests = requests
             .iter()
@@ -190,8 +190,9 @@ fn native_nonfinite_placement_amounts_reach_the_source_formatter() {
         assert_eq!(
             requests.len(),
             expected.len(),
-            "native amount{amount} must preserve source placement count"
+            "native amount{amount} must preserve source placement count: {outcome:?}"
         );
+        outcome.expect("source accepts the native amount and its formatter result");
         for (request, expected) in requests.iter().zip(expected) {
             let payload: Value =
                 serde_json::from_slice(&request.body.as_ref().unwrap().wire_bytes().unwrap())
