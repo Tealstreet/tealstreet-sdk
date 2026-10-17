@@ -322,3 +322,10 @@ real client/builder check and verifies its refusal message before any order writ
 requires that binding assertion to fail after compilation, restores exact bytes
 and requires the witness to pass. Native private frame tests also assert orders,
 fill events, positions and the balance UPNL updated by a position event.
+
+`convertInterval` preserves the twelve stock inherited table members in the
+assembled class as native realm references. The typed OHLCV caller still uses the
+closed Timeframe union; the receiver-level test calls the real constructor's
+method, compares all 93 maintained-source cases, and checks inherited kind,
+stringification, arity and repeated reference identity. The accepted helper row
+now witnesses every inherited member (17 -> 27 cases).

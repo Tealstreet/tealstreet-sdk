@@ -17,12 +17,9 @@ pass after restoration. Existing method-body oracles and controls remain in use.
 Measured concrete transport gates and controls are recorded in
 [BINDING_EVIDENCE.md](BINDING_EVIDENCE.md).
 
-FINDING: the shared JS client factory does not yet implement the source
-`safeCexAxiosCreate` proxy/tunnel policy. This binding currently uses the supplied
-HTTP host directly. Default direct-host behavior is exercised; options requesting
-`tealstreetTunnel` or proxy routing must not be represented as verified here.
-The shared-runtime lane owns the generic service. Retain this finding until a
-shared implementation and concrete routing regression replace it.
+The binding uses the shared `safeCexAxiosCreate` factory for proxy selection and
+request outcomes. Registry `native_account_factory_routing` and napi
+`native-account-factory-routing.test.mjs` exercise that production path.
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/polymarket/CLAUDE.md).
 

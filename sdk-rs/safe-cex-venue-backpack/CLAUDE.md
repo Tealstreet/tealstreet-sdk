@@ -339,3 +339,9 @@ checks that reconnect refreshes orders, and advances the runtime clock to verify
 that the original polling chain remains the only one.
 The same socket-event fixture covers private order and position Store commits,
 fill emission, and the real REST balance refresh triggered by an order-fill frame.
+
+Native REST and private subscription signatures read the synchronized shared
+virtual clock. REST ticker IDs and position timestamps use that same source
+clock. Rate limiting, heartbeat timing and private refresh throttles retain their
+source monotonic or Date.now clocks. The native routing and private reopen
+regressions distinguish synced time from an unrelated host clock.
