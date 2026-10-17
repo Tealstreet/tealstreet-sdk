@@ -397,3 +397,13 @@ consumer keeps feeTenthsBps as supplied in the signed action; it lowercases the
 address at the source callsite. Configured identity, lazy default getter reads,
 fresh fallback objects and action fee types have real Realm/source witnesses.
 No shared ExchangeOptions field types or Realm carriers are widened.
+
+
+The production orderRequestToOrderWire import reads native Realm fields directly.
+It formats price, size and trigger price before the HTTP JSON boundary, so NaN
+and infinities become the maintained wire strings rather than null. floatToWire
+uses the installed numeric/string operations, including source exponent-zero
+stripping; order-type limit objects and undefined fields retain their identities.
+The separate prepared signing API keeps its documented typed snapshot boundary.
+The actual constructed Exchange placement regression and native/source import
+matrix cover this adapter; no shared body or Realm carrier migration is implied.
