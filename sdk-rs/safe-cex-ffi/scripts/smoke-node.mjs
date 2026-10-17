@@ -12,3 +12,4 @@ execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-meth
 execFileSync('bun', ['run', join(crate, 'smoke/bun/run.mjs')], { stdio: 'inherit' });
 execFileSync('bun', ['run', join(crate, 'smoke/bun/native-exchange.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-placement.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-streams.test.mjs')], { stdio: 'inherit' });
