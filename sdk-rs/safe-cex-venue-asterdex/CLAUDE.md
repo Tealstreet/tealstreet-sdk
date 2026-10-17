@@ -1,5 +1,9 @@
 # AsterDEX Rust venue
 
+Cross-layer native venue/worker witnesses live in the parity tooling target
+`aster_worker_emitter`. Private facade/frame checks remain in this crate;
+AsterDEX has no dependency on the higher worker layer.
+
 Behavioral reference: `packages/safe-cex/src/exchanges/asterdex`; both runtimes
 remain maintained. Check the [official API docs](https://github.com/asterdex/api-docs)
 while implementing. The maintained TypeScript determines parity behavior.

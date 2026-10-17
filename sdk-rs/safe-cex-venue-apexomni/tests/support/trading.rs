@@ -90,8 +90,10 @@ fn place(p: &safe_cex_types::PreparedOrderOpts) -> J {
             fields.push((key, n(value)));
         }
     }
-    if let Some(value) = p.reduce_only {
-        fields.push(("reduceOnly", J::Bool(value)));
+    match p.reduce_only {
+        ModelField::Absent => {}
+        ModelField::Undefined => fields.push(("reduceOnly", J::Undefined)),
+        ModelField::Value(value) => fields.push(("reduceOnly", J::Bool(value))),
     }
     if let Some(value) = p.time_in_force {
         fields.push((
