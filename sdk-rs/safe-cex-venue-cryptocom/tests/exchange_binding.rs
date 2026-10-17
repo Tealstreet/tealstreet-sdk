@@ -717,3 +717,44 @@ fn dispose_sets_source_flag_without_removing_inherited_listeners() {
         "source override does not invoke base listener cleanup"
     );
 }
+
+// ts: cryptocom.exchange.ts cancelSymbolOrders / cancelAllOrders post the venue cancel-all,
+// so orders the store has not mapped yet are cancelled too.
+#[test]
+fn cancel_symbol_and_all_orders_post_the_venue_cancel_all() {
+    let h = venue(|http| http.ok("POST", "/private/cancel-all-orders", ok(json!({}))));
+    loaded(&h);
+    h.drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect("cancelSymbolOrders");
+    assert_eq!(
+        only(&h, "/private/cancel-all-orders"),
+        json!({"instrument_name": SYMBOL})
+    );
+    h.drive(h.venue().cancel_all_orders())
+        .expect("cancelAllOrders");
+    let calls = h.http.calls("/private/cancel-all-orders");
+    assert_eq!(calls.len(), 2, "cancelAllOrders posts once");
+    assert_eq!(envelope(&calls[1])["params"], json!({}));
+    assert!(h.http.calls("/private/cancel-order").is_empty());
+}
+
+#[test]
+fn cancel_all_orders_rethrows_a_venue_rejection() {
+    let h = venue(|http| {
+        http.route(
+            "POST",
+            "/private/cancel-all-orders",
+            400.0,
+            json!({"code": 40003, "message": "BAD_REQUEST"}),
+        )
+    });
+    loaded(&h);
+    let symbol = h
+        .drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect_err("cancelSymbolOrders rethrows");
+    let all = h
+        .drive(h.venue().cancel_all_orders())
+        .expect_err("cancelAllOrders rethrows");
+    assert_eq!(symbol.message, all.message);
+    assert!(symbol.message.contains("BAD_REQUEST"), "{}", symbol.message);
+}

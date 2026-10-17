@@ -38,6 +38,8 @@ MUTATIONS = [
     ("change_margin_type", '"changeMarginType"', '"changePositionMode"', "change_position_mode_only_warns_and_change_margin_type_rejects"),
     ("update_order", '"updateOrder"', '"cancelOrders"', "update_order_amends_price_and_quantity"),
     ("cancel_orders", '"cancelOrders"', '"updateOrder"', "cancel_orders_routes_triggers_to_the_advanced_endpoint"),
+    ("cancel_symbol_orders", '"cancelSymbolOrders"', '"cancelAllOrders"', "cancel_symbol_and_all_orders_post_the_venue_cancel_all"),
+    ("cancel_all_orders", '"cancelAllOrders"', '"cancelOrders"', "cancel_symbol_and_all_orders_post_the_venue_cancel_all"),
     ("schedule_cancel", "not_implemented()", "Box::pin(async { Ok(()) })", INHERITED),
     ("fetch_public_trades", "not_implemented()", "Box::pin(async { Ok(vec![]) })", INHERITED),
     ("fetch_historical_fills", "Ok(vec![])", 'Err(ExchangeError::new("mutant"))', INHERITED),

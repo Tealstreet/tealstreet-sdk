@@ -7,7 +7,9 @@ assembles the Rust exchange/API/socket bodies on `safe-cex-exchange::js_runtime`
 from real options, a Store, HTTP and WebSocket runtime dependencies. The Exchange
 trait forwards the supported methods and reproduces inherited source rejections
 for `fetchSymbolMaxLeverage`, `scheduleCancel` and `fetchPublicTrades`;
-`fetchHistoricalFills` returns the source's empty list. Registry wiring belongs
+`fetchHistoricalFills` returns the source's empty list. `cancelSymbolOrders` and
+`cancelAllOrders` forward to the source bodies, which post the venue
+`private/cancel-all-orders`; the base store-only sweep would miss unmapped orders. Registry wiring belongs
 to the registry lane. Tunnel installation currently rejects explicitly.
 
 Disposal follows the source flag write and public/private socket teardown.
