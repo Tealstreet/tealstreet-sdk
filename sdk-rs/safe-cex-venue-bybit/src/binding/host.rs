@@ -254,7 +254,14 @@ impl SnapshotHost for Rt {
         v.to_number()
     }
     fn object(&self, fields: Vec<(&'static str, Js)>) -> Js {
-        Js::object(fields)
+        let object = Js::object(fields);
+        if let Js::Object(data) = &object {
+            *data.proto.borrow_mut() = Some(Js::Builtin(
+                safe_cex_num::PrototypeRealm::current()
+                    .reference(safe_cex_num::ProtoMember::Prototype),
+            ));
+        }
+        object
     }
     fn array(&self, values: Vec<Js>) -> Js {
         Js::array(values)
@@ -282,6 +289,23 @@ impl SnapshotHost for Rt {
         match name {
             "null" => Ok(Js::Null),
             "globalThis" => Ok(self.shared.globals.clone()),
+            "select:mapBybitTransactionToIncomeRecords" => Ok(Js::function(
+                "mapBybitTransactionToIncomeRecords",
+                |_, args| {
+                    crate::ledger_mapping::map_bybit_transaction_to_income_records(&arg(&args, 0))
+                },
+            )),
+            "select:fetchBybitIncomeHistory" => self.global("fetchBybitIncomeHistory"),
+            "select:fetchBybitIncomeHistoryRange" => self.global("fetchBybitIncomeHistoryRange"),
+            "select:splitTimeRange" => self.global("splitTimeRange"),
+            "select:sleep" => self.global("sleep"),
+            "get-key" => arg(&args, 0).get_property(&arg(&args, 1)),
+            "spreadArgs" => Ok(Js::array(arg(&args, 0).iterable_values()?)),
+            "add" => safe_cex_exchange::js_runtime::ops::add(&arg(&args, 0), &arg(&args, 1)),
+            "less" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::less_than(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
             "select:mapBybitClosedPnl" => Ok(Js::function("mapBybitClosedPnl", |_, args| {
                 crate::ledger_mapping::map_bybit_closed_pnl(
                     &arg(&args, 0),
