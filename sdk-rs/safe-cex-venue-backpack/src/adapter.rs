@@ -1,8 +1,8 @@
 //! Owned exchange composition and concrete state-backed method frames.
 use crate::native_value::NativeValue;
 use crate::{
-    native_http::Client, native_value::Value, order_actions as actions, public_control::JsString,
-    rest_reads as reads,
+    native_http::RoutedClient, native_value::Value, order_actions as actions,
+    public_control::JsString, rest_reads as reads,
 };
 use safe_cex_exchange::{
     exchange::BaseExchange,
@@ -20,7 +20,7 @@ pub type DateParser = Rc<dyn Fn(JsString) -> Result<f64, ExchangeError>>;
 // ts: BackpackExchange
 pub struct BackpackExchange {
     pub base: Rc<BaseExchange>,
-    pub xhr: Rc<Client>,
+    pub xhr: RoutedClient,
     pub account_leverage_limit: Cell<f64>,
     pub grafana_endpoints_every: &'static [&'static str],
     pub grafana_endpoints_periodic: &'static [&'static str],
@@ -57,17 +57,39 @@ impl BackpackExchange {
             },
         );
         let base = Rc::new(base);
-        let o = base.options();
-        let options = Rc::new(RefCell::new(o));
-        let xhr = crate::api_factory::create_api(
-            Rc::new(RefCell::new(crate::native_http::Factory {
-                base: base.clone(),
-                build: Some(build),
-                install,
-            })),
-            options,
+        let options = base.options();
+        let secondary_proxy = options
+            .secondary_proxy_url
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or_else(|| runtime.transport().public_cors_proxy());
+        let factory = Rc::new(RefCell::new(crate::native_http::Factory {
+            base: base.clone(),
+            build,
+            install,
+        }));
+        let primary = crate::api_factory::create_api(
+            factory.clone(),
+            Rc::new(RefCell::new(options.clone())),
         )?;
-        xhr.limit_requests(base.runtime.clone(), 10);
+        primary.limit_requests(base.runtime.clone(), 10);
+        let reader = if let Some(key) = options.secondary_key.as_ref().filter(|key| !key.is_empty())
+        {
+            let mut secondary = options.clone();
+            secondary.key.clone_from(key);
+            if let Some(secret) = &options.secondary_secret {
+                secondary.secret.clone_from(secret);
+            }
+            if let Some(passphrase) = &options.secondary_passphrase {
+                secondary.passphrase = Some(passphrase.clone());
+            }
+            secondary.override_proxy_url = secondary_proxy;
+            crate::api_factory::create_api(factory, Rc::new(RefCell::new(secondary)))?
+        } else {
+            primary.clone()
+        };
+        let xhr = RoutedClient::new(primary, reader);
         let owner = Rc::new_cyclic(|weak| Self {
             base,
             xhr,

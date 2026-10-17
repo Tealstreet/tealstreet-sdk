@@ -339,3 +339,14 @@ checks that reconnect refreshes orders, and advances the runtime clock to verify
 that the original polling chain remains the only one.
 The same socket-event fixture covers private order and position Store commits,
 fill emission, and the real REST balance refresh triggered by an order-fill frame.
+
+
+The assembled HTTP client now selects its separately constructed secondary client
+for GET reads. Each key keeps its own signing interceptors and resolved route;
+write methods retain the primary client and its ten-request budget. Secondary
+reads have no rate wrapper. The HTTP builder is reusable so each client receives
+fresh shared factory state. Secondary options preserve absent versus empty
+credentials and replace the primary proxy override with the source's secondary
+proxy or provider public CORS default. Native routing regressions exercise the
+real binding/factory, verify the secondary signature against an RFC8032 public
+key, and distinguish the separate rate budgets.
