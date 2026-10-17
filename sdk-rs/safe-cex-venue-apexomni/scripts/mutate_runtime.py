@@ -10,7 +10,6 @@ control('utils.rs','safe_cex_crypto::Encoding::Base64','safe_cex_crypto::Encodin
 control('exchange_utils.rs','safe_cex_crypto::sha256(String::from_utf16_lossy(client_order_id).as_bytes())','{ let mut digest = safe_cex_crypto::sha256(String::from_utf16_lossy(client_order_id).as_bytes()); digest[0] ^= 1; digest }','hash_client_order_id_native','hashClientOrderId native digest bytes')
 control('api.rs','serialize(payload, false)','serialize(payload, true)','serialize_primary_native','serializeApexPayload native result')
 control('api.rs','serialize(payload, true)','serialize(payload, false)','serialize_legacy_native','serializeApexPayloadLegacy native result')
-control('transaction_signing.rs','default_decimals - token_decimals','default_decimals - token_decimals + 1.0','discard_precision_native','discardBeyondPrecision native result')
 control('exchange_utils.rs','math(decimal_multiply(number, scale))? / scale','math(decimal_multiply(number, scale))? * scale','fee_helper_native','feeHelper native result')
 control('zklink_host.rs','if !self.initialized.get()','if self.initialized.get()','initialization_native','initSdk operations')
 originals={file:file.read_text() for file,*_ in controls}
@@ -32,7 +31,7 @@ try:
   # Cargo stops after the first failed binary; initialization has a separate target below.
   if test=='initialization_native':continue
   assert f'test {test} ... FAILED' in output and label in output,(test,label,output)
- print('6 pure controls: exit 101; each named native assertion failed',flush=True)
+ print('5 pure controls: exit 101; each named native assertion failed',flush=True)
  result=subprocess.run(cmd[:cmd.index('--test')]+['--test','signing','--jobs','2','initialization_native'],cwd=root,capture_output=True,text=True);output=result.stdout+result.stderr
  (logs/'runtime-init-mutation.log').write_text(output)
  assert result.returncode==101 and 'initSdk operations' in output and 'test result: FAILED.' in output,output

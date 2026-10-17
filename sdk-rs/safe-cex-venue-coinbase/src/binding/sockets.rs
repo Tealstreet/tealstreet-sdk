@@ -455,14 +455,20 @@ pub(super) fn native_book(book: &PublicListenerBook) -> safe_cex_types::OrderBoo
 fn write_book(book: &PublicListenerBook, native: safe_cex_types::OrderBook) {
     let book = book.borrow();
     for (levels, values) in [(&book.bids, native.bids), (&book.asks, native.asks)] {
-        let old = levels.borrow().clone();
+        // A snapshot can contain several distinct levels at the same price.
+        // Consume each retained root once so helper copyback cannot alias them.
+        let mut old: Vec<_> = levels.borrow().iter().cloned().map(Some).collect();
         *levels.borrow_mut() = values
             .into_iter()
             .map(|value| {
                 let level = old
-                    .iter()
-                    .find(|level| level.borrow().price == value.price)
-                    .cloned()
+                    .iter_mut()
+                    .find(|level| {
+                        level.as_ref().is_some_and(|level| {
+                            level.borrow().price.to_bits() == value.price.to_bits()
+                        })
+                    })
+                    .and_then(Option::take)
                     .unwrap_or_else(|| {
                         Rc::new(RefCell::new(PublicBookLevel {
                             price: value.price,

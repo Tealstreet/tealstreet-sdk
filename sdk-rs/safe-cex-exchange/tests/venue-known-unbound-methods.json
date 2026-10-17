@@ -38,7 +38,6 @@
     "hasOwn",
     "is",
     "isSafeInteger",
-    "localeCompare",
     "pop"
   ]
 }
