@@ -2,11 +2,11 @@
   "safe-cex-exchange/src/js_runtime/base_exchange.rs::LOCAL_FUNCTION:deliver": {
     "category": "non-decoder",
     "reason": "Reviewed external_provider_object::deliver: serializes an already typed Candle/orderbook callback value with from_typed and invokes the existing native callback. The source string labels exception context; it is not parsed or used to decode a model. Callback exceptions are forwarded to report_exception. This is outbound listener delivery, not an ingress decoder.",
-    "sourceSha256": "3c4162821234a5a42801ac0f27f038005186c72695e34df2c8bcad960887c105"
+    "sourceSha256": "b0514769fbe517929dd04f73ff46bb610aebad8bf03ee30db086b74d9846b8e3"
   },
   "safe-cex-exchange/src/js_runtime/base_exchange.rs::LOCAL_FUNCTION:unsubscribe": {
     "category": "non-decoder",
     "reason": "Reviewed external_provider_object::unsubscribe: wraps an existing ListenerCleanup in a single-consumption RefCell slot and exposes a zero-argument native function. Invoking it takes the existing cleanup and forwards its result; it accepts no serialized model input and constructs no decoded domain value.",
-    "sourceSha256": "3c4162821234a5a42801ac0f27f038005186c72695e34df2c8bcad960887c105"
+    "sourceSha256": "b0514769fbe517929dd04f73ff46bb610aebad8bf03ee30db086b74d9846b8e3"
   }
 }

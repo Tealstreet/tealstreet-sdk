@@ -311,22 +311,26 @@ pub fn create(
         def(
             "fetchAndSetPrivateSnapshot",
             Js::function("fetchAndSetPrivateSnapshot", move |_, a| {
-                let venue = assembled_venue(&context)?;
-                let tries = arg(&a, 0);
-                // ts: `while (count < tries)` with `tries = 1`, so a fraction rounds up.
-                let tries = if tries.is_undefined() {
-                    1.0
-                } else {
-                    tries.to_number()?
-                };
-                let tries = if tries > 0.0 {
-                    tries.ceil().min(f64::from(u32::MAX)) as u32
-                } else {
-                    0
-                };
+                let context = context.clone();
                 Ok(Js::Promise(Promise::spawn(
                     &runtime,
                     Box::pin(async move {
+                        let venue = assembled_venue(&context)?;
+                        if venue.is_public_data_only() || venue.base().is_disposed() {
+                            return Ok(Js::Undefined);
+                        }
+                        let tries = arg(&a, 0);
+                        // TS exits before coercion; `count < tries` rounds fractions up.
+                        let tries = if tries.is_undefined() {
+                            1.0
+                        } else {
+                            tries.to_number()?
+                        };
+                        let tries = if tries > 0.0 {
+                            tries.ceil().min(f64::from(u32::MAX)) as u32
+                        } else {
+                            0
+                        };
                         venue.fetch_and_set_private_snapshot(tries).await?;
                         Ok(Js::Undefined)
                     }),
@@ -340,16 +344,17 @@ pub fn create(
         def(
             "fetchAndSetOrders",
             Js::function("fetchAndSetOrders", move |_, a| {
-                let venue = assembled_venue(&context)?;
-                let symbols = arg(&a, 0);
-                let symbols: Option<Vec<String>> = if symbols.truthy() {
-                    Some(to_typed(&symbols)?)
-                } else {
-                    None
-                };
+                let context = context.clone();
                 Ok(Js::Promise(Promise::spawn(
                     &runtime,
                     Box::pin(async move {
+                        let venue = assembled_venue(&context)?;
+                        let symbols = arg(&a, 0);
+                        let symbols: Option<Vec<String>> = if symbols.truthy() {
+                            Some(to_typed(&symbols)?)
+                        } else {
+                            None
+                        };
                         let orders = venue.fetch_and_set_orders(symbols).await?;
                         from_typed(&orders)
                     }),
@@ -416,15 +421,13 @@ pub fn create(
         def(
             "getOrFetchPositionsForSymbol",
             Js::function("getOrFetchPositionsForSymbol", move |_, a| {
-                let symbol = text(&arg(&a, 0))?;
-                let venue = context
-                    .upgrade()
-                    .and_then(|c| c.venue.borrow().as_ref().and_then(Weak::upgrade))
-                    .ok_or_else(|| Thrown::error("Error", "exchange is not assembled"))?;
+                let context = context.clone();
                 let base = base.clone();
                 Ok(Js::Promise(Promise::spawn(
                     &runtime,
                     Box::pin(async move {
+                        let symbol = text(&arg(&a, 0))?;
+                        let venue = assembled_venue(&context)?;
                         let positions = base
                             .get_or_fetch_positions_for_symbol(venue, &symbol)
                             .await?;
