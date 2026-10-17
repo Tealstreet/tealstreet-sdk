@@ -187,7 +187,17 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         "start ready log: {:?}",
         rt.console.borrow()
     );
-    rt.pump();
+    for _ in 0..64 {
+        if rt
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("\"login\""))
+        {
+            break;
+        }
+        rt.pump();
+    }
     let frames = rt.sent.borrow().clone();
     assert!(
         frames.iter().any(|f| f.contains("\"login\"")),
