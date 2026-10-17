@@ -7,12 +7,12 @@ pub fn to_number(value: &Value) -> Result<f64, JsCoercionError> {
     crate::income::to_number(value)
 }
 
-pub fn map_okx_closed_position(
+pub fn map_okx_closed_position<E: From<JsCoercionError>>(
     row: &serde_json::Map<String, Value>,
     market: Option<&Market>,
-    contracts_to_base: impl Fn(f64, &Market, f64) -> f64,
+    contracts_to_base: impl Fn(f64, &Market, f64) -> Result<f64, E>,
     account_name: &str,
-) -> Result<Option<ClosedPnlEntry>, JsCoercionError> {
+) -> Result<Option<ClosedPnlEntry>, E> {
     let open_time = safe_cex_num::parse_int(
         &nullish_string(row.get("cTime").unwrap_or(&Value::Null), "0")?,
         Some(10),
@@ -23,11 +23,10 @@ pub fn map_okx_closed_position(
     }
     let close_price = to_number(row.get("closeAvgPx").unwrap_or(&Value::Null))?;
     let native_size = to_number(row.get("closeTotalPos").unwrap_or(&Value::Null))?;
-    let contracts = market
-        .filter(|_| close_price > 0.0)
-        .map_or(native_size, |market| {
-            contracts_to_base(native_size, market, close_price)
-        });
+    let contracts = match market.filter(|_| close_price > 0.0) {
+        Some(market) => contracts_to_base(native_size, market, close_price)?,
+        None => native_size,
+    };
     let closed_time = safe_cex_num::parse_int(
         &nullish_string(row.get("uTime").unwrap_or(&Value::Null), "0")?,
         Some(10),
