@@ -217,8 +217,9 @@ that refusal, so adding a required inherited field cannot silently leave the
 reported schema unchanged. Other schema member walks consume type literals;
 class member extraction is a separate operation, not an interface census.
 
-Field-identity supplements preserve the three original declaration fixture
-artifacts byte-identically. Distinct samples address equal-valued field swaps;
+Field-identity supplements retain independent declaration fixture artifacts.
+The legacy types artifact excludes the removed unused order DTOs; retained
+cases stay byte-identical. Distinct samples address equal-valued field swaps;
 separate recursive native-field assertions address symmetric Serde renames that
 a roundtrip cannot see. FIELD_IDENTITY_AUDIT.md records the completed scope and
 remaining inventories; a stronger declaration test does not imply the whole
@@ -399,7 +400,7 @@ private remote schema as `v3_contracts`. See
 The focused runner retains full compiler discovery and selected-source scope
 checks; it does not classify the remaining Woo owners or aliases.
 
-The next accepted-set batch reviews thirty concrete declaration records, with
+The next accepted-set batch reviews 27 retained concrete declaration records, with
 native views of all fields and separate raw/owned/borrowed/qualified ingress.
 The V3 public mapper's five numeric validations are expanded from their former
 local macro so source discovery can inspect ordinary Rust. Its existing typed
@@ -429,3 +430,14 @@ terminal private-frame regressions. Both source scripts execute actual TS bodies
 NEW/PARTIAL Store insertion and public typed results retain the separate shared
 Order field-domain obligations. This repair makes no shared-type or nonnumeric
 Store insertion claim; it neither coerces copied strings nor drops bad rows.
+
+The unused `WooxOrder`, `FetchOrderResponse` and nested meta DTOs are removed.
+Their strict declaration decoders rejected documented null metadata even though
+production order reads already consume raw runtime rows. The legacy declaration
+oracle and accepted-record cohort exclude these erased-only records; remaining
+record guards, field and numeric witnesses stay active. `binding_orders` exercises
+all four documented null fields through the real signed HTTP/class mapper and
+retains their own null keys in info. `scripts/legacy-order-null-control.py`
+compiles a live-mapper null-refusal control that must fail its named order-count
+assertion; decoder-only tests are not evidence
+for this production path.
