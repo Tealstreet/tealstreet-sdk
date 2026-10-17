@@ -404,3 +404,9 @@ fills, positions and balance frames with native Store/event assertions.
 A compiled xhr-assignment mutation fails the production startup regression;
 exact restoration passes. Retained composition tests cover live class factories
 and polling rather than the deleted wrappers.
+
+Spot websocket candle dates use shared ToPrimitive before choosing UTF-16 date
+parsing or numeric TimeClip, matching the one-argument Date constructor. The
+constructed candle binding test compares eleven raw JSON input shapes to the
+maintained handleOHLC body, including array dates, invalid dates and fractional
+milliseconds; output timestamps and all price/volume fields are checked natively.
