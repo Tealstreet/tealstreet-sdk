@@ -235,7 +235,15 @@ fn real_private_write_timeout_emits_forced_toast_once_until_recovery() {
     }
 }
 
-fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str) {
+fn callback_failure(fault: &str) -> safe_cex_exchange::runtime::ExchangeError {
+    let mut error =
+        safe_cex_exchange::runtime::ExchangeError::new(format!("{fault}-consumer-failed"));
+    error.origin = Some(safe_cex_exchange::runtime::ExchangeErrorOrigin::new(
+        std::io::Error::other("opaque callback origin"),
+    ));
+    error
+}
+fn source_health_callback_profiles() -> Vec<Value> {
     let source = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -250,78 +258,97 @@ fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str)
     );
     let expected: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
     assert_eq!(expected.len(), 2);
+    expected
+}
+fn health_check_write(h: &Harness) {
+    let opts: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":2.5,"price":123.45,"clientOrderId":"health-check"})).unwrap();
+    h.drive(Box::pin(
+        h.exchange.base().place_order(h.exchange.as_ref(), opts),
+    ))
+    .unwrap();
+    h.runtime.advance(8000.0);
+}
+fn assert_callback_origin(h: &Harness, original: &safe_cex_exchange::runtime::ExchangeError) {
+    let errors = h.runtime.reported_errors.borrow();
+    let actual = errors
+        .iter()
+        .filter(|error| error.message == original.message)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual.len(),
+        1,
+        "host must receive exactly the actual callback rejection: {:?}",
+        h.runtime.reports.borrow()
+    );
+    assert_eq!(
+        actual[0].origin, original.origin,
+        "original opaque callback cause survives the venue and runtime"
+    );
+}
+fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str) {
+    let expected = source_health_callback_profiles();
     for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
-        for (index, profile) in ["log", "warning"].into_iter().enumerate() {
-            if profile != fault {
-                continue;
-            }
-            assert_eq!(expected[index]["fault"], fault);
-            assert_eq!(expected[index]["sameError"], true);
-            let (h, _, _) = connected(name.clone());
-            h.http.ok("POST", "/api/v3/brokerage/orders", json!({"success":true,"success_response":{"order_id":"health-order","product_id":"BTC-USDC","side":"BUY","client_order_id":"health-check"}}));
-            let warnings = Rc::new(RefCell::new(0_u64));
-            let observed = warnings.clone();
-            h.venue().base().on(
-                "warning",
-                Rc::new(move |_, _| {
-                    *observed.borrow_mut() += 1;
-                    if fault == "warning" {
-                        Err(safe_cex_exchange::runtime::ExchangeError::new(
-                            "warning-consumer-failed",
-                        ))
-                    } else {
-                        Ok(())
-                    }
-                }),
-            );
-            h.venue().base().on(
-                "log",
-                Rc::new(move |_, message| {
-                    if fault == "log"
-                        && message
-                            .as_str()
-                            .is_some_and(|m| m.contains("Coinbase private WS is not receiving"))
-                    {
-                        Err(safe_cex_exchange::runtime::ExchangeError::new(
-                            "log-consumer-failed",
-                        ))
-                    } else {
-                        Ok(())
-                    }
-                }),
-            );
-            let opts: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":2.5,"price":123.45,"clientOrderId":"health-check"})).unwrap();
-            h.drive(Box::pin(
-                h.exchange.base().place_order(h.exchange.as_ref(), opts),
-            ))
-            .unwrap();
-            h.runtime.advance(8000.0);
-            assert!(
-                h.store.socket_health()["privateDegradedReason"]
-                    .as_str()
-                    .unwrap()
-                    .contains("Coinbase private WS"),
-                "health commits before callback failure"
-            );
-            assert_eq!(
-                *warnings.borrow(),
-                expected[index]["warnings"].as_u64().unwrap(),
-                "{fault}: source stops subsequent effects on callback failure"
-            );
-            assert!(
-                h.runtime
-                    .reports
-                    .borrow()
-                    .iter()
-                    .any(|e| e.contains(&format!("{fault}-consumer-failed"))),
-                "{fault}: timer host receives the actual callback rejection: {:?}",
-                h.runtime.reports.borrow()
-            );
-            h.venue().dispose().unwrap();
-        }
+        let index = usize::from(fault == "warning");
+        assert_eq!(expected[index]["fault"], fault);
+        assert_eq!(expected[index]["sameError"], true);
+        let (h, _, _) = connected(name);
+        h.http.ok("POST","/api/v3/brokerage/orders",json!({"success":true,"success_response":{"order_id":"health-order","product_id":"BTC-USDC","side":"BUY","client_order_id":"health-check"}}));
+        let original = callback_failure(fault);
+        let warning_error = original.clone();
+        let log_error = original.clone();
+        let warnings = Rc::new(RefCell::new(0_u64));
+        let observed = warnings.clone();
+        h.venue().base().on(
+            "warning",
+            Rc::new(move |_, _| {
+                *observed.borrow_mut() += 1;
+                if fault == "warning" {
+                    Err(warning_error.clone())
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+        let log_id = h.venue().base().on(
+            "log",
+            Rc::new(move |_, message| {
+                if fault == "log"
+                    && message
+                        .as_str()
+                        .is_some_and(|m| m.contains("Coinbase private WS is not receiving"))
+                {
+                    Err(log_error.clone())
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+        health_check_write(&h);
+        assert!(
+            h.store.socket_health()["privateDegradedReason"]
+                .as_str()
+                .unwrap()
+                .contains("Coinbase private WS"),
+            "health commits before callback failure"
+        );
+        assert_eq!(
+            *warnings.borrow(),
+            expected[index]["warnings"].as_u64().unwrap(),
+            "{fault}: source stops subsequent effects on callback failure"
+        );
+        assert_callback_origin(&h, &original);
+        h.venue().base().off("log", Some(&log_id));
+        health_check_write(&h);
+        assert_eq!(
+            *warnings.borrow(),
+            expected[index]["recoveryWarnings"].as_u64().unwrap(),
+            "{fault}: latch retains source state after the original throw"
+        );
+        assert_eq!(expected[index]["recoveryWarned"], true);
+        assert_callback_origin(&h, &original);
+        h.venue().dispose().unwrap();
     }
 }
-
 #[test]
 fn real_health_log_callback_failure_stops_warning_and_reaches_timer_host() {
     health_callbacks_preserve_source_throws_and_effect_order("log");
@@ -329,4 +356,40 @@ fn real_health_log_callback_failure_stops_warning_and_reaches_timer_host() {
 #[test]
 fn real_health_warning_callback_failure_reaches_timer_host() {
     health_callbacks_preserve_source_throws_and_effect_order("warning");
+}
+#[test]
+fn real_auth_failure_log_callback_reaches_socket_host() {
+    let expected = source_health_callback_profiles();
+    assert_eq!(expected[0]["sameError"], true);
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let (h, socket, _) = connected(name);
+        let original = callback_failure("auth-log");
+        let injected = original.clone();
+        h.venue().base().on(
+            "log",
+            Rc::new(move |_, message| {
+                if message
+                    .as_str()
+                    .is_some_and(|m| m.contains("Coinbase private WS authentication failed"))
+                {
+                    Err(injected.clone())
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+        send(
+            &h,
+            &socket,
+            json!({"type":"error","message":"authentication failed"}),
+        );
+        assert!(
+            h.store.socket_health()["privateDegradedReason"]
+                .as_str()
+                .unwrap()
+                .contains("Coinbase private WS authentication failed")
+        );
+        assert_callback_origin(&h, &original);
+        h.venue().dispose().unwrap();
+    }
 }

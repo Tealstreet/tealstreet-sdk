@@ -11,6 +11,9 @@ for(const fault of ['log','warning']){
  const state={hasWarnedPrivateUserStreamDegraded:false,store:{updateSocketHealth(){updates++;}},log(){if(fault==='log')throw error;},emitter:{emit(){warnings++;throw error;}}};
  const fn=vm.runInNewContext(code,{LogSeverity:{Warning:'warning'}}).call(state);
  let sameError=false;try{fn('stale stream',true);}catch(caught){sameError=caught===error;}
- rows.push({fault,warnings,updates,sameError,warned:state.hasWarnedPrivateUserStreamDegraded});
+ const first={fault,warnings,updates,sameError,warned:state.hasWarnedPrivateUserStreamDegraded};
+ state.log=()=>{};state.emitter.emit=()=>{warnings++;};
+ fn('stale stream',true);
+ rows.push({...first,recoveryWarnings:warnings,recoveryWarned:state.hasWarnedPrivateUserStreamDegraded});
 }
 assert.equal(rows.length,2);process.stdout.write(JSON.stringify(rows));
