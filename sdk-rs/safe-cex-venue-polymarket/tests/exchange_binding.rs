@@ -184,6 +184,41 @@ fn place(h: &Harness, v: serde_json::Value) -> Result<Vec<String>, String> {
     ))
     .map_err(|e| e.message)
 }
+// A read preserves account data while the maintained Axios response interceptor
+// counts every actual HTTP outcome, including each cursor page and rejected reads.
+fn assert_private_read_snapshot(before: Value, mut after: Value, source_case: usize) {
+    static SOURCE: std::sync::OnceLock<Vec<Vec<String>>> = std::sync::OnceLock::new();
+    let source = SOURCE.get_or_init(|| {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/private-read-outcomes.cjs"
+            ))
+            .output()
+            .expect("execute maintained Axios outcome interceptor");
+        assert!(
+            output.status.success(),
+            "source outcomes: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows: Vec<Vec<String>> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(rows.len(), 3, "independent source private-read case count");
+        rows
+    });
+    let mut expected_stats = before["requestStats"].clone();
+    for outcome in &source[source_case] {
+        expected_stats[outcome] = json!(expected_stats[outcome].as_f64().unwrap() + 1.0);
+    }
+    assert_eq!(
+        after["requestStats"], expected_stats,
+        "private read counts actual source HTTP outcomes"
+    );
+    after["requestStats"] = before["requestStats"].clone();
+    assert_eq!(
+        after, before,
+        "private read preserves every other serialized store field"
+    );
+}
 #[test]
 fn concrete_fetch_positions_uses_holdings_and_keeps_snapshot_pure() {
     let h = private_harness(|http| {
@@ -204,7 +239,7 @@ fn concrete_fetch_positions_uses_holdings_and_keeps_snapshot_pure() {
     assert_eq!(positions[0].contracts, 10.);
     assert_eq!(positions[0].notional, 6.2);
     assert_eq!(positions[0].unrealized_pnl, 2.25);
-    assert_eq!(h.store.serialize(), before, "fetch_positions is pure");
+    assert_private_read_snapshot(before, h.store.serialize(), 0);
     assert_eq!(
         h.http.calls("/positions")[0].base_url,
         "https://data-api.polymarket.com"
@@ -247,7 +282,7 @@ fn concrete_fetch_orders_maps_all_pages_without_store_commit() {
         h.http.calls("/data/orders")[1].params["next_cursor"],
         "page-two"
     );
-    assert_eq!(h.store.serialize(), before, "fetch_orders is pure");
+    assert_private_read_snapshot(before, h.store.serialize(), 1);
 }
 #[test]
 fn concrete_place_order_posts_real_signed_gtc_payload() {
@@ -519,11 +554,7 @@ fn concrete_private_read_failure_rethrows_and_preserves_snapshot() {
         "source failure survives: {}",
         error.message
     );
-    assert_eq!(
-        h.store.serialize(),
-        before,
-        "failed private read preserves authoritative snapshot"
-    );
+    assert_private_read_snapshot(before, h.store.serialize(), 2);
     assert_eq!(
         h.http.calls("/data/orders").len(),
         1,
@@ -804,4 +835,30 @@ fn concrete_private_trade_emits_fill_and_refreshes_positions_with_rest_balance_r
     assert_eq!(h.store.balance().upnl, balance_before.upnl);
     drop(positions);
     h.venue().dispose().unwrap();
+}
+
+#[test]
+fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
+    let h = harness(ExchangeName::Polymarket, options(), |_| {});
+    let sockets = h.venue().base().get_all_sockets();
+    assert_eq!(sockets.len(), 2, "both real source sockets are registered");
+    for socket in &sockets {
+        assert!(
+            !socket.recover_after_offline(true).unwrap(),
+            "the source socket requests an account reload"
+        );
+    }
+    assert!(
+        !h.venue().recover_after_offline().unwrap(),
+        "the production Exchange must expose the reload policy"
+    );
+    assert!(
+        h.runtime.sockets.borrow().is_empty(),
+        "recovery must not dial a second retry chain"
+    );
+    h.venue().dispose().unwrap();
+    assert!(
+        h.venue().recover_after_offline().unwrap(),
+        "disposed accounts do not request another reload"
+    );
 }

@@ -97,6 +97,10 @@ pub trait WsProtocol {
         true
     }
 
+    /// Source receive timers dispatch the instance's checkLastReceived override.
+    fn check_last_received(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.check_last_received()
+    }
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         Err(ExchangeError::new("Not implemented"))
     }
@@ -2511,7 +2515,7 @@ impl BaseWebSocket {
                             }
                             Timer::Receive => {
                                 if socket.state.borrow().last_received != 0.0 {
-                                    socket.check_last_received()?;
+                                    socket.protocol.check_last_received(&socket)?;
                                     socket.parent.sync_socket_health_to_store()?;
                                     socket.schedule(Timer::Receive, 1000.0);
                                 }

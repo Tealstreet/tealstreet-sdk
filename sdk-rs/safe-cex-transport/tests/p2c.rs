@@ -1756,7 +1756,34 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
             method: "POST".into(),
             url: "/remote-input".into(),
             skip_remote_signing: skip,
-            config_extensions: [("grvtCookie".into(), json!("gravity=retained"))].into(),
+            config_extensions: [
+                (
+                    "grvtCookie".into(),
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        "gravity=retained".into(),
+                    ),
+                ),
+                (
+                    "nativeConfig".into(),
+                    safe_cex_types::retained_json::RetainedJsonInput::Object(vec![
+                        (
+                            "missing".into(),
+                            safe_cex_types::retained_json::RetainedJsonInput::Undefined,
+                        ),
+                        (
+                            "nan".into(),
+                            safe_cex_types::retained_json::RetainedJsonInput::Float(
+                                f64::from_bits(0x7ff8000000000042),
+                            ),
+                        ),
+                        (
+                            "negativeZero".into(),
+                            safe_cex_types::retained_json::RetainedJsonInput::Float(-0.0),
+                        ),
+                    ]),
+                ),
+            ]
+            .into(),
             body: Some(safe_cex_transport::RestBody::Untransformed(
                 json!({"input":79}),
             )),
@@ -1778,10 +1805,28 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
             "receipt_remote_native_signed_config {skip}"
         );
         assert_eq!(
-            venue.requests.lock().unwrap()[0].config_extensions["grvtCookie"],
+            venue.requests.lock().unwrap()[0].config_extensions["grvtCookie"]
+                .clone()
+                .into_value()
+                .unwrap(),
             json!("gravity=retained"),
             "REST CONFIG signed/bypass terminal extensions {skip}"
         );
+        {
+            use safe_cex_types::retained_json::RetainedJsonInput as Input;
+            let requests = venue.requests.lock().unwrap();
+            let Input::Object(fields) = &requests[0].config_extensions["nativeConfig"] else {
+                panic!("native config object");
+            };
+            assert_eq!(fields.len(), 3, "hosted config retains every data field");
+            assert!(matches!(&fields[0], (key, Input::Undefined) if key == "missing"));
+            assert!(
+                matches!(&fields[1], (key, Input::Float(value)) if key == "nan" && value.to_bits() == 0x7ff8000000000042)
+            );
+            assert!(
+                matches!(&fields[2], (key, Input::Float(value)) if key == "negativeZero" && value.to_bits() == (-0.0_f64).to_bits())
+            );
+        }
         assert_eq!(
             signer.calls.lock().unwrap().len(),
             usize::from(!skip),

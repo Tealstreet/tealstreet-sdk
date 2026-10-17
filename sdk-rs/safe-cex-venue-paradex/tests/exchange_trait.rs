@@ -897,6 +897,156 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
 }
 
 #[test]
+fn constructed_rest_orders_use_host_local_timezone() {
+    constructed_orders_use_host_local_timezone(false);
+}
+
+#[test]
+fn constructed_private_order_timestamps_keep_raw_clock() {
+    constructed_orders_use_host_local_timezone(true);
+}
+
+fn constructed_orders_use_host_local_timezone(private: bool) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::process::Command;
+
+    let name = if private {
+        "constructed_private_order_timestamps_keep_raw_clock"
+    } else {
+        "constructed_rest_orders_use_host_local_timezone"
+    };
+    // Isolate the process timezone, without changing the parallel test runner's
+    // environment. The source's new Date(created_at).getTime() runs in Node
+    // under the same fixed UTC-7 host profile as the constructed exchange.
+    if std::env::var("PARADEX_LOCAL_DATE_CHILD").as_deref() != Ok(name) {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env("TZ", "Etc/GMT+7")
+            .env("PARADEX_LOCAL_DATE_CHILD", name)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "non-UTC constructed exchange child failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let dates = ["2026-07-20T00:00:00", "2026-07-20T00:00:00Z", "2026-07-20"];
+    let output = Command::new("node")
+        .args([
+            "-e",
+            "console.log(JSON.stringify(JSON.parse(process.argv[1]).map(v => new Date(v).getTime())))",
+            &serde_json::to_string(&dates).unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let mut expected: Vec<f64> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected.len(), dates.len());
+    assert_eq!(expected[0] - expected[1], 7.0 * 60.0 * 60.0 * 1000.0);
+    assert_eq!(expected[1], expected[2], "ISO date-only remains UTC");
+    let rows: Vec<_> = dates
+        .iter()
+        .enumerate()
+        .map(|(i, date)| {
+            json!({
+                "id":format!("local-date-{i}"), "market":"BTC-USD-PERP",
+                "side":"BUY", "type":"LIMIT", "status":"OPEN", "price":"101.5",
+                "size":"0.006", "remaining_size":"0.003", "created_at":date,
+                "reduce_only":false
+            })
+        })
+        .collect();
+    let conversions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = conversions.clone();
+    let (venue, runtime, store, _) = support::fixture_with_timezone(
+        private_options(),
+        |wire| {
+            private_script(wire);
+            if !private {
+                wire.responses
+                    .borrow_mut()
+                    .insert("/orders".into(), json!({"results":rows}));
+            }
+        },
+        // The embedding host supplies its local-to-UTC policy, matching the
+        // fixed UTC-7 profile selected for the independent Node witness.
+        std::rc::Rc::new(move |wall_time| {
+            captured.borrow_mut().push(wall_time);
+            wall_time + 7.0 * 60.0 * 60.0 * 1000.0
+        }),
+    );
+    drive(&runtime, venue.start()).unwrap();
+    let startup_conversions = conversions.borrow().len();
+    if private {
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let socket = runtime.sockets.borrow()[1].1.clone();
+        // Private updates use Date.now(), independently of created_at.
+        expected.fill(runtime.now.get());
+        for row in &rows {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    json!({"jsonrpc":"2.0", "method":"subscription",
+                    "params":{"channel":"orders.ALL","data":row}})
+                    .to_string(),
+                )));
+            runtime.pump();
+        }
+    } else {
+        let orders = drive(&runtime, venue.fetch_orders(None)).unwrap();
+        assert_eq!(orders.len(), dates.len());
+        for (order, expected) in orders.iter().zip(&expected) {
+            assert_eq!(
+                order.last_update.to_bits(),
+                expected.to_bits(),
+                "REST {}",
+                order.id
+            );
+        }
+    }
+    if private {
+        assert!(
+            conversions.borrow().is_empty(),
+            "Date.now bypasses timezone conversion"
+        );
+    } else {
+        assert!(startup_conversions > 0, "startup maps the local date");
+        assert_eq!(
+            &*conversions.borrow(),
+            &vec![expected[1]; startup_conversions + 1],
+            "only the local date converts, one more time during the explicit REST read"
+        );
+    }
+    let stored = store.orders();
+    assert_eq!(stored.len(), dates.len());
+    for (index, expected) in expected.iter().enumerate() {
+        let order = stored
+            .iter()
+            .find(|o| o.id == format!("local-date-{index}"))
+            .unwrap();
+        assert_eq!(
+            order.last_update.to_bits(),
+            expected.to_bits(),
+            "Store {}",
+            order.id
+        );
+    }
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
 fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
     let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
     drive(&runtime, venue.start()).unwrap();
