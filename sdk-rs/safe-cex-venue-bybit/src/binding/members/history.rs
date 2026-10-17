@@ -90,3 +90,14 @@ pub(crate) fn fetch_income_history_range(
         ),
     })
 }
+
+pub(crate) fn fetch_historical_orders(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
+    Ok(match venue(rt)?.base.name {
+        ExchangeName::Bybitspot | ExchangeName::Bybitinverse => Js::array(vec![]),
+        _ => crate::ledger_history::fetch_historical_orders(
+            Rc::new(rt.clone()),
+            rt.this.clone(),
+            opts,
+        ),
+    })
+}

@@ -714,3 +714,8 @@ maintained transaction-log helpers. Spot retains inherited empty history. Keep
 linear/inverse context order, source combined-category sort/limit rules, inclusive
 windows and repeated IDs. The mapper stays native until the typed public output;
 its ordinary lookup tables retain actual Object.prototype members.
+
+Historical order reads now bind primary/demo to the native mapper and signed
+history client. Dedicated Spot/Inverse keep Base's empty method. Keep ascending
+inclusive windows, category order and first-seen ID deduplication before sorting
+and limits. All three ledger mappers share native numeric coercion.

@@ -69,14 +69,30 @@ fn dedicated_spot_and_inverse_keep_inherited_empty_order_history() {
 #[test]
 fn order_history_deduplicates_pages_before_sorting_and_limit() {
     let h = harness_as(ExchangeName::Bybit, options(), |wire| {
-        wire.ok("GET", "/v5/order/history", json!({"list":[row("one","100"),row("","150")],"nextPageCursor":"next"}));
-        wire.ok("GET", "/v5/order/history", json!({"list":[row("one","300"),row("two","200")]}));
+        wire.ok(
+            "GET",
+            "/v5/order/history",
+            json!({"list":[row("one","100"),row("","150")],"nextPageCursor":"next"}),
+        );
+        wire.ok(
+            "GET",
+            "/v5/order/history",
+            json!({"list":[row("one","300"),row("two","200")]}),
+        );
     });
     let opts = serde_json::from_value(json!({"limit":1})).unwrap();
-    let rows = h.drive(h.venue().fetch_historical_orders(Some(opts))).unwrap();
-    assert_eq!(rows.len(),1);
-    assert_eq!(rows[0].id,"two","first occurrence of a repeated ID wins before sorting");
-    assert_eq!(h.wire.calls("/v5/order/history")[1].params["cursor"],"next");
+    let rows = h
+        .drive(h.venue().fetch_historical_orders(Some(opts)))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].id, "two",
+        "first occurrence of a repeated ID wins before sorting"
+    );
+    assert_eq!(
+        h.wire.calls("/v5/order/history")[1].params["cursor"],
+        "next"
+    );
     h.venue().dispose().unwrap();
 }
 
@@ -85,29 +101,50 @@ fn order_history_scans_both_categories_and_inclusive_windows() {
     let mut opts = options();
     opts.enable_inverse_markets = Some(true);
     let h = harness_as(ExchangeName::Bybitdemo, opts, |wire| {
-        wire.ok("GET", "/v5/order/history", json!({"list":[row("shared","100")]}));
+        wire.ok(
+            "GET",
+            "/v5/order/history",
+            json!({"list":[row("shared","100")]}),
+        );
     });
     let opts = serde_json::from_value(json!({"from":0,"to":604800000})).unwrap();
-    let rows = h.drive(h.venue().fetch_historical_orders(Some(opts))).unwrap();
-    assert_eq!(rows.len(),1);
+    let rows = h
+        .drive(h.venue().fetch_historical_orders(Some(opts)))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
     let calls = h.wire.calls("/v5/order/history");
-    assert_eq!(calls.len(),4);
-    assert_eq!(calls.iter().map(|r|r.params["category"].clone()).collect::<Vec<_>>(),vec![json!("linear"),json!("linear"),json!("inverse"),json!("inverse")]);
-    assert_eq!(calls[0].params["startTime"],"0");
-    assert_eq!(calls[0].params["endTime"],"604799999");
-    assert_eq!(calls[1].params["startTime"],"604800000");
-    assert_eq!(calls[1].params["endTime"],"604800000");
+    assert_eq!(calls.len(), 4);
+    assert_eq!(
+        calls
+            .iter()
+            .map(|r| r.params["category"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            json!("linear"),
+            json!("linear"),
+            json!("inverse"),
+            json!("inverse")
+        ]
+    );
+    assert_eq!(calls[0].params["startTime"], "0");
+    assert_eq!(calls[0].params["endTime"], "604799999");
+    assert_eq!(calls[1].params["startTime"], "604800000");
+    assert_eq!(calls[1].params["endTime"], "604800000");
     h.venue().dispose().unwrap();
 }
 
 #[test]
 fn order_history_cap_warns_and_keeps_first_seen_ids() {
     let h = harness_as(ExchangeName::Bybit, options(), |wire| {
-        wire.ok("GET", "/v5/order/history", json!({"list":[row("same","100")],"nextPageCursor":"more"}));
+        wire.ok(
+            "GET",
+            "/v5/order/history",
+            json!({"list":[row("same","100")],"nextPageCursor":"more"}),
+        );
     });
     let rows = h.drive(h.venue().fetch_historical_orders(None)).unwrap();
-    assert_eq!(rows.len(),1);
-    assert_eq!(h.wire.calls("/v5/order/history").len(),20);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(h.wire.calls("/v5/order/history").len(), 20);
     assert!(h.runtime.logs.borrow().iter().any(|m|m=="warning: fetchHistoricalOrders stopped at the 20-page cap; older orders were not fetched"));
     h.venue().dispose().unwrap();
 }
@@ -117,7 +154,31 @@ fn order_history_public_only_returns_without_http() {
     let mut opts = options();
     opts.public_data_only = Some(true);
     let h = harness_as(ExchangeName::Bybit, opts, |_| {});
-    assert!(h.drive(h.venue().fetch_historical_orders(None)).unwrap().is_empty());
+    assert!(
+        h.drive(h.venue().fetch_historical_orders(None))
+            .unwrap()
+            .is_empty()
+    );
     assert!(h.wire.calls("/v5/order/history").is_empty());
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn order_history_keeps_rows_with_inherited_optional_function_fields() {
+    let h = harness_as(ExchangeName::Bybit, options(), |wire| {
+        let mut order = row("optional-prototype", "100");
+        order["positionIdx"] = json!("toString");
+        wire.ok("GET", "/v5/order/history", json!({"list":[order]}));
+    });
+    let rows = h.drive(h.venue().fetch_historical_orders(None)).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "optional-prototype");
+    assert!(rows[0].position_side.is_none());
+    assert!(
+        serde_json::to_value(&rows[0])
+            .unwrap()
+            .get("positionSide")
+            .is_none()
+    );
     h.venue().dispose().unwrap();
 }
