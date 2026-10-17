@@ -751,6 +751,12 @@ impl PublicStreamHost for PublicHost {
         Ok(())
     }
     fn send(&self, frame: &str) -> Result<(), ExchangeError> {
+        if frame == "ping" {
+            // Share the exact timestamp sampled by the venue ping body with
+            // BaseWebSocket, which owns pong latency and its next-ping timer.
+            self.socket
+                .set_ping_at(owner(&self.stream)?.core.ping_at.get());
+        }
         self.socket.send(frame)
     }
     fn performance_now(&self) -> f64 {
@@ -929,6 +935,12 @@ impl pc::PrivateStreamHost for PrivateHost {
         })))
     }
     fn send_with_log(&self, frame: &str) -> Result<(), ExchangeError> {
+        if frame == "ping" {
+            // Share the exact timestamp sampled by the venue ping body with
+            // BaseWebSocket, which owns pong latency and its next-ping timer.
+            self.socket
+                .set_ping_at(owner(&self.stream)?.core.ping_at.get());
+        }
         self.socket.send_with_log(frame)
     }
     fn performance_now(&self) -> f64 {
