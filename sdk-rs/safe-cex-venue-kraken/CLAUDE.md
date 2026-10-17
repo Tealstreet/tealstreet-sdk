@@ -393,3 +393,14 @@ client-ID generator. `tests/native_clock.rs` checks actual signed Futures/Spot
 requests under a pushed server offset and a different host wall clock;
 `tests/native_identity.rs` checks both nanoid separators in the native cliOrdId.
 The shared Bitunix native audit control runner checks both regressions.
+
+
+Unused `construction::futures_constructor` / `spot_constructor` wrappers and
+their generic constructor-only corpus are removed. Production construction stays
+on `classes::futures_exchange` / `spot_exchange`, sharing `construct_with` for the
+actual API-client assignments. Constructor manifest rows target those live class
+factories. `exchange_binding` covers startup plus production private orders,
+fills, positions and balance frames with native Store/event assertions.
+A compiled xhr-assignment mutation fails the production startup regression;
+exact restoration passes. Retained composition tests cover live class factories
+and polling rather than the deleted wrappers.
