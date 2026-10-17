@@ -2817,7 +2817,7 @@ const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
     (
         "Futures",
         "fetch_positions",
-        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":0.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0,"marginSize":0.0,"info":{"synthetic":true,"symbolConfig":null}}]"#,
+        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":0.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0,"marginSize":0.0,"info":{"synthetic":true}}]"#,
         &["/fapi/v3/positionRisk", "/fapi/v1/symbolConfig"],
     ),
     (

@@ -1312,3 +1312,10 @@ reaction handles its source immediately; an unhandled propagated rejection
 belongs to the derived promise. Reading result() alone does not handle it.
 Checks retain discarded rejection values until their reporting turn, and host
 driver discard releases those pending captures without reporting them.
+
+String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
+units and honor their position argument after search-string coercion. Positions
+truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
+endsWith defaults to the full length only for undefined. The native Node corpus
+covers surrogate halves, empty needles, all position boundaries and thrown
+position conversion identity.

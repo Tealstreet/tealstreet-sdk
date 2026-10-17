@@ -2,7 +2,7 @@
 use safe_cex_exchange::{
     js_runtime::{
         client, globals,
-        promise::{await_js, Promise},
+        promise::{Promise, await_js},
         scope::ScopeShared,
         value::Js,
     },
@@ -466,11 +466,9 @@ const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const
         first.settle(Err(safe_cex_exchange::js_runtime::value::Thrown::new(
             Js::str("first"),
         )));
-        rows.push(vec![await_js(combined)
-            .await
-            .unwrap_err()
-            .value
-            .to_display()]);
+        rows.push(vec![
+            await_js(combined).await.unwrap_err().value.to_display(),
+        ]);
         assert_eq!(rows, expected);
     });
 }
