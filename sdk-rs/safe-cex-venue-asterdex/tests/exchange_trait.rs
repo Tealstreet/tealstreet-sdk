@@ -14,6 +14,106 @@ mod exchange_data;
 use exchange_data::script;
 
 #[test]
+fn candle_reads_follow_source_fields_without_decoding_unused_tuple_columns() {
+    use std::io::Write;
+    let cases = json!([
+        {"name":"six-columns","rows":[[1700000000000u64,"1","3","0.5","2","4"]]},
+        {"name":"numeric-columns","rows":[[1700000000001u64,1,3,0.5,2,4]]},
+        {"name":"opaque-unused-columns","rows":[[1700000000002u64,"1","3","0.5","2","4",null,{},[],false,{},null,"extra"]]},
+        {"name":"missing-volume","rows":[[1700000000003u64,"1tail","3","0.5","2"]]},
+        {"name":"indexed-record","rows":[{"0":1700000000004u64,"1":"1","2":"3","3":"0.5","4":"2","5":null}]}
+    ]);
+    assert_eq!(cases.as_array().unwrap().len(), 5);
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/ohlcv-rows-source.cjs"
+        ))
+        .env(
+            "SAFE_CEX_TYPESCRIPT_PATH",
+            std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+            }),
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&cases).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 10);
+    for (version, offset) in [("v1", 0), ("v3", 5)] {
+        let options = if version == "v3" {
+            let secret = format!("{:064x}", 1);
+            let wallet =
+                safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&secret).unwrap();
+            json!({"key":wallet.address().to_checksum(None),"secret":secret,"applicationId":"0x1111111111111111111111111111111111111111"})
+        } else {
+            json!({"key":"fixture-key","secret":"fixture-secret"})
+        };
+        let (venue, rt, _, wire) = support::fixture(options);
+        script(&wire);
+        let path = format!("/fapi/{version}/klines");
+        for (index, case) in cases.as_array().unwrap().iter().enumerate() {
+            let expected = &source[offset + index];
+            assert_eq!(expected["version"], version);
+            assert_eq!(expected["name"], case["name"]);
+            wire.responses
+                .borrow_mut()
+                .insert(path.clone(), case["rows"].clone());
+            let candles = drive(&rt, venue.fetch_ohlcv(serde_json::from_value(json!({
+                "symbol":"BTCUSDT","interval":"1m","limit":2,"from":123000,"to":999000
+            })).unwrap())).expect("real candle binding accepts source-readable rows without validating unused columns");
+            assert_eq!(candles.len(), 1);
+            let candle = &candles[0];
+            for (field, value) in [
+                ("timestamp", candle.timestamp),
+                ("open", candle.open),
+                ("high", candle.high),
+                ("low", candle.low),
+                ("close", candle.close),
+                ("volume", candle.volume),
+            ] {
+                let wanted = &expected["candles"][0][field];
+                if wanted == "NaN" {
+                    assert!(value.is_nan(), "{version} {} {field}", case["name"]);
+                } else {
+                    assert_eq!(
+                        Some(value),
+                        wanted.as_f64(),
+                        "{version} {} {field}",
+                        case["name"]
+                    );
+                }
+            }
+            let requests = wire.requests.borrow();
+            let request = requests.last().unwrap();
+            assert_eq!(request_path(request), path);
+            assert_eq!(expected["requests"][0]["url"], path);
+            let query = signed_query_params(request);
+            assert_eq!(query["symbol"], "BTCUSDT");
+            assert_eq!(query["interval"], "1m");
+            assert_eq!(query["limit"], "2");
+            assert_eq!(query["startTime"], "123000");
+            assert!(!query.contains_key("endTime"), "source ignores to");
+        }
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
 fn sparse_position_risk_rows_use_source_coercion_in_v1_and_v3() {
     for v3 in [false, true] {
         let options = if v3 {

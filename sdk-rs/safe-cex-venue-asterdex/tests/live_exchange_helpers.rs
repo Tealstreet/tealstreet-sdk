@@ -555,7 +555,10 @@ fn fetch_ohlcv_matches_typescript() {
                 )
             })
             .collect::<Vec<safe_cex_venue_asterdex::types::AsterDEXKlineResponse>>();
-        let candles = transform_klines(&rows);
+        let rows = safe_cex_exchange::js_runtime::value::from_typed(&rows).unwrap();
+        let candles: Vec<safe_cex_types::Candle> =
+            safe_cex_exchange::js_runtime::value::to_typed(&transform_klines(&rows).unwrap())
+                .unwrap();
         let actual = serde_json::to_value(&candles).unwrap();
         same(
             &actual,
