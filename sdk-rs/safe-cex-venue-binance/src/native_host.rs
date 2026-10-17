@@ -288,7 +288,7 @@ async fn run_request(
                         response,
                         client.transform.get(),
                     ))
-                    .map_err(|e| failure(e.message))?,
+                    .map_err(|error| exchange_failure(error.into()))?,
                     None => false,
                 };
             if network || rejected {
@@ -640,7 +640,7 @@ impl ResponseBindings for NativeResponseBindings {
     fn resend(&mut self, response: EventValue) -> Result<EventValue, Failure> {
         if self.resend_allowed
             && is_binance_style_signature_rejection(&to_json(&response.read("data")?)?)
-                .map_err(|e| failure(e.message))?
+                .map_err(|error| exchange_failure(error.into()))?
         {
             self.resend_requested = true;
             return Ok(EventValue::Bool(true));

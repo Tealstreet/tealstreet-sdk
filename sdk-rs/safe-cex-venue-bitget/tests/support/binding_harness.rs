@@ -18,17 +18,19 @@ use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
-    rc::Rc,
+    rc::{Rc, Weak},
     sync::Arc,
     task::{Context, Poll, Waker},
 };
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
+type Sleeper = (f64, Weak<RefCell<Option<Waker>>>);
 
 #[derive(Default)]
 pub struct Runtime {
     pub now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
+    sleepers: RefCell<Vec<Sleeper>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
 }
@@ -40,6 +42,21 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
+        let mut ready = vec![];
+        self.sleepers.borrow_mut().retain(|(deadline, sleeper)| {
+            let Some(sleeper) = sleeper.upgrade() else {
+                return false;
+            };
+            if self.now.get() >= *deadline
+                && let Some(waker) = sleeper.borrow_mut().take()
+            {
+                ready.push(waker);
+            }
+            true
+        });
+        for waker in ready {
+            waker.wake();
+        }
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
@@ -80,10 +97,15 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = Rc::new(RefCell::new(None));
+        self.sleepers
+            .borrow_mut()
+            .push((at, Rc::downgrade(&sleeper)));
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
