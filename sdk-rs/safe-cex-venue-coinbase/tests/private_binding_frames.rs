@@ -234,3 +234,99 @@ fn real_private_write_timeout_emits_forced_toast_once_until_recovery() {
         h.venue().dispose().unwrap();
     }
 }
+
+fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str) {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/health-callback-binding.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected.len(), 2);
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        for (index, profile) in ["log", "warning"].into_iter().enumerate() {
+            if profile != fault {
+                continue;
+            }
+            assert_eq!(expected[index]["fault"], fault);
+            assert_eq!(expected[index]["sameError"], true);
+            let (h, _, _) = connected(name.clone());
+            h.http.ok("POST", "/api/v3/brokerage/orders", json!({"success":true,"success_response":{"order_id":"health-order","product_id":"BTC-USDC","side":"BUY","client_order_id":"health-check"}}));
+            let warnings = Rc::new(RefCell::new(0_u64));
+            let observed = warnings.clone();
+            h.venue().base().on(
+                "warning",
+                Rc::new(move |_, _| {
+                    *observed.borrow_mut() += 1;
+                    if fault == "warning" {
+                        Err(safe_cex_exchange::runtime::ExchangeError::new(
+                            "warning-consumer-failed",
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }),
+            );
+            h.venue().base().on(
+                "log",
+                Rc::new(move |_, message| {
+                    if fault == "log"
+                        && message
+                            .as_str()
+                            .is_some_and(|m| m.contains("Coinbase private WS is not receiving"))
+                    {
+                        Err(safe_cex_exchange::runtime::ExchangeError::new(
+                            "log-consumer-failed",
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }),
+            );
+            let opts: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":2.5,"price":123.45,"clientOrderId":"health-check"})).unwrap();
+            h.drive(Box::pin(
+                h.exchange.base().place_order(h.exchange.as_ref(), opts),
+            ))
+            .unwrap();
+            h.runtime.advance(8000.0);
+            assert!(
+                h.store.socket_health()["privateDegradedReason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Coinbase private WS"),
+                "health commits before callback failure"
+            );
+            assert_eq!(
+                *warnings.borrow(),
+                expected[index]["warnings"].as_u64().unwrap(),
+                "{fault}: source stops subsequent effects on callback failure"
+            );
+            assert!(
+                h.runtime
+                    .reports
+                    .borrow()
+                    .iter()
+                    .any(|e| e.contains(&format!("{fault}-consumer-failed"))),
+                "{fault}: timer host receives the actual callback rejection: {:?}",
+                h.runtime.reports.borrow()
+            );
+            h.venue().dispose().unwrap();
+        }
+    }
+}
+
+#[test]
+fn real_health_log_callback_failure_stops_warning_and_reaches_timer_host() {
+    health_callbacks_preserve_source_throws_and_effect_order("log");
+}
+#[test]
+fn real_health_warning_callback_failure_reaches_timer_host() {
+    health_callbacks_preserve_source_throws_and_effect_order("warning");
+}
