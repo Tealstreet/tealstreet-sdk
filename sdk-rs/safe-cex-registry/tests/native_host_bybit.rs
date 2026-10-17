@@ -83,6 +83,65 @@ fn bybit_and_demo_construct_and_sign_through_native_registry() {
     });
 }
 
+#[test]
+fn bybit_response_error_listener_rejection_reaches_native_registry() {
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(|request| {
+                    (request.path == "/v5/user/query-api").then(|| json!({
+                        "retCode":10016,"retMsg":"service unavailable",
+                        "raw_response":"There might be too much traffic or a configuration error",
+                        "result":{"userID":12345}
+                    }))
+                }),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            let calls = Rc::new(std::cell::Cell::new(0));
+            let observed = calls.clone();
+            let cleanup = h.exchange.base().on(
+                "error",
+                Rc::new(move |_, _| {
+                    observed.set(observed.get() + 1);
+                    let mut error = safe_cex_exchange::runtime::ExchangeError::new(
+                        "subscriber refused diagnostic",
+                    );
+                    error.name = "DiagnosticSubscriberError".into();
+                    Err(error)
+                }),
+            );
+            let error =
+                tokio::time::timeout(std::time::Duration::from_secs(10), h.exchange.get_account())
+                    .await
+                    .expect("native account rejection completes")
+                    .unwrap_err();
+            assert_eq!(
+                calls.get(),
+                1,
+                "{name:?}: real error subscriber was reached"
+            );
+            assert_eq!(h.seen.borrow().len(), 1, "callback refusal stops retry");
+            assert_signed(&h.seen.borrow()[0]);
+            assert_eq!(
+                error.name, "DiagnosticSubscriberError",
+                "{name:?}: preserve callback error name"
+            );
+            assert_eq!(error.message, "subscriber refused diagnostic");
+            h.exchange.base().off("error", Some(&cleanup));
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
 #[derive(Default)]
 struct HostedBybit {
     calls: RefCell<Vec<Value>>,
