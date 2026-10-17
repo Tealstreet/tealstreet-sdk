@@ -1,6 +1,6 @@
 //! Public, futures and private Bitunix sockets on the shared BaseWebSocket runtime.
 use crate::{
-    adapter::{BitunixVenue, Fault, json as adapter_json, to_value, units, utf8},
+    adapter::{BitunixVenue, Fault, json as adapter_json, to_value, units},
     composition::{FuturesSocket, PrivateSocket, PublicSocket},
     session_control::{ConnectionHost, PrivateOpenHost, SocketKind, SocketListener},
 };
@@ -121,7 +121,7 @@ impl WsParent for Parent {
         self.live()?.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.base.emit(event, Value::String(message.into()))
+        self.live()?.base.emit(event, safe_cex_exchange::js_runtime::value::Js::str(message))
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.base.sync_socket_health_to_store()
@@ -765,7 +765,7 @@ impl Socket {
         let id = venue.base.on(
             event,
             Rc::new(move |_, payload| match weak.upgrade() {
-                Some(s) => s.on_markets_changed(payload),
+                Some(s) => s.on_markets_changed(&safe_cex_exchange::js_runtime::value::to_json(payload)?),
                 None => Ok(()),
             }),
         );
@@ -1427,7 +1427,7 @@ impl ConnectionHost for Conn {
         self.socket
             .venue()?
             .base
-            .emit("grafana-info", Value::String(utf8(&message)?))
+            .emit("grafana-info", safe_cex_exchange::js_runtime::value::Js::String(message.into()))
     }
     fn create(&mut self, url: &Option<String>) -> Result<(), ExchangeError> {
         let url = url

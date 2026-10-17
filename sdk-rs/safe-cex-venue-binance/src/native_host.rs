@@ -481,7 +481,7 @@ fn error_value(error: &Failure) -> EventValue {
         error
             .code
             .clone()
-            .map_or(EventValue::Undefined, EventValue::from_json),
+            .unwrap_or(EventValue::Undefined),
     );
     value.write(
         "response",
@@ -564,7 +564,7 @@ fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<Even
         }) => {
             let mut error = ExchangeError::new(message);
             error.name = name.into();
-            error.code = to_json(&code).ok().filter(|v| !v.is_null());
+            error.code = (!code.is_undefined()).then_some(code);
             error.response = to_json(&response).ok().filter(|v| !v.is_null());
             Err(Rc::new(error))
         }

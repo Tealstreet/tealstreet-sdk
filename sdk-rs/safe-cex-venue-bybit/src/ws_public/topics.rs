@@ -65,15 +65,15 @@ fn sync(parent: &BybitExchange, topics: &Topics) -> Result<(), ExchangeError> {
     )?;
     Ok(())
 }
-fn native_markets(values: &[Value]) -> primary::Markets {
+fn native_markets(values: &[safe_cex_types::Market]) -> primary::Markets {
     Rc::new(RefCell::new(
         values
             .iter()
-            .filter(|value| !safe_cex_num::js_truthy(value.get("option")))
+            .filter(|value| value.option.is_none())
             .map(|value| {
                 Rc::new(RefCell::new(primary::Market {
-                    symbol: value["symbol"].as_str().unwrap_or_default().into(),
-                    quote: value["quote"].as_str().unwrap_or_default().into(),
+                    symbol: value.symbol.clone(),
+                    quote: value.quote.clone(),
                 }))
             })
             .collect(),
@@ -172,7 +172,7 @@ impl PublicTopics {
             };
             // The emitter's native market records have already crossed the shared
             // typed Store boundary; no arbitrary JS getter/string coercion is claimed.
-            let added = payload["added"].as_array().cloned().unwrap_or_default();
+            let added = safe_cex_exchange::js_runtime::value::to_typed::<Vec<safe_cex_types::Market>>(&payload.get("added")?)?;
             let topics = topics.clone();
             let output_topics = topics.clone();
             let has_ws = socket.has_websocket();
@@ -183,7 +183,7 @@ impl PublicTopics {
                 Box::pin(ticker::on_markets_changed(
                     added
                         .iter()
-                        .filter_map(|m| m["symbol"].as_str().map(str::to_owned))
+                        .map(|m| m.symbol.clone())
                         .collect(),
                     move || has_ws,
                     move || disposed,
