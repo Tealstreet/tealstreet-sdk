@@ -184,33 +184,36 @@ fn error_data_property(object: &Js, key: &str, value: Js, enumerable: bool) {
 
 // Shared stock prototypes carry inherited names; no constructor/runtime captures
 // or reference cycles are retained by this immutable thread-local lookup table.
-thread_local! {
-    static ERROR_PROTOTYPES: IndexMap<&'static str, Js> = {
-        let base = Js::object(vec![]);
-        error_data_property(&base, "name", Js::str("Error"), false);
-        error_data_property(&base, "message", Js::str(""), false);
-        error_data_property(&base, "toString", Js::function("toString", |this, _| {
-            error_string(&this).map(Js::String)
-        }), false);
-        let mut prototypes = IndexMap::new();
-        prototypes.insert("Error", base.clone());
-        for name in ["EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"] {
-            let prototype = Js::object(vec![]);
-            let Js::Object(data) = &prototype else { unreachable!() };
-            *data.proto.borrow_mut() = Some(base.clone());
-            error_data_property(&prototype, "name", Js::str(name), false);
-            error_data_property(&prototype, "message", Js::str(""), false);
-            prototypes.insert(name, prototype);
-        }
-        prototypes
-    };
+fn error_prototype(name: &str) -> (Js, bool) {
+    thread_local! {
+        static ERROR_PROTOTYPES: IndexMap<&'static str, Js> = {
+            let base = Js::object(vec![]);
+            error_data_property(&base, "name", Js::str("Error"), false);
+            error_data_property(&base, "message", Js::str(""), false);
+            error_data_property(&base, "toString", Js::function("toString", |this, _| {
+                error_string(&this).map(Js::String)
+            }), false);
+            let mut prototypes = IndexMap::new();
+            prototypes.insert("Error", base.clone());
+            for name in ["EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"] {
+                let prototype = Js::object(vec![]);
+                let Js::Object(data) = &prototype else { unreachable!() };
+                *data.proto.borrow_mut() = Some(base.clone());
+                error_data_property(&prototype, "name", Js::str(name), false);
+                error_data_property(&prototype, "message", Js::str(""), false);
+                prototypes.insert(name, prototype);
+            }
+            prototypes
+        };
+    }
+    ERROR_PROTOTYPES.with(|prototypes| match prototypes.get(name) {
+        Some(prototype) => (prototype.clone(), false),
+        None => (prototypes["Error"].clone(), true),
+    })
 }
 
 fn make_error_object(name: &str, message: Option<Str>) -> Js {
-    let (prototype, custom_name) = ERROR_PROTOTYPES.with(|prototypes| match prototypes.get(name) {
-        Some(prototype) => (prototype.clone(), false),
-        None => (prototypes["Error"].clone(), true),
-    });
+    let (prototype, custom_name) = error_prototype(name);
     let object = Js::object_with_class("Error", vec![]);
     let Js::Object(data) = &object else {
         unreachable!()
