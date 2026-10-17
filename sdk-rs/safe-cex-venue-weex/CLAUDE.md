@@ -13,6 +13,11 @@ gateway factory and UTC date profile, with its existing caller-owned limiter.
 The source's inherited scheduleCancel rejection remains `Not implemented`.
 Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
 native body; batch capability registration invokes the source batch algorithm.
+The trading runtime's `updateStoredOrder` capability binds the real Store's
+`updateOrder` with its Store receiver. Accepted single/batch PostOnly placements
+and TP/SL amendments then apply the source patch and return IDs. Constructed
+regressions check existing and absent rows, batch-result reordering and both
+protective order types; an absent row remains absent.
 
 The explicit Weex bigint response parser consumes original wire tokens on both
 success and HTTP failure before venue status/error handling. Private WS uses the
