@@ -411,3 +411,14 @@ reading either clock. `private_fill_timestamp_types_match_the_maintained_handler
 drives actual account_all data.fills frames against maintained TypeScript arrow
 bodies for 15 timestamp values, retaining the five-second boundary and future
 numeric timestamps while rejecting strings, arrays and other non-number inputs.
+Public REST payload parsers retain native arrays and row references. Book fallback
+selection stays lazy, ticker candidate capture stays eager, and guarded book-side
+reads occur twice as in the source. Native source tests retain UTF16 and sparse rows.
+
+Private market-payload flattening retains native JS rows and skips array holes
+without copying through JSON. The orders wrapper applies its object guard before
+calling the live owner helper; source oracles cover identity, numeric bits and UTF16.
+
+Nonce retry classification reads the original error's code and message directly.
+Both String conversions precede the final OR, so matching codes still observe
+message coercion failures. Unread surrogate fields and cycles stay untouched.
