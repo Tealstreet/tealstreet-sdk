@@ -7,6 +7,7 @@ use crate::rust_venues::rust_constructor;
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     exchange::Exchange,
+    js_runtime::value::Js,
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
     runtime::{Cleanup, ExchangeError, ListenerCleanup, RemoteSigner},
     websocket::WsRuntime,
@@ -20,7 +21,7 @@ use safe_cex_transport::{
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts};
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
@@ -30,7 +31,7 @@ use std::{
     sync::Arc,
 };
 
-pub type NativeAccountFuture<T> = Pin<Box<dyn Future<Output = Result<T, Value>>>>;
+pub type NativeAccountFuture<T> = Pin<Box<dyn Future<Output = Result<T, NativeValue>>>>;
 
 // The JSON command surface admits object records. Flattened ignored fields keep
 // its existing surplus-field behavior while refusing Serde positional structs.
@@ -101,11 +102,13 @@ struct HostSigner {
     listeners: AvailabilityListeners,
     next: Cell<u64>,
 }
-fn error_text(error: &Value) -> String {
-    error["message"]
-        .as_str()
-        .map_or_else(|| error.to_string(), str::to_owned)
+fn error_text(error: &NativeValue) -> String {
+    match error.get("message") {
+        Some(NativeValue::String(message)) => String::from_utf16_lossy(message),
+        _ => format!("{error:?}"),
+    }
 }
+
 impl safe_cex_transport::signing::RemoteSigner for HostSigner {
     fn sign(&self, request: RemoteSignerRequest) -> TransportFuture<'_, RemoteSignerResponse> {
         let sign = self.sign.clone();
@@ -166,19 +169,28 @@ impl RemoteSigner for HostSigner {
     }
 }
 
-fn exchange_error(error: &ExchangeError) -> Value {
-    let mut value = json!({"name": error.name, "message": error.message});
+fn exchange_error(error: &ExchangeError) -> NativeValue {
+    let mut fields = vec![
+        ("name", NativeValue::string(&error.name)),
+        ("message", NativeValue::string(&error.message)),
+    ];
     if let Some(code) = &error.code {
-        value["code"] = code.clone();
+        match NativeValue::from_js(code) {
+            Ok(code) => fields.push(("code", code)),
+            Err(cause) => return host_error(format!("cannot retain native error code: {cause}")),
+        }
     }
-    value
+    NativeValue::object(fields)
 }
-fn host_error(message: impl Into<String>) -> Value {
-    json!({"name": "Error", "message": message.into()})
+fn host_error(message: impl Into<String>) -> NativeValue {
+    NativeValue::object([
+        ("name", NativeValue::string("Error")),
+        ("message", NativeValue::string(&message.into())),
+    ])
 }
 
 /// Build an account through its bound registry Rust constructor.
-pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>, Value> {
+pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>, NativeValue> {
     let name: ExchangeName = serde_json::from_value(Value::String(spec.exchange.clone()))
         .map_err(|e| host_error(e.to_string()))?;
     let options: ExchangeOptions = spec
@@ -313,7 +325,7 @@ pub fn native_account_watch(
             let exchange = Rc::downgrade(&account.exchange);
             let id = base.on(
                 event,
-                Rc::new(move |name: &str, data: &Value| {
+                Rc::new(move |name: &str, data: &Js| {
                     if !active.get() {
                         return Ok(());
                     }
@@ -329,7 +341,7 @@ pub fn native_account_watch(
                         forward("deactivate-status", &NativeValue::Bool(true));
                         return Ok(());
                     }
-                    forward(name, &NativeValue::from(data.clone()));
+                    forward(name, &NativeValue::from_js(data)?);
                     Ok(())
                 }),
             );
@@ -355,16 +367,16 @@ pub fn native_account_watch(
     })
 }
 
-fn arg<T: DeserializeOwned>(args: &[NativeValue], index: usize) -> Result<T, Value> {
+fn arg<T: DeserializeOwned>(args: &[NativeValue], index: usize) -> Result<T, NativeValue> {
     args.get(index)
         .unwrap_or(&NativeValue::Undefined)
         .decode()
         .map_err(|e| host_error(format!("Invalid argument {index}: {e}")))
 }
-fn encode<T: Serialize>(value: T) -> Result<NativeValue, Value> {
+fn encode<T: Serialize>(value: T) -> Result<NativeValue, NativeValue> {
     NativeValue::encode(&value).map_err(|e| host_error(e.to_string()))
 }
-fn done<T>(result: Result<T, ExchangeError>) -> Result<T, Value> {
+fn done<T>(result: Result<T, ExchangeError>) -> Result<T, NativeValue> {
     result.map_err(|error| exchange_error(&error))
 }
 
@@ -374,7 +386,7 @@ fn listen(
     account: &Rc<NativeAccount>,
     method: &'static str,
     args: &[NativeValue],
-) -> Result<NativeValue, Value> {
+) -> Result<NativeValue, NativeValue> {
     let id = account.next_stream.get();
     let next = id
         .checked_add(1)
