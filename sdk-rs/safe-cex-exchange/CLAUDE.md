@@ -1219,6 +1219,14 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+Ordinary numeric conversion of live objects/functions calls `valueOf` before
+`toString`, reading each member only when reached and retaining the original
+receiver and thrown value. String conversion uses the same private primitive
+conversion algorithm with its string-hint ordering. Object results and
+non-callable members advance to the next method; no primitive result throws.
+The production native-host `js_number_coercion` witness compares Node traces,
+negative-zero/NaN results, inheritance, live lookup and conversion failures.
+
 The JS Number `toFixed` builtin delegates to `safe_cex_num::js_to_fixed` after
 ordinary digits coercion. Exact binary ties round away from zero; negative zero,
 nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
