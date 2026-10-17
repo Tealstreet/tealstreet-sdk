@@ -193,3 +193,6 @@ mod tests;
 
 #[cfg(test)]
 mod socket_tests;
+
+#[cfg(test)]
+mod spot_limiter_tests;

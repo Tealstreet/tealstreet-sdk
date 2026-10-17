@@ -340,3 +340,10 @@ their duplicate spot_models definitions does not make those rows not-applicable.
 The current census and reduced fixed corpus counts are in README.md. Historical
 controls for deleted owners are removed from active scripts and contract/schema
 files; earlier audit documents retain their measured trees and original counts.
+
+The unused `spot_rate_limiter` duplicate and its fake-host fixture/oracle are
+removed. Spot limiter rows now name only the production `spot_client` bodies.
+`realm::spot_limiter_tests` constructs the class with the concrete Realm host and
+checks per-instance tokens, default weight, the exact minute refill and recursive
+Promise/timer acquisition. Historical SPOT_LIMITER_BODIES_EVIDENCE.json records
+the removed adapter; it does not establish production binding coverage.

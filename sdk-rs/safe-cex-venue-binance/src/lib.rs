@@ -42,7 +42,6 @@ pub mod position_refresh;
 pub mod private_helpers;
 pub mod private_message;
 pub mod private_open;
-pub mod private_order_logic;
 pub mod private_ping;
 pub mod protocol_types;
 pub mod public_candle_delegate;

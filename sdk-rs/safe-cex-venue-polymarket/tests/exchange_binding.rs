@@ -614,3 +614,28 @@ fn concrete_supplied_credentials_funder_and_all_signer_types_reach_requests() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn concrete_halfway_size_uses_js_to_fixed_in_signed_payload() {
+    let h = private_harness(|http| {
+        http.ok(
+            "POST",
+            "/order",
+            json!({"success":true,"orderID":"halfway-id"}),
+        );
+    });
+    let ids = place(
+        &h,
+        json!({"symbol":"event-Yes","type":"limit","side":"buy","amount":10.125,"price":0.5}),
+    )
+    .unwrap();
+    assert_eq!(ids, vec!["halfway-id"]);
+    let request = &h.http.calls("/order")[0];
+    let payload: serde_json::Value = serde_json::from_slice(&wire(request)).unwrap();
+    assert_eq!(
+        payload["order"]["takerAmount"], "10130000",
+        "source toFixed rounds 10.125 to size 10.13 before signing"
+    );
+    assert_eq!(payload["order"]["makerAmount"], "5065000");
+    assert_eq!(payload["order"]["signature"].as_str().unwrap().len(), 132);
+}

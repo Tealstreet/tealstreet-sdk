@@ -120,6 +120,7 @@ pub struct Socket {
     pub sent: RefCell<Vec<String>>,
     pub events: Rc<RefCell<VecDeque<WsEvent>>>,
     pub closed: Cell<bool>,
+    pub delivered_events: Rc<Cell<usize>>,
 }
 impl WsSocket for Socket {
     fn ready_state(&self) -> u8 {
@@ -127,11 +128,14 @@ impl WsSocket for Socket {
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
         let events = self.events.clone();
+        let delivered = self.delivered_events.clone();
         Box::pin(std::future::poll_fn(move |_| {
-            events
-                .borrow_mut()
-                .pop_front()
-                .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+            if let Some(event) = events.borrow_mut().pop_front() {
+                delivered.set(delivered.get() + 1);
+                Poll::Ready(Ok(event))
+            } else {
+                Poll::Pending
+            }
         }))
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
@@ -237,6 +241,7 @@ pub struct Http {
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
     pub advance_ms: Cell<f64>,
+    pub held_request: RefCell<Option<(String, String, Rc<Cell<bool>>)>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
@@ -332,7 +337,25 @@ impl JsHttpHost for Http {
                 &format!("unscripted request {method} {url}"),
             )),
         };
-        Box::pin(async move { result })
+        let gate = self
+            .held_request
+            .borrow()
+            .as_ref()
+            .filter(|(held_method, held_url, _)| held_method == &method && held_url == &url)
+            .map(|(_, _, gate)| gate.clone());
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                std::future::poll_fn(|_| {
+                    if gate.get() {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                })
+                .await;
+            }
+            result
+        })
     }
 }
 

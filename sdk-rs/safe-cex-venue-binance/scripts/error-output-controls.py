@@ -16,9 +16,7 @@ cases = [
     ('response_message.rs', 'response_message',
      'safe_cex_venue_binance::response_message::response_message',
      b'\n    let _ = (payload, js_string(None), js_truthy(None));\n    Ok(String::new())\n'),
-    ('private_order_logic.rs', 'get_order_reject_reason',
-     'safe_cex_venue_binance::private_order_logic::get_order_reject_reason',
-     b'\n    let _ = (data, js_string(None), js_truthy(None));\n    Ok(None)\n'),
+
 ]
 originals = {crate / 'src' / file: (crate / 'src' / file).read_bytes() for file, _, _, _ in cases}
 
@@ -51,9 +49,9 @@ try:
         print(f'CONTROL PASS: {owner} compiled; its direct production output witness fails', flush=True)
         path.write_bytes(original)
         restored, output = run()
-        assert (restored.returncode == 0 and 'Four production decoder-output probes passed' in output
+        assert (restored.returncode == 0 and 'Three production decoder-output probes passed' in output
                 and '0 failed owners' in output), output[-8000:]
-        print(f'RESTORED PASS: {owner}; all four actual production outputs pass', flush=True)
+        print(f'RESTORED PASS: {owner}; all three actual production outputs pass', flush=True)
 finally:
     for path, source in originals.items():
         path.write_bytes(source)
