@@ -259,3 +259,9 @@ private socket frame for both Coinbase variants with an unrelated host clock.
 the source formatOrder object literal. The production transport regression
 observes exact encoded POST bytes for Coinbase and CoinbaseSpot; it drives the
 real class graph, signers, client factory and installed transport adapter.
+
+CDP key-name validation requires exactly one organization segment and one key-ID
+segment, matching the source regex. Slashes inside either segment are refused
+before local JWT signing or HTTP dispatch; Unicode and interior spaces stay
+accepted. The constructed credential binding witness checks eight actual-source
+profiles through WS signing and rejects an invalid REST key before transport.
