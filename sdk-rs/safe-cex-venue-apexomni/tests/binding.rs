@@ -122,6 +122,7 @@ fn bound_fetch_markets() {
 #[test]
 fn bound_place_order() {
     let h = fixture();
+    let source_clock = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
     let ids = h
         .drive(h.exchange.base().place_order(h.exchange.as_ref(), placed()))
         .unwrap();
@@ -141,6 +142,7 @@ fn bound_place_order() {
     );
     assert_eq!(calls[0].headers["APEX-API-KEY"], "fixture-key");
     let source = std::process::Command::new("node")
+        .env("SAFE_CEX_VIRTUAL_TIME", source_clock.to_string())
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/scripts/binding-signature.cjs"
@@ -210,3 +212,20 @@ inherited_test!(
     "BTCUSDC".into(),
     None
 );
+
+#[test]
+fn bound_amendment_omits_undefined_side() {
+    let h = fixture();
+    let order = h.drive(h.venue().fetch_orders(None)).unwrap().remove(0);
+    let mut row = serde_json::to_value(order).unwrap();
+    row.as_object_mut().unwrap().remove("side");
+    let opts = serde_json::from_value(json!({"order":row,"update":{"price":102.129}})).unwrap();
+    assert_eq!(
+        h.drive(h.venue().update_order(opts)).unwrap(),
+        ["9007199254740993"]
+    );
+    let calls = h.http.calls("/v3/order");
+    assert_eq!(calls.len(), 1);
+    assert!(!calls[0].data.as_object().unwrap().contains_key("side"));
+    done(&h);
+}

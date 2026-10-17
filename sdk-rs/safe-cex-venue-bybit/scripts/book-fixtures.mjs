@@ -42,6 +42,7 @@ for(const variant of ['bybit','bybitinverse','bybitspot']) {
   add([snapshot,{type:'delta',data:{u:2,a:[row]}}]);
   add([{type:'snapshot',data:{u:1,a:[row]}}]);
  }
+ for(const levels of [{'0':['11','4'],length:'1'}, '12', {length:1}]) add([{type:'snapshot',data:{u:1,a:levels}}]);
  for(const first of [0,1,9,'9','10',true,[],{}, {toString:null}]) for(const next of [0,1,2,10,11,12,'10','11','91',null]) add([{...snapshot,data:{...snapshot.data,u:first}},{type:'delta',data:{u:next,a:[['12','0']]}}]);
  add([snapshot,{type:'delta',data:{u:4}}, {type:'snapshot',data:{u:10,a:[['12','1']]}},{type:'delta',data:{u:13}},'timer',{type:'delta',data:{u:14}}]);
  add([snapshot,{type:'snapshot',data:{u:2,a:[['12','9'],null]}}]);

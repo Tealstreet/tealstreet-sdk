@@ -254,3 +254,8 @@ virtual clock, matching their source call sites. Polling, private health and
 optimistic REST timestamps retain the source Date.now runtime clock. The native
 clock regression syncs server time, signs real REST JWTs and delivers an opened
 private socket frame for both Coinbase variants with an unrelated host clock.
+
+`PlaceOrderRequest` serializes `leverage` before `order_configuration`, matching
+the source formatOrder object literal. The production transport regression
+observes exact encoded POST bytes for Coinbase and CoinbaseSpot; it drives the
+real class graph, signers, client factory and installed transport adapter.

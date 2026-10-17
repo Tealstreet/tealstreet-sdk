@@ -439,7 +439,7 @@ impl ApexOmniPrivateWebsocket {
                     let closed = orders
                         .into_iter()
                         .map(|mut order| {
-                            order.status = OrderStatus::Closed;
+                            order.status = safe_cex_types::ModelField::Value(OrderStatus::Closed);
                             order
                         })
                         .collect();
@@ -488,10 +488,10 @@ impl ApexOmniPrivateWebsocket {
                 ] {
                     patch.set_number(key, value);
                 }
-                if let Some(v) = position.realized_pnl {
+                if let Some(v) = position.realized_pnl.into_value() {
                     patch.set_number("realizedPnl", v);
                 }
-                if let Some(v) = position.last_update {
+                if let Some(v) = position.last_update.into_value() {
                     patch.set_number("lastUpdate", v);
                 }
                 updates.push((position.id, patch));

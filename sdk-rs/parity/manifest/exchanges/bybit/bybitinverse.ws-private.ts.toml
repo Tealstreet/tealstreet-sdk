@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitinverse.ws-private.ts"
-rust_files = ["safe-cex-venue-bybit/src/private_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_private.rs", "safe-cex-venue-bybit/src/ws_private/protocol.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/ws_private/local_auth.rs"]
+rust_files = [ "safe-cex-venue-bybit/src/private_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_private.rs", "safe-cex-venue-bybit/src/ws_private/protocol.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/ws_private/local_auth.rs" ]
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket"
@@ -16,7 +16,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::new"
 status = "divergent"
-note = "CHOSEN: the source field initializer is composed by PrivateProtocol::new using canonical safe-cex-store create_incremental_fills with default 500. Native closure/RefCell storage replaces a JS callable property while retaining per-socket cumulative state across messages. The real inverse_binding socket witness pins repeated-frame suppression, incremental USD quantity and inverse qty/value pricing. A compiled fresh-tracker-per-frame mutation must fail its named duplicate-fill assertion. The shared helper owns arithmetic; no venue-local fill algorithm remains."
+note = "CHOSEN: the source field initializer is composed by PrivateProtocol::new using canonical safe-cex-store create_incremental_fills with default 500. Native closure/RefCell storage replaces a JS callable property while retaining per-socket cumulative state across messages. The real inverse_binding socket witness pins repeated-frame suppression, incremental USD quantity and inverse qty/value pricing. A compiled fresh-tracker-per-frame mutation must fail its named duplicate-fill assertion. The shared helper owns arithmetic; no venue-local fill algorithm remains. Concrete rename/split targets: `safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::new`."
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket.connectAndSubscribe"
@@ -24,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ws_private.rs::connect_and_subscribe"
 status = "divergent"
-note = "CHOSEN: the shared socket core owns physical dialing and cancellation. The dedicated inverse class supplies its parent name/options to the existing private-v5 connection body. Native evidence: the standalone inverse_binding socket pump verifies dedicated-secondary active topics, both source change callbacks, authenticated subscription order, inverse order/fill/position delivery and disposal. The 19 compiled binding consumer controls include constructor/start/dispose restoration. Renamed Rust targets: safe-cex-venue-bybit/src/ws_private.rs::connect_and_subscribe."
+note = "CHOSEN: the shared socket core owns physical dialing and cancellation. The dedicated inverse class supplies its parent name/options to the existing private-v5 connection body. Native evidence: the standalone inverse_binding socket pump verifies dedicated-secondary active topics, both source change callbacks, authenticated subscription order, inverse order/fill/position delivery and disposal. The 19 compiled binding consumer controls include constructor/start/dispose restoration. Renamed Rust targets: safe-cex-venue-bybit/src/ws_private.rs::connect_and_subscribe. Concrete rename/split targets: `safe-cex-venue-bybit/src/ws_private.rs::connect_and_subscribe`."
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket.onOpen"
@@ -32,7 +32,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-bybit/src/private_ws_lifecycle.rs::on_open", "safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::open" ]
 status = "ported"
-note = "Extracted the inverse onOpen body with an explicit fire-and-forget starter callback. Starts sendReconnectSequence exactly once without awaiting its completion, ignores its completion value, and preserves a synchronous starter exception as the generic native Result error. The callback owns the asynchronous operation it starts; full socket constructor and reconnect/auth host composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/private_ws_lifecycle.rs::on_open. The actual private socket awaits its inherited authentication body before the inverse order/position subscription. Native evidence: the standalone inverse_binding socket pump verifies dedicated-secondary active topics, both source change callbacks, authenticated subscription order, inverse order/fill/position delivery and disposal. The 19 compiled binding consumer controls include constructor/start/dispose restoration. Renamed Rust targets: safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::open."
+note = "Extracted the inverse onOpen body with an explicit fire-and-forget starter callback. Starts sendReconnectSequence exactly once without awaiting its completion, ignores its completion value, and preserves a synchronous starter exception as the generic native Result error. The callback owns the asynchronous operation it starts; full socket constructor and reconnect/auth host composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/private_ws_lifecycle.rs::on_open. The actual private socket awaits its inherited authentication body before the inverse order/position subscription. Native evidence: the standalone inverse_binding socket pump verifies dedicated-secondary active topics, both source change callbacks, authenticated subscription order, inverse order/fill/position delivery and disposal. The 19 compiled binding consumer controls include constructor/start/dispose restoration. Renamed Rust targets: safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::open. Concrete rename/split targets: `safe-cex-venue-bybit/src/private_ws_lifecycle.rs::on_open`, `safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::open`."
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket.sendReconnectSequence"
@@ -46,9 +46,9 @@ note = "CHOSEN: the inverse reconnect body runs when its Rust Future is first po
 ts = "BybitInversePrivateWebsocket.onMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::message"]
+rs = [ "safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::message" ]
 status = "divergent"
-note = "Production socket binding calls the live target directly; the test-only inverse_socket_bodies module, fake realm and oracle were removed. Existing decoded UTF-8/JSON socket input and owned-snapshot boundaries remain declared at MANIFEST-SPEC.md#shared-utf8-string-boundary and MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. inverse_binding exercises the real secondary public/private socket lifecycle, active topics, authenticated subscriptions, inverse order/fill/position delivery and disposal; private order frames retain per-socket incremental fills and qty/value pricing, and positions preserve native numbers through shared ModelPatch without inserting absent rows. Execution and wallet topics remain source no-ops. This does not widen raw input or shared typed model domains."
+note = "Production socket binding calls the live target directly; the test-only inverse_socket_bodies module, fake realm and oracle were removed. Existing decoded UTF-8/JSON socket input and owned-snapshot boundaries remain declared at MANIFEST-SPEC.md#shared-utf8-string-boundary and MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. inverse_binding exercises the real secondary public/private socket lifecycle, active topics, authenticated subscriptions, inverse order/fill/position delivery and disposal; private order frames retain per-socket incremental fills and qty/value pricing, and positions preserve native numbers through shared ModelPatch without inserting absent rows. Execution and wallet topics remain source no-ops. This does not widen raw input or shared typed model domains. Concrete rename/split targets: `safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::message`."
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket.ping"
@@ -62,17 +62,17 @@ note = "Extracted the inverse private ping body with explicit receiver/clock/set
 ts = "BybitInversePrivateWebsocket.handleOrderTopic"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_order_topic"]
+rs = [ "safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_order_topic" ]
 status = "ported"
-note = "Production socket binding calls the live target directly; the test-only inverse_socket_bodies module, fake realm and oracle were removed. Existing decoded UTF-8/JSON socket input and owned-snapshot boundaries remain declared at MANIFEST-SPEC.md#shared-utf8-string-boundary and MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. inverse_binding exercises the real secondary public/private socket lifecycle, active topics, authenticated subscriptions, inverse order/fill/position delivery and disposal; private order frames retain per-socket incremental fills and qty/value pricing, and positions preserve native numbers through shared ModelPatch without inserting absent rows. Execution and wallet topics remain source no-ops. This does not widen raw input or shared typed model domains."
+note = "Production socket binding calls the live target directly; the test-only inverse_socket_bodies module, fake realm and oracle were removed. Existing decoded UTF-8/JSON socket input and owned-snapshot boundaries remain declared at MANIFEST-SPEC.md#shared-utf8-string-boundary and MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. inverse_binding exercises the real secondary public/private socket lifecycle, active topics, authenticated subscriptions, inverse order/fill/position delivery and disposal; private order frames retain per-socket incremental fills and qty/value pricing, and positions preserve native numbers through shared ModelPatch without inserting absent rows. Execution and wallet topics remain source no-ops. This does not widen raw input or shared typed model domains. Concrete rename/split targets: `safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_order_topic`."
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket.handlePositionTopic"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_position_topic"]
+rs = [ "safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_position_topic" ]
 status = "ported"
-note = "Production socket binding calls the live target directly; the test-only inverse_socket_bodies module, fake realm and oracle were removed. Existing decoded UTF-8/JSON socket input and owned-snapshot boundaries remain declared at MANIFEST-SPEC.md#shared-utf8-string-boundary and MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. inverse_binding exercises the real secondary public/private socket lifecycle, active topics, authenticated subscriptions, inverse order/fill/position delivery and disposal; private order frames retain per-socket incremental fills and qty/value pricing, and positions preserve native numbers through shared ModelPatch without inserting absent rows. Execution and wallet topics remain source no-ops. This does not widen raw input or shared typed model domains."
+note = "Production socket binding calls the live target directly; the test-only inverse_socket_bodies module, fake realm and oracle were removed. Existing decoded UTF-8/JSON socket input and owned-snapshot boundaries remain declared at MANIFEST-SPEC.md#shared-utf8-string-boundary and MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. inverse_binding exercises the real secondary public/private socket lifecycle, active topics, authenticated subscriptions, inverse order/fill/position delivery and disposal; private order frames retain per-socket incremental fills and qty/value pricing, and positions preserve native numbers through shared ModelPatch without inserting absent rows. Execution and wallet topics remain source no-ops. This does not widen raw input or shared typed model domains. Concrete rename/split targets: `safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_position_topic`."
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket#auth"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ws_private/local_auth.rs::auth"
 status = "divergent"
-note = "CHOSEN: the existing typed auth host supplies local/remote signing, clock and socket capabilities instead of ambient JS globals. Dedicated inverse name/options flow through that host; the numeric-expiry/JSON wire and callback-cancellation profile remains the separately witnessed generic auth boundary. Native evidence: the standalone inverse_binding socket pump verifies dedicated-secondary active topics, both source change callbacks, authenticated subscription order, inverse order/fill/position delivery and disposal. The 19 compiled binding consumer controls include constructor/start/dispose restoration. Renamed Rust targets: safe-cex-venue-bybit/src/ws_private/local_auth.rs::auth."
+note = "CHOSEN: the existing typed auth host supplies local/remote signing, clock and socket capabilities instead of ambient JS globals. Dedicated inverse name/options flow through that host; the numeric-expiry/JSON wire and callback-cancellation profile remains the separately witnessed generic auth boundary. Native evidence: the standalone inverse_binding socket pump verifies dedicated-secondary active topics, both source change callbacks, authenticated subscription order, inverse order/fill/position delivery and disposal. The 19 compiled binding consumer controls include constructor/start/dispose restoration. Renamed Rust targets: safe-cex-venue-bybit/src/ws_private/local_auth.rs::auth. Concrete rename/split targets: `safe-cex-venue-bybit/src/ws_private/local_auth.rs::auth`."
 
 [[symbol]]
 ts = "BybitInversePrivateWebsocket#subscribe"

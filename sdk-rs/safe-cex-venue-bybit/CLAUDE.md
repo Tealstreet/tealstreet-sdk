@@ -644,6 +644,13 @@ Spot retains its existing spot-only body. Retirement consumes only `id` and
 without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
 four production constructors and the real retained receiver/HTTP client path.
 
+The Exchange candle-read override reaches the concrete receiver for all four bound
+families. `binding/members/ohlcv.rs` preserves primary validation/errors and the
+dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
+`candle_read_binding` supplies four compiled master-fail controls and six HTTP
+witnesses. `private_frame_binding` sends order/fill/position/balance-related frames
+through each family's real private protocol and Store bridge.
+
 The unused `inverse_socket_bodies` adapter and its fake realm/oracle are removed.
 Inverse socket manifest rows point to the live `ws_private` and `ws_public`
 bodies. The real inverse socket witness replays a cumulative fill frame and then
@@ -652,3 +659,14 @@ advances it, checking suppression, USD delta and inverse qty/value price.
 frame, requires the duplicate-fill assertion to fail after compilation, restores
 the exact source bytes and requires the same witness to pass. Historical socket
 body evidence describes the removed adapter, not production coverage.
+
+Primary placement preserves Lodash `times` count admission before materializing
+lots. A zero market maximum produces Infinity and no payloads, as in TypeScript.
+`tests/zero_order_max_binding.rs` drives both actual primary/demo placement paths
+in bounded child processes so the pre-fix infinite loop fails safely.
+
+The Exchange order-book listener now selects the source public socket and installs
+real snapshot/delta subscriptions: depth 200 for Spot and 1000 for derivatives.
+Core-owned retry/resync timers and retained topic maps preserve delayed connection,
+sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
+four families; the maintained source book oracle includes array-like level lists.

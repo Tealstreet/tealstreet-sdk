@@ -833,7 +833,12 @@ fn fetch_orders_accepts_documented_null_legacy_metadata_through_the_binding() {
     assert_eq!(order.id, "11");
     assert_eq!(order.symbol, "BTCUSDT");
     assert_eq!(
-        (order.price, order.amount, order.filled, order.remaining),
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
         (99.0, 2.0, 0.0, 2.0)
     );
     let info = order.info.as_ref().expect("original raw order metadata");

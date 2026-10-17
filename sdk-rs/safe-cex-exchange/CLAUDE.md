@@ -570,6 +570,13 @@ without sleeping or sending again. No caller supplies a remaining-timeout value.
 The installed Axios truthy guards retain timeout zero as unlimited and skip the
 first subtraction for a clock starting exactly at epoch zero.
 
+Transport JavaScript coercion failures retain their name and unprefixed message
+when converted into ExchangeError. The original RestFailure remains the opaque
+origin. Direct JsCoercionError conversion retains its typed native cause too;
+Binance and BingX signature predicates use these conversions instead of rebuilding
+an Error from text. The native order/account witnesses cover resolved envelopes
+and HTTP rejection, and assert that coercion failures never trigger a resend.
+
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
 copied from opaque NetworkFailure. The library network-or-idempotent helper is
@@ -1219,6 +1226,15 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
+JavaScript callbacks need not define a Rust total order: NaN comparison results
+mean equality, and inconsistent callbacks must not panic. The first source throw
+stops comparisons immediately. Default Array sorting compares original UTF-16
+units, puts undefined before holes and rejects a present non-callable comparator.
+The native-host `js_sort` target checks the compiled master panic and error count,
+plus Node ordering across merge boundaries. Ordering under an inconsistent
+comparator remains implementation-dependent under ECMAScript.
+
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
 receiver and thrown value. String conversion uses the same private primitive
@@ -1232,3 +1248,39 @@ ordinary digits coercion. Exact binary ties round away from zero; negative zero,
 nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
 `tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
 Polymarket's concrete binding witness checks the resulting signed order amounts.
+
+JS socket listener throws are host exceptions, never transport errors. Plain
+EventTarget dispatch continues after each throw; source ReconnectingWebSocket
+(header/relay/configured wrapper) dispatch stops its grouped callback at the
+throw. The resolved connection records that choice before delivery. Returned
+promises do not enter the socket-error path; general unhandled-rejection
+reporting is a separate runtime concern. `tests/js_socket_listener_errors.rs`
+compares eight real native loopback open/message cases with Node EventTarget
+and the maintained RWS implementation, and checks the native exception output.
+
+The shared `qs.stringify` binding consumes arrayFormat (indices/repeat/comma/
+brackets), callable sort, RFC3986/RFC1738 format and the encode boolean. It
+sorts keys at every object/array level before reading child values and keeps
+undefined omissions. Comparator failures propagate; native sorting does not
+claim V8's comparator call schedule. `tests/js_qs_options.rs` executes the actual
+installed qs package over 96 option/input combinations. The BingX registry
+regression additionally observes final signed GET query ordering through the
+production HTTP client and verifies the signature against the source preimage.
+Other qs options remain outside this imported runtime surface.
+
+Map/Set `forEach` uses stable insertion positions, like the live iterators, and
+releases its collection borrow before each callback. Deletions, clear/reinsert,
+updates and new entries are observed during traversal. Callbacks receive the
+source thisArg and native value/key/owner references; invalid callbacks reject
+even on empty collections. `js_collection_foreach` checks fourteen Node traces,
+nested traversal, abrupt completion, native signed-zero/reference identity and
+thisArg. Both named regressions compiled and failed on the snapshot implementation.
+
+Both JS `virtualClock` getters delegate to the shared synced singleton.
+`getCurrentTime` wraps `VirtualClock::get_current_time` in the existing dayjs
+object, retaining date clipping and arithmetic; `getCurrentTimeMs` remains the
+numeric hot path. Source `Date.now()` still reads the runtime wall clock.
+Registry `native_host_phemex_clock` exercises the real dayjs consumer through a
+signed native HTTP request, verifying its HMAC and expiry after a 90-second
+server correction. The core virtual-clock regression checks both getters and
+the independent raw Date clock.

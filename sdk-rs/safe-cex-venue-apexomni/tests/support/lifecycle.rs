@@ -130,7 +130,10 @@ impl ApexServices for Services {
     fn throttle_fetch_orders(&self) -> Result<(), ExchangeError> {
         panic!("not used by lifecycle")
     }
-    fn place_orders(&self, _: Vec<PlaceOrderOpts>) -> ExchangeFuture<'_, Vec<String>> {
+    fn place_orders(
+        &self,
+        _: Vec<safe_cex_types::PreparedOrderOpts>,
+    ) -> ExchangeFuture<'_, Vec<String>> {
         panic!("not used by lifecycle")
     }
     fn dayjs_value_ms(&self, input: Option<f64>) -> Result<f64, ExchangeError> {
@@ -324,13 +327,13 @@ fn run_lifecycle(name: &str) {
             .unwrap();
         }
         if variant == 1 && name.contains("Snapshot") {
-            venue
-                .last_websocket_positions_update
-                .set(Some(1700001234067.));
+            let stamp = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms() - 500.;
+            FIXTURE_STAMPS.with(|stamps| stamps.borrow_mut().push((stamp, 1700001234067.)));
+            venue.last_websocket_positions_update.set(Some(stamp));
             let mut p = Store::positions(store.as_ref()).to_vec();
-            p[0].last_update = Some(1700001234067.);
+            p[0].last_update = Some(stamp).into();
             p[0].id = "BTC-USDC:short".into();
-            p[0].side = PositionSide::Short;
+            p[0].side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
                 store.as_ref(),
                 StoreUpdate {

@@ -46,19 +46,21 @@ fn positions(rows: &Value) -> Vec<Position> {
             p.id = r["id"].as_str().unwrap().into();
             p.symbol = r["symbol"].as_str().unwrap().into();
             p.side = if r["side"] == "long" {
-                PositionSide::Long
+                safe_cex_types::ModelField::Value(PositionSide::Long)
             } else {
-                PositionSide::Short
+                safe_cex_types::ModelField::Value(PositionSide::Short)
             };
             p.contracts = decode_number(&r["contracts"]);
             p.leverage = decode_number(&r["leverage"]);
-            p.position_mode = r
+            p.position_mode = (r
                 .get("positionMode")
-                .map(|v| serde_json::from_value(v.clone()).unwrap());
-            p.margin_type = r
+                .map(|v| serde_json::from_value(v.clone()).unwrap()))
+            .into();
+            p.margin_type = (r
                 .get("marginType")
-                .map(|v| serde_json::from_value(v.clone()).unwrap());
-            p.info = r.get("info").map(decode_json);
+                .map(|v| serde_json::from_value(v.clone()).unwrap()))
+            .into();
+            p.info = (r.get("info").map(decode_json)).into();
             p
         })
         .collect()

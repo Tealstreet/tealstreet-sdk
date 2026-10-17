@@ -2,6 +2,7 @@
 //! inheritance/globals; blocked manager functions remain required dependencies.
 use crate::{
     chaser::ChaserOrderInstance,
+    error_post::WorkerErrorPost,
     handler::BaseHandler,
     payload::{StoreWorkerOp, StoreWorkerPayload},
     settings::{AppSettingsWorkerType, ExchangeMetadataWorkerType},
@@ -25,6 +26,7 @@ use std::{
 /// including replacement under the same ID. No default manager implementation
 /// manufactures partial cancellations or optional fill reconciliation.
 pub trait CommandHandlerHost: TwapHost + Sized + 'static {
+    fn worker_error_post(&self) -> WorkerErrorPost;
     fn post_payload(&self, payload: StoreWorkerPayload) -> Result<(), ExchangeError>;
     fn cleanup_chaser_exchange(
         &self,
@@ -76,19 +78,11 @@ impl<H: CommandHandlerHost> ChaserOrderHandler<H> {
     pub fn new(context: Rc<HandlerContext<H>>) -> Rc<Self> {
         Rc::new_cyclic(|weak: &std::rc::Weak<Self>| {
             let replay = weak.clone();
-            let post = context.ctx.clone();
             let report = context.exchange();
             let base = BaseHandler::new(
                 context.exchange(),
                 "ChaserOrderHandler".into(),
-                Rc::new(move |p| {
-                    if let Err(e) = post.post_payload(p) {
-                        post.runtime().report_exception(
-                            &e,
-                            &serde_json::json!({"handler":"ChaserOrderHandler"}),
-                        );
-                    }
-                }),
+                context.ctx.worker_error_post(),
                 Rc::new(move |p| {
                     if let Some(h) = replay.upgrade() {
                         if let Err(e) = h.handle(&p) {
@@ -152,17 +146,11 @@ impl<H: CommandHandlerHost> TwapHandler<H> {
     pub fn new(context: Rc<HandlerContext<H>>) -> Rc<Self> {
         Rc::new_cyclic(|weak: &std::rc::Weak<Self>| {
             let replay = weak.clone();
-            let post = context.ctx.clone();
             let report = context.exchange();
             let base = BaseHandler::new(
                 context.exchange(),
                 "TwapHandler".into(),
-                Rc::new(move |p| {
-                    if let Err(e) = post.post_payload(p) {
-                        post.runtime()
-                            .report_exception(&e, &serde_json::json!({"handler":"TwapHandler"}));
-                    }
-                }),
+                context.ctx.worker_error_post(),
                 Rc::new(move |p| {
                     if let Some(h) = replay.upgrade() {
                         if let Err(e) = h.handle(&p) {
@@ -303,17 +291,11 @@ impl<H: CommandHandlerHost> UiStateHandler<H> {
     pub fn new(context: Rc<HandlerContext<H>>) -> Rc<Self> {
         Rc::new_cyclic(|weak: &std::rc::Weak<Self>| {
             let replay = weak.clone();
-            let post = context.ctx.clone();
             let report = context.exchange();
             let base = BaseHandler::new(
                 context.exchange(),
                 "UiStateHandler".into(),
-                Rc::new(move |p| {
-                    if let Err(e) = post.post_payload(p) {
-                        post.runtime()
-                            .report_exception(&e, &serde_json::json!({"handler":"UiStateHandler"}));
-                    }
-                }),
+                context.ctx.worker_error_post(),
                 Rc::new(move |p| {
                     if let Some(h) = replay.upgrade() {
                         if let Err(e) = h.handle(&p) {

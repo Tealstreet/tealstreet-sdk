@@ -347,3 +347,17 @@ removed. Spot limiter rows now name only the production `spot_client` bodies.
 checks per-instance tokens, default weight, the exact minute refill and recursive
 Promise/timer acquisition. Historical SPOT_LIMITER_BODIES_EVIDENCE.json records
 the removed adapter; it does not establish production binding coverage.
+
+The accepted request-weight contract includes cancelByCloid batches of 39, 40 and
+80 for both raw and native JSON bodies. `rate_encoded` compares the actual TS
+weights and the production ApiClient.prepare_request limiter reservations. The
+cloid-weight binding control deletes each classifier arm independently, requires
+a compiled pacing assertion failure, restores exact bytes and reruns the witness.
+
+The realm's imported `virtualClock.getCurrentTimeMs` reads the shared synced
+singleton for both family constructors, matching TS. Realm `Date.now`, nonce
+helpers that explicitly use it, and monotonic pacing keep their runtime clocks.
+Registry `native_host_hyperliquid_clock` performs a real signed leverage update,
+checks the transmitted action/signature, and requires its nonce to reflect a
+90-second server correction. The binding schedule-cancel fixture uses a deadline
+relative to that synced clock; the fractional Date nonce regression stays raw.

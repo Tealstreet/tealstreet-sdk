@@ -249,12 +249,24 @@ fn run_formatter(case: &Value) {
     };
     let name = case["name"].as_str().unwrap();
     let result = match name {
-        "formatTriggerOrder" => ready(format_trigger_order(&opts, source.as_ref(), &store, &host))
-            .map(|value| vec![value]),
-        "formatAlgoOrder" => {
-            ready(format_algo_order(&opts, &store, &host)).map(|value| vec![value])
-        }
-        "formatNormalOrder" => ready(format_normal_order(&opts, &store, &host)),
+        "formatTriggerOrder" => ready(format_trigger_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            source.as_ref(),
+            &store,
+            &host,
+        ))
+        .map(|value| vec![value]),
+        "formatAlgoOrder" => ready(format_algo_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            &store,
+            &host,
+        ))
+        .map(|value| vec![value]),
+        "formatNormalOrder" => ready(format_normal_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            &store,
+            &host,
+        )),
         _ => panic!("unknown formatter"),
     };
     let expected = &case["result"];
@@ -421,7 +433,7 @@ fn run_service(case: &Value, path: u8) {
         .map(|value| {
             assert_eq!(
                 value,
-                js_from_value(expected["value"].clone()).unwrap(),
+                js_from_value::<safe_cex_types::PositionMode>(expected["value"].clone()).unwrap(),
                 "native_position_mode_result"
             );
         }),
@@ -432,7 +444,7 @@ fn run_service(case: &Value, path: u8) {
         .map(|value| {
             assert_eq!(
                 value,
-                js_from_value(expected["value"].clone()).unwrap(),
+                js_from_value::<safe_cex_types::MarginType>(expected["value"].clone()).unwrap(),
                 "native_margin_type_result"
             );
         }),
@@ -639,7 +651,11 @@ fn native_large_split_profile_is_explicit_refusal() {
             cancel_algo_orders: Box::new(|_| Box::pin(std::future::ready(Ok(())))),
             broker_id_enabled: true,
         };
-        let result = ready(format_normal_order(&opts, &store, &host));
+        let result = ready(format_normal_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            &store,
+            &host,
+        ));
         assert!(
             result.is_err(),
             "native_cap_refuses_full_and_remainder_payloads"
