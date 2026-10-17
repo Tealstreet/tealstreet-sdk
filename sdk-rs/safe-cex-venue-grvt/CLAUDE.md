@@ -338,3 +338,9 @@ closed Timeframe union; the receiver-level test calls the real constructor's
 method, compares all 93 maintained-source cases, and checks inherited kind,
 stringification, arity and repeated reference identity. The accepted helper row
 now witnesses every inherited member (17 -> 27 cases).
+
+`private_receive_watchdog_obeys_grvt_idle_thresholds` drives the real private socket
+through authentication and the shared receive timer. GRVT stays silent at 8 seconds,
+pings after 30 seconds and reconnects after 90 seconds with source Warning severity.
+The shared socket bridge preserves lastReceived reads and dispatches the actual
+GRVT override; the former base-only timer fails the 8-second assertion.
