@@ -1,3 +1,7 @@
+The imported response-key helper preserves primitive `in` errors before account
+mapping and searches inherited native keys in original/snake/camel order. The
+signed-response and constructed-host regressions pin refusal timing and shadowing.
+
 # Bitget venue family
 
 The private-topic host consumes the shared iterator protocol instead of indexing
