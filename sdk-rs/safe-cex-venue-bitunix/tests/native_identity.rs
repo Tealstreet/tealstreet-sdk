@@ -337,11 +337,17 @@ fn attached_amendment_recreates_only_after_matching_refusal_and_successful_cance
             .iter()
             .map(|r| {
                 let body = match r.body.as_ref().unwrap() {
-                    safe_cex_transport::RestBody::Untransformed(v) => v.clone(),
-                    safe_cex_transport::RestBody::Transformed(t) => match t.value() {
-                        Value::String(s) => serde_json::from_str(s).unwrap(),
-                        v => v.clone(),
-                    },
+                    // This source fixture compares the finite JSON request report.
+                    safe_cex_transport::RestBody::Untransformed(v) => v
+                        .clone()
+                        .into_value()
+                        .expect("strict placement fixture must have a JSON view"),
+                    safe_cex_transport::RestBody::Transformed(t) => {
+                        match t.value().clone().into_value().expect("JSON wire body") {
+                            Value::String(s) => serde_json::from_str(&s).unwrap(),
+                            v => v,
+                        }
+                    }
                     safe_cex_transport::RestBody::Encoded(b) => serde_json::from_slice(b).unwrap(),
                 };
                 json!({"endpoint":r.url,"payload":body})
