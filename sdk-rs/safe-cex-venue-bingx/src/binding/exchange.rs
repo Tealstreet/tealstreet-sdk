@@ -16,6 +16,7 @@ use std::rc::Rc;
 pub struct BingxDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Rc<dyn JsHttpHost>,
+    pub local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
     pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 

@@ -106,6 +106,13 @@ pub(crate) fn capabilities(name: &ExchangeName) -> ExchangeCapabilities {
     ) {
         capabilities.fetch_historical_orders =
             CapabilityBinding::implemented(|venue, options| venue.fetch_historical_orders(options));
+        capabilities.fetch_option_chain =
+            CapabilityBinding::implemented(|venue, query| venue.fetch_option_chain(query));
+        capabilities.fetch_option_expiries = CapabilityBinding::implemented(|venue, underlying| {
+            venue.fetch_option_expiries(underlying)
+        });
+        capabilities.fetch_account_greeks =
+            CapabilityBinding::implemented(|venue, ()| venue.fetch_account_greeks());
     }
     capabilities
 }
@@ -824,6 +831,39 @@ impl Exchange for BybitExchange {
         options: HistoricalTradeOptions,
     ) -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
         self.invoke("fetchClosedPnl", args!(js(&options)))
+    }
+    fn fetch_option_chain(
+        &self,
+        query: OptionChainQuery,
+    ) -> ExchangeFuture<'_, Vec<OptionChainRow>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
+        ) {
+            self.invoke("fetchOptionChain", args!(js(&query)))
+        } else {
+            ExchangeCapabilities::default().fetch_option_chain(self, query)
+        }
+    }
+    fn fetch_option_expiries(&self, underlying: String) -> ExchangeFuture<'_, Vec<f64>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
+        ) {
+            self.invoke("fetchOptionExpiries", args!(js(&underlying)))
+        } else {
+            ExchangeCapabilities::default().fetch_option_expiries(self, underlying)
+        }
+    }
+    fn fetch_account_greeks(&self) -> ExchangeFuture<'_, Vec<AccountGreeks>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
+        ) {
+            self.invoke("fetchAccountGreeks", vec![])
+        } else {
+            ExchangeCapabilities::default().fetch_account_greeks(self)
+        }
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
         self.invoke("fetchTickers", vec![])
