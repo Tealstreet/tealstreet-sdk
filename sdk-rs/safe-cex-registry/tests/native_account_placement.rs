@@ -34,16 +34,17 @@ fn places_the_exact_client_id_and_returns_the_ts_reference() {
             h.ok("placeOrderWithClientOrderId", json!([order])).await,
             json!({"orderIds":["9001"],"clientOrderId":"caller-native-77"})
         );
-        let seen = h.seen.borrow();
-        let request = seen
-            .iter()
-            .find(|request| request.method == "POST")
-            .unwrap();
-        assert!(
-            request.query.contains("newClientOrderId=caller-native-77"),
-            "{request:?}"
-        );
-        drop(seen);
+        {
+            let seen = h.seen.borrow();
+            let request = seen
+                .iter()
+                .find(|request| request.method == "POST")
+                .unwrap();
+            assert!(
+                request.query.contains("newClientOrderId=caller-native-77"),
+                "{request:?}"
+            );
+        }
         let error = h
             .call("placeOrderWithClientOrderId", json!([options()]))
             .await
@@ -70,24 +71,25 @@ fn existing_placement_generates_the_ts_nanoid_format() {
     run(async {
         let h = started().await;
         h.ok("placeOrder", json!([options()])).await;
-        let seen = h.seen.borrow();
-        let request = seen
-            .iter()
-            .find(|request| request.method == "POST")
-            .unwrap();
-        let id = support::query_value(&request.query, "newClientOrderId").unwrap();
-        assert!(id.starts_with("x-s3vFFRQp"));
-        assert!(
-            id.len() <= "x-s3vFFRQp".len() + 21,
-            "TS prefixes a <=21-character filtered nanoid, got {id}"
-        );
-        assert!(
-            id.strip_prefix("x-s3vFFRQp")
-                .unwrap()
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric())
-        );
-        drop(seen);
+        {
+            let seen = h.seen.borrow();
+            let request = seen
+                .iter()
+                .find(|request| request.method == "POST")
+                .unwrap();
+            let id = support::query_value(&request.query, "newClientOrderId").unwrap();
+            assert!(id.starts_with("x-s3vFFRQp"));
+            assert!(
+                id.len() <= "x-s3vFFRQp".len() + 21,
+                "TS prefixes a <=21-character filtered nanoid, got {id}"
+            );
+            assert!(
+                id.strip_prefix("x-s3vFFRQp")
+                    .unwrap()
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric())
+            );
+        }
         h.ok("dispose", json!([])).await;
     });
 }
@@ -132,17 +134,18 @@ macro_rules! nuke_orders_method {
                 let h = started().await;
                 h.ok("fetchAndSetOrders", json!([null])).await;
                 assert_eq!(h.ok($method, json!([])).await, Value::Null);
-                let requests = h.seen.borrow();
-                for endpoint in ["/fapi/v1/allOpenOrders", "/fapi/v1/algoOpenOrders"] {
-                    assert_eq!(
-                        requests
-                            .iter()
-                            .filter(|r| r.method == "DELETE" && r.path.ends_with(endpoint))
-                            .count(),
-                        1
-                    );
+                {
+                    let requests = h.seen.borrow();
+                    for endpoint in ["/fapi/v1/allOpenOrders", "/fapi/v1/algoOpenOrders"] {
+                        assert_eq!(
+                            requests
+                                .iter()
+                                .filter(|r| r.method == "DELETE" && r.path.ends_with(endpoint))
+                                .count(),
+                            1
+                        );
+                    }
                 }
-                drop(requests);
                 h.ok("dispose", json!([])).await;
             });
         }
