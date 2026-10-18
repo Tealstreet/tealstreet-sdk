@@ -30,7 +30,7 @@ real builtins and calls the production Promise/await/chain methods. Its only
 custom callbacks are supplied JavaScript behavior: thenables, accessors and
 iterators. It contains no test runtime, replacement resolver or executor.
 
-The matrix exercises await, async return, all, allSettled, then, finally and the
+The matrix exercises await, async return, both native and installed all/allSettled entrypoints, then, finally and the
 already-correct canonical resolve positive control. Cases include synchronous
 then lookup, deferred invocation, correct receiver, nested adoption, noncallable
 then, getter/call throws, first-call locking while adoption remains pending and
@@ -51,8 +51,8 @@ node safe-cex-exchange/tests/js_thenable_adoption_oracle.cjs
 cargo test -p safe-cex-exchange --features native --test js_thenable_adoption --jobs 1
 ```
 
-The initial compiled baseline has eight named failing groups. Canonical resolve
-and scalar/native await FIFO positive controls pass. The source and native
+The final compiled baseline has ten named failing groups across 108 engine cases. Canonical resolve
+and scalar/native await FIFO positive controls pass (two named groups). The source and native
 observations must remain unchanged through the production cutover. Existing
 constructor, serial-helper, iterable, microtask and client regressions remain
 required. Any changed cancellation/override producer pin must be reviewed and

@@ -3,7 +3,7 @@
 use safe_cex_exchange::{
     js_runtime::{
         client, globals,
-        promise::{Promise, await_js},
+        promise::{self, Promise, await_js},
         scope::{Scope, ScopeShared},
         value::{Js, Thrown, arg},
     },
@@ -224,7 +224,11 @@ async fn matrix(scope: Scope<()>, route: &'static str) {
                 Js::array(vec![input.clone()])
             };
             let constructor = scope.global("Promise").unwrap();
-            let pending = if matches!(route, "then" | "finally") {
+            let pending = if route == "nativeAll" {
+                Js::Promise(promise::all(&runtime, vec![input.clone()]))
+            } else if route == "nativeAllSettled" {
+                Js::Promise(promise::all_settled(&runtime, vec![input.clone()]))
+            } else if matches!(route, "then" | "finally") {
                 let returned = input.clone();
                 constructor
                     .call_method("resolve", vec![Js::Number(-0.)])
@@ -242,8 +246,8 @@ async fn matrix(scope: Scope<()>, route: &'static str) {
             };
             trace.borrow_mut().push("returned".into());
             match promise.wait().await {
-                Ok(value) if route == "all" => Ok(value.get("0").unwrap()),
-                Ok(value) if route == "allSettled" => {
+                Ok(value) if matches!(route, "all" | "nativeAll") => Ok(value.get("0").unwrap()),
+                Ok(value) if matches!(route, "allSettled" | "nativeAllSettled") => {
                     let row = value.get("0").unwrap();
                     if row.get("status").unwrap().to_display() == "rejected" {
                         Err(Thrown::new(row.get("reason").unwrap()))
@@ -291,6 +295,14 @@ fn installed_then_adopts_callback_thenables() {
 #[test]
 fn installed_finally_adopts_callback_thenables() {
     run(|scope| matrix(scope, "finally"));
+}
+#[test]
+fn native_all_adopts_thenables() {
+    run(|scope| matrix(scope, "nativeAll"));
+}
+#[test]
+fn native_all_settled_adopts_thenables() {
+    run(|scope| matrix(scope, "nativeAllSettled"));
 }
 
 #[test]

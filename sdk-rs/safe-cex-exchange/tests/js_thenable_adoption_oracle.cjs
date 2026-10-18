@@ -3,7 +3,7 @@
   const modes = ['fulfill', 'nan', 'reject', 'getter-throw', 'call-throw',
     'resolve-then-throw', 'reject-then-resolve', 'nested', 'noncallable', 'pending-first'];
   const output = {};
-  for (const route of ['await', 'return', 'all', 'allSettled', 'resolve', 'then', 'finally']) {
+  for (const route of ['await', 'return', 'all', 'allSettled', 'resolve', 'then', 'finally', 'nativeAll', 'nativeAllSettled']) {
     output[route] = [];
     for (const mode of modes) {
       const trace = [];
@@ -45,12 +45,14 @@
         if (route === 'resolve') promise = Promise.resolve(input);
         if (route === 'then') promise = Promise.resolve().then(() => input);
         if (route === 'finally') promise = Promise.resolve(-0).finally(() => input);
+        if (route === 'nativeAll') promise = Promise.all([input]);
+        if (route === 'nativeAllSettled') promise = Promise.allSettled([input]);
         if (route === 'all' || route === 'allSettled') promise = Promise[route]([input]);
         trace.push('returned');
         try {
           let value = await promise;
-          if (route === 'all') value = value[0];
-          if (route === 'allSettled') {
+          if (route === 'all' || route === 'nativeAll') value = value[0];
+          if (route === 'allSettled' || route === 'nativeAllSettled') {
             if (value[0].status === 'rejected') throw value[0].reason;
             value = value[0].value;
           }
