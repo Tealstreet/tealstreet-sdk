@@ -97,7 +97,7 @@ fn native_market(actual: &Market, expected: &Value) {
             "min amount",
         ),
         (
-            actual.limits.amount.max,
+            safe_cex_num::numeric_value_to_number(&actual.limits.amount.max),
             &expected["limits"]["amount"]["max"],
             "max amount",
         ),

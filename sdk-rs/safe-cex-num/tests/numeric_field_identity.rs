@@ -100,7 +100,7 @@ fn domain_native_field_identity_supplement() {
                 v.precision.amount,
                 v.precision.price,
                 v.limits.amount.min,
-                v.limits.amount.max,
+                safe_cex_num::numeric_value_to_number(&v.limits.amount.max),
                 v.limits.leverage.min,
                 v.limits.leverage.max,
             ],

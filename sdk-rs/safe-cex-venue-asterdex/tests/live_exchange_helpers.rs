@@ -1462,7 +1462,9 @@ fn exchange_helpers_match_typescript() {
         actual["precision"]["price"] = number(market.precision.price);
         actual["precision"]["amount"] = number(market.precision.amount);
         actual["limits"]["amount"]["min"] = number(market.limits.amount.min);
-        actual["limits"]["amount"]["max"] = number(market.limits.amount.max);
+        actual["limits"]["amount"]["max"] = number(safe_cex_num::numeric_value_to_number(
+            &market.limits.amount.max,
+        ));
         actual["limits"]["leverage"]["max"] = number(market.limits.leverage.max);
         same(
             &number(market.precision.price),

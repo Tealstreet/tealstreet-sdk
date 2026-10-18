@@ -158,7 +158,7 @@ fn format_order_body(
         if amount < minimum {
             amount = minimum;
         }
-        let maximum = market.limits.amount.max;
+        let maximum = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         if truthy(maximum) && amount > maximum {
             amount = maximum;
         }

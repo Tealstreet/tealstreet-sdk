@@ -24,3 +24,7 @@ alloy-dyn-abi.workspace = true
 
 [dev-dependencies]
 indexmap = "=2.14.2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+safe-cex-exchange = { workspace = true, features = ["native"] }
+tokio = { workspace = true, features = ["rt", "time"] }

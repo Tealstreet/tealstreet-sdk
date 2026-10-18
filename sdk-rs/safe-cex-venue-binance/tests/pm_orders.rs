@@ -149,7 +149,7 @@ fn run_cases(precision_supplement: bool) {
                 market.precision.amount,
             );
         }
-        market.limits.amount.max = numeric(c, "max");
+        market.limits.amount.max = (numeric(c, "max")).into();
         let store = Rc::new(DefaultStore::new());
         Store::update(
             store.as_ref(),

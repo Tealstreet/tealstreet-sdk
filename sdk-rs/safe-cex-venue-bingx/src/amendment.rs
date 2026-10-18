@@ -315,7 +315,9 @@ impl BingxAmendment {
         if !qty.is_finite() || qty <= 0.0 {
             return self.reject("BingX amended order quantity must be greater than zero");
         }
-        if qty < market.limits.amount.min || qty > market.limits.amount.max {
+        if qty < market.limits.amount.min
+            || qty > safe_cex_num::numeric_value_to_number(&market.limits.amount.max)
+        {
             return self
                 .reject("BingX amended order quantity is outside the reconciled market limits");
         }
