@@ -923,3 +923,25 @@ fn auth_declares_shared_response_and_native_expiry_boundaries() {
 }
 
 mod notification;
+
+#[test]
+fn retained_handler_frames_cross_the_production_core_registry() {
+    let (socket, _, _) = fixture();
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    let callback: safe_cex_exchange::websocket::MessageHandler = Rc::new(move |_| {
+        seen.set(seen.get() + 1);
+        Ok(())
+    });
+    socket.message_handlers.borrow_mut().insert(
+        "tickers".into(),
+        Rc::new(RefCell::new(vec![callback])),
+    );
+    for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+        let frame = format!(r#"{{"topic":"tickers.BTCUSDT","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#);
+        on_message(&socket, &frame).unwrap();
+    }
+    on_message(&socket, r#"{"topic":"tickers.BTCUSDT","neighbor":true}"#).unwrap();
+    assert_eq!(calls.get(), 4, "source-valid native graphs reach the shared registry");
+    socket.dispose();
+}

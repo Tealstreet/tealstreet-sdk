@@ -1076,3 +1076,24 @@ fn public_symbol_collision_uses_latest_store_alias_owner() {
         stop();
     }
 }
+
+#[test]
+fn retained_handler_frames_cross_the_production_core_registry() {
+    let (owner, _, _) = fixture(PublicKind::FuturesMarket);
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    let callback: MessageHandler = Rc::new(move |_| {
+        seen.set(seen.get() + 1);
+        Ok(())
+    });
+    owner.base().message_handlers.borrow_mut().insert(
+        "retainedProbe".into(),
+        Rc::new(RefCell::new(vec![callback])),
+    );
+    for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+        let frame = format!(r#"{{"e":"retainedProbe","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#);
+        owner.on_message(&frame).expect("source-valid native graph reaches core callbacks");
+    }
+    owner.on_message(r#"{"e":"retainedProbe","neighbor":true}"#).unwrap();
+    assert_eq!(calls.get(), 4, "every source-valid frame reaches the real class/core registry");
+}

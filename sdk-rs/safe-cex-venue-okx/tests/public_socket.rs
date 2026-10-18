@@ -386,3 +386,31 @@ fn incoming_health_publication_errors_stop_frame_processing() {
         );
     }
 }
+
+#[test]
+fn retained_handler_frames_cross_the_production_core_registry() {
+    let runtime = Rc::new(Runtime::default());
+    let parent = Parent::new();
+    let socket = BaseWebSocket::new(1, parent, runtime, Rc::new(Protocol));
+    let calls = Rc::new(RefCell::new(0));
+    let seen = calls.clone();
+    let callback: MessageHandler = Rc::new(move |_| {
+        *seen.borrow_mut() += 1;
+        Ok(())
+    });
+    socket.message_handlers.borrow_mut().insert(
+        "tickers".into(),
+        Rc::new(RefCell::new(vec![callback])),
+    );
+    let sequences = RefCell::new(HashMap::new());
+    let recovering = RefCell::new(HashSet::new());
+    let topics = RefCell::new(HashMap::new());
+    for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+        let frame = format!(r#"{{"arg":{{"channel":"tickers"}},"unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#);
+        on_message(&socket, &SocketFrame::Text(frame), &sequences, &recovering, &topics)
+            .expect("source-valid native graph reaches OKX dispatch");
+    }
+    on_message(&socket, &SocketFrame::Text(r#"{"arg":{"channel":"tickers"},"neighbor":true}"#.into()), &sequences, &recovering, &topics).unwrap();
+    assert_eq!(*calls.borrow(), 4, "all valid frames reach the shared registry");
+    socket.dispose();
+}
