@@ -17,6 +17,10 @@ cases = {
     "hyperliquid": ("private_message_dispatch.rs", "binding", 'h.set(&buffer, "midPrice", &last)?;', 'h.set(&buffer, "mark", &last)?;'),
     "hyperliquidspot": ("spot_ws_dispatch.rs", "spot_binding", 'h.set(&buffer, "midPrice", &last)?;', 'h.set(&buffer, "mark", &last)?;'),
     "lighter": ("public_ingress.rs", "exchange_binding", 'let mark = parse_fields(&h, &data, &["markPrice", "mark_price", "mark"])?;', 'let mark = parse_fields(&h, &data, &["indexPrice", "index_price", "index"])?;'),
+    "blofin": ("public_stream_data.rs", "native_ping_latency", 'let last = float(update.get("last"))?;', 'let last = float(update.get("bidPrice"))?;'),
+    "cryptocom": ("socket_handlers.rs", "exchange_binding", '("last", parsed_field(h, &data, "a")?),', '("last", parsed_field(h, &data, "b")?),'),
+    "coinbase": ("public_stream_dispatch.rs", "exchange_binding", '"No handler for channel ".encode_utf16()', '"Unexpected ticker channel ".encode_utf16()'),
+    "binance": ("public_classes.rs", "private_classes", 'patch.set_number(field.name(), value)', 'patch.set_number(field.name(), if field.name() == "last" { 0.0 } else { value })'),
 }
 selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
@@ -24,6 +28,7 @@ for venue in selected:
     filename, target, before, after = cases[venue]
     crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket"}.get(venue, venue)
     test = {
+        "binance": "production_ticker_coercion_",
         "kucoin": "production_ticker_coercion_futures_matches_constructed_typescript",
         "kucoinspot": "production_ticker_coercion_spot_matches_constructed_typescript",
     }.get(venue, "production_ticker_coercion_matches_constructed_typescript")
@@ -32,15 +37,19 @@ for venue in selected:
     assert original.count(before.encode()) == 1, venue
     command = ["cargo", "test", "--jobs", "1", "-p", "safe-cex-venue-" + crate,
                "--test", target, test]
+    expected = 3 if venue == "binance" else 1
+    if venue == "binance":
+        command += ["--features", "native"]
     try:
         source.write_bytes(original.replace(before.encode(), after.encode(), 1))
         red = subprocess.run(command, cwd=root / "sdk-rs", capture_output=True, text=True)
         Path("/tmp/ticker-native-" + venue + "-control.log").write_text(red.stdout + red.stderr)
         assert red.returncode == 101 and "native ticker" in red.stdout + red.stderr and "test result: FAILED" in red.stdout, red.stdout + red.stderr
+        assert str(expected) + " failed" in red.stdout, red.stdout
         print(venue + ": compiled native assertion RED", flush=True)
     finally:
         source.write_bytes(original)
     green = subprocess.run(command, cwd=root / "sdk-rs", capture_output=True, text=True)
     Path("/tmp/ticker-native-" + venue + "-restored.log").write_text(green.stdout + green.stderr)
-    assert green.returncode == 0 and "1 passed" in green.stdout, green.stdout + green.stderr
+    assert green.returncode == 0 and str(expected) + " passed" in green.stdout, green.stdout + green.stderr
     print(venue + ": exact restoration GREEN", flush=True)
