@@ -1,6 +1,6 @@
 fn set_maximum_size(h: &Harness, max: f64) {
-    let mut markets = h.store.markets().to_vec();
-    markets[0].limits.amount.max = max;
+    let mut markets = h.store.markets().unwrap().to_vec();
+    markets[0].limits.amount.max = (max).into();
     Store::update(
         h.store.as_ref(),
         safe_cex_store::StoreUpdate {

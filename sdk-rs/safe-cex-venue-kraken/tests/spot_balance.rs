@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Balance, Ticker};
 use safe_cex_venue_kraken::spot_balance;
 use serde_json::{Value, json};
@@ -77,7 +78,7 @@ fn ticker(symbol: &str, last: f64) -> Ticker {
         ask: 0.0,
         last,
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         timestamp: None,
         percentage: 0.0,
@@ -259,7 +260,7 @@ fn spot_balance_live_source() {
             "SBALANCE native emits"
         );
         assert_eq!(
-            observe(&store.balance()),
+            observe(&store.balance().unwrap()),
             case["storeAfter"],
             "SBALANCE post-emission Store"
         );
@@ -307,10 +308,10 @@ fn spot_balance_live_source() {
             assert!(balance.coins.is_none(), "SBALANCE native absent coins");
             if !emits.borrow().is_empty() {
                 assert_eq!(case["sameFallback"], true, "SBALANCE source fallback alias");
-                let before = store.balance().free;
+                let before = store.balance().unwrap().free;
                 balance.free += 997.25;
                 assert_eq!(
-                    number(store.balance().free),
+                    number(store.balance().unwrap().free),
                     number(before),
                     "SBALANCE CHOSEN native snapshot independent"
                 );

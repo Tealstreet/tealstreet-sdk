@@ -46,10 +46,13 @@ executes the maintained types module. Its inherited-field control must remain:
 use resolved properties, not InterfaceDeclaration.members. Fixtures distinguish
 same-typed fields, and native field observations are separate from serde metadata.
 Wire assertions use shared JS numeric projection only after native-bit checks.
-One Node invocation emits the complete corpus. Lone-surrogate witnesses retain
-TypeScript code units and escaped output alongside Rust refusal; their manifest
-rows cite the canonical UTF-8 boundary rather than calling those inputs invalid
-JSON. No unchecked Axios runtime-validation equivalence is claimed.
+One Node invocation emits the complete corpus. Lone-surrogate witnesses compare
+exact TypeScript code units and escaped output through both canonical retained
+parsing and raw capture. Both shared and bare record decoding use numeric capture
+and retain the record, replacing lone units with U+FFFD only in typed Strings.
+Direct native member observations preserve every other distinct fixture field
+and numeric bit pattern. All 883 source cases and 3659 typed route comparisons
+remain pinned. No unchecked Axios runtime-validation equivalence is claimed.
 
 Use `--test types` while working on types, and `tests/types_controls.py --only
 '<row>'` for targeted mutation checks. The full runner proves one production
@@ -277,3 +280,28 @@ share this retained carrier; only consumed typed fields perform native coercion.
 The real NativeRuntime WebSocket regression compares the stored raw order with
 maintained TypeScript using numeric bits and UTF-16 units. Per-row asset/leverage
 admission and visible refusal remain unchanged.
+
+`public_stream::HandlerList` owns live callback registrations, not a raw decoder.
+`scripts/handler-list-contracts.mjs` measures its actual compiler alias through
+the maintained accepted inventory. The constructed production socket witness
+`native_callback_registry_keeps_live_lists_and_original_errors` observes append
+to a captured list, next-frame registry replacement, original parsed payload and
+callback error/code referents. `tests/handler-list-controls.py` replaces the live
+list capture with a copied list; the named native dispatch assertion must fail
+before exact source restoration passes. No probe-family relaxation is used.
+
+
+The typed-native public async family uses shared `eager::start_eager` for all 18
+implemented SDK async methods, retaining the existing runtime and native receiver.
+`tests/divergence_timing.rs` covers call-prefix errors/logs and a held mode-change
+continuation after unpolled waiter drop. The lifecycle child probes cover live
+refresh/recovery and full silent teardown on final exchange-handle drop.
+`scripts/divergence-controls.py` compiles eleven independent production faults,
+requires named failures, restores exact source bytes and replays GREEN. Run it
+serially with no concurrent source edits or Cargo commands. Always run the full
+workspace parity index before marking a PR READY. See DIVERGENCE_TIMING_AUDIT.md.
+
+Final native Drop now enters shared `safe_cex_exchange::native_final_drop`, retaining
+its existing explicit dispose and host-timer cleanup closure. The shared lifetime
+primitive completes base cleanup even if that closure fails; the existing real
+refresh/recovery/socket/Store-error teardown probes remain mandatory.

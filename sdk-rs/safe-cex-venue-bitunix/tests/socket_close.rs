@@ -1,4 +1,4 @@
-//! Bitunix sockets register a no-event `handleClose`/`handleError`, as in TS.
+//! The base stops plain error listeners; actual close invokes Bitunix handleClose.
 #[path = "support/venue_runtime.rs"]
 #[allow(dead_code)]
 mod support;
@@ -120,15 +120,28 @@ fn abnormal_closes_reconnect_at_the_minimum_delay_without_a_failure_pause() {
 }
 
 #[test]
-fn a_socket_error_runs_handle_close() {
+fn a_socket_error_waits_for_actual_close() {
     let (venue, rt, logs, url) = started();
+    let before = dials(&rt, &url);
     latest(&rt, &url)
         .events
         .borrow_mut()
         .push_back(WsEvent::Error("boom".into()));
     assert!(
-        reconnects_within_3s(&rt, &url, 2),
-        "handleError must close and reconnect: {:?}",
+        !reconnects_within_3s(&rt, &url, before + 1),
+        "base stopImmediatePropagation suppresses handleError: {:?}",
+        logs.borrow()
+    );
+    latest(&rt, &url)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Close {
+            code: Some(1006),
+            reason: String::new(),
+        });
+    assert!(
+        reconnects_within_3s(&rt, &url, before + 1),
+        "the actual close still reconnects: {:?}",
         logs.borrow()
     );
     venue.dispose().unwrap();

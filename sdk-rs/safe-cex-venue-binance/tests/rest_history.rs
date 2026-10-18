@@ -49,7 +49,11 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
-        EventValue::Array(v) => array_values(v).iter().map(wire).collect(),
+        EventValue::Array(v) => array_values(v)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -70,11 +74,11 @@ fn error(name: &str) -> Failure {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "history-code"
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"venue detail"}})).into());
     Rc::new(e)
 }
 fn error_wire(e: &Failure, want: &Failure) -> Value {
-    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))})
 }
 fn original(e: &Failure, want: &Failure, l: &str) {
     assert!(Rc::ptr_eq(e, want), "{l}: original Error Rc");
@@ -86,7 +90,7 @@ fn original(e: &Failure, want: &Failure, l: &str) {
         "{l}"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(json!({"status":503,"data":{"msg":"venue detail"}})),
         "{l}"
     )
@@ -125,8 +129,8 @@ fn rows(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native array")
     };
-    assert_eq!(a.borrow().len(), n, "{l}: native row count");
-    array_values(a)
+    assert_eq!(a.len(), n, "{l}: native row count");
+    array_values(a).expect("fixture array reads")
 }
 fn native_enum(v: &EventValue, want: PrivateEnum, l: &str) {
     let EventValue::String(units) = v else {
@@ -474,7 +478,7 @@ fn state(family: &str, name: &str) -> Shared {
             let EventValue::Array(a) = &payload else {
                 panic!()
             };
-            a.borrow()[0].as_ref().unwrap().write(
+            native_array_fixture::slots(&a)[0].as_ref().unwrap().write(
                 "id",
                 if name == "null-id" {
                     EventValue::Null
@@ -675,7 +679,7 @@ fn reader(family: &str) {
                 assert!(!Rc::ptr_eq(e, &error), "{label}: generated Error");
                 assert_eq!(e.name, "TypeError", "{label}");
                 assert!(
-                    e.code.is_none() && e.response.is_none(),
+                    e.code.is_none() && e.response_json_view().is_none(),
                     "{label}: generated absent metadata"
                 );
                 let message = match (family, name) {
@@ -966,7 +970,7 @@ fn reader(family: &str) {
             let EventValue::Array(a) = &state.payload else {
                 panic!()
             };
-            assert_eq!(a.borrow().len(), 3, "{label}: native appended input floor");
+            assert_eq!(a.len(), 3, "{label}: native appended input floor");
         }
         if family == "range" {
             assert_eq!(
@@ -1149,7 +1153,7 @@ fn mapper() {
             } else {
                 assert_eq!(e.name, "TypeError");
                 assert_eq!(e.message, "Cannot read properties of null (reading 'id')");
-                assert!(e.code.is_none() && e.response.is_none());
+                assert!(e.code.is_none() && e.response_json_view().is_none());
             }
         } else {
             let v = result.as_ref().unwrap();
@@ -1426,7 +1430,7 @@ fn seed() {
             let mut s = state.borrow_mut();
             s.trace.push(json!(["callback"]));
             let last = if let EventValue::Array(a) = &s.candles {
-                a.borrow().last().cloned().flatten()
+                native_array_fixture::slots(&a).last().cloned().flatten()
             } else {
                 None
             };
@@ -1626,3 +1630,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;

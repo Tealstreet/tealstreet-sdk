@@ -1,8 +1,10 @@
-use safe_cex_num::js_number_string;
-use safe_cex_store::{
-    Store, StoreUpdate, model_patch::ModelPatch, store::DefaultStore,
-    ticker_lookup::TickerSymbolLookup,
+use safe_cex_exchange::{
+    js_runtime::value::{Js, Thrown, from_json},
+    native_store::DefaultStore,
+    runtime::ExchangeError,
 };
+use safe_cex_num::js_number_string;
+use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{StoreSubscriberError, Ticker};
 use safe_cex_venue_bitget::ticker::{TickerHandlerError, handle_ticker_topic};
 use serde_json::{Value, json};
@@ -44,7 +46,7 @@ fn ticker(id: &str, symbol: &str) -> Ticker {
         ask: 0.,
         last: 0.,
         mark: 0.,
-        index: 0.,
+        index: Some(0.),
         mid_price: None,
         percentage: 0.,
         open_interest: 0.,
@@ -81,7 +83,7 @@ fn assert_rows(actual: &[Ticker], expected: &[Ticker], label: &str) {
             ("ask", a.ask, e.ask),
             ("last", a.last, e.last),
             ("mark", a.mark, e.mark),
-            ("index", a.index, e.index),
+            ("index", a.index.unwrap(), e.index.unwrap()),
             ("percentage", a.percentage, e.percentage),
             ("openInterest", a.open_interest, e.open_interest),
             ("fundingRate", a.funding_rate, e.funding_rate),
@@ -148,7 +150,7 @@ fn run(scene: &'static str) -> Observed {
     let mut expected = seed.clone();
     if ["truthy-info-stripped", "info-id-error-stripped"].contains(&scene) {
         assert!(
-            Store::tickers(&store)[0].info.is_none(),
+            Store::tickers(&store).unwrap()[0].info.is_none(),
             "PROTO native required actual ingress strips truthy info"
         );
         expected[0].info = None;
@@ -171,24 +173,26 @@ fn run(scene: &'static str) -> Observed {
         _ => {}
     }
     assert_rows(
-        &Store::tickers(&store),
+        &Store::tickers(&store).unwrap(),
         &expected,
         "producer input before handler",
     );
     if scene == "symbol-sentinel" {
         assert!(
-            Store::tickers_by_symbol(&store).contains_key("__proto__"),
-            "PROTO native chosen borrowed own-entry view"
+            !Store::tickers_by_symbol(&store)
+                .unwrap()
+                .contains_key("__proto__"),
+            "PROTO native plain symbol dictionary has no own prototype key"
         );
+        let lookup = Store::lookup_ticker_by_symbol(&store, "symbol").unwrap();
         assert!(
-            matches!(
-                Store::lookup_ticker_by_symbol(&store, "symbol"),
-                TickerSymbolLookup::PrototypeField {
-                    truthy: true,
-                    id: None
-                }
-            ),
+            lookup.is_truthy(),
             "PROTO native real shared prototype lookup entry"
+        );
+        assert_eq!(
+            lookup.update_id().unwrap(),
+            Some("undefined".into()),
+            "PROTO native inherited primitive id uses source property-key coercion"
         );
     }
     let key = match scene {
@@ -203,9 +207,14 @@ fn run(scene: &'static str) -> Observed {
         "own-constructor" => "constructor",
         _ => "symbol",
     };
+    let trait_lookup = Store::lookup_ticker_by_symbol(&store, key).unwrap();
+    let direct_lookup = store.lookup_ticker_by_symbol(key).unwrap();
     assert_eq!(
-        Store::lookup_ticker_by_symbol(&store, key),
-        store.lookup_ticker_by_symbol(key),
+        (trait_lookup.is_truthy(), trait_lookup.update_id().unwrap()),
+        (
+            direct_lookup.is_truthy(),
+            direct_lookup.update_id().unwrap()
+        ),
         "PROTO native trait dispatch uses actual Store view"
     );
     let input = match scene {
@@ -297,7 +306,7 @@ fn run(scene: &'static str) -> Observed {
             "PROTO native handler success {scene}: {result:?}"
         )
     }
-    let rows = Store::tickers(&store).to_vec();
+    let rows = Store::tickers(&store).unwrap().to_vec();
     assert_rows(&rows, &expected, scene);
     assert_eq!(
         first.borrow().len(),
@@ -371,8 +380,9 @@ fn prototype_native_before_source() {
         assert_eq!(handler["file"], file);
         assert_eq!(handler["last_index"], 21, "PROTO final source iteration");
         assert_eq!(
-            handler["getter"]["hasOwnPrototype"], false,
-            "PROTO source getter chosen-view distinction"
+            handler["getter"],
+            json!({"hasOwnPrototype":false,"hasOwnSymbol":false,"inheritedSymbol":"__proto__","idKey":"undefined","prototypeIsRow":true}),
+            "PROTO maintained Store dictionary prototype and inherited primitive shape"
         );
         assert_eq!(
             handler["cases"],
@@ -438,11 +448,13 @@ fn direct_id_cases() -> Vec<Value> {
         }
         if name != "reset-clear" {
             assert!(
-                Store::tickers_by_id(&store).contains_key("__proto__"),
-                "PROTO native chosen ID own-entry view"
+                !Store::tickers_by_id(&store)
+                    .unwrap()
+                    .contains_key("__proto__"),
+                "PROTO native plain ID dictionary has no own prototype key"
             );
             assert!(
-                Store::tickers(&store)[0].info.is_none(),
+                Store::tickers(&store).unwrap()[0].info.is_none(),
                 "PROTO native direct actual stored input"
             );
         }
@@ -483,7 +495,48 @@ fn direct_id_cases() -> Vec<Value> {
         } else {
             "symbol"
         };
-        let result = Store::update_ticker(&store, key, &patch);
+        if name == "string" {
+            let Err(safe_cex_store::StoreMutationError::Access(error)) =
+                Store::update_ticker(&store, key, &patch)
+            else {
+                panic!("typed Ticker projection must visibly refuse an inherited primitive")
+            };
+            assert_eq!(error.phase(), safe_cex_types::StoreReadPhase::Projection);
+            let original = error
+                .native_cause()
+                .downcast_ref::<Thrown>()
+                .unwrap()
+                .value
+                .clone();
+            let recovered = Thrown::from(ExchangeError::from(error));
+            assert!(
+                recovered.value.same_reference(&original),
+                "typed projection refusal retains original cause"
+            );
+            assert_eq!(
+                recovered.message(),
+                "invalid type: string \"__proto__\", expected struct Ticker"
+            );
+        }
+        let changes = if name == "info-only" {
+            from_json(&json!({"info":{"ignored":true}}))
+        } else if name == "empty-patch" {
+            Js::object(vec![])
+        } else {
+            Js::object(vec![(
+                match name {
+                    "readonly-length" => "length",
+                    "readonly-index" => "0",
+                    "noncanonical-index" => "00",
+                    _ => "last",
+                },
+                Js::Number(9.0),
+            )])
+        };
+        let result = store.facade().unwrap().call_method(
+            "updateTicker",
+            vec![Js::object(vec![("id", Js::str(key))]), changes],
+        );
         let throws = [
             "string",
             "number",
@@ -493,12 +546,6 @@ fn direct_id_cases() -> Vec<Value> {
             "noncanonical-index",
         ]
         .contains(&name);
-        let failed_field = match name {
-            "readonly-length" => "length",
-            "readonly-index" => "0",
-            "noncanonical-index" => "00",
-            _ => "last",
-        };
         let message = match name {
             "string" => "Cannot create property 'last' on string '__proto__'",
             "readonly-length" => {
@@ -508,37 +555,17 @@ fn direct_id_cases() -> Vec<Value> {
             "noncanonical-index" => "Cannot create property '00' on string '__proto__'",
             _ => "Cannot create property 'last' on number '7'",
         };
-        if throws {
-            assert!(result.is_err(), "PROTO native direct ID TypeError {name}");
-            assert_eq!(
-                result.as_ref().unwrap_err().name(),
-                "TypeError",
-                "PROTO native public mutation error name"
-            );
-            assert_eq!(
-                result.as_ref().unwrap_err().to_string(),
-                message,
-                "PROTO native public mutation Display"
-            );
-        }
-
         let error = if throws {
-            let Err(safe_cex_store::StoreMutationError::Patch(error)) = result else {
-                panic!("PROTO native direct ID TypeError {name}: {result:?}")
-            };
-            assert!(
-                error.is_type_error(),
-                "PROTO native direct ID TypeError kind"
+            let thrown = result.unwrap_err();
+            assert_eq!(
+                thrown.value.get("name").unwrap().to_js_string().unwrap(),
+                "TypeError".encode_utf16().collect::<Vec<_>>().into(),
+                "PROTO native original mutation error name"
             );
             assert_eq!(
-                error.field(),
-                failed_field,
-                "PROTO native original failed assignment field"
-            );
-            assert_eq!(
-                error.message(),
+                thrown.message(),
                 message,
-                "PROTO native exact TypeError message"
+                "PROTO native original failed assignment field and message"
             );
             Some(("TypeError", message))
         } else {
@@ -551,7 +578,7 @@ fn direct_id_cases() -> Vec<Value> {
         if name == "own-shadow" {
             expected[1].last = 9.0;
         }
-        let rows = Store::tickers(&store).to_vec();
+        let rows = Store::tickers(&store).unwrap().to_vec();
         assert_rows(&rows, &expected, name);
         assert_eq!(
             *first.borrow(),

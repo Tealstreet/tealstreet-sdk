@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, Thrown, from_json},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use serde_json::{Value, json};
 use std::rc::Rc;
 fn selector(tag: &str) -> Js {
@@ -76,7 +76,7 @@ fn bulk_remove_selector_ids_match_source_property_keys_and_early_returns() {
     let cases = source["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 30, "source array cases and empty Store floor");
     for row in cases {
-        let facade = store::facade(Rc::new(DefaultStore::new()));
+        let facade = store::facade(Rc::new(DefaultStore::new())).unwrap();
         let seeds = if row["empty"] == true {
             vec![]
         } else {
@@ -117,6 +117,7 @@ fn bulk_remove_selector_ids_match_source_property_keys_and_early_returns() {
             .get("orders")
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap()
             .iter()
             .map(|row| row.get("id").unwrap().to_display())

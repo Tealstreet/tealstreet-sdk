@@ -1,6 +1,7 @@
 //! Hyperliquid's action composition over the independently vector-bound primitives.
 use crate::types::Signature;
 use alloy_dyn_abi::DynSolValue;
+use safe_cex_exchange::js_runtime::value::owned::{OwnedCallbackError, OwnedJsValue};
 use safe_cex_num::JsJsonValue;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -351,25 +352,53 @@ pub fn cancel_order_to_action(cancel: Value) -> Value {
         ("cancels", Value::Array(vec![cancel])),
     ])
 }
-pub fn address_to_bytes(address: &str) -> Result<Vec<u8>, String> {
+fn signing_error(message: String) -> OwnedCallbackError {
+    OwnedCallbackError::new(OwnedJsValue::object([
+        ("name", OwnedJsValue::string("Error")),
+        ("message", OwnedJsValue::string(&message)),
+    ]))
+}
+
+fn byteslike_error(value: &str) -> OwnedCallbackError {
+    let rendered = serde_json::to_string(value).expect("Rust string JSON rendering");
+    let message = format!(
+        "invalid BytesLike value (argument=\"value\", value={rendered}, code=INVALID_ARGUMENT, version=6.17.0)"
+    );
+    OwnedCallbackError::new(OwnedJsValue::object([
+        ("name", OwnedJsValue::string("TypeError")),
+        ("message", OwnedJsValue::string(&message)),
+        ("code", OwnedJsValue::string("INVALID_ARGUMENT")),
+        ("argument", OwnedJsValue::string("value")),
+        ("value", OwnedJsValue::string(value)),
+        (
+            "shortMessage",
+            OwnedJsValue::string("invalid BytesLike value"),
+        ),
+    ]))
+}
+
+pub fn address_to_bytes(address: &str) -> Result<Vec<u8>, OwnedCallbackError> {
     let hex = address
         .strip_prefix("0x")
-        .ok_or("invalid BytesLike value")?;
-    if hex.len() % 2 != 0 {
-        return Err("invalid BytesLike value".into());
-    }
-    hex.as_bytes()
-        .chunks(2)
+        .or_else(|| address.strip_prefix("0X"))
+        .filter(|hex| hex.len() % 2 == 0 && hex.bytes().all(|c| c.is_ascii_hexdigit()))
+        .ok_or_else(|| byteslike_error(address))?;
+    Ok(hex
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
-            let a = (pair[0] as char)
-                .to_digit(16)
-                .ok_or("invalid BytesLike value")?;
-            let b = (pair[1] as char)
-                .to_digit(16)
-                .ok_or("invalid BytesLike value")?;
-            Ok((a * 16 + b) as u8)
+            let digit = |c: u8| {
+                if c.is_ascii_digit() {
+                    c - b'0'
+                } else {
+                    c.to_ascii_lowercase() - b'a' + 10
+                }
+            };
+            digit(pair[0]) * 16 + digit(pair[1])
         })
-        .collect()
+        .collect())
 }
 fn number_nonce(n: f64) -> Result<u64, String> {
     if !n.is_finite() || n.fract() != 0.0 {
@@ -448,15 +477,19 @@ pub fn signing_preimage(
     action: &(impl SigningInput + ?Sized),
     vault: Option<&str>,
     nonce: &Value,
-) -> Result<Vec<u8>, String> {
-    let mut data = safe_cex_crypto::msgpack::encode_js_value(&action.encoding_view())?;
-    data.extend_from_slice(&nonce_u64(nonce)?.to_be_bytes());
+) -> Result<Vec<u8>, OwnedCallbackError> {
+    let mut data = safe_cex_crypto::msgpack::encode_js_value(&action.encoding_view())
+        .map_err(signing_error)?;
+    data.extend_from_slice(&nonce_u64(nonce).map_err(signing_error)?.to_be_bytes());
     data.push(u8::from(vault.is_some()));
     // ts-bug: actionHash accepts short hex vaults and pads trailing zeros instead of enforcing 20 bytes.
     if let Some(vault) = vault {
         let bytes = address_to_bytes(vault)?;
         if bytes.len() > 20 {
-            return Err("offset is out of bounds".into());
+            return Err(OwnedCallbackError::new(OwnedJsValue::object([
+                ("name", OwnedJsValue::string("RangeError")),
+                ("message", OwnedJsValue::string("offset is out of bounds")),
+            ])));
         }
         data.extend_from_slice(&bytes);
         data.resize(data.len() + 20 - bytes.len(), 0);
@@ -467,7 +500,7 @@ pub fn action_hash(
     action: &(impl SigningInput + ?Sized),
     vault: Option<&str>,
     nonce: &Value,
-) -> Result<String, String> {
+) -> Result<String, OwnedCallbackError> {
     Ok(format!(
         "{:#x}",
         DynSolValue::Bytes(signing_preimage(action, vault, nonce)?).encode_topic()
@@ -480,7 +513,7 @@ pub fn construct_phantom_agent(hash: &str, mainnet: bool) -> Value {
     ])
 }
 pub(crate) fn split_sig(signature: &str) -> Result<Signature, String> {
-    let bytes = address_to_bytes(signature)?;
+    let bytes = address_to_bytes(signature).map_err(|error| error.to_string())?;
     if !matches!(bytes.len(), 64 | 65) {
         return Err("invalid raw signature length".into());
     }
@@ -537,7 +570,7 @@ pub fn sign_l1_action(
     vault: Option<&str>,
     nonce: &Value,
     mainnet: bool,
-) -> Result<Signature, String> {
+) -> Result<Signature, OwnedCallbackError> {
     let hash = action_hash(action, vault, nonce)?;
     let domain:Value=serde_json::from_str(r#"{"name":"Exchange","version":"1","chainId":1337,"verifyingContract":"0x0000000000000000000000000000000000000000"}"#).unwrap();
     let types: Value = serde_json::from_str(
@@ -550,7 +583,7 @@ pub fn sign_l1_action(
         ("primaryType", "Agent".into()),
         ("message", construct_phantom_agent(&hash, mainnet)),
     ]);
-    sign_inner(key, &data)
+    sign_inner(key, &data).map_err(signing_error)
 }
 
 pub fn sign_user_signed_action(
@@ -894,7 +927,7 @@ fn project_wallet_field(
     {
         let value = wallet_scalar(value)?;
         let text = value.as_str().ok_or("invalid BytesLike value")?;
-        address_to_bytes(text)?;
+        address_to_bytes(text).map_err(|error| error.to_string())?;
         return Ok(value);
     }
     if let Some((element, _)) = kind.strip_suffix(']').and_then(|k| k.rsplit_once('[')) {

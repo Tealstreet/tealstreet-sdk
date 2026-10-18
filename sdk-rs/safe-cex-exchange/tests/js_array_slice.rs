@@ -51,14 +51,14 @@ console.log(JSON.stringify(rows));
     tokio::task::LocalSet::new().block_on(&rt,async {
         let runtime=native_runtime();
         let http=client::rest_http_host(runtime.clone(),Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
-        let shared=Rc::new(ScopeShared::new(runtime,http,Rc::new(safe_cex_store::store::DefaultStore::new()),Js::object(vec![]),()));
+        let shared=Rc::new(ScopeShared::new(runtime,http,Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),Js::object(vec![]),()));
         globals::install_builtins(&shared.globals,Rc::downgrade(&shared));
         for row in rows {
             let array=if row["sparse"]==true {Js::holey_array(vec![Some(Js::Number(5.)),None,Some(Js::Undefined),Some(Js::Number(4.))])}else{Js::array(vec![Js::Number(5.),Js::Number(1.),Js::Number(4.)])};
             let args=row["input"].as_array().unwrap().iter().map(|value|index(value.as_str().unwrap())).collect();
             let result=array.call_method("slice",args).unwrap();
             let Js::Array(cells)=result else {panic!("slice returns an array");};
-            let slots:Vec<Value>=cells.borrow().iter().map(|slot|json!({"own":slot.is_some(),"value":slot.as_ref().unwrap_or(&Js::Undefined).to_display()})).collect();
+            let slots:Vec<Value>=Js::Array(cells).array_items().unwrap().unwrap().iter().map(|slot|json!({"own":slot.is_some(),"value":slot.as_ref().unwrap_or(&Js::Undefined).to_display()})).collect();
             assert_eq!(json!(slots),row["slots"],"SLICE source bounds {} sparse={}",row["input"],row["sparse"]);
         }
     });

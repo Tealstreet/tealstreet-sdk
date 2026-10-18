@@ -1,11 +1,12 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
     JsJsonValue,
     numeric_ingress::{JsNumberInput, js_from_value},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     IncomeCategory, IncomeRecord, MarginType, Market, Position, PositionMode, PositionSide,
 };
@@ -91,7 +92,7 @@ fn response(case: &Value) -> Result<Option<JsNumberInput>, Box<dyn Error>> {
         let mut error = ExchangeError::new("read failure");
         error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str("EPRIVATE"));
         error.metadata.store_subscriber_ids = vec![13, 29];
-        error.metadata.response = Some(json!({"status":429}));
+        error = error.with_retained_response((json!({"status":429})).into());
         return Err(Box::new(error));
     }
     Ok(case["raw"]
@@ -119,7 +120,7 @@ fn error(error: Box<dyn Error>, identity: Option<*const ExchangeError>) -> Value
             "read failure metadata retained"
         );
         assert_eq!(
-            native.metadata.response,
+            native.response_json_view(),
             Some(json!({"status":429})),
             "read failure response retained"
         );
@@ -288,7 +289,7 @@ fn spot_positions_live_oracle() {
     for case in cardinality::cases("reads", "positions", oracle()) {
         let store = DefaultStore::new();
         install(&store, &case["markets"]);
-        let positions = reads::fetch_spot_positions(&store);
+        let positions = reads::fetch_spot_positions(&store).unwrap();
         cardinality::native_len(
             positions.len(),
             &case["result"],
@@ -349,9 +350,10 @@ fn read_chosen_boundaries() {
         calls.set(calls.get() + 1);
         ready(Ok(Some(response)))
     }));
-    assert!(
-        result.is_err(),
-        "token Value output still refuses lone units"
+    assert_eq!(
+        result.unwrap(),
+        json!("\u{fffd}"),
+        "typed token uses the shared String projection"
     );
     assert_eq!(calls.get(), 1, "response narrowing happens after POST");
     assert_eq!(
@@ -618,10 +620,18 @@ fn leverage_chosen_boundary() {
     );
     let response: JsNumberInput = serde_json::from_str(raw).unwrap();
     let reports = Cell::new(0);
+    let clears = Cell::new(0);
+    let entries = RefCell::new(Vec::new());
     complete(reads::fetch_leverage_settings(
         |_| Ok(ready(Ok(Some(response)))),
-        || panic!("wire refusal must precede cache clear"),
-        |_, _| panic!("wire refusal must precede cache set"),
+        || {
+            clears.set(clears.get() + 1);
+            Ok(())
+        },
+        |symbol, leverage| {
+            entries.borrow_mut().push((symbol, leverage));
+            Ok(())
+        },
         |prefix, message| {
             assert_eq!(prefix, "[Kraken] Failed to fetch leverage settings:");
             assert!(!message.is_empty(), "visible wire refusal");
@@ -630,7 +640,16 @@ fn leverage_chosen_boundary() {
         },
     ))
     .unwrap();
-    assert_eq!(reports.get(), 1, "caught wire refusal is reported once");
+    assert_eq!(
+        reports.get(),
+        0,
+        "admitted typed text must not report a refusal"
+    );
+    assert_eq!(clears.get(), 1, "successful response clears the cache once");
+    let entries = entries.into_inner();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].0, json!("\u{fffd}"));
+    assert_eq!(entries[0].1.as_f64().unwrap().to_bits(), 17.25f64.to_bits());
 }
 
 #[path = "support/history.rs"]

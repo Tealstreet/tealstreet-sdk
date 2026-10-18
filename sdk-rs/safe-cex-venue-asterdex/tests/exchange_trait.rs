@@ -17,6 +17,7 @@ use exchange_data::script;
 
 #[test]
 fn constructed_aster_rejection_keeps_native_string_code_units() {
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_exchange::{
         js_runtime::{
             client::JsHttpHost,
@@ -25,7 +26,6 @@ fn constructed_aster_rejection_keeps_native_string_code_units() {
         },
         runtime::ExchangeRuntime,
     };
-    use safe_cex_store::store::DefaultStore;
     use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
     use std::cell::Cell;
     struct RejectingHost {
@@ -431,10 +431,10 @@ fn all_sixteen_defaults_are_bound_through_the_constructed_exchange() {
     // 1 start: actual source startup, Store writes and live socket constructors.
     drive(&rt, venue.start()).unwrap();
     assert!(
-        store.loaded().markets
-            && store.loaded().tickers
-            && store.loaded().orders
-            && store.loaded().positions
+        store.loaded().unwrap().markets
+            && store.loaded().unwrap().tickers
+            && store.loaded().unwrap().orders
+            && store.loaded().unwrap().positions
     );
     assert!(sent(&wire, "GET", "/fapi/v4/account"));
     take(&wire);
@@ -504,7 +504,7 @@ fn all_sixteen_defaults_are_bound_through_the_constructed_exchange() {
     take(&wire);
     // 10 position mode.
     drive(&rt, venue.change_position_mode(true, None)).unwrap();
-    assert!(store.options().is_hedged);
+    assert!(store.options().unwrap().is_hedged);
     assert!(sent(&wire, "POST", "/fapi/v1/positionSide/dual"));
     take(&wire);
     // 11 margin type.
@@ -776,13 +776,13 @@ fn constructed_exchange_starts_with_real_signed_clients_and_native_sockets() {
     script(&wire);
     drive(&rt, venue.start()).unwrap();
     assert!(
-        store.loaded().markets
-            && store.loaded().tickers
-            && store.loaded().positions
-            && store.loaded().orders
+        store.loaded().unwrap().markets
+            && store.loaded().unwrap().tickers
+            && store.loaded().unwrap().positions
+            && store.loaded().unwrap().orders
     );
-    assert_eq!(store.markets()[0].symbol, "BTCUSDT");
-    assert_eq!(store.tickers()[0].last.to_bits(), 102f64.to_bits());
+    assert_eq!(store.markets().unwrap()[0].symbol, "BTCUSDT");
+    assert_eq!(store.tickers().unwrap()[0].last.to_bits(), 102f64.to_bits());
     let account = drive(&rt, venue.get_account()).unwrap();
     assert_eq!(account.user_id, "aster-account");
     assert!(wire.requests.borrow().iter().any(|request| {
@@ -918,7 +918,7 @@ fn private_reopen_refreshes_orders_missed_during_disconnect() {
     for _ in 0..8 {
         rt.pump();
     }
-    assert_eq!(store.orders()[0].id, "9001");
+    assert_eq!(store.orders().unwrap()[0].id, "9001");
     let private = rt
         .sockets
         .borrow()
@@ -966,7 +966,7 @@ fn private_reopen_refreshes_orders_missed_during_disconnect() {
         after > before,
         "private reopen must perform the source snapshot refresh"
     );
-    let rows = store.orders();
+    let rows = store.orders().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].id, "777",
@@ -980,7 +980,7 @@ fn private_reopen_refreshes_orders_missed_during_disconnect() {
 fn stream_fixture() -> (
     Rc<safe_cex_venue_asterdex::native_exchange::AsterDEXExchange>,
     Rc<support::Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     std::sync::Arc<support::Wire>,
 ) {
     let (venue, rt, store, wire) =
@@ -1035,13 +1035,78 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 rt.pump();
             }
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
         ticker_coercion::assert_refusals(&rt.console.borrow().join("\n"), case);
         assert!(
             rt.errors.borrow().is_empty(),
             "native ticker {:?}",
             rt.errors.borrow()
         );
+    }
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn production_public_ingress_keeps_surrogate_batches_and_numeric_bits() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            "sdk-rs/safe-cex-venue-asterdex/tests/public-ingress-source.cjs",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let corpus: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 12);
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case["frames"].as_array().unwrap().len())
+            .sum::<usize>(),
+        20
+    );
+    let (venue, rt, store, _) = stream_fixture();
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    for case in cases {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("asterdex")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        rt.console.borrow_mut().clear();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                    safe_cex_transport::socket::SocketFrame::Text(frame.as_str().unwrap().into()),
+                ));
+            for _ in 0..8 {
+                rt.pump();
+            }
+        }
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
+        assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+        assert!(rt.console.borrow().is_empty(), "{:?}", rt.console.borrow());
     }
     venue.dispose().unwrap();
 }
@@ -1134,7 +1199,7 @@ fn public_frames_preserve_partial_depth_and_candle_semantics() {
         json!({"stream":"!markPrice@arr@1s","data":[{"s":"BTCUSDT","p":"100.75","i":"100.25","r":"0","T":1700000100000u64}]}),
     );
     {
-        let rows = store.tickers();
+        let rows = store.tickers().unwrap();
         let ticker = rows.iter().find(|v| v.symbol == "BTCUSDT").unwrap();
         assert_eq!(
             (
@@ -1150,7 +1215,7 @@ fn public_frames_preserve_partial_depth_and_candle_semantics() {
         assert_eq!(
             (
                 ticker.mark,
-                ticker.index,
+                ticker.index.unwrap(),
                 ticker.funding_rate,
                 ticker.funding_time
             ),
@@ -1209,7 +1274,7 @@ fn order_frame(id: u64) -> Value {
 fn production_private_order_frame_updates_store() {
     let (venue, rt, store, _) = stream_fixture();
     deliver_private(&rt, order_frame(9050));
-    let rows = store.orders();
+    let rows = store.orders().unwrap();
     let order = rows
         .iter()
         .find(|o| o.id == "9050")
@@ -1248,7 +1313,7 @@ fn production_private_fill_frame_updates_store_and_emits_fill() {
     frame["o"]["L"] = json!("96");
     frame["o"]["ap"] = json!("96");
     deliver_private(&rt, frame);
-    let rows = store.orders();
+    let rows = store.orders().unwrap();
     let order = rows.iter().find(|o| o.id == "9051").unwrap();
     assert_eq!((order.filled, order.remaining), (0.25, 2.75));
     let fills = fills.borrow();
@@ -1270,7 +1335,7 @@ fn production_private_positions_frame_updates_store() {
         &rt,
         json!({"e":"ACCOUNT_UPDATE","E":1700000001000u64,"a":{"P":[{"s":"BTCUSDT","pa":"3","ep":"97","up":"8","ps":"BOTH","mt":"cross","iw":"0"}]}}),
     );
-    let rows = store.positions();
+    let rows = store.positions().unwrap();
     let position = rows
         .iter()
         .find(|p| p.symbol == "BTCUSDT" && p.side == PositionSide::Long)
@@ -1293,7 +1358,7 @@ fn production_private_balance_frame_updates_store() {
         &rt,
         json!({"e":"ACCOUNT_UPDATE","E":1700000001000u64,"a":{"B":[{"a":"USDT","wb":"125","cw":"110"}],"P":[]}}),
     );
-    let balance = store.balance();
+    let balance = store.balance().unwrap();
     assert_eq!(
         (balance.total, balance.free, balance.used),
         (125.0, 110.0, 15.0)
@@ -1473,7 +1538,7 @@ fn algo_capacity_counts_raw_stop_info_when_normalized_type_is_undefined() {
     let venue: Rc<dyn Exchange> = venue;
     script(&wire);
     drive(&rt, venue.start()).unwrap();
-    let mut markets = store.markets().to_vec();
+    let mut markets = store.markets().unwrap().to_vec();
     let safe_cex_types::retained_json::RetainedJsonInput::Array(filters) = markets[0]
         .info
         .as_mut()
@@ -1578,7 +1643,7 @@ fn market_leverage_applies_approved_js_number_after_source_fallback() {
 fn mark_frame_refuses_bad_rows(wrapped: bool) {
     use safe_cex_store::{Store, StoreUpdate};
     let (venue, rt, store, _) = stream_fixture();
-    let original = store.tickers()[0].clone();
+    let original = store.tickers().unwrap()[0].clone();
     let tickers = ["BTCUSDT", "ETHUSDT", "LTCUSDT", "ADAUSDT"]
         .into_iter()
         .map(|symbol| {
@@ -1597,7 +1662,7 @@ fn mark_frame_refuses_bad_rows(wrapped: bool) {
         false,
     )
     .unwrap();
-    let before = store.tickers().to_vec();
+    let before = store.tickers().unwrap().to_vec();
     let emitted = Rc::new(std::cell::Cell::new(0));
     let saved = emitted.clone();
     venue.base().on(
@@ -1636,7 +1701,7 @@ fn mark_frame_refuses_bad_rows(wrapped: bool) {
     for _ in 0..16 {
         rt.pump();
     }
-    let tickers = store.tickers();
+    let tickers = store.tickers().unwrap();
     let get = |symbol: &str| {
         tickers
             .iter()
@@ -1723,7 +1788,7 @@ fn mark_price_falsey_time_and_unknown_targets_keep_source_behavior() {
     for _ in 0..16 {
         rt.pump();
     }
-    let tickers = store.tickers();
+    let tickers = store.tickers().unwrap();
     assert_eq!(tickers[0].mark, 204.);
     assert_eq!(tickers[0].funding_time, 1700000100000.);
     assert!(

@@ -4,6 +4,144 @@ mod data_trace;
 mod error_post_support;
 use serde_json::Value;
 
+struct HeldPositionVenue {
+    base: BaseExchange,
+    capabilities: ExchangeCapabilities,
+    fetches: RefCell<Vec<Option<Vec<String>>>>,
+    fails: bool,
+    ready: bool,
+}
+impl Exchange for HeldPositionVenue {
+    type PlaceOpts = safe_cex_types::PlaceOrderOpts;
+    fn base(&self) -> &BaseExchange {
+        &self.base
+    }
+    fn capabilities(&self) -> &ExchangeCapabilities {
+        &self.capabilities
+    }
+    fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
+        self.fetches.borrow_mut().push(symbols);
+        Box::pin(async move {
+            self.base
+                .runtime
+                .sleep(if self.ready { 0 } else { 100 })
+                .await?;
+            if self.fails {
+                return Err(ExchangeError::new("held fetch failed"));
+            }
+            Ok(vec![position(8.0)])
+        })
+    }
+}
+fn position_timing(dispatch: bool, ready_only: bool) {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/store_notification_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let profiles = source["positionTiming"].as_array().unwrap();
+    assert_eq!(profiles.len(), 16);
+    for profile in profiles
+        .iter()
+        .filter(|p| p["dispatch"] == dispatch && (p["outcome"] == "ready") == ready_only)
+    {
+        let mut profile = profile.clone();
+        for phase in ["before", "after"] {
+            profile[phase]["leverage"] = json!(profile[phase]["leverage"].as_f64().unwrap());
+        }
+        let runtime = Rc::new(runtime::Runtime::default());
+        runtime.now.set(10_000);
+        let store = Rc::new(DefaultStore::new());
+        store
+            .add_or_update_positions_full(vec![position(5.0)])
+            .unwrap();
+        let venue = Rc::new(HeldPositionVenue {
+            base: BaseExchange::new(
+                ExchangeName::Bybit,
+                serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
+                store.clone(),
+                runtime.clone(),
+                Default::default(),
+            ),
+            capabilities: Default::default(),
+            fetches: RefCell::default(),
+            fails: profile["outcome"] == "failure",
+            ready: profile["outcome"] == "ready",
+        });
+        let posts = Rc::new(RefCell::new(Vec::new()));
+        let sink = posts.clone();
+        let handler = UpdatePositionsHandler::new(
+            venue.clone(),
+            Rc::new(move |message| sink.borrow_mut().push(message)),
+        );
+        let symbols = (profile["scoped"] == true).then(|| vec!["BTC".into()]);
+        for request_id in ["first", "duplicate"] {
+            if dispatch {
+                handler.handle(safe_cex_webworker::payload::StoreWorkerPayload {
+                    op: safe_cex_webworker::payload::StoreWorkerOp::UpdatePositions,
+                    instance_id: None,
+                    data: Some(json!({"requestId":request_id,"symbols":symbols})),
+                });
+            } else {
+                drop(handler.handle_update_positions(request_id.into(), symbols.clone()));
+            }
+        }
+        let snapshot = || {
+            json!({
+                "fetches":*venue.fetches.borrow(),
+                "posts":*posts.borrow(),
+                "leverage":store.positions().unwrap()[0].leverage,
+            })
+        };
+        assert_eq!(
+            snapshot(),
+            profile["before"],
+            "POSITION eager prefix {profile}"
+        );
+        if profile["outcome"] == "disposed" {
+            venue.base.set_disposed_flag(true);
+        }
+        runtime.advance(10_100);
+        assert_eq!(
+            snapshot(),
+            profile["after"],
+            "POSITION detached continuation {profile}"
+        );
+        assert_eq!(
+            venue.fetches.borrow().len(),
+            1,
+            "POSITION duplicate never fetches"
+        );
+        assert!(runtime.exceptions.borrow().is_empty());
+        assert_eq!(
+            store.positions().unwrap()[0].leverage.to_bits(),
+            if profile["outcome"] == "success" || profile["outcome"] == "ready" {
+                8.0_f64
+            } else {
+                5.0_f64
+            }
+            .to_bits()
+        );
+        venue.base.dispose().unwrap();
+    }
+}
+#[test]
+fn position_helper_starts_before_poll_and_survives_dropped_waiter() {
+    position_timing(false, false);
+}
+#[test]
+fn position_dispatch_starts_before_return_and_survives_caller() {
+    position_timing(true, false);
+}
+
 #[test]
 fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
     let output = std::process::Command::new("node")
@@ -117,7 +255,7 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
         };
         update_positions_with_leverage(&venue, &symbol, &leverage).unwrap();
         assert_eq!(
-            store.positions()[0].leverage,
+            store.positions().unwrap()[0].leverage,
             8.0,
             "LEVERAGE native positive symbol commit"
         );
@@ -133,25 +271,20 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
 
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Position, StoreData};
 use safe_cex_webworker::{
     call_method::CallMethodHandler, positions::UpdatePositionsHandler,
     ui_state::update_positions_with_leverage,
 };
 use serde_json::json;
-use std::{
-    cell::RefCell,
-    future::Future,
-    pin::pin,
-    rc::Rc,
-    task::{Context, Poll, Waker},
-};
+use std::{cell::RefCell, rc::Rc};
 
 struct Venue {
     base: BaseExchange,
@@ -174,15 +307,6 @@ fn position(leverage: f64) -> Position {
 }
 fn view(data: &StoreData) -> Value {
     json!({"leverage":data.positions.first().map(|p| p.leverage),"orders":data.orders.iter().map(|o|&o.id).collect::<Vec<_>>()})
-}
-fn ready<T>(future: impl Future<Output = T>) -> T {
-    match pin!(future)
-        .as_mut()
-        .poll(&mut Context::from_waker(Waker::noop()))
-    {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("NOTIFICATION expected completed worker call"),
-    }
 }
 #[test]
 fn native_store_notification_reaches_worker_after_committed_mutation() {
@@ -287,10 +411,9 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                                 instance_id: None,
                                 data: Some(json!({"requestId":"r","symbols":symbols})),
                             });
-                            assert_eq!(
-                                runtime.tasks.borrow().len(),
-                                1,
-                                "NOTIFICATION native dispatch schedules once"
+                            assert!(
+                                posts.borrow().is_empty(),
+                                "NOTIFICATION source await yields before Store write"
                             );
                             runtime.advance(10_000);
                             assert!(
@@ -298,7 +421,8 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                                 "NOTIFICATION native dispatch settles once"
                             );
                         } else {
-                            ready(handler.handle_update_positions("r".into(), symbols));
+                            drop(handler.handle_update_positions("r".into(), symbols));
+                            runtime.advance(10_000);
                         }
                     }
                     "remove" => {
@@ -307,11 +431,12 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                             data_trace::post(post),
                             error_post_support::unexpected(),
                         );
-                        ready(handler.handle_call_method(
+                        drop(handler.handle_call_method(
                             "r".into(),
                             "removeOrders".into(),
                             vec![json!([{"id":"o"}])],
                         ));
+                        runtime.advance(10_000);
                     }
                     "leverage" => {
                         let leverage =
@@ -426,7 +551,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                     unsubscribe_second();
                     continue;
                 }
-                let state = store.serialize();
+                let state = store.serialize().unwrap();
                 assert_eq!(
                     venue.base.is_disposed(),
                     dispose,
@@ -480,4 +605,10 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
             }
         }
     }
+}
+
+#[test]
+fn position_ready_fetch_yields_before_store_write() {
+    position_timing(false, true);
+    position_timing(true, true);
 }

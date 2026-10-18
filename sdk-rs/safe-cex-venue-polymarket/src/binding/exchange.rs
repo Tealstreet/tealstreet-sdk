@@ -85,7 +85,7 @@ impl PolymarketExchange {
             &class,
             from_typed(&name).map_err(err)?,
             from_typed(&options).map_err(err)?,
-            store::facade(store),
+            store::facade(store)?,
         )
         .map_err(err)?
         .receiver();
@@ -107,26 +107,22 @@ impl PolymarketExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let this = self.rt.this.clone();
+        let runtime = self.rt.exchange_runtime();
+        let result = self.rt.this.call_method(member, args);
         Box::pin(async move {
-            let value = await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            let value = await_js(&runtime, result.map_err(err)?)
+                .await
+                .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let this = self.rt.this.clone();
+        let runtime = self.rt.exchange_runtime();
+        let result = self.rt.this.call_method(member, args);
         Box::pin(async move {
-            await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            await_js(&runtime, result.map_err(err)?)
+                .await
+                .map_err(err)?;
             Ok(())
         })
     }
@@ -288,3 +284,8 @@ impl Exchange for PolymarketExchange {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "receiver_tests.rs"]
 mod receiver_tests;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "eager_tests.rs"]
+mod eager_tests;

@@ -32,7 +32,19 @@ fn strict_public_decoders_and_mappers_match_live_typescript() {
         2184,
         "WOO-CARDINALITY v3_public source total"
     );
-    for case in cases.as_array().unwrap() {
+    let cases = cases.as_array().unwrap();
+    assert_eq!(
+        cases
+            .iter()
+            .filter(|case| case["name"] == "mapWooV3Candles")
+            .count(),
+        42,
+        "archived source-only cases for the retired mapper"
+    );
+    for case in cases
+        .iter()
+        .filter(|case| case["name"] != "mapWooV3Candles")
+    {
         let v = &case["input"];
         let opt = if case["missing"] == true {
             None
@@ -76,17 +88,6 @@ fn strict_public_decoders_and_mappers_match_live_typescript() {
             "mapWooV3OrderBook" => wire(map_woo_v3_order_book(
                 &serde_json::from_value(v.clone()).unwrap(),
             )),
-            "mapWooV3Candles" => {
-                let mut input = v.clone();
-                if case["nonfinite"] == true {
-                    input[1]["startTimestamp"] = json!(0);
-                }
-                let mut rows = serde_json::from_value::<Vec<WooV3KlineRow>>(input).unwrap();
-                if case["nonfinite"] == true {
-                    rows[1].start_timestamp = f64::NAN;
-                }
-                wire(map_woo_v3_candles(&rows))
-            }
             name => panic!("unclaimed oracle {name}"),
         };
         if let Some(error) = case.get("error") {

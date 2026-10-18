@@ -179,11 +179,14 @@ impl BybitExchange {
         }
     }
 
-    pub(crate) fn get_ticker_symbols_for_category(&self, category: PublicCategory) -> Vec<String> {
+    pub(crate) fn get_ticker_symbols_for_category(
+        &self,
+        category: PublicCategory,
+    ) -> Result<Vec<String>, safe_cex_exchange::runtime::ExchangeError> {
         let symbols = self
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .filter(|market| {
                 if market.option.is_some() {
@@ -197,7 +200,7 @@ impl BybitExchange {
             })
             .map(|market| market.symbol.clone())
             .collect::<Vec<_>>();
-        self.base.get_ticker_symbols_for_subscription(&symbols)
+        Ok(self.base.get_ticker_symbols_for_subscription(&symbols))
     }
 
     pub(crate) fn has_full_sized_position_opposite_side(
@@ -205,7 +208,7 @@ impl BybitExchange {
         symbol: &str,
         side: safe_cex_types::OrderSide,
         amount: f64,
-    ) -> bool {
+    ) -> Result<bool, safe_cex_exchange::runtime::ExchangeError> {
         let opposite = if side == safe_cex_types::OrderSide::Buy {
             safe_cex_types::PositionSide::Short
         } else {
@@ -213,7 +216,7 @@ impl BybitExchange {
         };
         // An inverse amount is USD contracts, so compare it with the position's native size.
         let inverse = crate::inverse_symbol::is_bybit_inverse_symbol(symbol);
-        self.base.store.positions().iter().any(|position| {
+        Ok(self.base.store.positions()?.iter().any(|position| {
             let size = if inverse {
                 position
                     .extra
@@ -227,32 +230,36 @@ impl BybitExchange {
                 && position.side == opposite
                 && position.contracts != 0.0
                 && size >= amount
-        })
+        }))
     }
 
     pub(crate) fn infer_protective_order_side(
         &self,
         order: &serde_json::Value,
-    ) -> Result<Option<safe_cex_types::OrderSide>, String> {
+    ) -> Result<Option<safe_cex_types::OrderSide>, safe_cex_exchange::runtime::ExchangeError> {
         use safe_cex_types::{OrderSide, PositionSide};
         if !order.is_null() && !order.is_object() && !order.is_array() {
-            return Err("TypeError: Bybit field lookup requires an object".into());
+            safe_cex_num::get_key::v_unknown(Some(order), "positionIdx")
+                .map_err(|error| type_error(error.message))?;
         }
-        let index = safe_cex_num::js_number(crate::json_field::field(order, "positionIdx")?)
-            .map_err(|error| error.message)?;
+        let index = safe_cex_num::js_number(
+            crate::json_field::field(order, "positionIdx").map_err(type_error)?,
+        )
+        .map_err(|error| type_error(error.message))?;
         if index == 1. {
             return Ok(Some(OrderSide::Sell));
         }
         if index == 2. {
             return Ok(Some(OrderSide::Buy));
         }
-        let Some(symbol) = crate::json_field::field(order, "symbol")?
+        let Some(symbol) = crate::json_field::field(order, "symbol")
+            .map_err(type_error)?
             .and_then(serde_json::Value::as_str)
             .filter(|symbol| !symbol.is_empty())
         else {
             return Ok(None);
         };
-        let positions = self.base.store.positions();
+        let positions = self.base.store.positions()?;
         let open = positions
             .iter()
             .filter(|position| position.symbol == symbol && position.contracts.abs() > 0.)
@@ -597,4 +604,10 @@ impl BybitExchange {
         )
         .await
     }
+}
+
+fn type_error(message: impl Into<String>) -> safe_cex_exchange::runtime::ExchangeError {
+    let mut error = safe_cex_exchange::runtime::ExchangeError::new(message);
+    error.name = "TypeError".into();
+    error
 }

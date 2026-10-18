@@ -10,6 +10,7 @@ use safe_cex_transport::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+mod error_enhancer;
 pub mod factory;
 
 /// What a client needs from its host: the runtime owning launched requests and
@@ -24,6 +25,10 @@ pub trait JsHttpHost {
     }
     /// Hosted account capability shared by JS HTTP and BaseExchange/WS auth.
     fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
+        None
+    }
+    /// Native implementation of the source options.payloadSigner callback.
+    fn payload_signer(&self) -> Option<Rc<dyn safe_cex_crypto::PayloadSigner>> {
         None
     }
 }
@@ -288,7 +293,7 @@ fn normalized_header_value(value: Js) -> Result<Js, Thrown> {
     if value.is_nullish() || value.strict_equals(&Js::Bool(false)) {
         return Ok(value);
     }
-    if let Some(values) = value.array_values() {
+    if let Some(values) = value.array_values()? {
         return values
             .into_iter()
             .map(normalized_header_value)
@@ -543,7 +548,7 @@ fn transform_response(response: &Js, config: &Js) -> Result<(), Thrown> {
         return Ok(());
     }
     let transforms = transforms
-        .array_values()
+        .array_values()?
         .unwrap_or_else(|| vec![transforms]);
     let mut data = response.get("data")?;
     for transform in transforms {
@@ -613,6 +618,24 @@ pub struct JsRestAdapter {
     rejection: RefCell<Option<Thrown>>,
 }
 
+fn native_query(value: &safe_cex_types::QueryValue) -> Js {
+    use safe_cex_types::QueryValue;
+    match value {
+        QueryValue::Undefined => Js::Undefined,
+        QueryValue::Null => Js::Null,
+        QueryValue::Bool(value) => Js::Bool(*value),
+        QueryValue::Number(value) => Js::Number(*value),
+        QueryValue::String(value) => Js::str(value),
+        QueryValue::Array(values) => Js::array(values.iter().map(native_query).collect()),
+        QueryValue::Object(values) => Js::object(
+            values
+                .iter()
+                .map(|(key, value)| (key.as_str(), native_query(value)))
+                .collect(),
+        ),
+    }
+}
+
 impl JsRestAdapter {
     pub fn new(runtime: Rc<dyn ExchangeRuntime>, xhr: Js) -> Self {
         Self {
@@ -622,13 +645,24 @@ impl JsRestAdapter {
         }
     }
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
+        let params = match (&request.query_params, &request.params) {
+            (Some(_), Some(_)) => {
+                return Err(Thrown::error(
+                    "TypeError",
+                    "Cannot combine legacy and native query parameters",
+                ));
+            }
+            (Some(params), None) => Some(native_query(params)),
+            (None, Some(params)) => Some(from_json(params)),
+            (None, None) => None,
+        };
         let config = Js::object(vec![]);
         for (name, value) in &request.config_extensions {
             config.define(name, from_retained_input(value.clone()))?;
         }
         // Typed parameters remain authoritative over an extension of that name.
-        if let Some(params) = &request.params {
-            config.define("params", from_json(params))?;
+        if let Some(params) = params {
+            config.define("params", params)?;
         }
         let url = Js::str(&request.url);
         // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
@@ -679,31 +713,127 @@ impl RestAdapter for JsRestAdapter {
                         .ok()
                         .filter(|r| !r.is_nullish())
                         .and_then(|r| rest_response(&r).ok());
-                    let code = optional(&thrown.value, "code").ok().and_then(|value| {
-                        if let Js::String(units) = value {
-                            Some(units)
-                        } else {
-                            None
-                        }
-                    });
                     let message = thrown.message();
-                    // RestFailure.code is the existing UTF-8 diagnostic view.
-                    // The owned cause is authoritative for the native string.
-                    let mut fields = vec![(
-                        "message",
-                        super::value::owned::OwnedJsValue::string(&message),
-                    )];
-                    if let Some(code) = &code {
-                        fields.push((
+                    let capture = (|| -> Result<_, crate::runtime::ExchangeError> {
+                        let mut fields = Vec::new();
+                        for field in [
+                            "name",
+                            "message",
                             "code",
-                            super::value::owned::OwnedJsValue::String(code.to_vec()),
-                        ));
-                    }
-                    let cause = super::value::owned::OwnedCallbackError::new(
-                        super::value::owned::OwnedJsValue::object(fields),
-                    );
+                            "stack",
+                            "cause",
+                            "isAxiosError",
+                            "enhancedMessage",
+                            "context",
+                            "originalError",
+                        ] {
+                            let value = optional(&thrown.value, field)?;
+                            if field == "originalError"
+                                && matches!(&value, Js::Object(object) if object.class == "Error")
+                            {
+                                use super::value::owned::OwnedJsValue;
+                                let OwnedJsValue::Object(mut snapshot) =
+                                    OwnedJsValue::object(fields.clone())
+                                else {
+                                    unreachable!("error metadata object")
+                                };
+                                for (key, cell) in value.own_entries()? {
+                                    if key.as_ref()
+                                        == "originalError".encode_utf16().collect::<Vec<_>>()
+                                        || key.as_ref()
+                                            == "response".encode_utf16().collect::<Vec<_>>()
+                                        || snapshot
+                                            .iter()
+                                            .any(|(name, _)| name.as_slice() == key.as_ref())
+                                        || cell.is_callable()
+                                    {
+                                        continue;
+                                    }
+                                    let captured = if key.as_ref()
+                                        == "config".encode_utf16().collect::<Vec<_>>()
+                                        && cell.is_object()
+                                    {
+                                        let mut config = vec![];
+                                        for (name, cell) in cell.own_entries()? {
+                                            if cell.is_callable()
+                                                || cell.array_items()?.is_some_and(|items| {
+                                                    items
+                                                        .into_iter()
+                                                        .flatten()
+                                                        .any(|item| item.is_callable())
+                                                })
+                                            {
+                                                continue;
+                                            }
+                                            let captured = if ["paramsSerializer", "axios-retry"]
+                                                .iter()
+                                                .any(|key| {
+                                                    name.iter().copied().eq(key.encode_utf16())
+                                                })
+                                                && cell.is_object()
+                                            {
+                                                let mut options = vec![];
+                                                for (key, value) in cell.own_entries()? {
+                                                    if !value.is_callable() {
+                                                        options.push((
+                                                            key.to_vec(),
+                                                            OwnedJsValue::from_js(&value)?,
+                                                        ));
+                                                    }
+                                                }
+                                                OwnedJsValue::Object(options)
+                                            } else {
+                                                OwnedJsValue::from_js(&cell)?
+                                            };
+                                            config.push((name.to_vec(), captured));
+                                        }
+                                        OwnedJsValue::Object(config)
+                                    } else {
+                                        OwnedJsValue::from_js(&cell)?
+                                    };
+                                    snapshot.push((key.to_vec(), captured));
+                                }
+                                let snapshot = OwnedJsValue::Object(snapshot);
+                                fields.push((
+                                    "originalErrorIsError",
+                                    super::value::owned::OwnedJsValue::Bool(true),
+                                ));
+                                fields.push(("originalError", snapshot));
+                                continue;
+                            }
+                            if !value.is_undefined() || thrown.value.has_own(field) {
+                                fields.push((
+                                    field,
+                                    super::value::owned::OwnedJsValue::from_js(&value)?,
+                                ));
+                            }
+                        }
+                        if !fields.iter().any(|(field, _)| *field == "message") {
+                            fields.push((
+                                "message",
+                                super::value::owned::OwnedJsValue::string(&message),
+                            ));
+                        }
+                        Ok(super::value::owned::OwnedCallbackError::new(
+                            super::value::owned::OwnedJsValue::object(fields),
+                        ))
+                    })();
+                    let cause = capture.map_err(|error| RestFailure {
+                        code: None,
+                        message: error.message,
+                        transport_error: None,
+                        response: None,
+                        request: Box::new(request.clone()),
+                        context: Some(Box::new(serde_json::json!({"name": error.name}))),
+                    })?;
+                    let code = match cause.value().get("code") {
+                        Some(super::value::owned::OwnedJsValue::String(units)) => {
+                            Some(String::from_utf16_lossy(units))
+                        }
+                        _ => None,
+                    };
                     let failure = RestFailure {
-                        code: code.as_ref().map(|units| String::from_utf16_lossy(units)),
+                        code,
                         message,
                         transport_error: Some(Box::new(
                             safe_cex_transport::TransportError::Rejected(
@@ -728,6 +858,7 @@ struct RestHttpHost {
     runtime: Rc<dyn ExchangeRuntime>,
     adapter: std::sync::Arc<dyn RestAdapter>,
     remote: Option<super::base_exchange::HostedSigner>,
+    payload: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
     exchange: RefCell<Option<safe_cex_types::ExchangeName>>,
 }
 
@@ -745,10 +876,21 @@ pub fn rest_http_host_signed(
     adapter: std::sync::Arc<dyn RestAdapter>,
     remote: Option<super::base_exchange::HostedSigner>,
 ) -> Rc<dyn JsHttpHost> {
+    rest_http_host_with_signers(runtime, adapter, remote, None)
+}
+
+/// Native signer capabilities remain executable handles outside serialized options.
+pub fn rest_http_host_with_signers(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: Option<super::base_exchange::HostedSigner>,
+    payload: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
+) -> Rc<dyn JsHttpHost> {
     Rc::new(RestHttpHost {
         runtime,
         adapter,
         remote,
+        payload,
         exchange: RefCell::new(None),
     })
 }
@@ -1047,6 +1189,9 @@ impl JsHttpHost for RestHttpHost {
     fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
         self.remote.clone()
     }
+    fn payload_signer(&self) -> Option<Rc<dyn safe_cex_crypto::PayloadSigner>> {
+        self.payload.clone()
+    }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.runtime.clone()
     }
@@ -1099,11 +1244,18 @@ impl JsHttpHost for RestHttpHost {
                 Err(failure) => {
                     if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
                         failure.transport_error.as_deref()
-                        && let Some(cause) = origin
+                        && origin
                             .error()
-                            .downcast_ref::<super::value::owned::OwnedCallbackError>()
+                            .is::<super::value::owned::OwnedCallbackError>()
                     {
-                        return Err(Thrown::new(cause.value().to_js()));
+                        let config = if remote.is_some() {
+                            effective_config(&config, (*failure.request).clone())?
+                        } else {
+                            config
+                        };
+                        let error = Thrown::from(crate::runtime::ExchangeError::from(failure));
+                        error.value.define("config", config)?;
+                        return Err(error);
                     }
                     let config = if remote.is_some() {
                         effective_config(&config, *failure.request)?

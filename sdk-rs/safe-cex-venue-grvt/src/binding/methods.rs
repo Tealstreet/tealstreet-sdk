@@ -162,14 +162,14 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
             Ok(crate::snapshots::calculate_position_upnl_from_last_price(
                 &to_typed(&a)?,
                 h.0.shared.store.as_ref(),
-            )
+            )?
             .map_or(Js::Null, Js::Number))
         }
         "calculateUpnlFromPositions" => {
             Ok(Js::Number(crate::snapshots::calculate_upnl_from_positions(
                 &to_typed::<Vec<Position>>(&a)?,
                 h.0.shared.store.as_ref(),
-            )))
+            )?))
         }
         "syncBalanceUpnlFromPositions" => {
             let positions = if a.is_undefined() {
@@ -359,9 +359,11 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
         "updateOrder" => {
             let scope = h.0.clone();
             Ok(scope.spawn(Box::pin(async move {
+                let field_count = a.get("update")?.own_keys().len();
                 let opts: UpdateOrderOpts = to_typed(&a)?;
-                let ids = crate::order_controls::update_order(
+                let ids = crate::order_controls::update_order_with_field_count(
                     &opts,
+                    field_count,
                     |order| {
                         let result =
                             from_typed(order).and_then(|v| call(&h, "cancelOrder", vec![v]));

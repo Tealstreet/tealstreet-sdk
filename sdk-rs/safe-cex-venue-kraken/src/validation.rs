@@ -55,7 +55,7 @@ fn lower(value: &Value, expression: &str) -> Result<String, ExchangeError> {
 
 fn status(error: &ExchangeError, expected: f64) -> bool {
     error
-        .response
+        .response_json_view()
         .as_ref()
         .and_then(|r| r.get("status"))
         .and_then(js_value_as_f64)
@@ -86,7 +86,8 @@ fn futures_failure(error: ExchangeError) -> Result<ValidateAccountResult, Exchan
             return Ok(result(text));
         }
     }
-    let data = error.response.as_ref().and_then(|r| r.get("data"));
+    let response = error.response_json_view();
+    let data = response.as_ref().and_then(|r| r.get("data"));
     let error_field = data.and_then(|d| d.get("error"));
     let first_error = first(error_field)?;
     let message = first_error

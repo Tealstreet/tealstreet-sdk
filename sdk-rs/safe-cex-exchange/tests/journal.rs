@@ -162,6 +162,79 @@ fn interval(actual: &PositionInterval, expected: &Value) {
     );
 }
 #[test]
+fn interval_mixed_optional_ids_never_panic_or_lose_positions() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["orderingCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 128);
+    for (index, case) in cases.iter().enumerate() {
+        let fills: Vec<Execution> = serde_json::from_value(case["fills"].clone()).unwrap();
+        let actual =
+            reconstruct_position_intervals(&fills, &mut PositionIntervalOptions::default())
+                .expect("INTERVAL mixed optional IDs complete without a host panic");
+        let expected = case["intervals"].as_array().unwrap();
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "INTERVAL mixed ID count {index}"
+        );
+        for row in &actual {
+            let expected = expected
+                .iter()
+                .find(|value| value["symbol"] == row.symbol)
+                .unwrap();
+            interval(row, expected);
+        }
+    }
+}
+#[test]
+fn interval_nonfinite_close_times_never_panic_or_lose_positions() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["nonfiniteCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 128);
+    for case in cases {
+        let mut fills: Vec<Execution> = serde_json::from_value(case["fills"].clone()).unwrap();
+        for (fill, timestamp) in fills.iter_mut().zip(case["timestamps"].as_array().unwrap()) {
+            fill.timestamp = decoded(timestamp);
+        }
+        let actual =
+            reconstruct_position_intervals(&fills, &mut PositionIntervalOptions::default())
+                .expect("INTERVAL nonfinite close times complete without a host panic");
+        let expected = case["intervals"].as_array().unwrap();
+        assert_eq!(actual.len(), expected.len());
+        for row in &actual {
+            let expected = expected
+                .iter()
+                .find(|value| value["symbol"] == row.symbol)
+                .unwrap();
+            interval(row, expected);
+        }
+    }
+}
+#[test]
 #[ignore = "requires installed live TypeScript"]
 fn journal_interval_native_source_parity() {
     let output = std::process::Command::new("node")
@@ -246,14 +319,14 @@ fn journal_interval_native_source_parity() {
                     "INTERVAL native funding attributed"
                 );
             }
-            let mut currency = |s: &str| format!("settle:{s}");
+            let mut currency = |s: &str| Ok(format!("settle:{s}"));
             let mut resolve_funding = |i: &PositionInterval| attribute_funding(i, &funding, false);
             let mut deps = FoldPositionAdapterDeps {
                 account: "acct",
                 resolve_settle_currency: &mut currency,
                 resolve_funding: Some(&mut resolve_funding),
             };
-            let actual_record = map_folded_interval(actual, &mut deps);
+            let actual_record = map_folded_interval(actual, &mut deps).unwrap();
             let expected_record = &case["records"][n];
             if expected_record.is_null() {
                 assert!(actual_record.is_none(), "FOLD native refusal");
@@ -292,7 +365,7 @@ fn journal_interval_native_source_parity() {
             fees: decoded(&e["fees"]),
             fee_currencies: vec!["USDT".into()],
         };
-        let mut currency = |s: &str| format!("settle:{s}");
+        let mut currency = |s: &str| Ok(format!("settle:{s}"));
         let result = map_folded_interval(
             &actual,
             &mut FoldPositionAdapterDeps {
@@ -300,7 +373,8 @@ fn journal_interval_native_source_parity() {
                 resolve_settle_currency: &mut currency,
                 resolve_funding: None,
             },
-        );
+        )
+        .unwrap();
         if case["result"].is_null() {
             assert!(result.is_none(), "FOLD direct refusal");
         } else {
@@ -424,7 +498,7 @@ fn journal_build_native_source_parity() {
             trace
                 .borrow_mut()
                 .push(serde_json::json!(["currency", symbol]));
-            format!("settle:{symbol}")
+            Ok(format!("settle:{symbol}"))
         };
         let result = ready(build_folded_position_records(
             &mut FoldableExchange {

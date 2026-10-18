@@ -130,57 +130,67 @@ impl BackpackExchange {
         }))
     }
     pub fn fetch_markets(self: &Rc<Self>) -> reads::Task<Vec<reads::Market<Value>>, ExchangeError> {
-        reads::fetch_markets(self.frame())
+        let future = reads::fetch_markets(self.frame());
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_tickers(
         self: &Rc<Self>,
     ) -> reads::Task<Vec<Option<reads::Ticker<Value>>>, ExchangeError> {
-        reads::fetch_tickers(self.frame())
+        let future = reads::fetch_tickers(self.frame());
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_ohlcv(
         self: &Rc<Self>,
         opts: reads::OHLCVOptions,
     ) -> reads::Task<Vec<Option<reads::Candle>>, ExchangeError> {
-        reads::fetch_ohlcv(self.frame(), opts)
+        let future = reads::fetch_ohlcv(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_order_book(
         self: &Rc<Self>,
         symbol: JsString,
     ) -> reads::Task<reads::OrderBook, ExchangeError> {
-        reads::fetch_order_book(self.frame(), symbol)
+        let future = reads::fetch_order_book(self.frame(), symbol);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_historical_fills(
         self: &Rc<Self>,
         opts: reads::ExecutionsOptions,
     ) -> reads::Task<Vec<reads::Execution>, ExchangeError> {
-        reads::fetch_historical_fills(self.frame(), opts)
+        let future = reads::fetch_historical_fills(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_orders(
         self: &Rc<Self>,
         symbols: Option<Vec<JsString>>,
     ) -> reads::Task<Vec<Option<Order>>, ExchangeError> {
-        reads::fetch_orders(self.frame(), symbols)
+        let future = reads::fetch_orders(self.frame(), symbols);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_positions(self: &Rc<Self>) -> reads::Task<Vec<reads::Position>, ExchangeError> {
-        reads::fetch_positions(self.frame())
+        let future = reads::fetch_positions(self.frame());
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fix_trigger_orders_without_trigger_by(
         self: &Rc<Self>,
-        orders: reads::Array<Value>,
+        orders: Value,
     ) -> reads::Task<(), ExchangeError> {
-        reads::fix_trigger_orders_without_trigger_by(self.frame(), orders)
+        let future = reads::fix_trigger_orders_without_trigger_by(self.frame(), orders);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn place_order(
         self: &Rc<Self>,
         opts: actions::Options,
     ) -> actions::Task<Vec<JsString>, ExchangeError> {
-        actions::place_order(self.frame(), opts)
+        let future = actions::place_order(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn update_order(
         self: &Rc<Self>,
         opts: actions::Update,
     ) -> actions::Task<Vec<JsString>, ExchangeError> {
-        actions::update_order(self.frame(), opts)
+        let future = actions::update_order(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn get_position_mode(&self) -> ExchangeFuture<'static, PositionMode> {
         crate::account_reads::get_position_mode()
@@ -254,6 +264,23 @@ impl Frame {
 }
 impl reads::Host for Frame {
     type Value = Value;
+    type Array = Value;
+    fn array_length(&mut self, a: &Value) -> Result<usize, ExchangeError> {
+        Ok(a.get("length")?.to_number()? as usize)
+    }
+    fn array_element(&mut self, a: &Value, index: usize) -> Result<Option<Value>, ExchangeError> {
+        if a.has_index(index) {
+            Ok(Some(a.get(&index.to_string())?))
+        } else {
+            Ok(None)
+        }
+    }
+    fn array_set(&mut self, a: &Value, index: usize, value: Value) -> Result<(), ExchangeError> {
+        Ok(a.set(&index.to_string(), value)?)
+    }
+    fn array_from(&mut self, values: Vec<Option<Value>>) -> Value {
+        Value::holey_array(values)
+    }
     type Error = ExchangeError;
     type LogTarget = ();
     type Order = Order;
@@ -268,7 +295,7 @@ impl reads::Host for Frame {
     fn field(&mut self, v: &Value, k: &str) -> Result<Value, ExchangeError> {
         v.field(k)
     }
-    fn array(&mut self, v: &Value) -> Result<reads::Array<Value>, ExchangeError> {
+    fn array(&mut self, v: &Value) -> Result<Value, ExchangeError> {
         v.array()
     }
     fn is_array(&mut self, v: &Value) -> bool {
@@ -312,11 +339,7 @@ impl reads::Host for Frame {
     }
     fn pair(&mut self, v: &Value) -> Result<(Value, Value), ExchangeError> {
         let a = v.array()?;
-        let a = a.borrow();
-        Ok((
-            a.first().cloned().flatten().unwrap_or(Value::Undefined),
-            a.get(1).cloned().flatten().unwrap_or(Value::Undefined),
-        ))
+        Ok((a.get("0")?, a.get("1")?))
     }
     fn spread(&mut self, v: &[Value]) -> Result<Value, ExchangeError> {
         Value::spread(v)
@@ -390,7 +413,7 @@ impl reads::Host for Frame {
         self.owner
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == s)
             .map(|m| {
@@ -400,12 +423,12 @@ impl reads::Host for Frame {
             })
             .transpose()
     }
-    fn markets(&mut self) -> Result<reads::Array<Value>, ExchangeError> {
+    fn markets(&mut self) -> Result<Value, ExchangeError> {
         let m = self
             .owner
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .map(|m| {
                 serde_json::to_value(m)
@@ -413,7 +436,7 @@ impl reads::Host for Frame {
                     .map_err(|e| ExchangeError::new(e.to_string()))
             })
             .collect::<Result<_, _>>()?;
-        Ok(Rc::new(RefCell::new(m)))
+        Ok(Value::holey_array(m))
     }
     fn position_mode(&mut self) -> Result<reads::Task<PositionMode, ExchangeError>, ExchangeError> {
         Ok(self.owner.get_position_mode())
@@ -439,10 +462,7 @@ impl reads::Host for Frame {
             format!("{s}:{side}")
         }))
     }
-    fn repair(
-        &mut self,
-        orders: reads::Array<Value>,
-    ) -> Result<reads::Task<(), ExchangeError>, ExchangeError> {
+    fn repair(&mut self, orders: Value) -> Result<reads::Task<(), ExchangeError>, ExchangeError> {
         Ok(self.owner.fix_trigger_orders_without_trigger_by(orders))
     }
     fn map_order(&mut self, v: Value) -> Result<Order, ExchangeError> {
@@ -450,7 +470,7 @@ impl reads::Host for Frame {
             .map_err(|e| ExchangeError::new(e.to_string()))?;
         crate::order_utils::map_order(
             &order,
-            |s, side, n| Ok(self.determine(s, side, n)),
+            |s, side, n| self.determine(s, side, n),
             |m, severity| self.owner.base.log(m, severity),
         )
     }
@@ -461,28 +481,33 @@ impl reads::Host for Frame {
         side: OrderSide,
         n: f64,
     ) -> Result<OrderType, ExchangeError> {
-        Ok(self.determine(&symbol.utf8()?, side, n))
+        self.determine(&symbol.utf8()?, side, n)
     }
     fn trigger_by(&mut self, tp: bool) -> Result<JsString, ExchangeError> {
         Ok(self.reference(tp, None))
     }
 }
 impl Frame {
-    fn determine(&self, symbol: &str, side: OrderSide, trigger: f64) -> OrderType {
+    fn determine(
+        &self,
+        symbol: &str,
+        side: OrderSide,
+        trigger: f64,
+    ) -> Result<OrderType, ExchangeError> {
         let tickers = self
             .owner
             .base
             .store
-            .tickers()
+            .tickers()?
             .iter()
             .map(|t| (t.symbol.clone(), Some(t.last), Some(t.mark)))
             .collect::<Vec<_>>();
-        crate::private_order_utils::determine_trigger_order_type(
+        Ok(crate::private_order_utils::determine_trigger_order_type(
             &tickers,
             &symbol.to_owned(),
             side,
             Some(trigger),
-        )
+        ))
     }
     fn reference(&self, tp: bool, explicit: Option<OrderStopTriggerType>) -> JsString {
         let v = crate::order_utils::get_trigger_by(
@@ -528,7 +553,7 @@ impl actions::Host for Frame {
             .owner
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == symbol)
             .cloned())
@@ -612,7 +637,7 @@ impl actions::Host for Frame {
             .owner
             .base
             .store
-            .orders()
+            .orders()?
             .iter()
             .find(|o| o.id == id)
             .cloned()
@@ -658,14 +683,14 @@ impl BackpackExchange {
         let owner = self.clone();
         let log = owner.clone();
         let xhr = self.xhr.clone();
-        crate::account_reads::cancel_order(
+        let future = crate::account_reads::cancel_order(
             &order.symbol,
             &order.id,
             move |symbol| {
                 Ok(owner
                     .base
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .find(|m| m.symbol == symbol)
                     .map(|m| m.id.clone()))
@@ -682,7 +707,8 @@ impl BackpackExchange {
                 }))
             },
             move |m, s| log.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn cancel_symbol_orders(
         self: &Rc<Self>,
@@ -691,13 +717,13 @@ impl BackpackExchange {
         let owner = self.clone();
         let log = owner.clone();
         let xhr = self.xhr.clone();
-        crate::account_reads::cancel_symbol_orders(
+        let future = crate::account_reads::cancel_symbol_orders(
             &symbol,
             move |s| {
                 Ok(owner
                     .base
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .find(|m| m.symbol == s)
                     .map(|m| m.id.clone()))
@@ -714,12 +740,13 @@ impl BackpackExchange {
                 }))
             },
             move |m, s| log.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_balance(self: &Rc<Self>) -> actions::Task<safe_cex_types::Balance, ExchangeError> {
         let xhr = self.xhr.clone();
         let owner = self.clone();
-        crate::account_reads::fetch_balance(
+        let future = crate::account_reads::fetch_balance(
             move |endpoint| {
                 let response = xhr.request(
                     "GET",
@@ -730,14 +757,15 @@ impl BackpackExchange {
                 Ok(Box::pin(async move { response.await?.prepared() }))
             },
             move |m, s| owner.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn get_account(
         self: &Rc<Self>,
     ) -> actions::Task<crate::account_reads::AccountIdentity, ExchangeError> {
         let xhr = self.xhr.clone();
         let owner = self.clone();
-        crate::account_reads::get_account(
+        let future = crate::account_reads::get_account(
             move |endpoint| {
                 let response = xhr.request(
                     "GET",
@@ -748,7 +776,8 @@ impl BackpackExchange {
                 Box::pin(async move { response.await?.prepared() })
             },
             move |m, s| owner.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_account_info(self: &Rc<Self>) -> actions::Task<(), ExchangeError> {
         let response = self.xhr.request(
@@ -759,14 +788,15 @@ impl BackpackExchange {
         );
         let owner = self.clone();
         let log = owner.clone();
-        Box::pin(async move {
+        let future = Box::pin(async move {
             crate::account_reads::fetch_account_info(
                 &owner.account_leverage_limit,
                 |_| async move { response.await?.prepared() },
                 move |m, s| log.base.log(m, s),
             )
             .await
-        })
+        });
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn listen_ohlcv(
         self: &Rc<Self>,
@@ -797,7 +827,7 @@ impl BackpackExchange {
         };
         crate::order_utils::map_order(
             order,
-            |s, side, n| Ok(frame.determine(s, side, n)),
+            |s, side, n| frame.determine(s, side, n),
             |m, s| self.base.log(m, s),
         )
     }
@@ -815,7 +845,7 @@ impl BackpackExchange {
         symbol: &str,
         side: OrderSide,
         n: f64,
-    ) -> OrderType {
+    ) -> Result<OrderType, ExchangeError> {
         Frame {
             owner: self.clone(),
         }
@@ -830,5 +860,32 @@ impl BackpackExchange {
             owner: self.clone(),
         }
         .reference(tp, explicit)
+    }
+}
+
+// Native lifetime ruling: an unobserved final handle must not leave live socket
+// callbacks referring to a dead weak parent. Explicit source disposal remains
+// independently ordered; final destruction additionally closes native resources.
+impl Drop for BackpackExchange {
+    fn drop(&mut self) {
+        safe_cex_exchange::native_final_drop(&self.base, || {
+            if let Some(public) = self.public_websocket.get() {
+                public.ticker_handler.cancel();
+                let _ = public.dispose();
+                for task in public.tasks.borrow_mut().drain(..) {
+                    task.cancel();
+                }
+            }
+            if let Some(private) = self.private_websocket.get() {
+                let _ = private.dispose();
+                for task in private.tasks.borrow_mut().drain(..) {
+                    task.cancel();
+                }
+            }
+            for task in self.tasks.borrow_mut().drain(..) {
+                task.cancel();
+            }
+            Ok(())
+        });
     }
 }

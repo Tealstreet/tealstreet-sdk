@@ -1,6 +1,6 @@
 # Orderly structural alias review
 
-All three assigned aliases have live users in configured websocket/account bodies.
+The three ws_controls aliases have live users in configured websocket/account bodies.
 They remain generic public aliases, with one fixed production-host profile each.
 No identity fallback or arbitrary host/type instantiation is enabled.
 
@@ -45,3 +45,32 @@ python3 safe-cex-venue-orderly/scripts/structural-alias-controls.py
 
 These profiles do not cover other aliases, function owners, arbitrary hosts,
 feature configurations or Wasm execution. Existing source/corpus assertions remain.
+
+Four additional callable aliases are retained by the configured native classes:
+`classes::{BoundMember,BodyFuture,NativeMember}<Host>` and
+`native_exchange::OrderlyHttpFactory`. Their exact production Host profiles and
+compiler declarations are registered without permitting arbitrary instantiations.
+These are native invocation, future and transport capabilities, not decoders.
+
+`native_class_callable_aliases_preserve_values_futures_and_errors` constructs all
+six account classes and invokes the production Host arrow/member implementations.
+It checks synchronous and asynchronous value/error identity, negative zero, lone
+UTF16, own undefined, the real REST body/client and both HTTP factory option sets.
+The terminal transport and runtime are the only scripted primitives.
+`scripts/class-alias-controls.py` independently corrupts argument forwarding,
+future results, member arguments and factory options, requiring compiled failures
+and exact restored passes.
+
+The reviewed nested `copy` and `present` bodies are byte-identical before and
+after 9225c237ef. Its two surrounding deletion calls propagate their existing
+Results. The canonical scan also refuses the local query glob import; its four
+used names are now explicit module imports. Both helpers and query behavior are
+unchanged, and the enclosing-file fingerprints cover this reviewed import edit.
+
+Run the added capabilities serially from `sdk-rs`:
+
+```sh
+cargo +1.99.0 test --locked --jobs 1 -p safe-cex-venue-orderly --lib native_class_callable_aliases_preserve_values_futures_and_errors
+python3 safe-cex-venue-orderly/scripts/class-alias-controls.py
+RUSTUP_TOOLCHAIN=1.99.0 CARGO_BUILD_JOBS=1 node safe-cex-parity/scripts/accepted-set.mjs --package=safe-cex-venue-orderly --jobs=1 --measure --owner=classes::BoundMember --owner=classes::BodyFuture --owner=classes::NativeMember --owner=native_exchange::OrderlyHttpFactory
+```

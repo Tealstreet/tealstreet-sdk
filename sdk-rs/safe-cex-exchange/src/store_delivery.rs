@@ -7,26 +7,35 @@ pub trait StoreUpdateThrottleHost: WorkerPortTimers + 'static {
     fn report_store_timer_error(&self, error: &ExchangeError);
 }
 
-struct ThrottleState<T> {
+struct ThrottleState<T, A> {
     timer: Option<T>,
-    last_args: Option<StoreFrame>,
+    last_args: Option<A>,
     last_call: Option<f64>,
     last_invoke: f64,
 }
 /// lodash throttle with default leading=true, trailing=true, maxWait=wait.
 /// Its callback reaches the real worker store_update through Weak, not a second
 /// keyed throttle. Binary64 timer delays and wall-clock rollback are preserved.
-pub struct StoreUpdateThrottle<H: StoreUpdateThrottleHost> {
+pub struct StoreUpdateThrottle<H: StoreUpdateThrottleHost, A: 'static = StoreFrame> {
     host: Rc<H>,
     pub wait_ms: f64,
-    state: RefCell<ThrottleState<H::Timer>>,
-    callback: Rc<dyn Fn(StoreFrame) -> Result<(), ExchangeError>>,
+    state: RefCell<ThrottleState<H::Timer, A>>,
+    callback: Rc<dyn Fn(A) -> Result<(), ExchangeError>>,
 }
 impl<H: StoreUpdateThrottleHost> StoreUpdateThrottle<H> {
     pub fn new(
         host: Rc<H>,
         wait: f64,
         callback: Rc<dyn Fn(StoreFrame) -> Result<(), ExchangeError>>,
+    ) -> Rc<Self> {
+        Self::new_with_argument(host, wait, callback)
+    }
+}
+impl<H: StoreUpdateThrottleHost, A: 'static> StoreUpdateThrottle<H, A> {
+    pub fn new_with_argument(
+        host: Rc<H>,
+        wait: f64,
+        callback: Rc<dyn Fn(A) -> Result<(), ExchangeError>>,
     ) -> Rc<Self> {
         Rc::new(Self {
             host,
@@ -97,7 +106,7 @@ impl<H: StoreUpdateThrottleHost> StoreUpdateThrottle<H> {
         }
         Ok(())
     }
-    pub fn call(self: &Rc<Self>, data: StoreFrame) -> Result<(), ExchangeError> {
+    pub fn call(self: &Rc<Self>, data: A) -> Result<(), ExchangeError> {
         let time = self.host.now_ms();
         let invoking = self.should_invoke(time);
         {
@@ -136,7 +145,7 @@ impl<H: StoreUpdateThrottleHost> StoreUpdateThrottle<H> {
         s.timer = None;
     }
 }
-impl<H: StoreUpdateThrottleHost> Drop for StoreUpdateThrottle<H> {
+impl<H: StoreUpdateThrottleHost, A: 'static> Drop for StoreUpdateThrottle<H, A> {
     fn drop(&mut self) {
         if let Some(timer) = self.state.get_mut().timer.take() {
             self.host.clear_timeout(&timer);

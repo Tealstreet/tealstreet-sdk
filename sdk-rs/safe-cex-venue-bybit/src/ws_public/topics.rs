@@ -177,7 +177,7 @@ impl PublicTopics {
             let Some(socket) = weak.upgrade() else {
                 return Ok(());
             };
-            let added = payload.get("added")?.array_values().unwrap_or_default();
+            let added = payload.get("added")?.array_values()?.unwrap_or_default();
             let topics = topics.clone();
             let output_topics = topics.clone();
             let has_ws = socket.has_websocket();
@@ -262,7 +262,7 @@ impl PublicTopics {
                 || Ok(socket.is_disposed()),
                 || {
                     let store = socket.store();
-                    let markets = store.markets();
+                    let markets = store.markets()?;
                     Ok(Rc::new(RefCell::new(
                         markets
                             .iter()

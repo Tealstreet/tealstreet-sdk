@@ -1,7 +1,8 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Market;
 use safe_cex_venue_blofin::symbols::*;
 use serde_json::{Value, json};
@@ -60,7 +61,9 @@ fn live_symbols_corpus() {
                 market_id_to_symbol(key, &store)
             };
             assert_eq!(
-                actual.map_or(json!({"undefined":true}), Value::String),
+                actual
+                    .unwrap()
+                    .map_or(json!({"undefined":true}), Value::String),
                 case["expected"],
                 "symbols_{name}_native case={i} path={path}"
             );
@@ -70,10 +73,10 @@ fn live_symbols_corpus() {
     }
     pin.finish("cases", pin.count("/cases"));
     pin.finish_comparisons(3);
-    assert!(
-        js_from_str::<String>("\"\\ud800\"").is_err(),
-        "symbols_utf8_boundary"
-    );
+    let raw = "\"\\ud800\"";
+    let native = js_from_str::<String>(raw).unwrap();
+    assert_eq!(native, "\u{fffd}", "typed symbol replacement");
+    typed_utf16::assert_projection(raw, &native);
     for index in 0..pin.count("/boundaries") {
         let case = &corpus["boundaries"][index];
         let store = DefaultStore::new();
@@ -97,7 +100,7 @@ fn live_symbols_corpus() {
             market_id_to_symbol("id", &store)
         };
         assert_eq!(
-            actual.as_deref(),
+            actual.unwrap().as_deref(),
             Some("id"),
             "typed_store_prototype_boundary"
         );
@@ -105,3 +108,6 @@ fn live_symbols_corpus() {
     }
     pin.finish("boundaries-case-1", pin.count("/boundaries"));
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

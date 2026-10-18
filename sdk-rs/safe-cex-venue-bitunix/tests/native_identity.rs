@@ -372,7 +372,7 @@ fn attached_amendment_recreates_only_after_matching_refusal_and_successful_cance
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            statuses(&serde_json::to_value(&*store.orders()).unwrap()),
+            statuses(&serde_json::to_value(&*store.orders().unwrap()).unwrap()),
             statuses(&case["orders"]),
             "cancel only the exact parent and children; neighbor survives: {label}"
         );
@@ -464,7 +464,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 rt.pump();
             }
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
     }
     assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
     assert!(
@@ -595,7 +595,7 @@ fn retained_model_info_survives_real_amendment_without_json_projection() {
         );
     }
     drop(requests);
-    for order in store.orders().iter() {
+    for order in store.orders().unwrap().iter() {
         assert_info(order);
     }
     venue.dispose().unwrap();
@@ -747,4 +747,47 @@ fn retained_standalone_info(selected: usize) {
         drop(requests);
         venue.dispose().unwrap();
     }
+}
+
+#[test]
+fn discarded_ticker_call_still_sends_its_request() {
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/eager-operation-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["requests"].as_array().unwrap().len(), 1);
+    let (venue, rt, store, wire) = support::fixture_with(false);
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/futures/market/tickers".into(),
+        json!({"code":0,"data":[]}),
+    );
+    let pending = venue.fetch_tickers();
+    drop(pending);
+    rt.pump();
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.url == "/api/v1/futures/market/tickers")
+            .count(),
+        1,
+        "a discarded source Promise still sends its ticker request"
+    );
+    assert_eq!(
+        safe_cex_store::Store::tickers(store.as_ref())
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(requests);
+    venue.dispose().unwrap();
 }

@@ -23,7 +23,7 @@ extra properties retain the declarations' structural input domain. The corpus
 uses ordinary UTF-8 strings and serde_json carriers.
 
 This is declaration-decoder evidence. The separate unknown-input validation,
-market/candle mapping functions, generic envelopes, number/string child owners,
+market mapping functions, generic envelopes, number/string child owners,
 and aliases retain their independent contract obligations.
 
 Source discovery initially refused the protocol glob and five invocations of a
@@ -31,9 +31,9 @@ local validation macro in `v3_public`. The glob now names its eight actual impor
 The five numeric validation bodies are ordinary Rust, preserving evaluation
 order, numeric conversion, finite/minimum checks and errors. The existing native
 mapper test covers its 2,184 source cases before and after that expansion. The
-local candle merge sorter stays in place with its existing non-decoder role;
-its entire body and following code are byte-identical. Only its reviewed
-whole-file source hash changes in the local-function policy.
+unused candle mapper and its local merge sorter are subsequently retired with
+their exact facade/control tail and local-function policy row. The other 2,142
+public cases retain their assertions; see V3_CANDLE_REVIEW.md.
 
 The focused runner performs ordinary full-package compiler inventory before
 selecting the thirty complete owners and checking their three source modules.
@@ -58,15 +58,15 @@ after the run. Normal restored runs exercise the strict behavior again.
 
 The mapper controls are maintained in scripts/accepted-public-source-controls.py.
 Run it serially with no other Cargo process: it temporarily changes the candidate
-market minimum and candle comparator, requires successful compilation followed
+market minimum, requires successful compilation followed
 by the named native fixture failure, restores the exact bytes and requires a
 passing test after each mutation. A finally block restores the source on an
 error; receipts go into a temporary directory outside the repository.
 
-Verified results: thirty production runtime receipts pass on native and on the
+Historical verification before the candle retirement: thirty production runtime receipts pass on native and on the
 actual Wasm target, with zero failed owners. All thirty copied object-guard
 removals compile and produce named native failures; exact native restoration
-passes. Both maintained mapper mutations compile and fail the named fixture
+passes. Both then-maintained mapper mutations compile and fail the named fixture
 test, with restored passes. Poisoning the local sorter's policy hash stops the
 maintained runner at its named source-pin assertion before runtime probes.
 Nine scoped tests (including the 2,184-case corpus and field-identity checks),

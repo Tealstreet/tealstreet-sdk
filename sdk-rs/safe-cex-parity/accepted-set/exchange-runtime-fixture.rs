@@ -14,7 +14,8 @@ use crate::{
         WsSocket,
     },
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use crate::native_store::DefaultStore;
+use safe_cex_store::Store;
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::ExchangeOptions;
 use serde_json::{Value, json};
@@ -59,11 +60,7 @@ impl ExchangeRuntime for Runtime {
             "name": error.name, "message": error.message, "context": context,
         }));
     }
-    fn report_raw_exception(
-        &self,
-        _: &Js,
-        _: &safe_cex_types::retained_json::RetainedJsonInput,
-    ) {
+    fn report_raw_exception(&self, _: &Js, _: &safe_cex_types::retained_json::RetainedJsonInput) {
         panic!("accepted fixture unexpectedly reported a raw exception")
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {

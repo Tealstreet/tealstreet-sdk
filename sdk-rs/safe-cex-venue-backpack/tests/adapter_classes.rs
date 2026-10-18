@@ -26,11 +26,12 @@ fn units(s: &str) -> JsString {
 #[test]
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn native_market_frames_reach_sdk_tickers_books_and_candles() {
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_exchange::{
         exchange::{BaseExchange, ExchangeSettings},
         websocket::WsEvent,
     };
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_transport::{RestResponseBody, socket::SocketFrame};
     use std::sync::Arc;
     let runtime = Rc::new(support::Runtime::default());
@@ -85,7 +86,11 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
     .unwrap();
     let tickers = ready(&runtime, Exchange::fetch_tickers(owner.as_ref())).unwrap();
     assert_eq!(
-        (tickers[0].mark, tickers[0].index, tickers[0].percentage),
+        (
+            tickers[0].mark,
+            tickers[0].index.unwrap(),
+            tickers[0].percentage
+        ),
         (101.0, 102.0, 5.0)
     );
     Store::update(
@@ -154,7 +159,10 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
         json!({"e":"ticker","s":"BTC_USDC","c":"100.5","P":"0.02","v":"3","q":"301.5"}),
     );
     assert_eq!(
-        (store.tickers()[0].last, store.tickers()[0].percentage),
+        (
+            store.tickers().unwrap()[0].last,
+            store.tickers().unwrap()[0].percentage
+        ),
         (100.5, 2.0)
     );
     frame(
@@ -317,7 +325,7 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
         [units("native-id")],
         "CLASS native bound order placement"
     );
-    assert_eq!(store.markets()[0].symbol, "BTC_USDC");
+    assert_eq!(store.markets().unwrap()[0].symbol, "BTC_USDC");
     o.dispose().unwrap();
     assert!(o.base.is_disposed(), "CLASS native disposal");
 }
@@ -330,12 +338,12 @@ fn concrete_public_throttle_and_weak_listener_lifetime() {
     };
     p.ticker_handler.call(data("10")).unwrap();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         10.0f64.to_bits(),
         "PUBLIC CLASS native ticker binding"
     );
     assert_eq!(
-        store.tickers()[0].percentage.to_bits(),
+        store.tickers().unwrap()[0].percentage.to_bits(),
         50.0f64.to_bits(),
         "PUBLIC CLASS native percentage binding"
     );
@@ -344,14 +352,14 @@ fn concrete_public_throttle_and_weak_listener_lifetime() {
     rt.now.set(1000.0);
     p.ticker_handler.call(data("30")).unwrap();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         30.0f64.to_bits(),
         "PUBLIC CLASS native throttle leading value"
     );
     rt.now.set(2000.0);
     rt.pump();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         30.0f64.to_bits(),
         "PUBLIC CLASS native stale trailing canceled"
     );
@@ -359,7 +367,7 @@ fn concrete_public_throttle_and_weak_listener_lifetime() {
     rt.now.set(2100.0);
     p.ticker_handler.call(data("40")).unwrap();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         40.0f64.to_bits(),
         "PUBLIC CLASS native cancel resets timestamp"
     );
@@ -393,28 +401,28 @@ fn concrete_public_depth_ticker_throttle_uses_source_100ms_window() {
         |bid: &str| Native::from_prepared(json!({"s":"BTC_USDC","b":[[bid,"1"]],"a":[]}).into());
     depth.call(data("10")).unwrap();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         10.0f64.to_bits(),
         "DEPTH leading"
     );
     rt.now.set(50.0);
     depth.call(data("15")).unwrap();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         10.0f64.to_bits(),
         "DEPTH inside window deferred"
     );
     rt.now.set(100.0);
     rt.pump();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         15.0f64.to_bits(),
         "DEPTH trailing fires at the source throttle(updateTickerFromDepth, 100) window"
     );
     rt.now.set(250.0);
     depth.call(data("20")).unwrap();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         20.0f64.to_bits(),
         "DEPTH leading after window"
     );
@@ -446,11 +454,11 @@ fn concrete_private_handler_and_throttle_state() {
     p.on_message(&safe_cex_transport::socket::SocketFrame::Text(raw))
         .unwrap();
     assert_eq!(
-        store.orders().len(),
+        store.orders().unwrap().len(),
         1,
         "PRIVATE CLASS native dispatcher order count"
     );
-    let order = store.orders()[0].clone();
+    let order = store.orders().unwrap()[0].clone();
     assert_eq!(order.id, "private-id", "PRIVATE CLASS native dispatcher ID");
     assert_eq!(
         order.amount.to_bits(),
@@ -550,10 +558,10 @@ fn shared_runtime_graph_reaches_backpack_throttled_ticker_without_projection() {
         ("v", Js::Number(f64::INFINITY)),
         ("q", Js::Number(f64::NEG_INFINITY)),
     ]);
-    let prior_percentage = store.tickers()[0].percentage;
+    let prior_percentage = store.tickers().unwrap()[0].percentage;
     assert!(data.field("P").unwrap().as_f64().unwrap().is_nan());
     socket.ticker_handler.call(data.clone()).unwrap();
-    let ticker = store.tickers()[0].clone();
+    let ticker = store.tickers().unwrap()[0].clone();
     assert_eq!(ticker.last.to_bits(), (-0.0f64).to_bits());
     assert_eq!(ticker.percentage.to_bits(), prior_percentage.to_bits());
     assert_eq!(ticker.volume, f64::INFINITY);
@@ -575,7 +583,7 @@ fn shared_runtime_graph_reaches_backpack_throttled_ticker_without_projection() {
     runtime.now.set(1000.0);
     runtime.pump();
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         37.5,
         "SHARED GRAPH deferred reader sees runtime mutation"
     );
@@ -659,6 +667,58 @@ fn native_field_receiver_forwards_own_cells_without_projection() {
     ] {
         assert!(value.field("x").unwrap().is_undefined());
     }
+}
+
+#[test]
+fn native_rest_array_host_retains_owner_and_inherited_getter_completion() {
+    use safe_cex_exchange::js_runtime::value::Thrown;
+    let (owner, runtime, _, wire) = support::fixture();
+    let array = Native::holey_array(vec![None]);
+    let alias = NativeValue::array(&array).unwrap();
+    assert!(alias.same_reference(&array), "REST_ARRAY original owner");
+    let tag = Native::object(vec![]);
+    array.set("tag", tag.clone()).unwrap();
+    let prototype = Native::object(vec![]);
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    let expected_tag = tag.clone();
+    prototype
+        .define_accessor(
+            "0",
+            Some(Rc::new(move |receiver| {
+                assert!(receiver.get("tag")?.same_reference(&expected_tag));
+                seen.set(seen.get() + 1);
+                Ok(Native::object(vec![]))
+            })),
+            None,
+        )
+        .unwrap();
+    array.set("__proto__", prototype.clone()).unwrap();
+    let before = wire.requests.lock().unwrap().len();
+    ready(
+        &runtime,
+        owner.fix_trigger_orders_without_trigger_by(alias.clone()),
+    )
+    .unwrap();
+    assert_eq!(calls.get(), 1, "REST_ARRAY inherited getter reached");
+    assert!(!array.has_own("0"), "REST_ARRAY hole remains a hole");
+    assert!(alias.get("tag").unwrap().same_reference(&tag));
+
+    let failure = Native::object(vec![("message", Native::str("original array getter"))]);
+    let thrown = failure.clone();
+    prototype
+        .define_accessor(
+            "0",
+            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+            None,
+        )
+        .unwrap();
+    let error = ready(&runtime, owner.fix_trigger_orders_without_trigger_by(alias)).unwrap_err();
+    assert!(
+        Thrown::from(error).value.same_reference(&failure),
+        "REST_ARRAY original getter rejection escapes"
+    );
+    assert_eq!(wire.requests.lock().unwrap().len(), before);
 }
 
 #[test]
@@ -838,7 +898,7 @@ fn native_typed_container_aliases_keep_shared_cells() {
 fn native_data_container_aliases_preserve_holes_keys_and_mutation() {
     use safe_cex_types::{OrderBook, OrderBookOrders};
     use safe_cex_venue_backpack::{
-        order_utils, orderbook_state, private_auth, public_control, public_listeners, rest_reads,
+        order_utils, orderbook_state, private_auth, public_control, public_listeners,
         startup_recovery,
     };
     let text: public_control::JsString = vec![0xd800, 0xdc00, 0xdfff];
@@ -867,20 +927,20 @@ fn native_data_container_aliases_preserve_holes_keys_and_mutation() {
     assert!(other.borrow()[0].1.same_reference(&value));
     map.borrow_mut().pop();
     assert_eq!(other.borrow().len(), 1);
-    let array: rest_reads::Array<Native> = Rc::new(RefCell::new(vec![
+    let array = Native::holey_array(vec![
         None,
         Some(Native::Null),
         Some(Native::Undefined),
         Some(value.clone()),
-    ]));
+    ]);
     let other = array.clone();
-    assert!(Rc::ptr_eq(&array, &other));
-    assert!(other.borrow()[0].is_none());
-    assert!(matches!(other.borrow()[1], Some(Native::Null)));
-    assert!(other.borrow()[2].as_ref().unwrap().is_undefined());
-    assert!(other.borrow()[3].as_ref().unwrap().same_reference(&value));
-    array.borrow_mut().pop();
-    assert_eq!(other.borrow().len(), 3);
+    assert!(array.same_reference(&other));
+    assert!(!other.has_own("0"));
+    assert!(matches!(other.get("1").unwrap(), Native::Null));
+    assert!(other.get("2").unwrap().is_undefined());
+    assert!(other.get("3").unwrap().same_reference(&value));
+    array.call_method("pop", vec![]).unwrap();
+    assert_eq!(other.get("length").unwrap().to_number().unwrap(), 3.0);
 
     let streams: public_control::Streams = Rc::new(RefCell::new(vec![None, Some(vec![0xd800])]));
     let other = streams.clone();
@@ -1166,4 +1226,53 @@ fn native_http_callable_aliases_execute_the_production_factory() {
     assert_eq!(result.status, 200);
     assert_eq!(wire.requests.lock().unwrap().len(), 1);
     assert_eq!(wire.requests.lock().unwrap()[0].timeout_ms, Some(20_000));
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn routed_client_clone_retains_both_configured_native_owners() {
+    use safe_cex_num::JsJsonValue;
+    use safe_cex_venue_backpack::native_http::RoutedClient;
+    let (primary_owner, primary_runtime, _, primary_wire) = support::fixture();
+    let (reader_owner, reader_runtime, _, reader_wire) = support::fixture();
+    let primary = Rc::clone(&primary_owner.xhr);
+    let reader = Rc::clone(&reader_owner.xhr);
+    assert!(!Rc::ptr_eq(&primary, &reader));
+    let original = RoutedClient::new(primary.clone(), reader.clone());
+    let primary_count = Rc::strong_count(&primary);
+    let reader_count = Rc::strong_count(&reader);
+    let clone = original.clone();
+    assert_eq!(Rc::strong_count(&primary), primary_count + 1);
+    assert_eq!(Rc::strong_count(&reader), reader_count + 1);
+    assert!(Rc::ptr_eq(&clone, &primary));
+    original.retries.set(3);
+    assert_eq!(clone.retries.get(), 3);
+    drop(original);
+    assert_eq!(Rc::strong_count(&primary), primary_count);
+    assert_eq!(Rc::strong_count(&reader), reader_count);
+    for (method, runtime, expected_primary, expected_reader) in [
+        ("GET", &reader_runtime, 0, 1),
+        ("POST", &primary_runtime, 1, 1),
+        ("get", &primary_runtime, 2, 1),
+    ] {
+        let result = ready(
+            runtime,
+            clone.request(
+                method,
+                "/api/v1/time",
+                JsJsonValue::Undefined,
+                JsJsonValue::Undefined,
+            ),
+        )
+        .unwrap();
+        assert_eq!(result.field("id").unwrap().utf8().unwrap(), "native-id");
+        assert_eq!(
+            primary_wire.requests.lock().unwrap().len(),
+            expected_primary
+        );
+        assert_eq!(reader_wire.requests.lock().unwrap().len(), expected_reader);
+    }
+    assert_eq!(primary_wire.requests.lock().unwrap()[0].method, "POST");
+    assert_eq!(primary_wire.requests.lock().unwrap()[1].method, "get");
+    assert_eq!(reader_wire.requests.lock().unwrap()[0].method, "GET");
 }

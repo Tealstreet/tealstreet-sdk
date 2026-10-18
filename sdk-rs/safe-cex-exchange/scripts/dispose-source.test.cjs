@@ -75,3 +75,13 @@ test('comments, strings and a nested class cannot supply the outer method super 
   assert.equal(hasSuperDispose(members[0].body), false);
   assert.equal(hasSuperDispose(members[1].body), true);
 });
+
+const finalDrop = rows.find(row => row.kind === 'native-final-drop');
+test('native final drop is classified once at its canonical core entrypoint', () => {
+  assert(finalDrop);
+  assert.equal(rows.filter(row => row.kind === 'native-final-drop').length, 1);
+  sources.validate(finalDrop);
+  assert.throws(() => sources.validate({...finalDrop, file:'safe-cex-venue-backpack/src/adapter.rs'}), /canonical core entrypoint/);
+  assert.throws(() => sources.validate({...finalDrop, finding:'dispose bypasses dynamic hook dispose through base'}), /another function/);
+  assert.throws(() => sources.validate({...finalDrop, dispose_source:[ownNoSuper]}), /not a TypeScript dispose/);
+});

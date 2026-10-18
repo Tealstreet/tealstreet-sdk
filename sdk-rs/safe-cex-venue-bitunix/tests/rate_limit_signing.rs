@@ -17,6 +17,14 @@ fn queued_bitunix_request_signs_after_the_rate_window_opens() {
     runtime.now.set(1000.0);
     for _ in 0..5 {
         let mut pending = venue.validate_account();
+        assert!(
+            pending
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending(),
+            "TS validateAccount awaits xhr.get even when HTTP is already ready"
+        );
+        runtime.pump();
         assert!(matches!(
             pending
                 .as_mut()
@@ -31,10 +39,19 @@ fn queued_bitunix_request_signs_after_the_rate_window_opens() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
+    runtime.pump();
+    assert!(
+        queued
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending(),
+        "the sixth request must still wait while the rate window is closed"
+    );
     assert_eq!(wire.requests.lock().unwrap().len(), 5);
     VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 80_000.0);
     let after_dequeue = VIRTUAL_CLOCK.get_current_time();
     runtime.now.set(2000.0);
+    runtime.pump();
     assert!(matches!(
         queued
             .as_mut()

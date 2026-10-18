@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Ticker;
 use safe_cex_venue_phemex::ticker_parser::{fetch_tickers, parse_tickers};
 use serde_json::{Value, json};
@@ -115,7 +116,7 @@ fn compare(
                     ("ask", ticker.ask),
                     ("last", ticker.last),
                     ("mark", ticker.mark),
-                    ("index", ticker.index),
+                    ("index", ticker.index.unwrap()),
                     ("percentage", ticker.percentage),
                     ("openInterest", ticker.open_interest),
                     ("fundingRate", ticker.funding_rate),
@@ -210,9 +211,13 @@ fn ticker_parser_and_read_match_actual_typescript() {
         false,
     )
     .unwrap();
-    assert_eq!(store.markets().len(), 4, "PHEMEX-PARSER fixture markets");
     assert_eq!(
-        store.tickers().len(),
+        store.markets().unwrap().len(),
+        4,
+        "PHEMEX-PARSER fixture markets"
+    );
+    assert_eq!(
+        store.tickers().unwrap().len(),
         2,
         "PHEMEX-PARSER fixture cached tickers"
     );

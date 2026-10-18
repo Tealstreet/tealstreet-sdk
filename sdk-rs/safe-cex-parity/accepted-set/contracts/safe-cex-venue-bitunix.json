@@ -14006,7 +14006,7 @@
         },
         "input": "observed",
         "reason": "Execute the coercion-error conversion and inspect native error class/message rather than reducing it to Display text.",
-        "call": "{let (name,message)=if $value[\"range\"]==true {(\"RangeError\",\"outside range\")}else{(\"TypeError\",\"wrong type\")};let fault=<$type as From<safe_cex_num::JsCoercionError>>::from(safe_cex_num::JsCoercionError{name,message});serde_json::json!({\"name\":fault.0.name,\"message\":fault.0.message,\"response\":fault.0.metadata.response})}",
+        "call": "{let (name,message)=if $value[\"range\"]==true {(\"RangeError\",\"outside range\")}else{(\"TypeError\",\"wrong type\")};let fault=<$type as From<safe_cex_num::JsCoercionError>>::from(safe_cex_num::JsCoercionError{name,message});serde_json::json!({\"name\":fault.0.name,\"message\":fault.0.message,\"response\":fault.0.response_json_view()})}",
         "cases": [
           {
             "input": {
@@ -14052,7 +14052,7 @@
         },
         "input": "observed",
         "reason": "Execute the ExchangeError wrapper and retain its actual remote response metadata.",
-        "call": "{let mut error=safe_cex_exchange::runtime::ExchangeError::new($value[\"message\"].as_str().unwrap());error.name=$value[\"name\"].as_str().unwrap().into();error.metadata.response=Some($value[\"response\"].clone());let fault=<$type as From<safe_cex_exchange::runtime::ExchangeError>>::from(error);serde_json::json!({\"name\":fault.0.name,\"message\":fault.0.message,\"response\":fault.0.metadata.response})}",
+        "call": "{let mut error=safe_cex_exchange::runtime::ExchangeError::new($value[\"message\"].as_str().unwrap());error.name=$value[\"name\"].as_str().unwrap().into();error=error.with_retained_response($value[\"response\"].clone().into());let fault=<$type as From<safe_cex_exchange::runtime::ExchangeError>>::from(error);serde_json::json!({\"name\":fault.0.name,\"message\":fault.0.message,\"response\":fault.0.response_json_view()})}",
         "cases": [
           {
             "input": {
@@ -14118,7 +14118,7 @@
         },
         "input": "observed",
         "reason": "Execute the String conversion with distinct input messages and observe the actual native Error default class.",
-        "call": "{let fault=<$type as From<String>>::from($value[\"message\"].as_str().unwrap().to_owned());serde_json::json!({\"name\":fault.0.name,\"message\":fault.0.message,\"response\":fault.0.metadata.response})}",
+        "call": "{let fault=<$type as From<String>>::from($value[\"message\"].as_str().unwrap().to_owned());serde_json::json!({\"name\":fault.0.name,\"message\":fault.0.message,\"response\":fault.0.response_json_view()})}",
         "cases": [
           {
             "input": {

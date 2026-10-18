@@ -13,11 +13,7 @@ use crate::{
 };
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_types::{MarginType, PositionMode, PositionSide};
-use std::{
-    cell::{Cell, RefCell},
-    collections::HashSet,
-    rc::Rc,
-};
+use std::{cell::Cell, collections::HashSet, rc::Rc};
 pub type Emit = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
 pub type Log = Rc<dyn Fn(String, LogSeverity) -> Result<(), Failure>>;
 pub trait PositionSnapshotBindings {
@@ -95,7 +91,7 @@ fn margin(config: EventValue) -> Result<EventValue, Failure> {
 }
 fn dense(v: &EventValue, method: &str, expr: &str) -> Result<usize, Failure> {
     if let EventValue::Array(a) = v {
-        Ok(a.borrow().len())
+        Ok(a.len())
     } else if v.nullish() {
         Err(type_error(format!(
             "Cannot read properties of {} (reading '{method}')",
@@ -182,7 +178,7 @@ pub async fn fetch_futures_positions(
         let EventValue::Array(formatted) = formatted else {
             unreachable!()
         };
-        let mut rows = array_values(&formatted);
+        let mut rows = array_values(&formatted)?;
         for i in 0..n {
             let market = markets.get(&i.to_string())?;
             for side in [PositionSide::Long, PositionSide::Short] {
@@ -287,7 +283,7 @@ pub async fn fetch_pm_positions(
         let EventValue::Array(formatted) = formatted else {
             unreachable!()
         };
-        let mut rows = array_values(&formatted);
+        let mut rows = array_values(&formatted)?;
         for i in 0..n {
             let market = markets.get(&i.to_string())?;
             for side in [PositionSide::Long, PositionSide::Short] {
@@ -395,7 +391,7 @@ pub async fn fetch_futures_positions_and_balance(
             let assets = fallback(opt(data.clone(), "assets")?, array(vec![]));
             let a = match assets {
                 EventValue::Array(a)=>a,
-                EventValue::String(s)=>Rc::new(RefCell::new(EventValue::String(s.clone()).text()?.chars().map(|c|Some(string(c.to_string()))).collect())),
+                EventValue::String(s)=>{let EventValue::Array(a)=EventValue::array(EventValue::String(s.clone()).text()?.chars().map(|c|string(c.to_string())).collect()) else {unreachable!()};a},
                 v=>return Err(type_error(match &v {
                     EventValue::Bool(x)=>format!("boolean {x} is not iterable (cannot read property Symbol(Symbol.iterator))"),
                     EventValue::Number(x)=>format!("number {} is not iterable (cannot read property Symbol(Symbol.iterator))",safe_cex_num::js_number_string(*x)),
@@ -403,8 +399,8 @@ pub async fn fetch_futures_positions_and_balance(
                 })),
             };
             let mut i = 0;
-            while i < a.borrow().len() {
-                let asset = a.borrow()[i].clone().unwrap_or(EventValue::Undefined);
+            while i < a.len() {
+                let asset = EventValue::Array(a.clone()).get(&i.to_string())?;
                 i += 1;
                 let wallet = fallback(asset.read("walletBalance")?, string("0")).float()?;
                 let available = fallback(asset.read("availableBalance")?, string("0")).float()?;

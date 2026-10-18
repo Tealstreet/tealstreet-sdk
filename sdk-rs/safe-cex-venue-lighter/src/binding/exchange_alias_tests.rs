@@ -160,7 +160,7 @@ impl World {
         let venue = LighterNativeExchange::new(
             ExchangeName::Lighter,
             options,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             LighterDependencies {
                 runtime: runtime.clone(),
                 http: http.clone(),

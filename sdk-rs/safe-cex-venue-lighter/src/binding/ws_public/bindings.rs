@@ -143,7 +143,7 @@ fn helpers() -> Vec<(&'static str, Js)> {
                 let shaped = match &value {
                     Js::Array(_) => Value::Array(
                         value
-                            .array_values()
+                            .array_values()?
                             .unwrap_or_default()
                             .iter()
                             .take(1)

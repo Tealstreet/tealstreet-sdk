@@ -24,7 +24,7 @@ fn method(
 }
 fn items(value: &Js) -> Result<Vec<Js>, Thrown> {
     Ok(value
-        .array_items()
+        .array_items()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))?
         .into_iter()
         .map(|item| item.unwrap_or(Js::Undefined))
@@ -75,11 +75,13 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "_hasFullSizedPositionOppositeSide", |rt, a| {
         let side = to_typed(&arg(&a, 1))?;
-        Ok(Js::Bool(venue(&rt)?.has_full_sized_position_opposite_side(
-            &text(&arg(&a, 0))?,
-            side,
-            arg(&a, 2).to_number()?,
-        )))
+        Ok(Js::Bool(
+            venue(&rt)?.has_full_sized_position_opposite_side(
+                &text(&arg(&a, 0))?,
+                side,
+                arg(&a, 2).to_number()?,
+            )?,
+        ))
     })?;
     method(rt, "formatBybitVenueError", |rt, a| {
         Ok(Js::str(&crate::exchange_errors::format_bybit_venue_error(
@@ -112,6 +114,26 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 }
                 Ok(Js::Number(index))
             }
+        })))
+    })?;
+    method(rt, "getStopOrderPositionIdx", |rt, a| {
+        let input = arg(&a, 0);
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let opts = rt.global("omit")?.call(
+                Js::Undefined,
+                vec![input, Js::array(vec![Js::str("reduceOnly")])],
+            )?;
+            let index = await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("getOrderPositionIdx", vec![opts])?,
+            )
+            .await?;
+            Js::object(vec![
+                ("0", Js::Number(0.)),
+                ("1", Js::Number(2.)),
+                ("2", Js::Number(1.)),
+            ])
+            .get_key(&index.to_js_string()?)
         })))
     })?;
     method(rt, "placeOrders", place_orders)?;
@@ -456,7 +478,7 @@ fn format_order_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
                 let market = venue(&rt)?
                     .base
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .find(|m| m.symbol == typed.symbol)
                     .cloned();
@@ -481,7 +503,7 @@ fn format_order_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
                 let ticker = venue(&rt)?
                     .base
                     .store
-                    .tickers()
+                    .tickers()?
                     .iter()
                     .find(|t| t.symbol == typed.symbol)
                     .cloned();

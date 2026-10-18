@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{runtime::*, websocket::*};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{
     TransportProvider,
     socket::{SocketFrame, TunnelHost},
@@ -410,30 +411,41 @@ fn public_connect_disposal_cancels_unpolled_and_pending_dial() {
             task.future.borrow().is_some(),
             "CANCELLATION-COVERAGE registered future exists inline={inline}"
         );
-        assert_eq!(runtime.trace.borrow().len(), usize::from(inline));
+        // Maintained public-connect.mjs executes all 42 source members:
+        // each live connect calls createWebsocket before returning, independently
+        // of whether the native host polls spawned tasks inline.
+        assert_eq!(
+            runtime.trace.borrow().len(),
+            1,
+            "BINANCE eager public dial starts before any host pump inline={inline}"
+        );
         parent.disposed.set(true);
         socket.dispose();
-        assert!(
-            task.cancelled.get(),
-            "CANCELLATION-COVERAGE retained task cancelled inline={inline}"
+        assert_eq!(
+            runtime.dial_drops.get(),
+            1,
+            "BINANCE core disposal drops the actual pending dial before any host pump inline={inline}"
         );
         assert!(
-            task.future.borrow().is_none(),
-            "CANCELLATION-COVERAGE retained future released inline={inline}"
+            !socket.has_websocket(),
+            "disposed pending dial never installs a socket"
         );
+        // The canonical Promise driver may serve unrelated jobs. Its cancelled
+        // owned body is gone now; pumping reaps that driver without cancelling
+        // the shared runtime task wholesale.
         runtime.pump();
         assert!(
-            task.cancelled.get() && task.future.borrow().is_none(),
-            "CANCELLATION-COVERAGE retained task stays cancelled after pump inline={inline}"
+            task.future.borrow().is_none(),
+            "CANCELLATION-COVERAGE completed shared driver is reaped after pump inline={inline}"
         );
         assert_eq!(
             runtime.trace.borrow().len(),
-            usize::from(inline),
+            1,
             "no late dial after disposal"
         );
         assert_eq!(
             runtime.dial_drops.get(),
-            usize::from(inline),
+            1,
             "pending dial future released by core disposal"
         );
         assert!(

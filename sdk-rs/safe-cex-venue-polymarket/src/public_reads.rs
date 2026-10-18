@@ -114,18 +114,3 @@ async fn read<T: DeserializeOwned + Serialize + JsNumberOutput>(
         context: None,
     })
 }
-
-/// Source `PolymarketAPI.getServerTime`; JSON number ingress is explicit.
-pub async fn get_server_time(client: &HttpClient) -> Result<f64, RestFailure> {
-    let request = RestRequest {
-        method: "get".into(),
-        url: crate::constants::ENDPOINTS
-            .iter()
-            .find(|(key, _)| *key == "TIME")
-            .expect("TIME declaration")
-            .1
-            .into(),
-        ..RestRequest::default()
-    };
-    read(client, request).await
-}

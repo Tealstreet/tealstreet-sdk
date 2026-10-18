@@ -2,12 +2,12 @@
 mod runtime;
 use indexmap::IndexMap;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::*,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, OrderSide, OrderType, PlaceOrderOpts};
 use safe_cex_webworker::chaser::ChaserOrderInstance;
 use safe_cex_webworker::task_types::*;
@@ -296,6 +296,15 @@ fn ready<T>(mut future: ExchangeFuture<'static, T>) -> T {
         Poll::Pending => panic!("fixture expected settled future"),
     }
 }
+fn settled<T>(mut future: ExchangeFuture<'static, T>) -> T {
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    ready(future)
+}
 fn options() -> TwapOptions {
     serde_json::from_value(json!({"accountName":"account","activeMarket":{"id":"BTC","symbol":"BTC","base":"BTC","quote":"USD","active":true,"precision":{"amount":0.01,"price":0.1},"limits":{"amount":{"min":0,"max":100},"leverage":{"min":1,"max":100}}},"side":"buy","size":3,"ordersCount":2,"duration":1,"randomnessPercentage":10,"chaserDelay":100,"useChaserOrders":false,"useLimitOrders":false,"reduceOnly":false})).unwrap()
 }
@@ -537,7 +546,7 @@ fn native_lifecycle_matches_252_source_interleavings() {
                         ready(w.pause());
                     }
                     if interruption == "terminate" {
-                        ready(w.terminate());
+                        settled(w.terminate());
                     }
                     h.released.set(true);
                     let result = match polled {
@@ -879,7 +888,7 @@ fn pause_resume_clocks_and_termination_preserve_source_order() {
     ));
     *h.now_reads.borrow_mut() = VecDeque::from([1000.0, 1001.0]);
     w.state().borrow_mut().next_order_at = 2000.0;
-    ready(w.resume());
+    settled(w.resume());
     assert!(h.now_reads.borrow().is_empty());
     let timer = *w.timer_id.borrow().as_ref().unwrap();
     assert_eq!(
@@ -895,7 +904,7 @@ fn pause_resume_clocks_and_termination_preserve_source_order() {
     );
     ready(w.pause());
     *h.now_reads.borrow_mut() = VecDeque::from([3000.0, 3001.0, 3002.0]);
-    ready(w.resume());
+    settled(w.resume());
     let timer = *w.timer_id.borrow().as_ref().unwrap();
     assert_eq!(
         h.timers.borrow()[&timer].1.to_bits(),
@@ -904,7 +913,7 @@ fn pause_resume_clocks_and_termination_preserve_source_order() {
     );
     assert!(h.now_reads.borrow().is_empty());
     w.slice_timers.borrow_mut().extend([101, 102]);
-    ready(w.terminate());
+    settled(w.terminate());
     assert_eq!(
         w.state().borrow().status,
         TwapStatus::Completed,
@@ -931,7 +940,7 @@ fn pause_resume_clocks_and_termination_preserve_source_order() {
     assert_eq!(clears, [42, 1, 2, 101, 102], "TWAP native clear order");
     let prior = h.events.borrow().len();
     w.slice_timers.borrow_mut().push(103);
-    ready(w.terminate());
+    settled(w.terminate());
     assert_eq!(
         h.events.borrow().len(),
         prior,
@@ -1260,4 +1269,74 @@ fn reentrant_rng_and_pending_rejection_read_live_options() {
         project_source_events(&oracle("twap_policy_oracle.mjs")["rngRace"])
     );
     h.detach_timers();
+}
+
+fn settlement_profile(method: &str) {
+    let source = oracle("twap_policy_oracle.mjs");
+    let rows = source["settlement"].as_array().unwrap();
+    assert_eq!(rows.len(), 6);
+    for mode in ["active", "noop", "post-error"] {
+        let h = Host::new();
+        let initial = match (method, mode) {
+            ("resume", "noop") => TwapStatus::Running,
+            ("resume", _) => TwapStatus::Paused,
+            (_, "noop") => TwapStatus::Completed,
+            _ => TwapStatus::Running,
+        };
+        let w = worker(&h, initial, &[1.0]);
+        *w.timer_id.borrow_mut() = Some(42);
+        w.slice_timers.borrow_mut().extend([101, 102]);
+        w.tracked_chaser_order_ids
+            .borrow_mut()
+            .push("tracked".into());
+        h.post_failure.set(mode == "post-error");
+        let mut waiter = if method == "resume" {
+            w.resume()
+        } else {
+            w.terminate()
+        };
+        let row = rows
+            .iter()
+            .find(|row| row["method"] == method && row["mode"] == mode)
+            .unwrap();
+        let before = json!({
+            "events": events_profile(&h.events.borrow()),
+            "status": status(w.state().borrow().status),
+            "registered": h.manager.has_id("fixture"),
+            "timer": *w.timer_id.borrow(),
+            "slices": *w.slice_timers.borrow(),
+            "tracked": *w.tracked_chaser_order_ids.borrow(),
+        });
+        let mut expected = row["before"].clone();
+        expected["events"] = project_source_events(&expected["events"]);
+        assert_eq!(before, expected, "TWAP {method}/{mode} synchronous prefix");
+        assert!(
+            waiter
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending(),
+            "TWAP {method}/{mode} caller must yield before settlement"
+        );
+        let outcome = match waiter
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            Poll::Ready(Ok(())) => "fulfilled".to_owned(),
+            Poll::Ready(Err(error)) => error.message,
+            Poll::Pending => panic!("TWAP {method}/{mode} did not settle after checkpoint"),
+        };
+        assert_eq!(json!(["returned", outcome]), row["order"]);
+        assert_eq!(events_profile(&h.events.borrow()), before["events"]);
+        h.detach_timers();
+    }
+}
+
+#[test]
+fn resume_preserves_prefix_and_yields_caller_settlement() {
+    settlement_profile("resume");
+}
+
+#[test]
+fn terminate_preserves_prefix_and_yields_caller_settlement() {
+    settlement_profile("terminate");
 }

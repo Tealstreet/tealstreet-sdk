@@ -2,17 +2,20 @@
 use safe_cex_store::Store;
 
 // ts: KucoinExchange.toApiSymbol
-pub fn to_api_symbol(symbol: Option<&str>, store: &dyn Store) -> String {
+pub fn to_api_symbol(
+    symbol: Option<&str>,
+    store: &dyn Store,
+) -> Result<String, safe_cex_types::StoreReadError> {
     let Some(symbol) = symbol.filter(|s| !s.is_empty()) else {
-        return String::new();
+        return Ok(String::new());
     };
-    store
-        .markets_by_symbol()
+    Ok(store
+        .markets_by_symbol()?
         .get(symbol)
         .map(|m| m.id.as_str())
         .filter(|id| !id.is_empty())
         .unwrap_or(symbol)
-        .to_owned()
+        .to_owned())
 }
 // ts: KucoinExchange.apiMarginCoin
 // ts-bug: KucoinExchange.apiMarginCoin retains the legacy SUSDT testnet spelling.

@@ -548,6 +548,18 @@
     ]
   },
   {
+    "file": "safe-cex-exchange/src/js_runtime/client/factory.rs",
+    "function": "install_outcome_interceptor",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "name",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-exchange/src/js_runtime/promise.rs",
     "function": "spawn",
     "edges": [
@@ -560,13 +572,13 @@
     ]
   },
   {
-    "file": "safe-cex-exchange/src/js_runtime/store.rs",
-    "function": "facade",
+    "file": "safe-cex-exchange/src/native_teardown.rs",
+    "function": "native_final_drop",
     "edges": [
       {
-        "receiver": "dynamic",
+        "receiver": "base",
         "kind": "call",
-        "hook": "update_order",
+        "hook": "dispose",
         "count": 1
       }
     ]
@@ -574,18 +586,6 @@
   {
     "file": "safe-cex-exchange/src/owned_tasks.rs",
     "function": "start_detached",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "start",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-exchange/src/owned_tasks.rs",
-    "function": "timer",
     "edges": [
       {
         "receiver": "dynamic",
@@ -652,30 +652,6 @@
         "kind": "call",
         "hook": "fetch_and_set_private_snapshot",
         "count": 2
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-exchange/src/websocket.rs",
-    "function": "schedule",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "start",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-exchange/src/websocket.rs",
-    "function": "spawn_owned_kind",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "start",
-        "count": 1
       }
     ]
   },
@@ -1138,18 +1114,6 @@
         "kind": "call",
         "hook": "name",
         "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-store/src/store.rs",
-    "function": "update_order",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "update_order",
-        "count": 2
       }
     ]
   },
@@ -2054,6 +2018,18 @@
   {
     "file": "safe-cex-venue-backpack/src/adapter.rs",
     "function": "dispose",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-backpack/src/adapter.rs",
+    "function": "drop",
     "edges": [
       {
         "receiver": "dynamic",
@@ -3179,6 +3155,18 @@
   {
     "file": "safe-cex-venue-bingx/src/binding/exchange.rs",
     "function": "dispose",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs",
+    "function": "drop",
     "edges": [
       {
         "receiver": "dynamic",
@@ -7395,13 +7383,6 @@
       {
         "receiver": "path",
         "kind": "reference",
-        "hook": "update_order",
-        "callee": "crate :: order_controls :: update_order",
-        "count": 1
-      },
-      {
-        "receiver": "path",
-        "kind": "reference",
         "hook": "validate_account",
         "callee": "account_runtime :: validate_account",
         "count": 1
@@ -8766,42 +8747,6 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "fetch_tickers",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-kraken/src/stream_adapters.rs",
-    "function": "futures_listen_order_book",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "listen_order_book",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-kraken/src/stream_adapters.rs",
-    "function": "spot_listen_ohlcv",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "listen_ohlcv",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-kraken/src/stream_adapters.rs",
-    "function": "spot_listen_order_book",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "listen_order_book",
         "count": 1
       }
     ]

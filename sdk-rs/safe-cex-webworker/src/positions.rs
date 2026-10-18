@@ -1,5 +1,10 @@
 use crate::payload::{StoreWorkerOp, StoreWorkerPayload};
-use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::{
+    eager::start_eager,
+    exchange::Exchange,
+    js_runtime::{promise::await_js, value::Js},
+    runtime::ExchangeFuture,
+};
 use safe_cex_types::ModelField;
 use serde_json::{Value, json};
 use std::{
@@ -53,62 +58,70 @@ impl UpdatePositionsHandler {
             requests_in_progress: RefCell::default(),
         })
     }
-    pub async fn handle_update_positions(&self, request_id: String, symbols: Option<Vec<String>>) {
-        let now = self.exchange.base().runtime.now_ms();
-        if now - self.last_failed_request.get() < 5000.0 {
-            self.done(&request_id, false, Some("retry_too_soon".into()));
-            return;
-        }
-        let valid = symbols.as_ref().map(|symbols| {
-            symbols
-                .iter()
-                .filter(|symbol| {
-                    !self
-                        .requests_in_progress
-                        .borrow()
-                        .contains(&Some((*symbol).clone()))
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        });
-        if valid.as_ref().is_some_and(Vec::is_empty)
-            || (valid.is_none() && self.requests_in_progress.borrow().contains(&None))
-        {
-            self.done(&request_id, true, None);
-            return;
-        }
-        {
-            let mut pending = self.requests_in_progress.borrow_mut();
-            match &valid {
-                Some(symbols) => pending.extend(symbols.iter().cloned().map(Some)),
-                None => {
-                    pending.insert(None);
+    pub fn handle_update_positions(
+        self: &Rc<Self>,
+        request_id: String,
+        symbols: Option<Vec<String>>,
+    ) -> ExchangeFuture<'static, ()> {
+        let handler = self.clone();
+        start_eager(&self.exchange.base().runtime, async move {
+            let now = handler.exchange.base().runtime.now_ms();
+            if now - handler.last_failed_request.get() < 5000.0 {
+                handler.done(&request_id, false, Some("retry_too_soon".into()));
+                return Ok(());
+            }
+            let valid = symbols.as_ref().map(|symbols| {
+                symbols
+                    .iter()
+                    .filter(|symbol| {
+                        !handler
+                            .requests_in_progress
+                            .borrow()
+                            .contains(&Some((*symbol).clone()))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            });
+            if valid.as_ref().is_some_and(Vec::is_empty)
+                || (valid.is_none() && handler.requests_in_progress.borrow().contains(&None))
+            {
+                handler.done(&request_id, true, None);
+                return Ok(());
+            }
+            {
+                let mut pending = handler.requests_in_progress.borrow_mut();
+                match &valid {
+                    Some(symbols) => pending.extend(symbols.iter().cloned().map(Some)),
+                    None => {
+                        pending.insert(None);
+                    }
                 }
             }
-        }
-        let mut guard = RequestGuard {
-            handler: self,
-            symbols: valid,
-            request_id: request_id.clone(),
-            settled: false,
-        };
-        // ts-bug: locks use filtered symbols but the fetch receives the original list.
-        let result = self
-            .exchange
-            .fetch_positions(symbols)
-            .await
-            .and_then(|positions| {
-                if self.exchange.base().is_disposed() {
+            let mut guard = RequestGuard {
+                handler: &handler,
+                symbols: valid,
+                request_id: request_id.clone(),
+                settled: false,
+            };
+            // ts-bug: locks use filtered symbols but the fetch receives the original list.
+            let result = handler.exchange.fetch_positions(symbols).await;
+            await_js(&handler.exchange.base().runtime, Js::Undefined)
+                .await
+                .map_err(|error| error.to_exchange_error())?;
+            let result = result.and_then(|positions| {
+                if handler.exchange.base().is_disposed() {
                     return Ok(false);
                 }
-                if !positions_equal(&positions, &self.exchange.base().store.positions()) {
+                if !positions_equal(&positions, &handler.exchange.base().store.positions()?) {
                     if guard.symbols.is_none() {
-                        self.exchange
+                        handler
+                            .exchange
                             .base()
                             .store
                             .add_or_update_positions_full(positions)?;
                     } else if !positions.is_empty() {
-                        self.exchange
+                        handler
+                            .exchange
                             .base()
                             .store
                             .add_or_update_positions(positions)?;
@@ -116,15 +129,17 @@ impl UpdatePositionsHandler {
                 }
                 Ok(true)
             });
-        match result {
-            Ok(true) => self.done(&request_id, true, None),
-            Ok(false) => {}
-            Err(error) => {
-                self.last_failed_request.set(now);
-                self.done(&request_id, false, Some(error.js_error_string()));
+            match result {
+                Ok(true) => handler.done(&request_id, true, None),
+                Ok(false) => {}
+                Err(error) => {
+                    handler.last_failed_request.set(now);
+                    handler.done(&request_id, false, Some(error.js_error_string()));
+                }
             }
-        }
-        guard.settled = true;
+            guard.settled = true;
+            Ok(())
+        })
     }
     pub fn handle(self: &Rc<Self>, payload: StoreWorkerPayload) {
         if payload.op != StoreWorkerOp::UpdatePositions {
@@ -139,14 +154,9 @@ impl UpdatePositionsHandler {
                 .map(str::to_owned)
                 .collect()
         });
-        let handler = self.clone();
-        self.exchange
-            .base()
-            .runtime
-            .spawn_local(Box::pin(async move {
-                handler.handle_update_positions(request_id, symbols).await;
-            }));
+        drop(self.handle_update_positions(request_id, symbols));
     }
+
     fn done(&self, request_id: &str, success: bool, reason: Option<String>) {
         let mut data = json!({"requestId":request_id,"success":success});
         if let Some(reason) = reason {

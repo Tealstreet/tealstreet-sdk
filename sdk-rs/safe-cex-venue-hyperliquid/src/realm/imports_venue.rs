@@ -28,6 +28,31 @@ impl crate::signing::SigningInput for SignedView {
     }
 }
 
+pub(super) fn signing_error(
+    r: &mut Realm,
+    cause: safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError,
+) -> Thrown {
+    let properties = match r.restore_typed_value(&cause.value().to_js()) {
+        Ok(value) => value,
+        Err(error) => return error,
+    };
+    let restore = |r: &mut Realm| -> Result<Value, Thrown> {
+        let name = r.get_str(&properties, "name")?;
+        let name = r.to_rust_string(&name)?;
+        let message = r.get_str(&properties, "message")?;
+        let message = r.to_rust_string(&message)?;
+        let error = r.error_of(&name, &message);
+        for (key, value) in r.own_entries(&properties)? {
+            if !key.same(&super::PropKey::str("name")) && !key.same(&super::PropKey::str("message"))
+            {
+                r.set(&error, &key, value)?;
+            }
+        }
+        Ok(error)
+    };
+    restore(r).unwrap_or_else(std::convert::identity)
+}
+
 fn resolve_builder(r: &mut Realm, options: Value) -> Result<Value, Thrown> {
     let builder = if options.is_nullish() {
         Value::Undefined
@@ -444,7 +469,7 @@ pub(crate) fn bind(realm: &Realm) {
         };
         let result =
             crate::signing::sign_l1_action(&wallet.0, &action, vault.as_deref(), &nonce, mainnet)
-                .map_err(|e| r.error(&e))
+                .map_err(|cause| signing_error(r, cause))
                 .and_then(|sig| r.from_typed(&sig));
         Ok(r.settled_promise(result))
     });
@@ -475,3 +500,8 @@ pub(crate) fn bind(realm: &Realm) {
             .map_err(|e| r.error(&e))
     });
 }
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/byteslike_signing.rs"]
+mod byteslike_signing;

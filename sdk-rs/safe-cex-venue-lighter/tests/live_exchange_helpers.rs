@@ -118,7 +118,7 @@ fn lighter_exchange_helpers_match_live_typescript() {
             t.ask = tagged_number(&p["ask"]);
             t.mark = tagged_number(&p["mark"]);
             t.last = tagged_number(&p["last"]);
-            t.index = tagged_number(&p["index"]);
+            t.index = Some(tagged_number(&p["index"]));
             t
         });
         let actual = match resolve_market_order_reference_price(
@@ -162,7 +162,7 @@ fn lighter_exchange_helpers_match_live_typescript() {
             let mut t: safe_cex_types::Ticker = serde_json::from_value(clean).unwrap();
             t.mark = tagged_number(&p["mark"]);
             t.last = tagged_number(&p["last"]);
-            t.index = tagged_number(&p["index"]);
+            t.index = Some(tagged_number(&p["index"]));
             t
         });
         assert_eq!(

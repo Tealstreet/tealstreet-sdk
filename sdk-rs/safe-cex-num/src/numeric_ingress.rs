@@ -100,12 +100,8 @@ impl<'de> MapAccess<'de> for Object {
         match self.entries.next() {
             Some((key, value)) => {
                 self.value = Some(value);
-                seed.deserialize(
-                    String::from_utf16(&key)
-                        .map_err(de::Error::custom)?
-                        .into_deserializer(),
-                )
-                .map(Some)
+                seed.deserialize(String::from_utf16_lossy(&key).into_deserializer())
+                    .map(Some)
             }
             None => Ok(None),
         }
@@ -139,9 +135,7 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         match self.0 {
             Node::Undefined | Node::Null => visitor.visit_unit(),
             Node::Bool(value) => visitor.visit_bool(value),
-            Node::Text(value) => {
-                visitor.visit_string(String::from_utf16(&value).map_err(de::Error::custom)?)
-            }
+            Node::Text(value) => visitor.visit_string(String::from_utf16_lossy(&value)),
             Node::Float(value) => visitor.visit_f64(value),
             Node::Lexeme(value) => {
                 let number: f64 = value.parse().map_err(de::Error::custom)?;
@@ -192,7 +186,7 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         visitor: V,
     ) -> Result<V::Value, Error> {
         if name == safe_cex_types::retained_json::RETAINED_NATIVE {
-            return JsNumberDeserializer(self.0.into_native_payload()).deserialize_seq(visitor);
+            return self.0.into_native_payload().deserialize_seq(visitor);
         }
         if name == safe_cex_types::model_field::MODEL_FIELD && matches!(self.0, Node::Undefined) {
             visitor.visit_unit()
@@ -219,11 +213,9 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match self.0 {
-            Node::Text(value) => visitor.visit_enum(
-                String::from_utf16(&value)
-                    .map_err(de::Error::custom)?
-                    .into_deserializer(),
-            ),
+            Node::Text(value) => {
+                visitor.visit_enum(String::from_utf16_lossy(&value).into_deserializer())
+            }
             Node::Object(entries) => {
                 if entries.len() != 1 {
                     return Err(de::Error::custom(

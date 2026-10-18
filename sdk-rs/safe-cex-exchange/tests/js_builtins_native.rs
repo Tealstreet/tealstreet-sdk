@@ -25,7 +25,7 @@ fn run_native(body: impl FnOnce(Scope<()>)) {
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -325,5 +325,85 @@ process.stdout.write(JSON.stringify(rows));
             rows.push(json!({"mode":mode,"trace":*trace.borrow(),"observed":observed}));
         }
         assert_eq!(json!(rows), source);
+    });
+}
+
+#[test]
+fn native_array_join_preserves_utf16_elements_separators_and_coercions() {
+    let oracle = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_array_join_utf16_source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        oracle.status.success(),
+        "{}",
+        String::from_utf8_lossy(&oracle.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&oracle.stdout).unwrap();
+    run_native(|_scope| {
+        let high = Js::utf16(&[0xd800]);
+        let low = Js::utf16(&[0xdc00]);
+        let element = Js::object(vec![(
+            "toString",
+            Js::function("native element", |_, _| Ok(Js::utf16(&[0xd800]))),
+        )]);
+        let separator = Js::object(vec![(
+            "toString",
+            Js::function("native separator", |_, _| Ok(Js::utf16(&[0xdc00]))),
+        )]);
+        let holes = Js::array(vec![]);
+        holes.set("length", Js::Number(3.0)).unwrap();
+        let native_array = Js::array(vec![
+            Js::Undefined,
+            Js::Null,
+            high.clone(),
+            Js::Number(-0.0),
+            Js::Number(f64::INFINITY),
+        ]);
+        let cases = [
+            ("elements", native_array, Js::str("|")),
+            (
+                "separator",
+                Js::array(vec![Js::str("a"), Js::str("b")]),
+                low,
+            ),
+            (
+                "default",
+                Js::array(vec![high.clone(), Js::str("x")]),
+                Js::Undefined,
+            ),
+            (
+                "nested",
+                Js::array(vec![
+                    Js::array(vec![high.clone(), Js::Null]),
+                    Js::str("tail"),
+                ]),
+                Js::str(";"),
+            ),
+            (
+                "null separator",
+                Js::array(vec![Js::str("a"), Js::str("b")]),
+                Js::Null,
+            ),
+            ("empty", Js::array(vec![]), high.clone()),
+            ("holes", holes, high),
+            ("coercion", Js::array(vec![element]), separator),
+        ];
+        assert_eq!(expected.as_array().unwrap().len(), cases.len());
+        for ((name, array, separator), expected) in
+            cases.into_iter().zip(expected.as_array().unwrap())
+        {
+            assert_eq!(expected["name"], name);
+            let actual = array.call_method("join", vec![separator]).unwrap();
+            let expected: Vec<u16> = serde_json::from_value(expected["units"].clone()).unwrap();
+            assert_eq!(
+                actual.as_str().unwrap().as_ref(),
+                expected.as_slice(),
+                "native Array.join UTF16: {name}"
+            );
+        }
     });
 }

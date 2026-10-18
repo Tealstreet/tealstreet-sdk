@@ -51,7 +51,7 @@ pub fn diagnostic(input: &Value, function: impl FnOnce(String) -> Failure) -> Va
     let value = function(source.clone());
     assert!(value.code.is_none());
     assert!(value.original_error.is_none());
-    assert!(value.response.is_none());
+    assert!(value.retained_response_input().is_none());
     json!({"name":value.name,"units":value.message.encode_utf16().collect::<Vec<_>>()})
 }
 pub fn markets(input: &Value, function: impl FnOnce(&Js) -> Result<Vec<Market>, Failure>) -> Value {
@@ -81,7 +81,7 @@ pub fn markets(input: &Value, function: impl FnOnce(&Js) -> Result<Vec<Market>, 
             json!({"id":row.id,"symbol":row.symbol,"prettySymbol":row.pretty_symbol,
                 "base":row.base,"quote":row.quote,"active":row.active,
                 "precision":[bits(row.precision.amount),bits(row.precision.price)],
-                "amount":[bits(row.limits.amount.min),bits(row.limits.amount.max)],
+                "amount":[bits(row.limits.amount.min),bits(safe_cex_num::numeric_value_to_number(&row.limits.amount.max))],
                 "leverage":[bits(row.limits.leverage.min),bits(row.limits.leverage.max)],
                 "minimumPrice":row.limits.price.as_ref().map(|value| bits(value.min)),
                 "contractSize":row.contract_size.map(bits),

@@ -76,7 +76,13 @@ fn norm(v: &EventValue, active: &mut BTreeSet<usize>) -> Value {
             if !active.insert(key) {
                 return json!({"$cycle":true});
             }
-            let out = Value::Array(array_values(a).iter().map(|v| norm(v, active)).collect());
+            let out = Value::Array(
+                array_values(a)
+                    .expect("fixture array reads")
+                    .iter()
+                    .map(|v| norm(v, active))
+                    .collect(),
+            );
             active.remove(&key);
             out
         }
@@ -209,11 +215,11 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
                 },
             )])
         };
-        Rc::new(RefCell::new(if f["count"] == 0 {
+        native_array_fixture::owner(if f["count"] == 0 {
             vec![]
         } else {
             vec![Some(entry)]
-        }))
+        })
     };
     let positions = json_graph(
         json!([{"id":"BTCUSDT","symbol":"BTCUSDT","side":"short","leverage":10,"liquidationPrice":99,"marginType":"isolated","positionMode":"oneway","entryPrice":8,"contracts":1,"notional":8,"unrealizedPnl":2,"unknown":41,"info":{"keep":17,"nested":{"old":19}}},{"id":"BTCUSDT:long","symbol":"BTCUSDT","side":"long","leverage":11,"liquidationPrice":98,"marginType":"cross","info":{"keep":18}},{"id":"BTCUSDT:short","symbol":"BTCUSDT","side":"short","leverage":12,"liquidationPrice":97,"marginType":"cross","info":{"keep":19}}]),
@@ -221,7 +227,11 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
     let EventValue::Array(positions) = positions else {
         panic!()
     };
-    for (i, p) in array_values(&positions).iter().enumerate() {
+    for (i, p) in array_values(&positions)
+        .expect("fixture array reads")
+        .iter()
+        .enumerate()
+    {
         p.write(
             "side",
             EventValue::enum_value(PrivateEnum::PositionSide(if i == 1 {
@@ -246,7 +256,7 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
         }
     }
     if f["name"] == "metadata-nullish" {
-        let p = &array_values(&positions)[0];
+        let p = &array_values(&positions).expect("fixture array reads")[0];
         p.write("leverage", EventValue::Null);
         p.write("liquidationPrice", number(0.0));
         p.write("marginType", EventValue::Null);
@@ -274,7 +284,7 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "private-code"
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"private detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"private detail"}})).into());
     Bindings(Rc::new(State {
         f,
         events,
@@ -310,11 +320,9 @@ impl PrivateEventBindings for Bindings {
             s.data.write("i", number(202.0));
         }
         if s.name() == "cyclic-id" && op == PrivateOperation::AddOrder {
-            let a = Rc::new(RefCell::new(vec![]));
-            EventValue::Array(a.clone())
-                .push(EventValue::Array(a.clone()))
-                .unwrap();
-            s.data.write("i", EventValue::Array(a));
+            let a = EventValue::array(vec![]);
+            a.push(a.clone()).unwrap();
+            s.data.write("i", a);
         }
         Ok(Rc::new(move |args| {
             s.log(Trace::Call(op));
@@ -338,11 +346,11 @@ impl PrivateEventBindings for Bindings {
                 s.data.write("q", string("7"));
             }
             if s.name() == "append-event" && op == PrivateOperation::AddOrder {
-                let first = array_values(&s.events)[0].clone();
-                s.events.borrow_mut().push(Some(first));
+                let first = array_values(&s.events).expect("fixture array reads")[0].clone();
+                EventValue::Array(s.events.clone()).push(first).unwrap();
             }
             if s.name() == "throttle-mutates" && op == PrivateOperation::ThrottlePositions {
-                array_values(&s.events)[0]
+                array_values(&s.events).expect("fixture array reads")[0]
                     .read("a")?
                     .write("P", EventValue::array(vec![]));
             }
@@ -405,7 +413,9 @@ impl PrivateEventBindings for Bindings {
             return Err(s.error.clone());
         }
         if s.name() == "append-balance" && n == 1 {
-            let EventValue::Array(a) = array_values(&s.events)[0].read("B")? else {
+            let EventValue::Array(a) =
+                array_values(&s.events).expect("fixture array reads")[0].read("B")?
+            else {
                 panic!()
             };
             EventValue::Array(a.clone())
@@ -492,24 +502,26 @@ fn identity(s: &State, e: &Effect) -> Value {
         AddPosition => {
             let row = &e.args[0];
             let existing = array_values(&s.positions)
+                .expect("fixture array reads")
                 .iter()
                 .find(|p| get(p, "id").same(&get(row, "id")))
                 .cloned()
                 .unwrap_or(EventValue::Undefined);
-            let input = if let EventValue::Array(p) = array_values(&s.events)[0]
+            let input = if let EventValue::Array(p) = array_values(&s.events)
+                .expect("fixture array reads")[0]
                 .read("a")
                 .unwrap()
                 .read("P")
                 .unwrap()
             {
-                p.borrow()[0].clone().unwrap()
+                native_array_fixture::slots(&p)[0].clone().unwrap()
             } else {
                 panic!()
             };
             json!({"infoFresh":!get(row,"info").same(&get(&existing,"info")),"infoNestedInput":get(&get(row,"info"),"nested").same(&get(&input,"nested")),"rowFresh":!row.same(&existing)})
         }
         UpdatePosition => {
-            json!({"selectorOriginal":array_values(&s.positions).iter().any(|p|p.same(&e.args[0])),"infoOriginal":get(&e.args[1],"info").same(&e.args[0])})
+            json!({"selectorOriginal":array_values(&s.positions).expect("fixture array reads").iter().any(|p|p.same(&e.args[0])),"infoOriginal":get(&e.args[1],"info").same(&e.args[0])})
         }
         UpdateStore => {
             let row = get(&e.args[0], "balance");
@@ -517,9 +529,12 @@ fn identity(s: &State, e: &Effect) -> Value {
             let coins = get(&row, "coins");
             let oldcurr = get(&s.balance, "currencies");
             let oldcoins = get(&s.balance, "coins");
-            let evt = array_values(&s.events)[0].clone();
+            let evt = array_values(&s.events).expect("fixture array reads")[0].clone();
             let asset_info = if let Ok(EventValue::Array(a)) = evt.read("B") {
-                if let Some(entry) = a.borrow().first().and_then(Option::as_ref) {
+                if let Some(entry) = native_array_fixture::slots(&a)
+                    .first()
+                    .and_then(Option::as_ref)
+                {
                     if !get(entry, "a").same(&string("__proto__")) {
                         Some(get(&get(&curr, &get(entry, "a").text().unwrap()), "info").same(entry))
                     } else {
@@ -553,7 +568,7 @@ fn projected(s: &State, error: Option<&Failure>) -> Value {
         })
         .collect::<Vec<_>>();
     let effects=s.effects.borrow().iter().map(|e|json!({"op":op_name(e.op),"args":e.args.iter().map(wire).collect::<Vec<_>>(),"identity":identity(s,e),"pending":e.pending})).collect::<Vec<_>>();
-    json!({"name":s.name(),"trace":trace,"effects":effects,"pending":s.flags.get(),"clocks":s.clocks.get(),"priceCalls":s.prices.get(),"eventLength":s.events.borrow().len(),"failure":error.map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))})
+    json!({"name":s.name(),"trace":trace,"effects":effects,"pending":s.flags.get(),"clocks":s.clocks.get(),"priceCalls":s.prices.get(),"eventLength":s.events.len(),"failure":error.map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))}))})
 }
 fn native_num(value: EventValue, expected: f64, label: &str) {
     let EventValue::Number(actual) = value else {
@@ -623,7 +638,7 @@ fn native_error(
                 "{label}: native error code"
             );
             assert_eq!(
-                e.response,
+                e.response_json_view(),
                 Some(json!({"status":503,"data":{"msg":"private detail"}})),
                 "{label}: native error response"
             );
@@ -640,7 +655,11 @@ fn native_error(
                 None,
                 "{label}: native generated code"
             );
-            assert_eq!(e.response, None, "{label}: native generated response");
+            assert_eq!(
+                e.response_json_view(),
+                None,
+                "{label}: native generated response"
+            );
         }
         _ => panic!("{label}: native result/error path mismatch"),
     }
@@ -793,7 +812,10 @@ fn order_test(v: Venue, family: &str) {
                 );
                 assert!(
                     field(&extra, "nested").same(&field(
-                        &field(&array_values(&s.orders)[0], "extra"),
+                        &field(
+                            &array_values(&s.orders).expect("fixture array reads")[0],
+                            "extra"
+                        ),
                         "nested"
                     )),
                     "{label}: native preserved extra nested identity"
@@ -1087,7 +1109,7 @@ fn order_test(v: Venue, family: &str) {
             "{label}: native trailing refresh count"
         );
         assert_eq!(
-            s.events.borrow().len(),
+            s.events.len(),
             if name == "empty" {
                 0
             } else if name == "append-event" {
@@ -1212,7 +1234,7 @@ fn account_test(v: Venue) {
             } else {
                 0
             };
-            let original = array_values(&s.positions)[index].clone();
+            let original = array_values(&s.positions).expect("fixture array reads")[index].clone();
             if v == Venue::Futures {
                 native_value(
                     field(&row, "id"),
@@ -1296,7 +1318,7 @@ fn account_test(v: Venue) {
                     17.0 + index as f64,
                     &format!("{label}: native info retained value"),
                 );
-                let EventValue::Array(p) = array_values(&s.events)[0]
+                let EventValue::Array(p) = array_values(&s.events).expect("fixture array reads")[0]
                     .read("a")
                     .unwrap()
                     .read("P")
@@ -1305,7 +1327,10 @@ fn account_test(v: Venue) {
                     panic!()
                 };
                 assert!(
-                    field(&info, "nested").same(&field(p.borrow()[0].as_ref().unwrap(), "nested")),
+                    field(&info, "nested").same(&field(
+                        native_array_fixture::slots(&p)[0].as_ref().unwrap(),
+                        "nested"
+                    )),
                     "{label}: native incoming nested info identity"
                 );
                 assert!(
@@ -1414,7 +1439,7 @@ fn spot_account_test() {
             );
             native_num(field(&row, "upnl"), 0.0, &format!("{label}: native upnl"));
             assert!(
-                field(&row, "info").same(&array_values(&s.events)[0]),
+                field(&row, "info").same(&array_values(&s.events).expect("fixture array reads")[0]),
                 "{label}: native original account event info"
             );
             let curr = field(&row, "currencies");
@@ -1440,12 +1465,18 @@ fn spot_account_test() {
                     "{label}: native appended currency changed"
                 );
             }
-            let assets = match array_values(&s.events)[0].read("B").unwrap() {
+            let assets = match array_values(&s.events).expect("fixture array reads")[0]
+                .read("B")
+                .unwrap()
+            {
                 EventValue::Array(a) => a,
-                EventValue::Undefined | EventValue::Null => Rc::new(RefCell::new(vec![])),
+                EventValue::Undefined | EventValue::Null => native_array_fixture::owner(vec![]),
                 _ => panic!("{label}: native asset collection"),
             };
-            if let Some(first) = assets.borrow().first().and_then(Option::as_ref) {
+            if let Some(first) = native_array_fixture::slots(&assets)
+                .first()
+                .and_then(Option::as_ref)
+            {
                 let asset = field(first, "a").text().unwrap();
                 if asset != "__proto__" {
                     let c = field(&curr, &asset);
@@ -1588,3 +1619,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;

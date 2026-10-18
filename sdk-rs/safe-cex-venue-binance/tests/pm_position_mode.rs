@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Position;
 use safe_cex_venue_binance::pm_position_mode::change_binance_pm_position_mode;
 use serde_json::{Value, json};
@@ -70,7 +71,8 @@ fn pm_position_mode_matches_source_through_production_store() {
                         .borrow_mut()
                         .push(json!(["post", url, body["dualSidePosition"]]));
                     let mut error = ExchangeError::new("request failed");
-                    error.response = Some(json!({"data":{"msg":case["msg"]}}));
+                    error =
+                        error.with_retained_response((json!({"data":{"msg":case["msg"]}})).into());
                     std::future::ready(if case["reject"] == true {
                         Err(error)
                     } else {
@@ -96,7 +98,7 @@ fn pm_position_mode_matches_source_through_production_store() {
         };
         let error = outcome.err().map(|error| json!({"name":error.name,"message":error.message,"code":observed_error_code(&error.code),"same":error==emitter_error}));
         assert_eq!(
-            json!({"trace":*trace.borrow(),"error":error,"isHedged":store.options().is_hedged}),
+            json!({"trace":*trace.borrow(),"error":error,"isHedged":store.options().unwrap().is_hedged}),
             case["expected"],
             "PM position mode source effects case {index}"
         );
@@ -138,14 +140,14 @@ fn pending_position_mode_post_does_not_commit_and_is_dropped_with_caller() {
                 .is_pending()
         );
         assert!(
-            !store.options().is_hedged,
+            !store.options().unwrap().is_hedged,
             "setting commits only after POST success"
         );
     }
     assert_eq!(calls.get(), 1, "one POST across repeated polls");
     drop(future);
     assert!(dropped.get(), "caller drop cancels owned POST future");
-    assert!(!store.options().is_hedged);
+    assert!(!store.options().unwrap().is_hedged);
 }
 
 #[test]
@@ -240,7 +242,7 @@ fn pm_notification_cutover_matches_source_catch_and_fanout() {
             assert_eq!(error, sentinel, "PM emitter error identity");
         }
         assert!(
-            store.options().is_hedged,
+            store.options().unwrap().is_hedged,
             "PM notification failure retains committed setting"
         );
         first();

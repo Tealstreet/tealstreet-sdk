@@ -3,8 +3,9 @@ use super::{
     text,
 };
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_typed};
+use safe_cex_transport::query::{QueryArrayFormat, QueryKeyOrder, QueryProfile, render_query};
 use safe_cex_types::{QueryValue, object_map::JsObjectMap};
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 pub(super) fn table<T: serde::Serialize>(entries: &[(&str, T)], key: &Js, inverse: bool) -> R<V> {
     let result = Js::object(vec![]);
     for (name, value) in entries {
@@ -24,12 +25,15 @@ pub(super) fn deep_clone(value: &Js) -> R<Js> {
         }
         match value {
             Js::Array(items) => {
-                let target = Js::Array(Rc::new(RefCell::new(vec![])));
+                let target = Js::array(vec![]);
+                target.set("length", Js::Number(items.len() as f64))?;
                 seen.push((value.clone(), target.clone()));
-                if let Js::Array(out) = &target {
-                    for item in items.borrow().iter() {
-                        out.borrow_mut()
-                            .push(item.as_ref().map(|item| copy(item, seen)).transpose()?);
+                for index in 0..items.len() {
+                    if value.has_index(index) {
+                        target.define(
+                            &index.to_string(),
+                            copy(&value.get(&index.to_string())?, seen)?,
+                        )?;
                     }
                 }
                 Ok(target)
@@ -59,7 +63,7 @@ fn query_value(value: &Js) -> R<QueryValue> {
         Js::String(_) => QueryValue::String(text(value)?),
         Js::Array(_) => QueryValue::Array(
             value
-                .array_values()
+                .array_values()?
                 .unwrap()
                 .iter()
                 .map(query_value)
@@ -76,7 +80,6 @@ fn query_value(value: &Js) -> R<QueryValue> {
     })
 }
 pub(super) fn query(value: &Js, sorted: bool) -> R<Js> {
-    use safe_cex_transport::query::*;
     let profile = QueryProfile {
         arrays: QueryArrayFormat::Indexed,
         encode: true,
@@ -595,41 +598,29 @@ impl crate::public_feeds::FeedHost for Host {
     }
 }
 impl crate::stream_reports::ReportHost for Host {
-    fn ticker_patch_refusal(
+    fn ticker_row_refusal(
         &self,
-        error: &Thrown,
+        store: &V,
+        ticker: &V,
         symbol: &[u16],
         fields: &[(&str, V)],
     ) -> R<Option<String>> {
-        let Some(native) = error.native.as_ref() else {
-            return Ok(None);
-        };
-        if !native.store_subscriber_ids.is_empty() {
-            return Ok(None);
-        }
-        let Some(safe_cex_store::StoreMutationError::Patch(patch)) =
-            native.origin.as_ref().and_then(|origin| {
-                origin
-                    .error()
-                    .downcast_ref::<safe_cex_store::StoreMutationError>()
-            })
+        let Some((field, value)) = fields
+            .iter()
+            .find(|(_, value)| !matches!(&**value, Js::Number(_)))
         else {
             return Ok(None);
         };
-        if patch.is_type_error() || !fields.iter().any(|(field, _)| *field == patch.field()) {
+        let id = ticker.get("id")?.to_js_string()?;
+        if !store.get("tickersById")?.get_key(&id)?.truthy() {
             return Ok(None);
         }
-        for (field, value) in fields {
-            if !matches!(&**value, Js::Number(_)) {
-                let rendered = self.global("JSON.stringify", vec![value.clone()])?;
-                return Ok(Some(format!(
-                    "Orderly ticker {} typed field {field} requires a number; received {}",
-                    String::from_utf16_lossy(symbol),
-                    text(&rendered)?
-                )));
-            }
-        }
-        Ok(None)
+        let rendered = self.global("JSON.stringify", vec![value.clone()])?;
+        Ok(Some(format!(
+            "Orderly ticker {} typed field {field} requires a number; received {}",
+            String::from_utf16_lossy(symbol),
+            text(&rendered)?
+        )))
     }
     fn ticker_refusal_error(&self, messages: Vec<String>) -> Thrown {
         Thrown::error("Error", &messages.join("; "))

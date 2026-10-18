@@ -16,7 +16,6 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture},
     websocket::{BaseWebSocket, MessageHandler, WsParent, WsProtocol, WsRuntime},
 };
-use safe_cex_store::model_patch::ModelPatch;
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::{Candle, object_map::JsObjectMap};
 use std::{
@@ -326,29 +325,36 @@ impl PublicState {
         let captured = if let Some(existing) = existing {
             existing
         } else {
-            let capture = crate::ticker_capture::Capture::new(store);
+            let capture = crate::ticker_capture::Capture::new(store).map_err(Rc::new)?;
             self.ticker_captures.borrow_mut().push(capture.clone());
             capture
         };
-        let dictionary = captured.dictionary();
+        let dictionary = captured.dictionary().map_err(Rc::new)?;
         let capture = || Ok(dictionary);
         let lookup = |dictionary: &crate::ticker_capture::Dictionary, symbol: &str| {
-            Ok(crate::ticker_capture::lookup(dictionary, symbol))
+            crate::ticker_capture::lookup(dictionary, symbol).map_err(Rc::new)
         };
         let get_update = || {
-            let store = self.parent.store();
+            let facade = safe_cex_exchange::native_store::facade(self.parent.store())
+                .map_err(|error| Rc::new(crate::ticker_capture::native_error(error)))?;
             Ok(
                 move |ticker: crate::ticker_capture::Target,
                       fields: crate::public_ticker_events::TickerFields| {
-                    let mut patch = ModelPatch::default();
-                    for (field, value) in fields {
-                        patch.set_number(field.name(), value)
-                    }
-                    {
-                        let id = ticker.id();
-                        store.update_ticker(&id, &patch)
-                    }
-                    .map_err(|e| failure(e.to_string()))
+                    let changes = safe_cex_exchange::js_runtime::value::Js::object(
+                        fields
+                            .into_iter()
+                            .map(|(field, value)| {
+                                (
+                                    field.name(),
+                                    safe_cex_exchange::js_runtime::value::Js::Number(value),
+                                )
+                            })
+                            .collect(),
+                    );
+                    facade
+                        .call_method("updateTicker", vec![ticker.0, changes])
+                        .map(|_| ())
+                        .map_err(|error| Rc::new(crate::ticker_capture::native_error(error)))
                 },
             )
         };
@@ -650,10 +656,12 @@ fn core_json(value: &EventValue) -> Result<serde_json::Value, Failure> {
                 "core JSON callback cannot represent nonfinite native number",
             )
         })?),
-        EventValue::Array(v) => V::Array(
-            v.borrow()
+        EventValue::Array(_) => V::Array(
+            value
+                .array_values()?
+                .expect("array")
                 .iter()
-                .map(|v| core_json(v.as_ref().unwrap_or(&EventValue::Undefined)))
+                .map(core_json)
                 .collect::<Result<_, _>>()?,
         ),
         EventValue::Object(_) => V::Object(

@@ -3,8 +3,8 @@
 #[path = "support/binding_runtime.rs"]
 mod host;
 use host::{Host, Routes};
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js, runtime::ExchangeSigners};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_venue_hyperliquid::{
     binding::{HyperliquidDependencies, RuntimeClock},
     rate_limit::RateLimiter,
@@ -113,10 +113,10 @@ fn bound_start_loads_spot_markets_balance_and_both_sockets() {
     );
     assert!(f.exchange.base().is_spot);
     let store = &f.exchange.base().store;
-    assert_eq!(store.markets().len(), 1);
-    assert_eq!(store.markets()[0].symbol, "PURR/USDC");
+    assert_eq!(store.markets().unwrap().len(), 1);
+    assert_eq!(store.markets().unwrap()[0].symbol, "PURR/USDC");
     assert_eq!(
-        store.markets()[0]
+        store.markets().unwrap()[0]
             .info
             .as_ref()
             .unwrap()
@@ -125,13 +125,13 @@ fn bound_start_loads_spot_markets_balance_and_both_sockets() {
             .as_f64(),
         Some(10000.0)
     );
-    assert!(store.loaded().markets && store.loaded().tickers);
+    assert!(store.loaded().unwrap().markets && store.loaded().unwrap().tickers);
     assert!(
-        store.tickers()[0].index.is_nan(),
+        store.tickers().unwrap()[0].index.unwrap().is_nan(),
         "source parseFloat(undefined) survives native Store"
     );
     assert!(
-        store.tickers()[0].funding_rate.is_nan(),
+        store.tickers().unwrap()[0].funding_rate.is_nan(),
         "source parseFloat(undefined) survives native Store"
     );
     assert_eq!(f.routes.count("info:spotMetaAndAssetCtxs"), 1);
@@ -153,7 +153,7 @@ fn bound_validate_account_checks_real_wallet_pair() {
 #[test]
 fn bound_fetch_positions_preserves_source_store_snapshot_without_writes() {
     let f = started();
-    let old = f.exchange.base().store.positions().to_vec();
+    let old = f.exchange.base().store.positions().unwrap().to_vec();
     assert!(!old.is_empty());
     let result = f
         .host
@@ -164,7 +164,7 @@ fn bound_fetch_positions_preserves_source_store_snapshot_without_writes() {
         serde_json::to_value(&old).unwrap()
     );
     assert_eq!(
-        serde_json::to_value(&*f.exchange.base().store.positions()).unwrap(),
+        serde_json::to_value(&*f.exchange.base().store.positions().unwrap()).unwrap(),
         serde_json::to_value(old).unwrap()
     );
 }
@@ -549,9 +549,9 @@ fn private_spot_order_updates_preserve_rest_owned_orders_without_emitting_fills(
     let wire = private_socket(&f);
     let store = &f.exchange.base().store;
     store.add_or_update_orders(vec![order()]).unwrap();
-    let orders = store.orders().to_vec();
-    let positions = store.positions().to_vec();
-    let balance = store.balance().clone();
+    let orders = store.orders().unwrap().to_vec();
+    let positions = store.positions().unwrap().to_vec();
+    let balance = store.balance().unwrap().clone();
     let fills = observe_private_fills(&f);
     private_frame(
         &f,
@@ -561,9 +561,9 @@ fn private_spot_order_updates_preserve_rest_owned_orders_without_emitting_fills(
             "status":"filled","statusTimestamp":1700000000000u64
         }]}),
     );
-    assert_eq!(&*store.orders(), orders.as_slice());
-    assert_eq!(&*store.positions(), positions.as_slice());
-    assert_eq!(&*store.balance(), &balance);
+    assert_eq!(&*store.orders().unwrap(), orders.as_slice());
+    assert_eq!(&*store.positions().unwrap(), positions.as_slice());
+    assert_eq!(&store.balance().unwrap(), &balance);
     assert!(
         fills.borrow().is_empty(),
         "source has no orderUpdates handler"
@@ -576,7 +576,7 @@ fn private_spot_live_fills_emit_exact_payload_and_refresh_real_balance() {
     let wire = private_socket(&f);
     let store = &f.exchange.base().store;
     store.add_or_update_orders(vec![order()]).unwrap();
-    let orders = store.orders().to_vec();
+    let orders = store.orders().unwrap().to_vec();
     let fills = observe_private_fills(&f);
     let fill = json!({"tid":123,"coin":"@0","side":"B","px":"1.375","sz":"0.25"});
     private_frame(
@@ -621,14 +621,14 @@ fn private_spot_live_fills_emit_exact_payload_and_refresh_real_balance() {
     assert_eq!(f.routes.count("info:spotClearinghouseState"), before + 1);
     assert_eq!(
         (
-            store.balance().total,
-            store.balance().used,
-            store.balance().free
+            store.balance().unwrap().total,
+            store.balance().unwrap().used,
+            store.balance().unwrap().free
         ),
         (200.0, 5.0, 195.0)
     );
     assert_eq!(
-        &*store.orders(),
+        &*store.orders().unwrap(),
         orders.as_slice(),
         "Spot fills do not patch orders"
     );
@@ -653,7 +653,7 @@ fn private_spot_balance_channels_publish_native_amounts_and_notional() {
             json!({"balances":balances})
         };
         private_frame(&f, &wire, json!({"channel":channel,"data":data}));
-        let balance = f.exchange.base().store.balance();
+        let balance = f.exchange.base().store.balance().unwrap();
         let total = usdc + purr_amount * 1.25;
         assert_eq!(
             (balance.total, balance.used, balance.free, balance.upnl),
@@ -676,7 +676,7 @@ fn private_spot_asset_data_updates_closed_position_configuration() {
     let f = started();
     let wire = private_socket(&f);
     let store = &f.exchange.base().store;
-    let mut positions = store.positions().to_vec();
+    let mut positions = store.positions().unwrap().to_vec();
     assert_eq!(positions.len(), 1);
     positions[0].leverage = 7.0;
     positions[0].margin_type = safe_cex_types::MarginType::Isolated.into();
@@ -690,7 +690,7 @@ fn private_spot_asset_data_updates_closed_position_configuration() {
             "coin":"@0","leverage":{"type":"isolated","value":50}
         }}),
     );
-    let positions = store.positions();
+    let positions = store.positions().unwrap();
     assert_eq!(positions[0].symbol, "PURR/USDC");
     assert_eq!(positions[0].contracts, 0.0);
     assert_eq!(positions[0].leverage, 1.0);
@@ -747,7 +747,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
             )));
             f.host.settle();
         }
-        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers().unwrap(), case);
     }
     assert!(
         f.host.reports.borrow().is_empty(),

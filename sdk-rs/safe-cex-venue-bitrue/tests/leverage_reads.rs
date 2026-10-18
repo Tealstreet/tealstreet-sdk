@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, StoreSubscriberError};
 use safe_cex_venue_bitrue::{leverage_reads::*, wire::OpaqueValue};
 use serde_json::{Value, json};
@@ -33,7 +34,7 @@ fn bits(v: f64) -> String {
     )
 }
 fn native(m: &Market) -> Value {
-    json!({"id":m.id,"symbol":m.symbol,"amountMin":bits(m.limits.amount.min),"amountMax":bits(m.limits.amount.max),"leverageMin":bits(m.limits.leverage.min),"leverageMax":bits(m.limits.leverage.max)})
+    json!({"id":m.id,"symbol":m.symbol,"amountMin":bits(m.limits.amount.min),"amountMax":bits(safe_cex_num::numeric_value_to_number(&m.limits.amount.max)),"leverageMin":bits(m.limits.leverage.min),"leverageMax":bits(m.limits.leverage.max)})
 }
 #[test]
 fn leverage_reads_match_actual_typescript() {
@@ -142,7 +143,7 @@ fn leverage_reads_match_actual_typescript() {
             }
             "fetchSymbolMaxLeverage" => {
                 counts[1] += 1;
-                json!({"kind":"number","bits":bits(run(fetch_symbol_max_leverage(&store,symbol,public,get)))})
+                json!({"kind":"number","bits":bits(run(fetch_symbol_max_leverage(&store,symbol,public,get)).unwrap())})
             }
             "updateSymbolMetadata" => {
                 counts[2] += 1;
@@ -183,7 +184,7 @@ fn leverage_reads_match_actual_typescript() {
             2,
             "BITRUE-LEVERAGE-READ source markets {index}"
         );
-        let actual = store.markets();
+        let actual = store.markets().unwrap();
         assert_eq!(
             actual.len(),
             expected.len(),
@@ -207,9 +208,10 @@ fn leverage_reads_match_actual_typescript() {
         compared, 9720,
         "BITRUE-LEVERAGE-READ executed market comparisons"
     );
-    assert!(
-        js_from_str::<String>(capture["surrogateRaw"].as_str().unwrap()).is_err(),
-        "CHOSEN read symbol UTF8 refusal"
+    typed_utf16::assert_projection(
+        capture["surrogateRaw"].as_str().unwrap(),
+        &(js_from_str::<String>(capture["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     let supplements = capture["supplements"].as_array().unwrap();
     assert_eq!(supplements.len(), 6, "CHOSEN read supplement source count");
@@ -266,7 +268,7 @@ fn leverage_reads_match_actual_typescript() {
                 "CHOSEN iterative bracket maximum"
             ),
             "fetchSymbolMaxLeverage" => assert_eq!(
-                run(fetch_symbol_max_leverage(&store, "BTC", false, get)),
+                run(fetch_symbol_max_leverage(&store, "BTC", false, get)).unwrap(),
                 3.0,
                 "CHOSEN iterative public maximum"
             ),
@@ -274,7 +276,7 @@ fn leverage_reads_match_actual_typescript() {
             _ => panic!("unknown supplement method"),
         }
         assert_eq!(
-            store.markets()[0].limits.leverage.max,
+            store.markets().unwrap()[0].limits.leverage.max,
             3.0,
             "CHOSEN iterative maximum commits"
         );
@@ -288,3 +290,6 @@ fn market(id: &str, symbol: &str, max: f64) -> Market {
     market.limits.leverage.max = max;
     market
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

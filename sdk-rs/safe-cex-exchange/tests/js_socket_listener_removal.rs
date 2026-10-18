@@ -102,7 +102,7 @@ fn native_socket_listener_removal_matches_source() {
                 runtime.clone(),
                 Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
             );
-            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
             let shared = Rc::new(ScopeShared::new(
                 runtime.clone(),
                 host,

@@ -1,3 +1,6 @@
+#[path = "support/query_observer.rs"]
+mod query_observer;
+
 use safe_cex_transport::{RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse};
 use safe_cex_venue_woo::legacy_fills::{
     WooLegacyFillsQuery, fetch_legacy_transaction_history_rows,
@@ -38,7 +41,7 @@ impl RestAdapter for Script {
             let index = self.calls.borrow().len();
             self.calls
                 .borrow_mut()
-                .push(json!({"url":request.url,"params":request.params}));
+                .push(json!({"url":request.url,"params":query_observer::params(&request)}));
             let error = match self.scenario.as_str() {
                 "error" | "error-empty" | "error-rows" => index == 0,
                 "two-errors" => index < 2,
@@ -168,7 +171,7 @@ fn legacy_history_matches_source_requests_and_rows() {
                 "LEGACY native row cardinality {index}"
             );
             assert_eq!(
-                observe(&Value::Array(rows)),
+                observe(&json!(rows)),
                 observe(&Value::Array(expected.clone())),
                 "LEGACY native rows {index}"
             );
@@ -183,7 +186,7 @@ fn legacy_history_matches_source_requests_and_rows() {
 }
 
 #[test]
-fn legacy_native_parameter_bits_and_nan_refusal() {
+fn legacy_native_parameter_bits_include_nan() {
     let mut observations = 0;
     for field in ["size", "start_t", "end_t", "page"] {
         for value in [-0.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
@@ -205,34 +208,14 @@ fn legacy_native_parameter_bits_and_nan_refusal() {
                 calls: RefCell::new(Vec::new()),
             };
             let result = ready(fetch_legacy_transaction_history_rows(&adapter, &query));
-            if value.is_nan() {
-                let error = result.expect_err("LEGACY NaN parameter refusal");
-                assert!(
-                    error
-                        .message
-                        .contains("numeric passthrough refuses NaN JSON"),
-                    "LEGACY shared NaN refusal {field}"
-                );
-                assert_eq!(
-                    adapter.calls.borrow().len(),
-                    0,
-                    "LEGACY NaN zero sends {field}"
-                );
-            } else {
-                assert!(result.unwrap().is_empty());
-                assert_eq!(
-                    adapter.calls.borrow().len(),
-                    1,
-                    "LEGACY numeric single attempt {field}"
-                );
-                let calls = adapter.calls.borrow();
-                let actual = safe_cex_num::js_number(Some(&calls[0]["params"][field])).unwrap();
-                assert_eq!(
-                    actual.to_bits(),
-                    value.to_bits(),
-                    "LEGACY native parameter bits {field}"
-                );
-            }
+            assert!(result.unwrap().is_empty());
+            let calls = adapter.calls.borrow();
+            assert_eq!(calls.len(), 1, "LEGACY numeric single attempt {field}");
+            assert_eq!(
+                calls[0]["params"][field]["bits"].as_str().unwrap(),
+                format!("{:016x}", value.to_bits()),
+                "LEGACY native parameter bits {field}"
+            );
             observations += 1;
         }
     }
@@ -281,7 +264,13 @@ fn legacy_response_phase_preserves_native_rows() {
         assert_eq!(result.len(), 3, "LEGACY response phase row count");
         assert_eq!(
             result,
-            data["rows"].as_array().unwrap().clone(),
+            data["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(safe_cex_types::retained_json::RetainedJsonInput::from)
+                .collect::<Vec<_>>(),
             "LEGACY response phase native members"
         );
         count += 1;

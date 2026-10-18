@@ -80,7 +80,7 @@ fn streaming_map_keeps_nested_numbers_retained_info_and_late_display_fields() {
         (ticker.ask, 2.25),
         (ticker.last, 3.5),
         (ticker.mark, 4.75),
-        (ticker.index, 5.875),
+        (ticker.index.unwrap(), 5.875),
         (ticker.percentage, 6.125),
         (ticker.open_interest, 7.25),
         (ticker.funding_rate, 8.5),

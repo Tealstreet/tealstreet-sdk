@@ -165,6 +165,12 @@ pub trait BlofinExchangeHost: 'static {
     fn clock_ms(&self) -> f64;
     fn wall_clock_ms(&self) -> f64;
     fn sleep(&self, delay: f64) -> rest_lifecycle::LifecycleFuture<'_, (), Self::Error>;
+    /// Start each Promise.all child eagerly and retain it independently of its waiter.
+    fn start_async<T: 'static>(
+        &self,
+        base: &Self::Base,
+        body: rest_lifecycle::LifecycleFuture<'static, T, Self::Error>,
+    ) -> rest_lifecycle::LifecycleFuture<'static, T, Self::Error>;
     fn init_external_public_data(
         &self,
         base: &Self::Base,
@@ -292,7 +298,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             }),
         }
     }
-    fn format_host(&self) -> FormatHost<'_, H::Error> {
+    fn format_host(self: &Rc<Self>) -> FormatHost<'_, H::Error> {
         FormatHost {
             get_margin_type: Box::new(move |s| {
                 let s = s.to_owned();
@@ -327,7 +333,10 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             broker_id_enabled: self.host.broker_id_enabled(),
         }
     }
-    fn write_host<'a>(&'a self, service: &'a ServiceHost<'a, H::Error>) -> WriteHost<'a, H::Error> {
+    fn write_host<'a>(
+        self: &'a Rc<Self>,
+        service: &'a ServiceHost<'a, H::Error>,
+    ) -> WriteHost<'a, H::Error> {
         WriteHost {
             service,
             format_normal_order: Box::new(move |opts| {
@@ -476,7 +485,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         order_rest::place_algo_order_batch(payloads, self.xhr.as_ref(), &service).await
     }
     pub async fn place_order(
-        &self,
+        self: &Rc<Self>,
         opts: &PreparedOrderOpts,
     ) -> Result<Vec<Option<Value>>, ServiceError<H::Error>> {
         let service = self.service();
@@ -484,7 +493,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         order_rest::place_order(opts, self.xhr.as_ref(), &host).await
     }
     pub async fn place_orders(
-        &self,
+        self: &Rc<Self>,
         opts: &[PreparedOrderOpts],
     ) -> Result<Vec<Option<Value>>, ServiceError<H::Error>> {
         let service = self.service();
@@ -492,7 +501,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         order_rest::place_orders(opts, self.xhr.as_ref(), &host).await
     }
     pub async fn cancel_normal_orders(
-        &self,
+        self: &Rc<Self>,
         orders: &[Order],
     ) -> Result<(), ServiceError<H::Error>> {
         let service = self.service();
@@ -505,7 +514,10 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         )
         .await
     }
-    pub async fn cancel_algo_orders(&self, orders: &[Order]) -> Result<(), ServiceError<H::Error>> {
+    pub async fn cancel_algo_orders(
+        self: &Rc<Self>,
+        orders: &[Order],
+    ) -> Result<(), ServiceError<H::Error>> {
         let service = self.service();
         let host = self.write_host(&service);
         order_rest::cancel_algo_orders(
@@ -517,7 +529,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         .await
     }
     pub async fn cancel_trigger_orders(
-        &self,
+        self: &Rc<Self>,
         orders: &[Order],
     ) -> Result<(), ServiceError<H::Error>> {
         let service = self.service();
@@ -530,7 +542,10 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         )
         .await
     }
-    pub async fn cancel_orders(&self, orders: &[Order]) -> Result<(), ServiceError<H::Error>> {
+    pub async fn cancel_orders(
+        self: &Rc<Self>,
+        orders: &[Order],
+    ) -> Result<(), ServiceError<H::Error>> {
         let service = self.service();
         let host = self.write_host(&service);
         order_rest::cancel_orders(
@@ -542,7 +557,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         .await
     }
     pub async fn change_margin_type(
-        &self,
+        self: &Rc<Self>,
         isolated: bool,
         symbol: Option<&str>,
     ) -> Result<(), ServiceError<H::Error>> {
@@ -559,7 +574,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         .await
     }
     pub async fn set_leverage(
-        &self,
+        self: &Rc<Self>,
         symbol: &str,
         input_leverage: f64,
     ) -> Result<(), ServiceError<H::Error>> {
@@ -575,7 +590,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         .await
     }
     pub async fn update_order(
-        &self,
+        self: &Rc<Self>,
         order: &Order,
         update: &UtilityInput,
     ) -> Result<Vec<Option<Value>>, ServiceError<H::Error>> {
@@ -640,8 +655,29 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         order_reads::fetch_trigger_orders(self.context.store.as_ref(), self.xhr.as_ref(), &host)
             .await
     }
+    fn order_families(
+        self: &Rc<Self>,
+    ) -> [rest_lifecycle::LifecycleFuture<'static, Vec<Order>, H::Error>; 3] {
+        let normal = self.clone();
+        let algo = self.clone();
+        let trigger = self.clone();
+        [
+            self.host.start_async(
+                &self.base,
+                Box::pin(async move { normal.fetch_normal_orders().await }),
+            ),
+            self.host.start_async(
+                &self.base,
+                Box::pin(async move { algo.fetch_algo_orders().await }),
+            ),
+            self.host.start_async(
+                &self.base,
+                Box::pin(async move { trigger.fetch_trigger_orders().await }),
+            ),
+        ]
+    }
     pub async fn fetch_orders_with_retry(
-        &self,
+        self: &Rc<Self>,
         retries: f64,
     ) -> Result<Vec<Order>, ServiceError<H::Error>> {
         let service = self.service();
@@ -651,16 +687,13 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             sleep: Box::new(move |delay| self.host.sleep(delay)),
             now: &now,
         };
-        order_reads::fetch_orders_with_retry(
-            retries,
-            self.context.store.as_ref(),
-            self.xhr.as_ref(),
-            &host,
-        )
+        order_reads::fetch_orders_with_retry(retries, self.context.store.as_ref(), &host, &|| {
+            self.order_families()
+        })
         .await
     }
     pub async fn fetch_orders(
-        &self,
+        self: &Rc<Self>,
         _symbols: Option<&[String]>,
     ) -> Result<Vec<Order>, ServiceError<H::Error>> {
         let service = self.service();
@@ -670,12 +703,9 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             sleep: Box::new(move |delay| self.host.sleep(delay)),
             now: &now,
         };
-        order_reads::fetch_orders(
-            _symbols,
-            self.context.store.as_ref(),
-            self.xhr.as_ref(),
-            &host,
-        )
+        order_reads::fetch_orders(_symbols, self.context.store.as_ref(), &host, &|| {
+            self.order_families()
+        })
         .await
     }
     pub async fn fetch_historical_orders(
@@ -833,38 +863,54 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         )
         .await
     }
-    pub async fn get_or_fetch_position_mode(
-        &self,
+    pub fn get_or_fetch_position_mode(
+        self: &Rc<Self>,
         symbol: Option<&str>,
         refetch: bool,
-    ) -> Result<PositionMode, ServiceError<H::Error>> {
-        let service = self.service();
-        order_services::get_or_fetch_position_mode(
-            symbol,
-            refetch,
-            &self.fields.account_modes,
-            self.context.store.as_ref(),
-            self.xhr.as_ref(),
-            &service,
+    ) -> rest_lifecycle::LifecycleFuture<'static, PositionMode, H::Error> {
+        let owner = self.clone();
+        let symbol = symbol.map(str::to_owned);
+        self.host.start_async(
+            &self.base,
+            Box::pin(async move {
+                let service = owner.service();
+                order_services::get_or_fetch_position_mode(
+                    symbol.as_deref(),
+                    refetch,
+                    &owner.fields.account_modes,
+                    owner.context.store.as_ref(),
+                    owner.xhr.as_ref(),
+                    &service,
+                )
+                .await
+            }),
         )
-        .await
     }
-    pub async fn get_or_fetch_margin_type(
-        &self,
+
+    pub fn get_or_fetch_margin_type(
+        self: &Rc<Self>,
         symbol: Option<&str>,
         refetch: bool,
-    ) -> Result<MarginType, ServiceError<H::Error>> {
-        let service = self.service();
-        order_services::get_or_fetch_margin_type(
-            symbol,
-            refetch,
-            &self.fields.account_modes,
-            self.context.store.as_ref(),
-            self.xhr.as_ref(),
-            &service,
+    ) -> rest_lifecycle::LifecycleFuture<'static, MarginType, H::Error> {
+        let owner = self.clone();
+        let symbol = symbol.map(str::to_owned);
+        self.host.start_async(
+            &self.base,
+            Box::pin(async move {
+                let service = owner.service();
+                order_services::get_or_fetch_margin_type(
+                    symbol.as_deref(),
+                    refetch,
+                    &owner.fields.account_modes,
+                    owner.context.store.as_ref(),
+                    owner.xhr.as_ref(),
+                    &service,
+                )
+                .await
+            }),
         )
-        .await
     }
+
     pub async fn fetch_leverage_for_symbol(
         &self,
         symbol: &str,
@@ -898,7 +944,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         order_services::place_trigger_order(payload, self.xhr.as_ref(), &service).await
     }
     pub async fn format_trigger_order(
-        &self,
+        self: &Rc<Self>,
         opts: &PreparedOrderOpts,
         source: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<OrderPayload, ServiceError<H::Error>> {
@@ -907,14 +953,14 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             .await
     }
     pub async fn format_algo_order(
-        &self,
+        self: &Rc<Self>,
         opts: &PreparedOrderOpts,
     ) -> Result<OrderPayload, ServiceError<H::Error>> {
         let host = self.format_host();
         order_formatters::format_algo_order(opts, self.context.store.as_ref(), &host).await
     }
     pub async fn format_normal_order(
-        &self,
+        self: &Rc<Self>,
         opts: &PreparedOrderOpts,
     ) -> Result<Vec<OrderPayload>, ServiceError<H::Error>> {
         let host = self.format_host();
@@ -923,16 +969,22 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
 }
 
 impl<H: BlofinExchangeHost> BlofinExchange<H> {
-    pub fn symbol_to_market_id(&self, symbol: &str) -> Option<String> {
+    pub fn symbol_to_market_id(
+        &self,
+        symbol: &str,
+    ) -> Result<Option<String>, safe_cex_types::StoreReadError> {
         crate::symbols::symbol_to_market_id(symbol, self.context.store.as_ref())
     }
-    pub fn market_id_to_symbol(&self, id: &str) -> Option<String> {
+    pub fn market_id_to_symbol(
+        &self,
+        id: &str,
+    ) -> Result<Option<String>, safe_cex_types::StoreReadError> {
         crate::symbols::market_id_to_symbol(id, self.context.store.as_ref())
     }
     pub fn map_orders(
         &self,
         rows: &crate::orders::OrdersInput,
-    ) -> Result<Vec<Order>, safe_cex_types::js_coercion::JsCoercionError> {
+    ) -> Result<Vec<Order>, crate::reads::MappingError> {
         crate::orders::map_orders(rows, self.context.store.as_ref(), || self.host.clock_ms())
     }
     pub fn map_positions(
@@ -952,7 +1004,8 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             Some(rows) => crate::tickers::format_tickers(rows, self.context.store.as_ref(), |s| {
                 self.host
                     .emit_and_log_error(&self.base, Some(&Value::String(s.into())))
-            }),
+            })
+            .map_err(|error| self.host.service_error(read_error(error))),
             None => {
                 self.host.emit_and_log_error(
                     &self.base,
@@ -960,7 +1013,11 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
                         "Cannot read properties of undefined (reading 'reduce')".into(),
                     )),
                 )?;
-                Ok(self.context.store.tickers().to_vec())
+                Ok(self
+                    .context
+                    .store
+                    .tickers()
+                    .map_err(|error| self.host.service_error(ServiceError::Store(error.into())))?)
             }
         }
     }
@@ -1007,7 +1064,10 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         )
         .await
     }
-    pub async fn cancel_symbol_orders(&self, symbol: &str) -> Result<(), ServiceError<H::Error>> {
+    pub async fn cancel_symbol_orders(
+        self: &Rc<Self>,
+        symbol: &str,
+    ) -> Result<(), ServiceError<H::Error>> {
         order_services::cancel_symbol_orders(
             symbol,
             self.context.store.as_ref(),
@@ -1040,7 +1100,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         )
     }
     pub async fn get_position_side(
-        &self,
+        self: &Rc<Self>,
         opts: &PositionSideOptions<'_>,
     ) -> Result<&'static str, ServiceError<H::Error>> {
         modes::get_position_side(opts, |s| {
@@ -1080,7 +1140,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
     pub fn add_inline_tpsl_fallback_orders(
         &self,
         orders: &[Order],
-    ) -> Result<Vec<Order>, safe_cex_types::js_coercion::JsCoercionError> {
+    ) -> Result<Vec<Order>, safe_cex_num::JsCoercionError> {
         crate::inline_tpsl::add_inline_tpsl_fallback_orders(orders, || self.host.clock_ms())
     }
     pub async fn start(self: &Rc<Self>) -> Result<(), ServiceError<H::Error>> {
@@ -1105,6 +1165,7 @@ fn read_error<E>(error: crate::reads::ReadError<E>) -> ServiceError<E> {
     match error {
         crate::reads::ReadError::Ingress(e) => ServiceError::Ingress(e),
         crate::reads::ReadError::Emitter(e) => ServiceError::Host(e),
+        crate::reads::ReadError::Store(e) => ServiceError::Store(e.into()),
     }
 }
 struct ExchangeLifecycle<'a, H: BlofinExchangeHost> {
@@ -1226,7 +1287,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
                         owner.context.store.as_ref(),
                         || owner.host.clock_ms(),
                     )
-                    .map_err(crate::private_stream_data::PrivateDataError::Coercion)
+                    .map_err(crate::private_stream_data::PrivateDataError::from)
                 }),
                 map_positions: Rc::new(move |rows| {
                     let owner = positions.upgrade().ok_or_else(|| {
@@ -1244,6 +1305,9 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
                             }
                             crate::positions::PositionMapError::Emitter(e) => {
                                 crate::private_stream_data::PrivateDataError::Host(e)
+                            }
+                            crate::positions::PositionMapError::Store(e) => {
+                                crate::private_stream_data::PrivateDataError::Store(e.into())
                             }
                         })
                 }),

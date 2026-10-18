@@ -26,7 +26,7 @@ fn error(message: impl AsRef<str>) -> Thrown {
 }
 fn fields(value: &Js) -> Result<Vec<Js>, Thrown> {
     value
-        .array_items()
+        .array_items()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))?
         .into_iter()
         .map(|v| Ok(v.unwrap_or(Js::Undefined)))
@@ -54,7 +54,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let symbol = text(&arg(&a, 0))?;
         let parent = venue(&rt)?;
         let missing = {
-            let markets = parent.base.store.markets();
+            let markets = parent.base.store.markets()?;
             !markets.is_empty() && !markets.iter().any(|m| m.symbol == symbol)
         };
         if missing {

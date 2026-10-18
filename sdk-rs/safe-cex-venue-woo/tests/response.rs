@@ -1,4 +1,5 @@
 use safe_cex_num::JsCoercionError;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_woo::response::*;
 use serde_json::{Value, json};
 fn input(v: &Value) -> Option<Value> {
@@ -49,7 +50,7 @@ fn wire_response_helpers_match_live_source() {
         let raw = input(&a[0]);
         let result: Result<Value, JsCoercionError> = match case["name"].as_str().unwrap() {
             "parseTransactionRowsFromResponse" => Ok(json!(parse_transaction_rows_from_response(
-                raw.as_ref().unwrap_or(&Value::Null)
+                &Input::from(raw.clone().unwrap_or(Value::Null))
             ))),
             "parseFiniteFundingNumber" => parse_finite_funding_number(raw.as_ref()).map(number),
             "normalizeTimestampSeconds" => normalize_timestamp_seconds(raw.as_ref()).map(number),
@@ -83,9 +84,15 @@ fn wire_response_helpers_match_live_source() {
 
 #[test]
 fn selected_transaction_array_is_borrowed_verbatim() {
-    let value = json!({"data":{"rows":[null,3,"fill",{"id":1}]},"rows":["root"]});
+    let value = Input::from(json!({"data":{"rows":[null,3,"fill",{"id":1}]},"rows":["root"]}));
     let actual = parse_transaction_rows_from_response(&value);
-    let source = value["data"]["rows"].as_array().unwrap();
+    let source = value
+        .get("data")
+        .unwrap()
+        .get("rows")
+        .unwrap()
+        .as_array()
+        .unwrap();
     assert_eq!(actual.as_ptr(), source.as_ptr());
     assert_eq!(actual.len(), 4);
 }

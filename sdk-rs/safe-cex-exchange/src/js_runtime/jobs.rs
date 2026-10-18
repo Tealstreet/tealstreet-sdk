@@ -155,7 +155,7 @@ impl Jobs {
         if (!self.jobs.borrow().is_empty() || !self.checks.borrow().is_empty())
             && !self.running.replace(true)
         {
-            OwnedTasks::start_detached(self.runtime.as_ref(), Box::pin(Driver(self.clone())));
+            OwnedTasks::start_promise_driver(self.runtime.as_ref(), Box::pin(Driver(self.clone())));
         }
     }
     fn enqueue(self: &Rc<Self>, work: Work, deadline: Option<f64>, eager: bool) -> Rc<Job> {
@@ -327,5 +327,75 @@ pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
     });
     if !nested {
         jobs.drain();
+    }
+}
+
+/// Outstanding source Promise continuations, excluding scheduled timer jobs.
+/// A replay receipt cannot certify processing while asynchronous frame work waits.
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub(crate) fn pending_non_timer(runtime: Rc<dyn ExchangeRuntime>) -> usize {
+    with_queues(|queues| {
+        queues
+            .borrow()
+            .iter()
+            .find_map(|(owner, jobs)| {
+                owner
+                    .upgrade()
+                    .filter(|owner| Rc::ptr_eq(owner, &runtime))
+                    .and_then(|_| jobs.upgrade())
+            })
+            .map_or(0, |jobs| {
+                jobs.checks.borrow().len()
+                    + jobs
+                        .jobs
+                        .borrow()
+                        .iter()
+                        .filter(|job| job.deadline.is_none() && !job.cancelled.get())
+                        .count()
+            })
+    })
+}
+
+#[cfg(test)]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+mod replay_receipt_tests {
+    use super::{checkpoint, for_runtime, pending_non_timer};
+    use crate::runtime::ExchangeRuntime;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+        task::{Poll, Waker},
+    };
+    #[test]
+    fn pending_replay_receipt_includes_async_work_but_excludes_future_timers() {
+        let host = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&host, async {
+            let runtime: Rc<dyn ExchangeRuntime> = crate::native::native_runtime();
+            let jobs = for_runtime(&runtime);
+            let ready = Rc::new(Cell::new(false));
+            let wake = Rc::new(RefCell::new(None::<Waker>));
+            let (gate, signal) = (ready.clone(), wake.clone());
+            jobs.spawn(Box::pin(async move {
+                std::future::poll_fn(|cx| {
+                    if gate.get() {
+                        return Poll::Ready(());
+                    }
+                    *signal.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                })
+                .await;
+            }));
+            let timer = jobs.timer(runtime.now_ms() + 1000.0, Box::pin(std::future::pending()));
+            checkpoint(runtime.clone());
+            assert_eq!(pending_non_timer(runtime.clone()), 1);
+            ready.set(true);
+            wake.borrow_mut().take().unwrap().wake();
+            checkpoint(runtime.clone());
+            assert_eq!(pending_non_timer(runtime), 0);
+            timer.cancel();
+        });
     }
 }

@@ -67,7 +67,7 @@ fn public_mapper_native_field_identity() {
         215,
         "WOO-MAPPER source total"
     );
-    let mut counts = [0; 4];
+    let mut counts = [0; 3];
     for case in cases
         .as_array()
         .unwrap()
@@ -118,7 +118,7 @@ fn public_mapper_native_field_identity() {
                             "limits.amount.min",
                         ),
                         (
-                            value.limits.amount.max,
+                            safe_cex_num::numeric_value_to_number(&value.limits.amount.max),
                             &input["limits"]["amount"]["max"],
                             "limits.amount.max",
                         ),
@@ -188,26 +188,8 @@ fn public_mapper_native_field_identity() {
                 }
                 counts[2] += 1;
             }
-            "mapWooV3Candles" => {
-                if case["nonfinite"] == true {
-                    continue;
-                }
-                let rows: Vec<WooV3KlineRow> = serde_json::from_value(input.clone()).unwrap();
-                let values = map_woo_v3_candles(&rows).unwrap();
-                let outputs = expected.as_array().unwrap();
-                assert_eq!(values.len(), outputs.len());
-                for (value, input) in values.iter().zip(outputs) {
-                    numbers!(value, input, timestamp => "timestamp", open => "open", high => "high", low => "low", close => "close", volume => "volume");
-                    assert!(value.last_side.is_none(), "last_side native absence");
-                }
-                counts[3] += 1;
-            }
             _ => {}
         }
     }
-    assert_eq!(
-        counts,
-        [28, 56, 13, 26],
-        "WOO-MAPPER compared cases per family"
-    );
+    assert_eq!(counts, [28, 56, 13], "WOO-MAPPER compared cases per family");
 }

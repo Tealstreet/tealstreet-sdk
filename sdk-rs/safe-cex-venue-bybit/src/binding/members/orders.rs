@@ -11,7 +11,7 @@ use crate::{
 };
 use safe_cex_num::{adjust, js_number_string};
 use safe_cex_types::{OrderType, PlaceOrderOpts};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::{borrow::Borrow, rc::Rc};
 
 fn num(n: f64) -> Js {
@@ -84,7 +84,7 @@ fn market(rt: &Rt, symbol: &str) -> Result<Option<safe_cex_types::Market>, Throw
     Ok(venue
         .base
         .store
-        .markets()
+        .markets()?
         .iter()
         .find(|m| m.symbol == symbol)
         .cloned())
@@ -307,7 +307,7 @@ async fn place_option_order(
     )
     .await?;
     let responses = responses
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
     let Some(response) = responses.first().cloned() else {
         return Err(Thrown::new(error_object(
@@ -481,7 +481,7 @@ fn fetch_position_mode_body(rt: &Rt, symbol: Js, primary: bool) -> Result<Js, Th
         } else {
             result.get("list")?
         };
-        let rows = list.array_items().unwrap_or_default();
+        let rows = list.array_items()?.unwrap_or_default();
         if primary && !meta.get("isSuccess")?.truthy() && rows.is_empty() {
             let message = meta.get("retMsg")?;
             let code = meta.get("retCode")?;
@@ -519,14 +519,16 @@ fn fetch_position_mode_body(rt: &Rt, symbol: Js, primary: bool) -> Result<Js, Th
         let mapped = if !primary && list.is_nullish() {
             Js::Undefined
         } else {
-            Js::array(
-                rows.into_iter()
-                    .map(|row| {
-                        rt.this
-                            .call_method("mapPosition", vec![row.unwrap_or(Js::Undefined)])
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
+            let list = if primary && !list.is_array() {
+                Js::array(vec![])
+            } else {
+                list
+            };
+            let mapper = rt
+                .this
+                .get("mapPosition")?
+                .call_method("bind", vec![rt.this.clone()])?;
+            list.call_method("map", vec![mapper])?
         };
         store.call_method("addOrUpdatePositions", vec![mapped.clone()])?;
         if mapped.get("length")?.truthy() {
@@ -537,32 +539,23 @@ fn fetch_position_mode_body(rt: &Rt, symbol: Js, primary: bool) -> Result<Js, Th
     })))
 }
 
-// ts: BybitExchange#getOrderPositionIdx
-pub(crate) async fn get_order_position_idx(
-    rt: &Rt,
-    opts: Map<String, Value>,
-) -> Result<f64, Thrown> {
-    let opts = std::cell::RefCell::new(opts);
-    crate::execution_guards::get_order_position_idx(&opts, |symbol| {
-        let pending = rt.this.call_method(
-            "fetchPositionMode",
-            vec![symbol.as_ref().map_or(Js::Undefined, from_json)],
-        );
-        async move {
-            let mode = await_js(&rt.exchange_runtime(), pending?).await?;
-            Ok::<_, Thrown>(Some(to_json(&mode)?).filter(|v| !v.is_null()))
-        }
-    })
-    .await
+// Placement and amendment dispatch through the same replaceable source member.
+pub(crate) async fn get_order_position_idx(rt: &Rt, opts: Js) -> Result<f64, Thrown> {
+    await_js(
+        &rt.exchange_runtime(),
+        rt.this.call_method("getOrderPositionIdx", vec![opts])?,
+    )
+    .await?
+    .to_number()
 }
 
-// ts: BybitExchange#getStopOrderPositionIdx
-async fn get_stop_order_position_idx(rt: &Rt, opts: &Map<String, Value>) -> Result<Js, Thrown> {
-    let index = crate::execution_guards::get_stop_order_position_idx(opts, |opts| {
-        get_order_position_idx(rt, opts)
-    })
-    .await?;
-    Ok(index.map_or(Js::Undefined, Js::Number))
+async fn get_stop_order_position_idx(rt: &Rt, opts: &Js) -> Result<Js, Thrown> {
+    await_js(
+        &rt.exchange_runtime(),
+        rt.this
+            .call_method("getStopOrderPositionIdx", vec![opts.clone()])?,
+    )
+    .await
 }
 
 /// The SET_TRADING_STOP answer: not-modified and OK both schedule the order refresh.
@@ -596,17 +589,13 @@ pub(crate) async fn place_stop_loss_or_take_profit(rt: &Rt, opts: &Js) -> Result
     };
     let amount = adjust(base.amount, market.precision.amount);
     let sized = (amount != 0. && !amount.is_nan()).then_some(amount);
-    let opts_json = to_json(opts)?.as_object().cloned().unwrap_or_default();
     let payload = Js::object(vec![
         (
             "category",
             Js::str(venue(rt)?.get_category_for_symbol(&base.symbol)),
         ),
         ("symbol", Js::str(&base.symbol)),
-        (
-            "positionIdx",
-            get_stop_order_position_idx(rt, &opts_json).await?,
-        ),
+        ("positionIdx", get_stop_order_position_idx(rt, opts).await?),
         (
             "tpslMode",
             Js::str(if sized.is_some() { "Partial" } else { "Full" }),
@@ -646,7 +635,7 @@ pub(crate) async fn place_trailing_stop_loss(rt: &Rt, opts: &Js) -> Result<Js, T
     let ticker = venue
         .base
         .store
-        .tickers()
+        .tickers()?
         .iter()
         .find(|t| t.symbol == base.symbol)
         .cloned();
@@ -661,17 +650,13 @@ pub(crate) async fn place_trailing_stop_loss(rt: &Rt, opts: &Js) -> Result<Js, T
         safe_cex_num::math_max(ticker.last, price) - safe_cex_num::math_min(ticker.last, price),
         market.precision.price,
     );
-    let opts_json = to_json(opts)?.as_object().cloned().unwrap_or_default();
     let payload = Js::object(vec![
         (
             "category",
             Js::str(venue.get_category_for_symbol(&base.symbol)),
         ),
         ("symbol", Js::str(&base.symbol)),
-        (
-            "positionIdx",
-            get_stop_order_position_idx(rt, &opts_json).await?,
-        ),
+        ("positionIdx", get_stop_order_position_idx(rt, opts).await?),
         ("trailingStop", num(distance)),
     ]);
     trading_stop(rt, payload).await
@@ -700,7 +685,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             |message| emit(&rt, message).map_err(|e| Rc::new(e.to_exchange_error())),
         )
         .map_err(|e| Thrown::from((*e).clone()))?;
-        if venue.has_full_sized_position_opposite_side(&base.symbol, base.side, base.amount)
+        if venue.has_full_sized_position_opposite_side(&base.symbol, base.side, base.amount)?
             && matches!(base.r#type, OrderType::StopLoss | OrderType::TakeProfit)
         {
             return place_stop_loss_or_take_profit(&rt, &opts).await;
@@ -714,13 +699,16 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                 &format!("Market {} not found", base.symbol),
             )));
         };
-        let mut position_opts = to_json(&opts)?.as_object().cloned().unwrap_or_default();
-        if base.r#type == OrderType::Conditional {
-            position_opts.insert("reduceOnly".into(), Value::Bool(false));
-        }
+        let position_opts = if base.r#type == OrderType::Conditional {
+            let copied = opts.spread_object()?;
+            copied.set("reduceOnly", Js::Bool(false))?;
+            copied
+        } else {
+            opts.clone()
+        };
         let position_idx = get_order_position_idx(&rt, position_opts).await?;
 
-        let max_size = market.limits.amount.max;
+        let max_size = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         let (p_price, p_amount) = (market.precision.price, market.precision.amount);
         let amount = adjust(base.amount, p_amount);
         let truthy = |v: Option<f64>| v.filter(|n| *n != 0. && !n.is_nan());
@@ -733,7 +721,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                 let ticker = venue
                     .base
                     .store
-                    .tickers()
+                    .tickers()?
                     .iter()
                     .find(|t| t.symbol == base.symbol)
                     .cloned()
@@ -937,7 +925,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         )
         .await?;
         let responses = responses
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
         collect_ids(&rt, &opts, responses)
     })))

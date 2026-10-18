@@ -257,3 +257,33 @@ admission stay strict. Source live-info alias versus native owned snapshot remai
 a declared boundary. `scripts/retained-order-info-controls.py` compiles three
 isolated faults (member JSON projection, REST JSON projection, undefined loss),
 requires the named real-binding test to fail and restores exact source bytes.
+
+The typed native payload provider reaches options before constructor-started SDK
+initialization. A hosted key reference therefore selects the source address-only
+account branch instead of local private-key parsing. The child-module
+`payload_signer_binding` witness runs NativeRuntime, the production REST host,
+reqwest and a loopback config/auth server; it compares all three Order/ModifyOrder/
+JWT hash-signature requests and auth headers with maintained Node SDK code, then
+checks HMAC hex/base64 through the same provider and propagated signer rejection.
+The labelled RED commit declares only the new host ABI/union; assembly is unchanged.
+`payload-signer-controls.py` independently disables real provider installation and
+truncates the forwarded hash, requires named compiled failures and restores exact
+source bytes before rerunning the witness. Apex has no maintained payloadSigner
+caller in this source tree; no Apex signing API is introduced by this repair.
+
+The listenOHLCV audit keeps polling failures diagnostic-only: Host::start reports
+the detached rejection without emitting an app error or writing Store state.
+`candle_audit_failure_reports_only_and_preserves_polling_and_shared_cleanup`
+compares the real REST/socket binding with the complete maintained public class
+and original fetchOHLCV method. Both failing endpoints still lead to a poll at
+3000ms, unchanged candles stay suppressed, and one listener cleanup preserves
+the other until its own cleanup cancels polling. This extra report is the
+authorized no-silent-failure residual; it is not a source parity claim.
+
+
+Order-book sorting uses the canonical fallible JS merge sorter. NaN comparisons
+mean equality and do not require a Rust total order; a throwing price getter
+stops comparison immediately and reaches the original catch/log path. The full
+maintained public class, real socket frames and constructed retained getter
+witnesses cover both sides. The shared TimSort scheduler also preserves the
+maintained 264-case ticker corpus, including finite levels separated by NaN.

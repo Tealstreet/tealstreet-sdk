@@ -127,8 +127,8 @@ impl SnapshotBindings for Bindings {
             "client-A".encode_utf16().collect::<Vec<_>>()
         );
         let result = if self.profile == "notfound" {
-            let mut error = safe_cex_exchange::runtime::ExchangeError::new("not found");
-            error.response = Some(json!({"data":{"code":-2013}}));
+            let error = safe_cex_exchange::runtime::ExchangeError::new("not found")
+                .with_retained_response(json!({"data":{"code":-2013}}).into());
             Err(Rc::new(error))
         } else {
             Ok(self.data.clone())
@@ -188,7 +188,7 @@ pub fn lookup(value: EventValue, b: &Bindings) -> Value {
 
 pub fn child(value: &EventValue) -> Value {
     match value
-        .array_items()
+        .array_items()?
         .and_then(|rows| rows.into_iter().next())
         .flatten()
     {

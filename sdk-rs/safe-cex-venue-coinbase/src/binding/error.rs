@@ -20,7 +20,18 @@ pub(super) fn from_thrown(error: Thrown) -> PortfolioFailure {
                 .filter(|v| !v.is_undefined())
                 .and_then(|v| safe_cex_exchange::js_runtime::value::to_json(&v).ok())
         };
-        native.response = property("response");
+        let response = match error.value.get("response") {
+            Ok(value) => value,
+            Err(cause) => return failure(cause.into()),
+        };
+        if !response.is_undefined() {
+            let response = match safe_cex_exchange::js_runtime::value::to_retained_input(&response)
+            {
+                Ok(value) => value,
+                Err(cause) => return failure(cause.into()),
+            };
+            native = native.with_retained_response(response);
+        }
         native.config = property("config");
 
         native.is_axios_error = error
@@ -58,8 +69,9 @@ mod tests {
     #[test]
     fn native_http_error_metadata_survives_the_venue_carrier() {
         let mut original = ExchangeError::new("scripted HTTP failure");
-        original.response =
-            Some(serde_json::json!({"status": 503, "data": {"message":"unavailable"}}));
+        original = original.with_retained_response(
+            serde_json::json!({"status": 503, "data": {"message":"unavailable"}}).into(),
+        );
         original.code = Some(safe_cex_exchange::js_runtime::value::from_json(
             &serde_json::json!("ERR_BAD_RESPONSE"),
         ));

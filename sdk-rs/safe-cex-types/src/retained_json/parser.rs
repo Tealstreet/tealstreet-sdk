@@ -52,6 +52,14 @@ impl Parser<'_> {
         }
         let mut units = Vec::new();
         loop {
+            let start = self.cursor;
+            while let Some(unit) = self.text.get(self.cursor) {
+                if matches!(unit, 0..=0x1f | 0x22 | 0x5c) {
+                    break;
+                }
+                self.cursor += 1;
+            }
+            units.extend_from_slice(&self.text[start..self.cursor]);
             let Some(&unit) = self.text.get(self.cursor) else {
                 return Err(self.error());
             };
@@ -91,7 +99,7 @@ impl Parser<'_> {
                     });
                 }
                 0..=0x1f => return Err(self.error()),
-                _ => units.push(unit),
+                _ => unreachable!("unescaped string chunk already consumed"),
             }
         }
     }

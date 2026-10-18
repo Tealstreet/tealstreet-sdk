@@ -67,7 +67,13 @@ fn decoded(v: Value) -> EventValue {
 }
 fn snap(v: &EventValue) -> EventValue {
     match v {
-        EventValue::Array(a) => array(array_values(a).iter().map(snap).collect()),
+        EventValue::Array(a) => array(
+            array_values(a)
+                .expect("fixture array reads")
+                .iter()
+                .map(snap)
+                .collect(),
+        ),
         EventValue::Object(_) => EventValue::record_object(
             v.spread()
                 .iter()
@@ -90,7 +96,11 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(v) => json!(v),
         EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
-        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -127,8 +137,8 @@ fn values(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native Array")
     };
-    assert_eq!(a.borrow().len(), n, "{l}: native array count");
-    array_values(a)
+    assert_eq!(a.len(), n, "{l}: native array count");
+    array_values(a).expect("fixture array reads")
 }
 fn own(v: &EventValue, k: &str) -> bool {
     let EventValue::Object(o) = v else {
@@ -160,9 +170,13 @@ fn encoded_input(v: &EventValue) -> JsJsonValue {
         EventValue::Bool(v) => JsJsonValue::Bool(*v),
         EventValue::Number(v) => JsJsonValue::Number(*v),
         EventValue::String(v) => JsJsonValue::String(String::from_utf16(v).unwrap()),
-        EventValue::Array(a) => {
-            JsJsonValue::Array(array_values(a).iter().map(encoded_input).collect())
-        }
+        EventValue::Array(a) => JsJsonValue::Array(
+            array_values(a)
+                .expect("fixture array reads")
+                .iter()
+                .map(encoded_input)
+                .collect(),
+        ),
         EventValue::Object(_) => JsJsonValue::Object(
             v.spread()
                 .iter()
@@ -251,7 +265,7 @@ fn error(name: &str) -> Failure {
             -1000
         }
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"venue detail"}})).into());
     Rc::new(e)
 }
 fn state(family: &str, name: &str) -> Shared {
@@ -416,7 +430,8 @@ fn state(family: &str, name: &str) -> Shared {
     replacement.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "emit-code"
     )));
-    replacement.response = Some(json!({"status":504,"data":{"msg":"emit detail"}}));
+    replacement = replacement
+        .with_retained_response((json!({"status":504,"data":{"msg":"emit detail"}})).into());
     Rc::new(RefCell::new(State {
         family: family.into(),
         venue,
@@ -510,7 +525,7 @@ impl BatchBindings for Bindings {
                 };
                 let replaced = decoded(fixture()["orders"][1].clone());
                 replaced.write("id", string("replaced"));
-                a.borrow_mut()[1] = Some(replaced);
+                EventValue::Array(a.clone()).set("1", replaced).unwrap();
             }
             let id = o.read("id")?.text()?;
             let regular = record([
@@ -553,7 +568,7 @@ impl BatchBindings for Bindings {
                     "native configured cancel rows",
                 );
                 let originals = if let EventValue::Array(a) = &b.conflicts {
-                    array_values(a)
+                    array_values(a).expect("fixture array reads")
                 } else {
                     panic!()
                 };
@@ -685,7 +700,7 @@ impl BatchBindings for Bindings {
                 let EventValue::Array(a) = &b.data else {
                     panic!()
                 };
-                a.borrow()[4]
+                native_array_fixture::slots(&a)[4]
                     .as_ref()
                     .unwrap()
                     .write("msg", string("changed row error"));
@@ -701,7 +716,7 @@ impl BatchBindings for Bindings {
                     if let Some(c) = &observed_error_code(&e.code) {
                         fields.insert("code".into(), c.clone());
                     }
-                    if let Some(r) = &e.response {
+                    if let Some(r) = &e.response_json_view() {
                         fields.insert("response".into(), r.clone());
                     }
                     Value::Object(fields)
@@ -799,7 +814,7 @@ fn generated(e: &Failure, b: &State, msg: &str, l: &str) {
     assert_eq!(e.name, "TypeError", "{l}: native generated name");
     assert_eq!(e.message, msg, "{l}: native generated message");
     assert!(
-        e.code.is_none() && e.response.is_none(),
+        e.code.is_none() && e.response_json_view().is_none(),
         "{l}: native generated metadata"
     );
 }
@@ -838,7 +853,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
         "{l}: native Error code"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(if replaced {
             json!({"status":504,"data":{"msg":"emit detail"}})
         } else {
@@ -848,7 +863,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
     );
 }
 fn error_wire(e: &Failure, b: &State) -> Value {
-    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))})
 }
 impl Trace {
     fn wire(&self, b: &State) -> Value {
@@ -876,7 +891,7 @@ impl Trace {
     }
 }
 fn state_wire(b: &State, result: &Result<EventValue, Failure>) -> Value {
-    json!({"name":b.name,"trace":b.trace.iter().map(|t|t.wire(b)).collect::<Vec<_>>(),"posts":b.posts.iter().map(|p|json!({"endpoint":p.endpoint,"payload":wire(&p.sent)})).collect::<Vec<_>>(),"emissions":b.emissions.iter().map(wire).collect::<Vec<_>>(),"classifications":b.classifications.iter().map(|v|match v{Rejection::Row(v)=>{let EventValue::Array(a)=&b.data else{panic!()};json!({"kind":"row","original":array_values(&a).iter().any(|o|o.same(v)),"value":wire(v)})},Rejection::Error(e)=>json!({"kind":"error","original":Rc::ptr_eq(e,&b.error)||Rc::ptr_eq(e,&b.replacement),"value":error_wire(e,b)})}).collect::<Vec<_>>(),"logs":b.logs.iter().map(|(m,s)|json!({"message":m,"severity":s})).collect::<Vec<_>>(),"methods":b.methods.iter().map(|m|json!({"method":key(m.method),"version":m.version,"args":wire(&m.sent)})).collect::<Vec<_>>(),"formats":b.formats.iter().map(wire).collect::<Vec<_>>(),"stringifies":b.stringifies.iter().map(wire).collect::<Vec<_>>(),"positions":b.position_reads,"markets":b.market_reads,"adjusts":b.adjusts.len(),"orderReads":b.order_reads,"assertRefs":b.assert_refs,"cancelRefs":b.cancel_refs,"returnedRef":result.as_ref().is_ok_and(|v|v.same(&b.returned)),"value":result.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"failure":result.as_ref().err().map(|e|error_wire(e,b))})
+    json!({"name":b.name,"trace":b.trace.iter().map(|t|t.wire(b)).collect::<Vec<_>>(),"posts":b.posts.iter().map(|p|json!({"endpoint":p.endpoint,"payload":wire(&p.sent)})).collect::<Vec<_>>(),"emissions":b.emissions.iter().map(wire).collect::<Vec<_>>(),"classifications":b.classifications.iter().map(|v|match v{Rejection::Row(v)=>{let EventValue::Array(a)=&b.data else{panic!()};json!({"kind":"row","original":array_values(&a).expect("fixture array reads").iter().any(|o|o.same(v)),"value":wire(v)})},Rejection::Error(e)=>json!({"kind":"error","original":Rc::ptr_eq(e,&b.error)||Rc::ptr_eq(e,&b.replacement),"value":error_wire(e,b)})}).collect::<Vec<_>>(),"logs":b.logs.iter().map(|(m,s)|json!({"message":m,"severity":s})).collect::<Vec<_>>(),"methods":b.methods.iter().map(|m|json!({"method":key(m.method),"version":m.version,"args":wire(&m.sent)})).collect::<Vec<_>>(),"formats":b.formats.iter().map(wire).collect::<Vec<_>>(),"stringifies":b.stringifies.iter().map(wire).collect::<Vec<_>>(),"positions":b.position_reads,"markets":b.market_reads,"adjusts":b.adjusts.len(),"orderReads":b.order_reads,"assertRefs":b.assert_refs,"cancelRefs":b.cancel_refs,"returnedRef":result.as_ref().is_ok_and(|v|v.same(&b.returned)),"value":result.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"failure":result.as_ref().err().map(|e|error_wire(e,b))})
 }
 fn compare(family: &str, actual: Vec<Value>, floor: usize) {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1152,7 +1167,10 @@ fn http_test(family: &str) {
                     panic!()
                 };
                 assert!(
-                    array_values(&original).iter().any(|p| p.same(&row)),
+                    array_values(&original)
+                        .expect("fixture array reads")
+                        .iter()
+                        .any(|p| p.same(&row)),
                     "{l}: native codec original payload referent"
                 );
             }
@@ -1338,7 +1356,10 @@ fn http_test(family: &str) {
                     panic!()
                 };
                 assert!(
-                    array_values(&a).iter().any(|o| o.same(row)),
+                    array_values(&a)
+                        .expect("fixture array reads")
+                        .iter()
+                        .any(|o| o.same(row)),
                     "{l}: native classifier original row"
                 );
                 assert!(
@@ -1777,3 +1798,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;

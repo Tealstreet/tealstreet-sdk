@@ -112,14 +112,14 @@ fn public_wire_topics_and_all_three_ticker_streams_reach_real_store() {
             &socket,
             json!({"e":"bookTicker","s":SYMBOL,"b":"50009","a":"50012"}),
         );
-        let tickers = h.store.tickers();
+        let tickers = h.store.tickers().unwrap();
         let t = &tickers[0];
         assert_eq!(t.last, 50020.5);
         assert_eq!(t.percentage, -1.25);
         assert_eq!(t.volume, 9.);
         assert_eq!(t.quote_volume, 450184.5);
         assert_eq!(t.mark, 50010.);
-        assert_eq!(t.index, 50011.);
+        assert_eq!(t.index, Some(50011.));
         assert_eq!(t.bid, 50009.);
         assert_eq!(t.ask, 50012.);
     }
@@ -305,7 +305,7 @@ fn private_stream_preserves_big_ids_raw_fill_units_and_terminal_reason() {
     let event = |status: &str, filled: &str, reject: &str| json!({"e":"ORDER_TRADE_UPDATE","o":{"i":12345678901234567u64,"s":SYMBOL,"S":"BUY","ot":"STOP_MARKET","q":"10","z":filled,"l":"2","ap":"50000","p":"0","sp":"49000","R":true,"cp":false,"wt":"MARK_PRICE","X":status,"r":reject}});
     frame(&socket, event("NEW", "0", ""));
     {
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         let o = &orders[0];
         assert_eq!(o.id, "12345678901234567");
         assert_eq!(o.amount, 10.);
@@ -327,10 +327,10 @@ fn private_stream_preserves_big_ids_raw_fill_units_and_terminal_reason() {
         2.,
         "source emits native contracts, not converted base"
     );
-    assert_eq!(h.store.orders()[0].filled, 3.);
-    assert_eq!(h.store.orders()[0].remaining, 7.);
+    assert_eq!(h.store.orders().unwrap()[0].filled, 3.);
+    assert_eq!(h.store.orders().unwrap()[0].remaining, 7.);
     frame(&socket, event("CANCELLED", "3", "GTX would cross"));
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     assert_eq!(
         orders[0].status.value(),
         Some(&safe_cex_types::OrderStatus::Canceled)
@@ -358,7 +358,7 @@ fn account_frame_converts_inverse_contracts_and_preserves_existing_fields() {
         &socket,
         json!({"e":"ACCOUNT_UPDATE","a":{"P":[{"s":SYMBOL,"pa":"-2","ps":"BOTH","ep":"45000","up":"-0.02"}]}}),
     );
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let p = &positions[0];
     assert_eq!(p.contracts, 0.004);
     assert_eq!(p.notional, 200.);
@@ -503,11 +503,11 @@ fn websocket_version_prevents_late_rest_position_snapshot_overwrite() {
         &socket,
         json!({"e":"ACCOUNT_UPDATE","a":{"P":[{"s":SYMBOL,"pa":"2","ps":"BOTH","ep":"45000","up":"0.02"}]}}),
     );
-    assert_eq!(h.store.positions()[0].contracts, 0.004);
+    assert_eq!(h.store.positions().unwrap()[0].contracts, 0.004);
     h.http.release();
     h.runtime.pump();
     assert_eq!(
-        h.store.positions()[0].contracts,
+        h.store.positions().unwrap()[0].contracts,
         0.004,
         "newer websocket position survives completed old REST snapshot"
     );
@@ -530,7 +530,7 @@ fn public_escaped_surrogate_frame_retains_documented_family_refusal() {
     let socket = connect(&h, SocketSlot::Public);
     socket.on_message(&SocketFrame::Text(r#"{"e":"24hrTicker","s":"BTCUSD_PERP","c":"50020.5","P":"-1.25","v":"9","q":"1","extra":"\ud800"}"#.into())).unwrap();
     assert_eq!(
-        h.store.tickers()[0].last,
+        h.store.tickers().unwrap()[0].last,
         50000.,
         "canonical family serde parser refuses escaped lone surrogate; source accepts and publishes50020.5"
     );
@@ -539,7 +539,7 @@ fn public_escaped_surrogate_frame_retains_documented_family_refusal() {
         json!({"e":"24hrTicker","s":SYMBOL,"c":"50020.5","P":"-1.25","v":"9","q":"1","extra":"plain"}),
     );
     assert_eq!(
-        h.store.tickers()[0].last,
+        h.store.tickers().unwrap()[0].last,
         50020.5,
         "same real binding accepts valid plain frame"
     );
@@ -564,15 +564,51 @@ fn private_warning_prefix_preserves_native_surrogate_error_and_rejection() {
             } else {
                 "Binance COIN-M user data stream keepalive failed: "
             };
-            let expected: Vec<u16> = prefix.encode_utf16().chain(units).collect();
+            let enhanced = "[binanceinverse] Request setup error: ";
+            let expected: Vec<u16> = prefix
+                .encode_utf16()
+                .chain(enhanced.encode_utf16())
+                .chain(if structured {
+                    units.to_vec()
+                } else {
+                    "undefined".encode_utf16().collect()
+                })
+                .collect();
+            assert_eq!(h.http.requests.borrow().len(), 1, "no network-code retry");
             assert!(
                 h.runtime.raw_consoles.borrow().iter().any(|v| v
                     .as_str()
                     .is_some_and(|units| units.as_ref() == expected.as_slice())),
-                "actual Base error console must retain warning units for {method}/Error={structured}; observed={:?}",
+                "actual factory/Base warning must match maintained TS for {method}/Error={structured}; observed={:?}",
                 h.runtime.raw_consoles.borrow()
             );
         }
+    }
+}
+
+#[test]
+fn private_warning_keeps_venue_response_error_after_factory_interceptor() {
+    for method in ["connectAndSubscribe", "updateListenKey"] {
+        let h = support::fixture(false, false);
+        let units = [0xd800];
+        h.http.replies.borrow_mut().push_back(Ok(Js::object(vec![
+            ("code", Js::Number(-2011.0)),
+            ("msg", Js::utf16(&units)),
+        ])));
+        private_member(&h, method);
+        let prefix = if method == "connectAndSubscribe" {
+            "Binance COIN-M user data stream unavailable: "
+        } else {
+            "Binance COIN-M user data stream keepalive failed: "
+        };
+        let expected: Vec<u16> = prefix.encode_utf16().chain(units).collect();
+        assert_eq!(h.http.requests.borrow().len(), 1);
+        assert!(
+            h.runtime.raw_consoles.borrow().iter().any(|value| value
+                .as_str()
+                .is_some_and(|observed| observed.as_ref() == expected.as_slice())),
+            "venue rejection follows the factory and keeps the original warning: {method}"
+        );
     }
 }
 

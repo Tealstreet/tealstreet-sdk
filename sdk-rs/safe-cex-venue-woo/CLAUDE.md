@@ -1,5 +1,26 @@
 # WOO venue port
 
+`binding/native_error_tests.rs` exercises the shared factory enhancer through the
+constructed signed client and typed REST adapter. Its acyclic originalError
+snapshot keeps Error diagnostics, extra/config data and response authority;
+callable config capabilities remain outside owned data. The actual maintained
+Aster/WOO classes independently establish the source behavior.
+
+`FIX_AUDIT_LEDGER.md` tracks the exact 60-row follow-up cohort. The isolated V3
+orderbook recovery port and its facade-only tests are retired after caller and
+constructed-runtime checks; the live legacy snapshot/delta/cleanup path remains.
+The unused V3 cancel-all-after descriptor/response module is retired too. WOO
+inherits the source BaseExchange.scheduleCancel `Error: Not implemented` rejection;
+the actual signed cancelAllOrders route remains available.
+
+The unused strict V3 account-info decoder and balance mapper are retired with
+their orphan DTO/enum/helper and exact facade cases. The real legacy balance
+binding and unrelated asset/futures/helper/pagination witnesses remain.
+
+`ASYNC_WRAPPER_REVIEW.md` records the real class's eager public call boundary.
+The common wrappers call the existing member before constructing their waiter
+and await its original Promise; do not wrap that Promise in another spawn.
+
 The canonical spread, lifecycle for-of and array-pattern slots consume the shared
 iterator protocol. Spread retains native values and UTF-16 code points; loops
 observe collection mutation during the body. Array patterns advance only their
@@ -65,14 +86,13 @@ companions provide serialization and deserialization from one canonical set of
 wire field names. External qualified-call tests exercise `Type::deserialize`
 as well as the trait path: adding a permissive inherent decoder must fail.
 
-`v3_public` now contains the strict unknown-input public decoders and book/candle
+`v3_public` now contains the strict unknown-input public decoders and book
 mappers. These remain inert, with no live transport binding. Decimal validation
 uses shared JS Number conversion, including radix prefixes and FEFF whitespace;
 book normalization uses the shared sort and accumulator. Six new records are
-map-only and have external qualified-call rejection coverage. Candle sorting
-matches finite timestamps and stable ties. A declared NaN-comparator divergence
-uses stable merge rather than Rust's total-order-assuming sort; live TypeScript
-pins the engine-dependent permutation. Market mapping retains the filtered row index, validation order, original info
+map-only and have external qualified-call rejection coverage. The unused V3 candle
+mapper and its private sort are retired; legacy candle reads retain their actual
+signed-client regression. Market mapping retains the filtered row index, validation order, original info
 and leverage overflow. Futures-stat mapping uses shared Math.round. Prototype-property hits retain the
 source row with absent id/symbol on output; declaration decoding still requires
 non-null strings. Market lookup does not iterate the map, so output order is
@@ -133,8 +153,8 @@ instance and performs a live transaction-normalizer lookup, retaining arbitrary
 returned values and original method/getter errors. RegExp capabilities now take
 pattern and flags, including global slash replacement. Two successful whole-class
 constructions reach client assignment, both sockets and fill subscription before
-native-first method assertions. The other 66 arrow slots and getPositionMode
-remain unbound; this closes the two member bindings, not the owning-class FINDING.
+native-first method assertions. The production host now binds all other arrow slots and getPositionMode too;
+EXCHANGE_CLASS_EVIDENCE.md records the successful complete-class reconciliation.
 The existing `response` wire facades retain their separate typed/cache boundaries.
 
 The public `factory::create_api` composes the shared HttpClient and classified-read
@@ -157,13 +177,12 @@ parse/trim a retried string again; a real-client recorder pins that phase bounda
 The public oracle pins a later source relabel appearing through info while the
 Rust witness retains its earlier snapshot; the manifest declares this choice.
 
-`public_socket::ping` and `handle_ping_event` are callable heartbeat operations
-on a core-owned BaseWebSocket. Ping checks disposal before recording monotonic
-time and sends only afterwards, so a host send failure retains the recorded
-time. Pong delegates disposal and readiness to core send. Forty actual-source
-cases include base.send, missing/closed/open sockets and host errors; the clock
-is observed through core latency reporting. This slice adds no socket lifecycle
-registration and no Store writer.
+The constructed public/private heartbeat members use `socket_classes::heartbeat`
+with the actual receiver's live setters and send/sendWithLog properties. The three
+unused typed core-socket facades and their native facade/control tail are retired.
+`HEARTBEAT_REVIEW.md` records 24 maintained-source/real-binding profiles, including
+signed-zero timestamps, retained UTF16 payloads and original thrown values. The
+archived 40 public and 40 private source cases remain source-only observations.
 
 The test-linked public socket dispatcher uses the shared parser, receive tracking
 and core live-list callback dispatch. A 126-case oracle executes the actual
@@ -245,13 +264,10 @@ regressions compiled and failed against master, covering all three public topics
 ignored metadata, overflow/signed zero, and normalized identifier admission.
 Private timestamp callbacks retain their existing JSON input boundary.
 
-`private_socket` extracts the private ping and timestamp helper. Ping keeps the
-source sendWithLog wrapper: diagnostics are checked after sending, and heartbeat
-classification stops diagnostic publication. Disposal prevents both timestamp
-updates and sending. The timestamp helper uses shared Number coercion, rejects
+`private_socket` retains the timestamp helper. The timestamp helper uses shared Number coercion, rejects
 nonpositive/nonfinite input, then floors with the source 1e12 unit threshold.
 Its JSON input boundary excludes native NaN and executable coercion hooks.
-Neither operation registers the pending private socket lifecycle.
+The decoder does not register the private socket lifecycle.
 
 The legacy fills interface inventory refuses heritage clauses before enumerating
 local members. Its permanent actual-source inherited-number mutation must hit
@@ -276,13 +292,6 @@ explicit enum matches independent of Serde wire attributes. Mapper identity
 uses a separate live pre-serialization numeric capture so JSON.stringify cannot
 erase negative-zero output; the original artifacts remain unchanged.
 
-`cancel_all_after` extracts only the inert limits, parity flags, validators,
-builder and response decoder. It owns no timer or transport. Its JSON outputs
-are explicitly mutable unlike the frozen source descriptors; both output type
-rows stay pending. A live actual-source corpus compares numeric fields before
-serialization, retaining signed zero and validation phase ordering. The module
-uses shared numeric observation; no native Number parser or serde union is added.
-
 `runtime_selector` extracts only inert route lookup, targets and selection using
 the existing migration inventory. No transport, Store writer or gate override is
 accepted. Unknown routes precede mode validation, modes precede lifecycle checks,
@@ -301,8 +310,8 @@ are explicit boundaries. The live oracle runs once per native test corpus.
 The legacy history fetcher executes the supplied production RestAdapter once per
 candidate, followed by the unqualified request. Empty successes retain the last
 RestFailure unchanged; nonempty rows stop the loop. Native query numbers use
-shared RetainedJsonInput, preserving signed zero and infinities while refusing
-NaN before sending. Immutable options, owned returned arrays, typed failures and
+canonical QueryValue, preserving signed zero, infinities and NaN until the
+selected serializer. The JS REST adapter restores those native values before signing. Immutable options, owned returned arrays, typed failures and
 response-transform parity are separate declared boundaries. Response phases
 retain native data; only strings enter the parser. The factory can
 supply the adapter; no exchange lifecycle registration is added by this helper.
@@ -317,8 +326,8 @@ public-data check, REST adapter and fallible reporter. Parsing completes before
 filtering. Direct fills sort stably by seconds; internal trades sort by milliseconds
 and synthesize missing order IDs before the fallback seconds sort. Output asset
 refusal occurs only after slicing and is separate from source-error reporting.
-Nonfinite bounds are ignored before JSON conversion; a NaN limit retains the
-existing shared parameter refusal. These functions do not register a WOO runtime.
+Nonfinite bounds are ignored before JSON conversion; a NaN limit reaches signed
+HTTP before the source slice produces an empty result. These functions do not register a WOO runtime.
 
 The order-page source witness fixes request and output counts independently of
 captured lengths. It observes copy-before-recursion, terminal array aliasing and
@@ -351,57 +360,17 @@ Its identity checks cover every produced object, including indexed algo tails;
 mutable-length and sparse input cases pin the source loops rather than assuming
 array iteration or immutable input.
 
-`v3_request` prepares inert V3 descriptors with shared qs-compatible sorted form
-serialization, JS JSON spelling and shared HMAC signing. It never dispatches a
-request or enables a migration gate. Typed input payload maps retain
-`JsNumberInput` values; their opaque query values deliberately include more than
-TypeScript's declared scalar/array query union. The raw preparation entry keeps
-source validation order, then refuses an unsupported output method only after
-body/signing phases. Prepared headers and descriptors are owned mutable values;
-the source freezes both. Signing uses the existing asynchronous crypto seam.
-
 `v3_ws_quotes` declares BBO/Trade records for the inert `v3_ticker` composer;
 it adds no websocket lifecycle or decoder registration. `v3_ticker` combines the
 existing futures-stat mapper with BBO bid/ask and Trade last, preserving validation
 order, normalized identity checks and native numeric bits. Its owned info copies
 BBO/Trade, while source info keeps their live referents. Its ticker/info records
-are mutable unlike the source's frozen objects. All seven new record decoders
-capture numeric input before private map-only Serde companions. The focused
-source/native target covers all twelve new symbols, with one compiling control
-per family; it performs native field assertions without roundtrip comparisons.
-
-`decode_woo_v3_regular_place_response_with` accepts a fallible live Set membership
-call after order-ID validation and before later response fields. Its generic
-Membership error retains the caller's original value; the existing slice facade
-delegates to it with ordinary membership. Native decoded fields, callback counts
-and error identity precede five actual-source cases, ending at wrong-request
-refusal. Captured response/output ownership remains a separately declared cost.
-
-The regular mutation decoder returns a validation error for a status outside its
-closed native domain, even when a public caller includes it in the allowed slice.
-The BAD-status witness first reproduced the old unreachable panic. This is a
-native API safeguard; BAD is outside the TypeScript status declaration.
-
-`decode_woo_v3_algo_place_response_with` decodes every row before calling fallible
-known-ID membership. Each call precedes internal duplicate detection, and the
-whole loop precedes positional blocking. Its generic Membership error retains
-the caller's original error; the existing slice facade delegates to this body.
-The caller supplies live Set method lookup and receiver invocation. Nine source
-cases end at a changing has getter; native fields, ordered calls and error
-identity are asserted first. Owned/mutable captured response boundaries remain
-CHOSEN and are observed separately from source shallow freezes and nested aliases.
-
-The account leverage audit observes the existing independent native query/target
-snapshots, mutable typed results and concrete gateway errors against actual
-source aliases/freezes and spread extras. Reversed hedge details retain native
-LONG/SHORT leverage routing before source projection. Separately supplied native
-request/target arguments have a broader construction domain than source ready
-targets; this remains a declared API choice. Eight account rows retain CHOSEN
-with explicit interface rationale; no new dense-data behavior defect was found.
-Lane-wide discovery counts and row identities live in DIVERGENCE_AUDIT_LEDGER.md.
+are mutable unlike the source's frozen objects. The five remaining record
+decoders capture numeric input before private map-only Serde companions. The focused source/native target retains the ticker
+and quote controls and native field assertions without roundtrip comparisons.
 
 
-The error/validator audit supplements the existing pricing/account corpora with
+The historical error/validator audit supplemented the pricing/account corpora with
 native-first assertions and actual-source `--guard-audit` modes. Its eight-row
 floor stops at requireExactKeys. Four string/key guards have MIXED notes backed
 by materialized D800 observations; native scalar/map refusals are whole-value
@@ -434,19 +403,18 @@ allowed-enum outputs retain D800 in source and have explicit whole-input native
 refusals. Ownership, live-method and fixed-intrinsic costs remain separately priced.
 The ledger tracks cumulative discoveries and each zero-code cohort independently.
 
-The first accepted-set batch reviews 32 V3 string enum owners independently,
+The remaining accepted-set literal cohort reviews 12 V3 string enum owners independently,
 including every declared tag and tagged-object refusal through four native
-entry paths. Twenty older derived enums now use the same String admission and
-private remote schema as `v3_contracts`. See
+entry paths. Each retained enum uses String admission and a private remote schema. See
 [accepted contract review and focused commands](ACCEPTED_CONTRACT_REVIEW.md).
 The focused runner retains full compiler discovery and selected-source scope
 checks; it does not classify the remaining Woo owners or aliases.
 
 The next accepted-set batch reviews 27 retained concrete declaration records, with
 native views of all fields and separate raw/owned/borrowed/qualified ingress.
-The V3 public mapper's five numeric validations are expanded from their former
-local macro so source discovery can inspect ordinary Rust. Its existing typed
-candle-sort helper retains its reviewed local role and exact source pin. See
+The V3 public numeric validations use ordinary Rust so source discovery can inspect
+them. The retired candle mapper's nested sort and its exact local-function pin are
+removed together; independent kline decoder contracts remain. See
 [record review and focused controls](ACCEPTED_RECORD_REVIEW.md).
 
 The [validator contract review](ACCEPTED_VALIDATOR_REVIEW.md) documents 30
@@ -526,8 +494,43 @@ Guard/algorithm/position-mode native corpora admit canonical retained UTF-16 inp
 and inspect their units before strict String/DTO projection. Original typed field,
 enum, source-case, numeric-bit and effect assertions remain unchanged.
 
-The five structural aliases have individually reviewed native trait/output records.
+The four remaining structural aliases have individually reviewed native trait/output records.
 `STRUCTURAL_ALIAS_REVIEW.md` separates actual decoders from typed metadata handles,
-records the exact two-slot array registration and documents the constructed class
+records the retired array boundary and documents the constructed class
 cache/signing witness plus independent compiled production controls. Unknown
 array/tuple identities remain refused; no V3 migration route is enabled.
+
+`HISTORY_QUERY_REVIEW.md` records the history QueryValue cutover, actual signed
+class witnesses, TypeScript URL/HMAC comparison and native query-kind observations.
+
+The history catch reporter selects the canonical retained response message and
+passes its native value to Raw(Js), preserving non-string formatting and UTF16.
+The configured-class/source regression also pins falsy fallback and empty results.
+
+History page parsing uses shared get-key admission before object mapping: null
+and stock arrays without a symbol are skipped; primitives retain the source lookup
+failure. The signed class regression preserves valid sibling fills and error text.
+
+The inactive V3 sequence function/result and orphan codecs were retired first.
+The remaining six-module V3 websocket island is now retired too; its only callers
+were audit facades. See WS_STATE_GATES.md for the complete caller and native proof.
+
+The inactive V3 account/private-order/write closure and orphan request DTO are
+retired after TS/Rust caller checks. All 12 remaining inactive assigned rows are
+ACCEPT; the live rows are tracked in FIX_AUDIT_LEDGER.md. See ACCOUNT_WRITE_REVIEW.md.
+
+The three live ticker FIX-audit rows accept the existing decision-3 typed boundary
+with current constructed-source/socket/Store evidence. LIVE_TICKER_REVIEW.md records
+the exact mappings, original subscriber failures and native numeric observations.
+
+The three order tables and mapLimitOrder FIX-audit leads are accepted against the
+constructed exchange, including inherited referent identity and live info aliases.
+See LIVE_ORDER_REVIEW.md; typed own-entry slices do not replace runtime lookup.
+
+History candidates and transaction parsing retain canonical Input through field
+selection and numeric coercion. HISTORY_PARSER_REVIEW.md records the signed native
+regression; strict typed historical output/option boundaries remain separate.
+
+History options follow source coercion before the typed request. Selected output
+assets use one row-admission pass after slicing; one malformed asset is reported
+and omitted while good rows survive. See HISTORY_OUTPUT_REVIEW.md.

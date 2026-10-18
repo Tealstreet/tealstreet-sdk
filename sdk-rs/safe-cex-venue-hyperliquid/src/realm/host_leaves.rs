@@ -681,7 +681,7 @@ impl PrivateMessageHost for Realm {
         }))
     }
     fn for_in(&mut self, object: &Value) -> Result<Value, Value> {
-        let keys = self.for_in_keys(object);
+        let keys = self.for_in_keys(object)?;
         Ok(self.iterator_object(IterSource::Keys { keys, index: 0 }))
     }
     fn for_in_next(&mut self, iterator: &Value) -> Result<Option<Value>, Value> {

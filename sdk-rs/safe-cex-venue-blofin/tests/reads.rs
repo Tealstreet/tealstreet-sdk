@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::js_from_value;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
@@ -163,7 +164,7 @@ fn info(value: safe_cex_types::retained_json::RetainedJsonInput) -> Value {
 fn native(ticker: Ticker) -> Value {
     assert!(ticker.mid_price.is_none(), "ticker_mid_price_absent");
     let mut value = json!({"id":ticker.id,"symbol":ticker.symbol,"bid":bits(ticker.bid),"ask":bits(ticker.ask),
-        "last":bits(ticker.last),"mark":bits(ticker.mark),"index":bits(ticker.index),"percentage":bits(ticker.percentage),
+        "last":bits(ticker.last),"mark":bits(ticker.mark),"index":bits(ticker.index.expect("numeric ticker source profile")),"percentage":bits(ticker.percentage),
         "fundingRate":bits(ticker.funding_rate),"fundingTime":bits(ticker.funding_time),"volume":bits(ticker.volume),
         "quoteVolume":bits(ticker.quote_volume),"openInterest":bits(ticker.open_interest)});
     if let Some(raw) = ticker.info {
@@ -401,6 +402,9 @@ fn live_reads_corpus() {
                         Err(ReadError::Emitter(error)) => {
                             assert!(Rc::ptr_eq(&error, &sentinel), "READ emitter identity");
                             json!({"error":"Error","message":"host:unique","identity":true})
+                        }
+                        Err(ReadError::Store(error)) => {
+                            panic!("unexpected fixture Store failure: {error}")
                         }
                         Err(ReadError::Ingress(error)) => {
                             panic!("READ unexpected ingress {i}: {error}")

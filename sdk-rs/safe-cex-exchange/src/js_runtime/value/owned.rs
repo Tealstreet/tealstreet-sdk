@@ -71,21 +71,36 @@ impl OwnedJsValue {
             Js::Array(_) => Self::Array(
                 value
                     .array_values()
+                    .map_err(|e| e.to_exchange_error())?
                     .expect("array variant has values")
                     .iter()
                     .map(|value| Self::capture(value, ancestors))
                     .collect::<Result<_, _>>()?,
             ),
-            Js::Object(_) => Self::Object(
-                value
-                    .own_entries()
-                    .map_err(|e| e.to_exchange_error())?
-                    .into_iter()
-                    .map(|(key, value)| {
-                        Self::capture(&value, ancestors).map(|value| (key.to_vec(), value))
-                    })
-                    .collect::<Result<_, _>>()?,
-            ),
+            Js::Object(object) => {
+                let mut fields = value.own_entries().map_err(|e| e.to_exchange_error())?;
+                if object.class == "Error" {
+                    for name in ["name", "message", "stack", "cause"] {
+                        if !fields
+                            .iter()
+                            .any(|(key, _)| key.iter().copied().eq(name.encode_utf16()))
+                        {
+                            let item = value.get(name).map_err(|e| e.to_exchange_error())?;
+                            if !item.is_undefined() || value.has_own(name) {
+                                fields.push((value::utf16(name), item));
+                            }
+                        }
+                    }
+                }
+                Self::Object(
+                    fields
+                        .into_iter()
+                        .map(|(key, item)| {
+                            Self::capture(&item, ancestors).map(|item| (key.to_vec(), item))
+                        })
+                        .collect::<Result<_, _>>()?,
+                )
+            }
             _ => {
                 return Err(ExchangeError::new(
                     "native account values require structured data",

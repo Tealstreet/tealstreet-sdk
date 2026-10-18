@@ -21,6 +21,7 @@ enum NativeMode {
     ModelRecord,
     InfoRecord,
     StoreRecord,
+    Key,
 }
 impl NativeMode {
     fn child(self) -> Self {
@@ -47,9 +48,9 @@ impl<'de> Deserializer<'de> for NativeInput {
         match self.0 {
             Input::Undefined | Input::Null => visitor.visit_unit(),
             Input::Bool(value) => visitor.visit_bool(value),
-            Input::Text(value) => {
-                visitor.visit_string(String::from_utf16(&value).map_err(de::Error::custom)?)
-            }
+            // Only the typed String view is well-formed. Retained native fields
+            // take the newtype/payload branch below and keep the original units.
+            Input::Text(value) => visitor.visit_string(String::from_utf16_lossy(&value)),
             Input::Float(value) => {
                 if !value.is_finite()
                     && std::any::type_name::<V::Value>()
@@ -80,18 +81,19 @@ impl<'de> Deserializer<'de> for NativeInput {
                                 && key.iter().copied().eq("zkLinkConfig".encode_utf16()))
                     })
                     .map(|(key, value)| {
-                        Ok((
-                            String::from_utf16(&key).map_err(de::Error::custom)?,
+                        (
+                            NativeInput(Input::Text(key), NativeMode::Key),
                             NativeInput(value, self.1.child()),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?
-                    .into_iter(),
+                        )
+                    }),
             )
             .deserialize_any(visitor),
         }
     }
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if self.1 == NativeMode::Key {
+            return self.deserialize_any(visitor);
+        }
         if matches!(self.0, Input::Null | Input::Undefined) {
             visitor.visit_none()
         } else {
@@ -103,9 +105,11 @@ impl<'de> Deserializer<'de> for NativeInput {
         name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
+        if self.1 == NativeMode::Key {
+            return self.deserialize_any(visitor);
+        }
         if name == crate::retained_json::RETAINED_NATIVE {
-            return NativeInput(self.0.into_native_payload(), NativeMode::Preserve)
-                .deserialize_seq(visitor);
+            return self.0.into_native_payload().deserialize_seq(visitor);
         }
         if name == crate::model_field::MODEL_FIELD && matches!(self.0, Input::Undefined) {
             return visitor.visit_unit();
@@ -128,26 +132,18 @@ impl<'de> Deserializer<'de> for NativeInput {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match self.0 {
-            Input::Text(value) => visitor.visit_enum(
-                String::from_utf16(&value)
-                    .map_err(de::Error::custom)?
-                    .into_deserializer(),
-            ),
-            Input::Object(values) if values.len() == 1 => {
-                de::value::MapAccessDeserializer::new(de::value::MapDeserializer::new(
-                    values
-                        .into_iter()
-                        .map(|(key, value)| {
-                            Ok((
-                                String::from_utf16(&key).map_err(de::Error::custom)?,
-                                NativeInput(value, self.1.child()),
-                            ))
-                        })
-                        .collect::<Result<Vec<_>, Error>>()?
-                        .into_iter(),
-                ))
-                .deserialize_enum(name, variants, visitor)
+            Input::Text(value) => {
+                visitor.visit_enum(String::from_utf16_lossy(&value).into_deserializer())
             }
+            Input::Object(values) if values.len() == 1 => de::value::MapAccessDeserializer::new(
+                de::value::MapDeserializer::new(values.into_iter().map(|(key, value)| {
+                    (
+                        NativeInput(Input::Text(key), NativeMode::Key),
+                        NativeInput(value, self.1.child()),
+                    )
+                })),
+            )
+            .deserialize_enum(name, variants, visitor),
             _ => Err(de::Error::custom(
                 "expected string or externally tagged enum object",
             )),
@@ -253,8 +249,25 @@ impl<'de> Deserializer<'de> for NativeInput {
         }
         self.deserialize_any(visitor)
     }
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        if let Input::Text(units) = &self.0
+            && units.len() <= 64
+            && units.iter().all(|unit| *unit < 128)
+        {
+            let mut bytes = [0u8; 64];
+            for (byte, unit) in bytes.iter_mut().zip(units) {
+                *byte = *unit as u8;
+            }
+            return visitor
+                .visit_str(std::str::from_utf8(&bytes[..units.len()]).expect("ASCII identifier"));
+        }
+        self.deserialize_any(visitor)
+    }
     serde::forward_to_deserialize_any! {
         bool f32 f64 char str string bytes byte_buf
-        unit unit_struct seq tuple tuple_struct map struct identifier ignored_any
+        unit unit_struct seq tuple tuple_struct map struct ignored_any
     }
 }

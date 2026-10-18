@@ -163,7 +163,9 @@ fn complete_task_graphs_match_source_numeric_bits() {
         "/activeMarket/precision/amount" => v.active_market.precision.amount,
         "/activeMarket/precision/price" => v.active_market.precision.price,
         "/activeMarket/limits/amount/min" => v.active_market.limits.amount.min,
-        "/activeMarket/limits/amount/max" => v.active_market.limits.amount.max,
+        "/activeMarket/limits/amount/max" => {
+            safe_cex_num::numeric_value_to_number(&v.active_market.limits.amount.max)
+        }
         "/activeMarket/limits/leverage/min" => v.active_market.limits.leverage.min,
         "/activeMarket/limits/leverage/max" => v.active_market.limits.leverage.max,
         "/activeMarket/limits/price/min" => v.active_market.limits.price.as_ref().unwrap().min,
@@ -195,7 +197,9 @@ fn complete_task_graphs_match_source_numeric_bits() {
         "/activeMarket/precision/amount" => v.active_market.precision.amount,
         "/activeMarket/precision/price" => v.active_market.precision.price,
         "/activeMarket/limits/amount/min" => v.active_market.limits.amount.min,
-        "/activeMarket/limits/amount/max" => v.active_market.limits.amount.max,
+        "/activeMarket/limits/amount/max" => {
+            safe_cex_num::numeric_value_to_number(&v.active_market.limits.amount.max)
+        }
         "/activeMarket/limits/leverage/min" => v.active_market.limits.leverage.min,
         "/activeMarket/limits/leverage/max" => v.active_market.limits.leverage.max,
         "/activeMarket/limits/price/min" => v.active_market.limits.price.as_ref().unwrap().min,

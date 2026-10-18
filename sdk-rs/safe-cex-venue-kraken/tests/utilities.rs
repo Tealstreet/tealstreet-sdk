@@ -241,9 +241,33 @@ fn numeric_capture_and_boundary() {
     );
     let input: JsNumberInput = serde_json::from_str(raw).unwrap();
     assert!(
-        fills::map_kraken_fill(input, &mut |_| Ok(None), &mut |ms| ms).is_err(),
-        "legacy fill wire refuses only when consumed"
+        fills::map_kraken_fill(input, &mut |_| Ok(None), &mut |ms| ms)
+            .unwrap()
+            .is_none(),
+        "incomplete fill is skipped after typed String admission, not a wire error"
     );
+}
+
+fn project_source_strings(value: &Value) -> Value {
+    match value {
+        Value::Object(fields) if fields.len() == 1 && fields.contains_key("units") => {
+            let units: Vec<u16> = fields["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|unit| u16::try_from(unit.as_u64().unwrap()).unwrap())
+                .collect();
+            Value::String(String::from_utf16_lossy(&units))
+        }
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(k, v)| (k.clone(), project_source_strings(v)))
+                .collect(),
+        ),
+        Value::Array(rows) => Value::Array(rows.iter().map(project_source_strings).collect()),
+        _ => value.clone(),
+    }
 }
 
 #[test]
@@ -278,31 +302,65 @@ fn chosen_boundary_live_witnesses() {
                 Some([0xd800].as_slice()),
                 "native units {name}"
             );
-            match name {
-                "fills.mapKrakenFill" => {
-                    assert!(fills::map_kraken_fill(input, &mut |_| Ok(None), &mut |ms| ms).is_err())
-                }
-                "fills.mapKrakenFills" => assert!(
-                    fills::map_kraken_fills(input, &mut |_| Ok(None), &mut |ms| ms).is_err()
+            // The source retains UTF-16. Only the final closed Rust String is
+            // projected; compare every native field and number bit independently.
+            let expected = project_source_strings(&case["output"]);
+            let mut resolve = |_: &str| Ok(None);
+            let mut utc = |ms| ms;
+            let actual = match name {
+                "fills.mapKrakenFill" => fills::map_kraken_fill(input, &mut resolve, &mut utc)
+                    .unwrap()
+                    .as_ref()
+                    .map_or(Value::Null, execution),
+                "fills.mapKrakenFills" => Value::Array(
+                    fills::map_kraken_fills(input, &mut resolve, &mut utc)
+                        .unwrap()
+                        .iter()
+                        .map(execution)
+                        .collect(),
                 ),
-                "income.mapKrakenAccountLogRow" => assert!(
-                    income::map_kraken_account_log_row(input, &mut |_| Ok(None), &mut |ms| ms)
-                        .is_err()
+                "income.mapKrakenAccountLogRow" => Value::Array(
+                    income::map_kraken_account_log_row(input, &mut resolve, &mut utc)
+                        .unwrap()
+                        .iter()
+                        .map(record)
+                        .collect(),
                 ),
-                "income.mapKrakenAccountLog" => assert!(
-                    income::map_kraken_account_log(input, &mut |_| Ok(None), &mut |ms| ms).is_err()
+                "income.mapKrakenAccountLog" => Value::Array(
+                    income::map_kraken_account_log(input, &mut resolve, &mut utc)
+                        .unwrap()
+                        .iter()
+                        .map(record)
+                        .collect(),
                 ),
-                "income.isPositionSizeLeg" => assert!(
-                    input
+                "income.isPositionSizeLeg" => {
+                    let fields = input
                         .decode::<std::collections::BTreeMap<String, String>>()
-                        .is_err(),
-                    "closed leg text admission"
-                ),
-                _ => assert!(
-                    input.decode::<String>().is_err(),
-                    "closed scalar text admission {name}"
-                ),
-            }
+                        .unwrap();
+                    assert_eq!(fields["asset"], "\u{fffd}");
+                    assert_eq!(fields["contract"], "\u{fffd}");
+                    json!(
+                        income::is_position_size_leg(&serde_json::to_value(fields).unwrap())
+                            .unwrap()
+                    )
+                }
+                _ => {
+                    let text = input.decode::<String>().unwrap();
+                    assert_eq!(text, "\u{fffd}", "closed scalar projection {name}");
+                    let value = Value::String(text);
+                    match name {
+                        "fills.num" => number(fills::num(Some(&value)).unwrap()),
+                        "fills.optionalNum" => optional(fills::optional_num(Some(&value)).unwrap()),
+                        "income.num" => optional(income::num(Some(&value)).unwrap()),
+                        "fills.toSeconds" => {
+                            number(fills::to_seconds(Some(&value), |ms| ms).unwrap())
+                        }
+                        "income.toMs" => number(income::to_ms(Some(&value), |ms| ms).unwrap()),
+                        _ => panic!("unknown scalar {name}"),
+                    }
+                }
+            };
+            assert_eq!(actual, expected, "native projected fields {name}");
         }
         match case["name"].as_str().unwrap() {
             "fills.num" | "fills.toSeconds" | "income.toMs" => {

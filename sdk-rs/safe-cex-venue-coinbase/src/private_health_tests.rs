@@ -1,6 +1,7 @@
 use super::CoinbasePrivateUserStreamHealth;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreMutationError, store::DefaultStore};
+use safe_cex_store::{Store, StoreMutationError};
 use safe_cex_types::StoreSubscriberError;
 use serde_json::{Map, Value, json};
 use std::{cell::RefCell, error::Error, process::Command, rc::Rc};
@@ -33,7 +34,7 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect::<Map<String, Value>>();
         Store::update_socket_health(&store, &initial_health).unwrap();
-        let current = Store::socket_health(&store);
+        let current = Store::socket_health(&store).unwrap();
         for (key, value) in values {
             assert_eq!(
                 current.as_ref().and_then(|current| current.get(key)),
@@ -71,7 +72,7 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
         json!({
             "lastMessageAt": health.last_message_at(),
             "hasWarned": health.has_warned_degraded(),
-            "socketHealth": serde_json::to_value(Store::serialize(&store)).unwrap()["socketHealth"],
+            "socketHealth": serde_json::to_value(Store::serialize(&store).unwrap()).unwrap()["socketHealth"],
         })
     };
 
@@ -193,7 +194,7 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
     let actual = json!({
         "lastMessageAt": health.last_message_at(),
         "hasWarned": health.has_warned_degraded(),
-        "socketHealth": serde_json::to_value(Store::serialize(&store)).unwrap()["socketHealth"],
+        "socketHealth": serde_json::to_value(Store::serialize(&store).unwrap()).unwrap()["socketHealth"],
         "notifications": notifications.borrow().clone(),
         "effects": effects.borrow().clone(),
         "checkpoints": checkpoints,
@@ -266,7 +267,7 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
         }
         other => panic!("expected original Store notification failure, got {other:?}"),
     }
-    let committed = Store::socket_health(&store).unwrap();
+    let committed = Store::socket_health(&store).unwrap().unwrap();
     assert_eq!(committed["privateDegradedReason"], "private stream stalled");
     assert_eq!(
         notifications.borrow().len(),
@@ -298,6 +299,7 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
     assert!(
         Store::socket_health(&message_store)
             .unwrap()
+            .unwrap()
             .get("privateDegradedReason")
             .is_none()
     );
@@ -307,7 +309,7 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
 fn subscriber_id_survives_store_to_exchange_error_conversion() {
     let store = DefaultStore::new();
     let mut cause = ExchangeError::new("subscriber failed");
-    cause.response = Some(json!({"status": 503}));
+    cause = cause.with_retained_response((json!({"status": 503})).into());
     let subscriber_cause: Rc<dyn Error> = Rc::new(cause);
     let _subscriber = Store::subscribe(
         &store,
@@ -333,9 +335,12 @@ fn subscriber_id_survives_store_to_exchange_error_conversion() {
 
     assert_eq!(exchange_error.message, "subscriber failed");
     assert_eq!(exchange_error.store_subscriber_ids, [0]);
-    assert_eq!(exchange_error.response, Some(json!({"status": 503})));
     assert_eq!(
-        Store::socket_health(&store).unwrap()["privateDegradedReason"],
+        exchange_error.response_json_view(),
+        Some(json!({"status": 503}))
+    );
+    assert_eq!(
+        Store::socket_health(&store).unwrap().unwrap()["privateDegradedReason"],
         "degraded",
         "Store state commits before subscriber failure is returned"
     );

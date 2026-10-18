@@ -9,7 +9,15 @@ in [P1A_FIELDS.md](P1A_FIELDS.md) and gate evidence in
 in [`../parity/MANIFEST-SPEC.md`](../parity/MANIFEST-SPEC.md) and cited by
 anchor; the closed-typed-output boundary in particular is a declaration, not a
 per-row argument, and it **excludes open-String fields, which carry the wire
-value**.
+value**. The coordinator's 2026-10-18 ingress ruling permits one explicit text
+projection: isolated UTF-16 surrogate units become U+FFFD when a retained value
+enters a typed Rust String or String key. Valid scalar text is unchanged. Raw
+RetainedJsonInput and model info keep their original units, including lone-unit
+keys, through the native payload marker; do not normalize the retained tree.
+This keeps a lone escaped unit from rejecting an entire otherwise valid batch.
+The real HTTP/client/Store proof is exchange's js_json_parse target; it executes
+the maintained TS Store over seven independent text profiles and checks both
+typed replacement and retained raw/info units before any JSON projection.
 
 Retained JSON projection tests pin two native array elements and two object members,
 with independent source/native lengths and executed comparison counts. Consuming-empty,
@@ -85,10 +93,21 @@ retained_json contains the canonical UTF-16 native data carrier. All five shared
 model info fields use it, preserving their Option or ModelField outer presence.
 NaN payloads, infinities, signed zero, own undefined, text and keys survive native
 Serde and Store capture. The named native codec is distinct from raw JSON tokens;
-its internal payload never appears in serialized JSON. The single retained JSON
+its internal payload never appears in serialized JSON. The private native payload adapter supplies UTF-16 storage as native-endian bytes.
+One borrowed read-only byte view lasts only through visit_bytes; the codec copies
+pairs back into u16 storage. The wire payload keeps numeric unit sequences and
+their existing range, type and cardinality checks. The single retained JSON
 writer lives here below Num and applies JSON.stringify projection only on output.
+Payload tags decode directly into the closed eight-variant tag enum. Short ASCII
+field identifiers use stack storage; long and Unicode names retain the existing
+String projection. Explicit key context preserves StringDeserializer's rejection
+of optional and newtype map keys. retained_utf16 checks these admissions against
+stock Serde and covers borrowed/owned UTF-8 byte tags independently.
 `safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
 against actual typed bridges and the production Store facade before wire checks.
+StoreData and StoreUpdate use the same native Store record profile: undefined
+optional JSON-view properties are omitted rather than turned into null, while
+retained zk config and nested model/info presence keep their native markers.
 
 Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
 float directly. Capture accepts that event using the same Float path as the
@@ -226,3 +245,33 @@ native numbers, undefined and UTF16 before serialization; `into_value` is a real
 JSON boundary, never an intermediate model conversion. The native Serde marker
 and InfoRecord codecs preserve own undefined without exposing marker objects in
 wire JSON. The single retained JSON writer lives below Num in this crate.
+
+NumericValue retains Number versus Text for numeric runtime fields whose source
+mapper passes strings unchanged. Market.limits.amount.max uses this carrier.
+The static TS projection remains number, following its maintained declaration;
+output preserves the runtime variant. Numeric consumers explicitly call num's
+numeric_value_to_number, which uses the existing Number(string) parser.
+
+Market.runtime is the shared carrier for runtime type/spot/swap/future/contract/
+linear/inverse properties constructed outside the maintained TS Market declaration.
+Its serializer writes these optional fields on the Market object; its private
+object decoder reads the same flattened keys. Precision base/quote, price max and
+cost limits are likewise optional runtime fields on the canonical nested models.
+The static TS declaration projection omits them; native output and numeric ingress
+retain them. Other venue constructors explicitly leave these fields absent.
+The recorded public-market addon regression executes the actual Backpack and
+Crypto.com TS constructors and compiled native binding against identical HTTP bytes.
+
+Ticker.index is a required nullable number at runtime. WOO returns index_price:null for a real listed market; Option<f64> preserves that null in native and wire models while the generated index:number follows the maintained static declaration. Missing index, undefined and non-number/non-null values remain invalid. Null is not a zero price or a refused ticker.
+
+MarketRuntime.fees retains the undeclared Paradex market literal's maker/taker
+number object through the same flattened Market boundary. MarketFees requires an
+object with both numeric fields; absence remains absent for other venues. The
+static generated TS Market declaration is unchanged. The recorded public-market
+addon regression compares all 66 Paradex markets against actual maintained TS.
+
+Native retained payloads stream through the single `into_native_payload` Serde
+adapter. UTF-16 units decode into validated u16 storage without an intermediate
+Float-node tree or f64 vector. The tagged payload schema and malformed-unit
+refusals are unchanged. JSON string parsing copies unescaped spans together;
+escape/control validation and duplicate-property order keep their existing rules.

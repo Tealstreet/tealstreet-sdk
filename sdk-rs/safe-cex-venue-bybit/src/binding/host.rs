@@ -43,9 +43,9 @@ pub(crate) fn get_key(obj: &Js, key: &str) -> Result<Js, Thrown> {
 // ts: mergeUpdatesUsingLastUpdate — keep an existing row updated within the cutoff.
 fn merge_updates_using_last_update(rt: &Rt, updates: &Js, existing: &Js) -> Result<Js, Thrown> {
     let now = rt.now();
-    let existing = existing.array_values().unwrap_or_default();
+    let existing = existing.array_values()?.unwrap_or_default();
     let mut merged = vec![];
-    for update in updates.array_values().unwrap_or_default() {
+    for update in updates.array_values()?.unwrap_or_default() {
         let id = update.get("id")?;
         let found = existing
             .iter()
@@ -88,7 +88,7 @@ fn sync_unified_balance_upnl(
         return Ok(balance.clone());
     }
     let mut upnl = 0.;
-    for position in positions.array_values().unwrap_or_default() {
+    for position in positions.array_values()?.unwrap_or_default() {
         let typed: safe_cex_types::Position = super::value::to_typed(&position)?;
         upnl += crate::inverse_symbol::position_upnl_in_quote(&typed);
     }
@@ -211,12 +211,12 @@ impl SnapshotHost for Rt {
             return Ok(Js::function("flat", move |_, _| {
                 let mut out = vec![];
                 for item in owner
-                    .array_items()
+                    .array_items()?
                     .unwrap_or_default()
                     .into_iter()
                     .flatten()
                 {
-                    match item.array_items() {
+                    match item.array_items()? {
                         Some(inner) => out.extend(inner.into_iter().flatten()),
                         None => out.push(item),
                     }
@@ -271,7 +271,7 @@ impl SnapshotHost for Rt {
     }
     fn values(&self, array: &Js) -> Result<Vec<Js>, Thrown> {
         array
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", array.to_display())))
     }
     fn is_array(&self, v: &Js) -> bool {

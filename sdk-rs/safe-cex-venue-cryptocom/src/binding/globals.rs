@@ -320,7 +320,7 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
 }
 
 fn sort_levels(levels: &Js, ascending: bool) -> Result<(), Thrown> {
-    let Some(values) = levels.array_values() else {
+    let Some(values) = levels.array_values()? else {
         return Err(Thrown::type_error("orderBook levels are not an array"));
     };
     let mut keyed = values

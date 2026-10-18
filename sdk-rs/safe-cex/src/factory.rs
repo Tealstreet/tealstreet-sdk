@@ -3,7 +3,8 @@ use crate::options_patch::{
     ExchangeOptionsPatch, apply_extra_patch, apply_patch, empty_extra_options, empty_options,
 };
 use indexmap::IndexMap;
-use safe_cex_store::{Store, store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, virtual_clock::VirtualClock};
 use safe_cex_transport::{TransportProvider, TransportRegistry};
 use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_exchange_metadata};
 use std::{
@@ -12,7 +13,7 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::Poll,
+    task::{Context, Poll, Waker},
 };
 
 pub type ExchangeConstructor<I> =
@@ -59,7 +60,18 @@ impl<I> ExchangeFactory<I> {
         options: ExchangeOptions,
         store: Option<Rc<dyn Store>>,
     ) -> Result<I, String> {
-        self.clock.start().await;
+        // Like the TS async call without await, run startup to its first
+        // suspension. The clock's host scheduler owns any continuation so
+        // neither a pending time request nor this caller's lifetime blocks it.
+        let clock = self.clock.clone();
+        let mut startup = Box::pin(async move { clock.start().await });
+        if startup
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+        {
+            (self.clock.schedule)(0, startup);
+        }
         let constructor = self.load_exchange(name).await?;
         let exchange_name = serde_json::from_value(serde_json::Value::String(name.into()))
             .map_err(|_| format!("Unknown exchange: {name}"))?;

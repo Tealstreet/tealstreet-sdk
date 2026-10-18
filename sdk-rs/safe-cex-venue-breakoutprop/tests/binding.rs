@@ -8,6 +8,7 @@ mod clock {
         "/../safe-cex-exchange/tests/support/runtime.rs"
     ));
 }
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -18,7 +19,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::*;
@@ -115,9 +116,51 @@ struct Wire {
     requests: RefCell<Vec<Value>>,
     native_requests: RefCell<Vec<Js>>,
     faults: RefCell<VecDeque<(String, u16, Value)>>,
+    holds: RefCell<Vec<(String, Rc<HttpHold>)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
     candle_response: RefCell<Option<Value>>,
     native_responses: RefCell<VecDeque<(String, Js)>>,
+}
+#[derive(Default)]
+struct HttpHold {
+    released: Cell<bool>,
+    waker: RefCell<Option<Waker>>,
+}
+impl HttpHold {
+    fn release(&self) {
+        self.released.set(true);
+        if let Some(waker) = self.waker.borrow_mut().take() {
+            waker.wake();
+        }
+    }
+}
+impl Wire {
+    fn hold(&self, url: &str) -> Rc<HttpHold> {
+        let hold = Rc::new(HttpHold::default());
+        self.holds.borrow_mut().push((url.into(), hold.clone()));
+        hold
+    }
+    fn reply(&self, url: &str, result: Result<Js, Thrown>) -> JsFuture<'static> {
+        let mut holds = self.holds.borrow_mut();
+        let hold = holds
+            .iter()
+            .position(|(target, _)| target == url)
+            .map(|index| holds.remove(index).1);
+        Box::pin(async move {
+            if let Some(hold) = hold {
+                std::future::poll_fn(move |cx| {
+                    if hold.released.get() {
+                        Poll::Ready(())
+                    } else {
+                        *hold.waker.borrow_mut() = Some(cx.waker().clone());
+                        Poll::Pending
+                    }
+                })
+                .await;
+            }
+            result
+        })
+    }
 }
 fn instrument() -> Value {
     json!({"type":"FOREX","symbol":"BTCUSD","version":1,"description":"Bitcoin","priceIncrement":0.1,"pipSize":0.01,"currency":"USD","lotSize":1,"multiplier":1,"firstCurrency":"BTC"})
@@ -150,7 +193,7 @@ impl JsHttpHost for Wire {
         {
             let (_, error) = self.errors.borrow_mut().pop_front().unwrap();
             error.define("config", config).unwrap();
-            return Box::pin(async move { Err(Thrown::new(error)) });
+            return self.reply(&url, Err(Thrown::new(error)));
         }
         let mut status = 200;
         let data = if self
@@ -192,14 +235,15 @@ impl JsHttpHost for Wire {
         } else {
             from_json(&data)
         };
-        Box::pin(async move {
+        self.reply(
+            &url,
             Ok(Js::object(vec![
                 ("status", Js::Number(status as f64)),
                 ("data", data),
                 ("headers", Js::object(vec![])),
                 ("config", config),
-            ]))
-        })
+            ])),
+        )
     }
 }
 struct Fixture {
@@ -297,15 +341,15 @@ fn start_loads_the_store_and_uses_polling_without_a_socket() {
     let f = fixture();
     f.run(f.exchange.start()).unwrap();
     assert!(
-        f.store.loaded().markets
-            && f.store.loaded().tickers
-            && f.store.loaded().balance
-            && f.store.loaded().orders
-            && f.store.loaded().positions
+        f.store.loaded().unwrap().markets
+            && f.store.loaded().unwrap().tickers
+            && f.store.loaded().unwrap().balance
+            && f.store.loaded().unwrap().orders
+            && f.store.loaded().unwrap().positions
     );
-    assert_eq!(f.store.balance().total, 50.25);
-    assert_eq!(f.store.markets().len(), 1);
-    assert_eq!(f.store.tickers().len(), 1);
+    assert_eq!(f.store.balance().unwrap().total, 50.25);
+    assert_eq!(f.store.markets().unwrap().len(), 1);
+    assert_eq!(f.store.tickers().unwrap().len(), 1);
     f.exchange.dispose().unwrap();
     assert!(f.runtime.exceptions.borrow().is_empty());
 }
@@ -351,14 +395,14 @@ fn fetch_tickers_reads_quotes() {
 fn fetch_positions_is_a_pure_portfolio_read() {
     let f = fixture();
     f.fetch_markets();
-    let before = f.store.positions().to_vec();
+    let before = f.store.positions().unwrap().to_vec();
     let rows = f
         .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].contracts, 0.0);
-    assert_eq!(&*f.store.positions(), before.as_slice());
-    assert!(!f.store.loaded().positions);
+    assert_eq!(&f.store.positions().unwrap(), before.as_slice());
+    assert!(!f.store.loaded().unwrap().positions);
     f.request("GET", "accounts/default:A/portfolio");
 }
 #[test]
@@ -366,8 +410,8 @@ fn fetch_orders_is_a_pure_portfolio_read() {
     let f = fixture();
     let rows = f.run(f.exchange.fetch_orders(None)).unwrap();
     assert!(rows.is_empty());
-    assert!(f.store.orders().is_empty());
-    assert!(!f.store.loaded().orders);
+    assert!(f.store.orders().unwrap().is_empty());
+    assert!(!f.store.loaded().unwrap().orders);
     let request = f.request("GET", "accounts/default:A/portfolio");
     assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
 }
@@ -558,7 +602,7 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
         let deadline = source["sleep_ms"].as_u64().unwrap();
         assert_eq!(source["queued_calls"], 0);
         assert_eq!(source["callback_ms"], 0);
-        f.runtime.advance(0);
+        f.runtime.advance(deadline / 2);
         assert_eq!(calls.get(), 0, "poll loop must not run immediately");
         f.runtime.advance(deadline - 1);
         assert_eq!(calls.get(), 0, "source interval must elapse");
@@ -652,9 +696,9 @@ fn observe_refusal(f: &Fixture, invoke: impl FnOnce() -> ExchangeError) -> Value
         }),
     );
     let snapshot = || {
-        let balance = f.store.balance();
+        let balance = f.store.balance().unwrap();
         (
-            serde_json::to_value(f.store.serialize()).unwrap(),
+            serde_json::to_value(f.store.serialize().unwrap()).unwrap(),
             [
                 balance.used.to_bits(),
                 balance.free.to_bits(),
@@ -845,7 +889,7 @@ pub fn accepted_typed_refusal(
 fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
     let f = fixture();
     f.fetch_markets();
-    let cached = f.store.markets().to_vec();
+    let cached = f.store.markets().unwrap().to_vec();
     let mut row = detail();
     row[field] = value;
     f.wire.faults.borrow_mut().push_back((
@@ -873,7 +917,7 @@ fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
         cached,
         "a valid prefix must not replace the cached markets"
     );
-    assert_eq!(&*f.store.markets(), cached.as_slice());
+    assert_eq!(&f.store.markets().unwrap(), cached.as_slice());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0].to_string().contains(cause),
@@ -967,12 +1011,20 @@ fn assert_unknown_enum_survives_start(field: &str) {
     }
     f.run(f.exchange.start())
         .expect("unknown enum must not abort production startup");
-    assert!(f.store.loaded().balance && f.store.loaded().positions && f.store.loaded().orders);
-    assert_eq!(f.store.orders().len(), 1, "unknown rows must be retained");
+    assert!(
+        f.store.loaded().unwrap().balance
+            && f.store.loaded().unwrap().positions
+            && f.store.loaded().unwrap().orders
+    );
+    assert_eq!(
+        f.store.orders().unwrap().len(),
+        1,
+        "unknown rows must be retained"
+    );
     let row = if field == "positionSide" {
-        serde_json::to_value(&f.store.positions()[0]).unwrap()
+        serde_json::to_value(&f.store.positions().unwrap()[0]).unwrap()
     } else {
-        serde_json::to_value(&f.store.orders()[0]).unwrap()
+        serde_json::to_value(&f.store.orders().unwrap()[0]).unwrap()
     };
     let omitted = if field == "positionSide" {
         "side"
@@ -1147,11 +1199,11 @@ fn real_trait_candles_propagate_original_http_failure() {
         ))
         .expect_err("source rethrows the candle refusal");
     assert_eq!(
-        error.response.as_ref().unwrap()["status"].as_f64(),
+        error.response_json_view().as_ref().unwrap()["status"].as_f64(),
         Some(400.0)
     );
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["msg"],
+        error.response_json_view().as_ref().unwrap()["data"]["msg"],
         "candle refusal"
     );
     assert_eq!(error.config.as_ref().unwrap()["url"], "marketdata");
@@ -1343,7 +1395,7 @@ fn malformed_ticker_fallback(prefix: Value) {
         false,
     )
     .unwrap();
-    let cached = f.store.tickers().to_vec();
+    let cached = f.store.tickers().unwrap().to_vec();
     let errors = Rc::new(RefCell::new(Vec::<Js>::new()));
     let observed = errors.clone();
     f.exchange.base.on(
@@ -1358,7 +1410,7 @@ fn malformed_ticker_fallback(prefix: Value) {
     ]}));
     let rows = f.run(f.exchange.fetch_tickers()).unwrap();
     assert_eq!(rows, cached);
-    assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
+    assert_eq!(f.store.tickers().unwrap().as_slice(), cached.as_slice());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         String::from_utf16(
@@ -1387,7 +1439,11 @@ fn account_lookup_reads_only_selected_account_fields() {
         f.exchange.account_code.borrow().as_deref(),
         Some("default:A")
     );
-    assert!(f.store.loaded().orders && f.store.loaded().positions && f.store.loaded().balance);
+    assert!(
+        f.store.loaded().unwrap().orders
+            && f.store.loaded().unwrap().positions
+            && f.store.loaded().unwrap().balance
+    );
     f.request("GET", "accounts/default:A/portfolio");
     f.run(f.exchange.fetch_orders(None)).unwrap();
     assert_eq!(
@@ -1488,7 +1544,7 @@ fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
     queue_portfolio(&f, data.clone());
     f.run(f.exchange.start())
         .expect("TS balance ignores order rows");
-    let balance = f.store.balance().clone();
+    let balance = f.store.balance().unwrap().clone();
     assert_eq!(balance.total, 48.25);
     assert_eq!(balance.upnl, -2.0);
     assert_eq!(balance.used, 10.0);
@@ -1627,15 +1683,15 @@ fn portfolio_balance_and_filtered_positions_accept_native_intermediate_scalars()
         f.run(f.exchange.start()).unwrap();
         assert_eq!(
             (
-                f.store.balance().total,
-                f.store.balance().used,
-                f.store.balance().free
+                f.store.balance().unwrap().total,
+                f.store.balance().unwrap().used,
+                f.store.balance().unwrap().free
             ),
             (50.25, 10.0, 40.25)
         );
-        assert_eq!(f.store.positions().len(), 1);
-        assert_eq!(f.store.positions()[0].symbol, "BTCUSD");
-        assert_eq!(f.store.positions()[0].contracts, 0.0);
+        assert_eq!(f.store.positions().unwrap().len(), 1);
+        assert_eq!(f.store.positions().unwrap()[0].symbol, "BTCUSD");
+        assert_eq!(f.store.positions().unwrap()[0].contracts, 0.0);
         f.exchange.dispose().unwrap();
     }
 }
@@ -1669,7 +1725,21 @@ fn auth_pipeline_checks_session_after_rate_limit_dequeue() {
     pump_pending(&f, &mut queued);
     f.exchange.invalidate_session();
     let error = f.run(queued).unwrap_err();
-    assert_eq!(error.message, "No session token");
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/auth-factory-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(error.name, source["name"].as_str().unwrap());
+    assert_eq!(error.message, source["message"].as_str().unwrap());
     assert_eq!(
         f.wire
             .requests
@@ -1905,7 +1975,7 @@ fn native_market_info_retains_nonfinite_undefined_and_utf16() {
         false,
     )
     .unwrap();
-    assert_retained_probe(&f.store.markets()[0], &["instrument"]);
+    assert_retained_probe(&f.store.markets().unwrap()[0], &["instrument"]);
 }
 #[test]
 fn native_portfolio_info_retains_nonfinite_undefined_and_utf16() {
@@ -2001,7 +2071,7 @@ fn native_balance_keeps_surrogate_symbol_info_without_premature_ticker_projectio
         ));
     }
     f.run(f.exchange.start()).unwrap();
-    let balance = f.store.balance().clone();
+    let balance = f.store.balance().unwrap().clone();
     for (name, number) in [
         ("total", balance.total),
         ("free", balance.free),
@@ -2114,4 +2184,308 @@ fn native_candles_ignore_surrogate_symbol_without_declared_record_validation() {
         1
     );
     f.exchange.dispose().unwrap();
+}
+
+fn async_audit_source() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/async-audit-source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+fn pump_until(f: &Fixture, predicate: impl Fn() -> bool) {
+    for _ in 0..400 {
+        f.runtime.advance(f.runtime.now.get() + 25);
+        if predicate() {
+            return;
+        }
+    }
+    panic!("real binding did not reach the held-I/O observation");
+}
+fn delete_ids(f: &Fixture) -> Vec<String> {
+    f.wire
+        .requests
+        .borrow()
+        .iter()
+        .filter(|row| {
+            row["method"]
+                .as_str()
+                .is_some_and(|method| method.eq_ignore_ascii_case("DELETE"))
+        })
+        .map(|row| {
+            row["url"]
+                .as_str()
+                .unwrap()
+                .rsplit('/')
+                .next()
+                .unwrap()
+                .into()
+        })
+        .collect()
+}
+#[test]
+fn async_audit_discarded_start_retains_store_and_polling_continuations() {
+    let source = async_audit_source();
+    let f = fixture();
+    assert!(
+        f.exchange
+            .socket()
+            .unwrap()
+            .message_handlers
+            .borrow()
+            .is_empty()
+    );
+    let login = f.wire.hold("/login");
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let seen = books.clone();
+    let cleanup = BreakoutpropExchange::listen_order_book(
+        &f.exchange,
+        "BTCUSD".into(),
+        Rc::new(move |book| {
+            seen.borrow_mut().push(book);
+            Ok(())
+        }),
+    )
+    .unwrap();
+    drop(f.exchange.start());
+    pump_until(&f, || f.wire.requests.borrow().len() == 1);
+    assert!(
+        !f.store.loaded().unwrap().markets,
+        "held login precedes Store writes"
+    );
+    assert!(
+        books.borrow().is_empty(),
+        "held login precedes parser delivery"
+    );
+    login.release();
+    pump_until(&f, || !books.borrow().is_empty());
+    let loaded = f.store.loaded().unwrap();
+    assert!(
+        loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders
+    );
+    assert_eq!(
+        f.store.balance().unwrap().total,
+        source["startup"]["balance"].as_f64().unwrap()
+    );
+    assert_eq!(f.store.markets().unwrap().len(), 1);
+    assert_eq!(f.store.tickers().unwrap().len(), 1);
+    assert_eq!(
+        books.borrow().len(),
+        1,
+        "discarded start completes first actual tick"
+    );
+    let requests = f.wire.requests.borrow();
+    let expected = source["startup"]["requests"].as_array().unwrap();
+    assert_eq!(expected.len(), 8, "maintained startup request floor");
+    assert_eq!(
+        requests.len(),
+        expected.len(),
+        "complete native startup request count"
+    );
+    for url in [
+        "/login",
+        "/users/k",
+        "instruments/query",
+        "accounts/default:A/instruments/query",
+        "accounts/default:A/portfolio",
+        "marketdata",
+    ] {
+        let actual = requests.iter().filter(|row| row["url"] == url).count();
+        let expected = expected.iter().filter(|row| row["url"] == url).count();
+        assert_eq!(actual, expected, "actual constructor request count {url}");
+    }
+    drop(requests);
+    pump_until(&f, || books.borrow().len() == 2);
+    assert!(
+        Rc::ptr_eq(&books.borrow()[0], &books.borrow()[1]),
+        "polling retains its book identity"
+    );
+    assert_eq!(books.borrow()[1].borrow().bids[0].price, 99.0);
+    cleanup().unwrap();
+    advance_real_poll(&f);
+    assert_eq!(
+        books.borrow().len(),
+        source["startup"]["callbacks"].as_u64().unwrap() as usize
+    );
+    f.exchange.dispose().unwrap();
+    let requests = f.wire.requests.borrow().len();
+    advance_real_poll(&f);
+    assert_eq!(
+        f.wire.requests.borrow().len(),
+        requests,
+        "dispose stops the live loop"
+    );
+    assert_eq!(books.borrow().len(), 2, "dispose emits no late callback");
+    assert!(f.runtime.exceptions.borrow().is_empty());
+}
+#[test]
+fn async_audit_discarded_cancel_reaches_later_lots_and_refusal_stops_them() {
+    let source = async_audit_source();
+    let cases = source["cancellations"].as_array().unwrap();
+    assert_eq!(
+        cases.len(),
+        3,
+        "success plus both first-settled rejection orders"
+    );
+    for case in cases {
+        let f = fixture();
+        f.fetch_markets();
+        f.wire.requests.borrow_mut().clear();
+        let failure_id = case["failureId"].as_u64().unwrap_or(0);
+        let held_url = format!("accounts/default:A/orders/{failure_id}");
+        let hold = f.wire.hold(&held_url);
+        let sibling_id = if failure_id == 0 { 9 } else { 0 };
+        let sibling_url = format!("accounts/default:A/orders/{sibling_id}");
+        let sibling = (case["reject"] == true).then(|| f.wire.hold(&sibling_url));
+        if case["reject"] == true {
+            for id in [0, 9] {
+                f.wire.errors.borrow_mut().push_back((
+                    format!("accounts/default:A/orders/{id}"),
+                    safe_cex_exchange::js_runtime::value::error_object(
+                        "Error",
+                        &format!("cancel refused {id}"),
+                    ),
+                ));
+            }
+        }
+        let errors = portfolio_error_log(&f);
+        let orders = (0..21)
+            .map(|id| {
+                let mut order = order();
+                order.id = id.to_string();
+                order
+            })
+            .collect();
+        let mut pending = f.exchange.cancel_orders(orders);
+        pump_until(&f, || delete_ids(&f).len() == 10);
+        assert!(
+            pending
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        if case["reject"] == false {
+            drop(pending);
+        } else {
+            hold.release();
+            let error = f.run(pending).unwrap_err();
+            assert!(
+                error.message.ends_with(case["rejection"].as_str().unwrap()),
+                "first settled HTTP rejection {error:?}"
+            );
+        }
+        hold.release();
+        if case["reject"] == false {
+            pump_until(&f, || delete_ids(&f).len() == 21);
+            let expected: Vec<_> = (0..21).map(|id| id.to_string()).collect();
+            assert_eq!(
+                delete_ids(&f),
+                expected,
+                "discarded caller still starts second and third lots"
+            );
+            assert_eq!(
+                case["ids"][20], "mutated",
+                "TS retains live order aliases; typed Order is owned"
+            );
+            assert!(errors.borrow().is_empty());
+        } else {
+            assert_eq!(
+                errors.borrow().len(),
+                1,
+                "held sibling has not reported yet"
+            );
+            sibling.unwrap().release();
+            pump_until(&f, || errors.borrow().len() == 2);
+            advance_real_poll(&f);
+            let expected: Vec<_> = case["ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(
+                delete_ids(&f),
+                expected,
+                "rejection preserves the first lot and prevents later lots"
+            );
+            assert_eq!(
+                errors.borrow().len(),
+                case["errors"].as_array().unwrap().len(),
+                "losing sibling still reports its original refusal"
+            );
+            for (actual, expected) in errors
+                .borrow()
+                .iter()
+                .zip(case["errors"].as_array().unwrap())
+            {
+                let message = String::from_utf16(actual.as_str().unwrap()).unwrap();
+                assert!(
+                    message.contains(expected.as_str().unwrap()),
+                    "source report order and original sibling message: {message}"
+                );
+            }
+        }
+        f.exchange.dispose().unwrap();
+        assert!(f.runtime.exceptions.borrow().is_empty());
+    }
+}
+
+#[test]
+fn async_audit_dispose_during_login_settles_without_late_store_or_callbacks() {
+    let source = async_audit_source();
+    let f = fixture();
+    let login = f.wire.hold("/login");
+    let callbacks = Rc::new(Cell::new(0));
+    let seen = callbacks.clone();
+    let _cleanup = BreakoutpropExchange::listen_order_book(
+        &f.exchange,
+        "BTCUSD".into(),
+        Rc::new(move |_| {
+            seen.set(seen.get() + 1);
+            Ok(())
+        }),
+    )
+    .unwrap();
+    let pending = f.exchange.start();
+    pump_until(&f, || f.wire.requests.borrow().len() == 1);
+    let login_waiter = f.exchange.get_session_token();
+    f.exchange.dispose().unwrap();
+    login.release();
+    let cancelled = f.run(login_waiter).unwrap_err();
+    assert_eq!(cancelled.name, "AbortError");
+    assert_eq!(
+        cancelled.message,
+        "Breakout Prop login cancelled after disposal"
+    );
+    f.run(pending).unwrap();
+    advance_real_poll(&f);
+    assert_eq!(
+        callbacks.get(),
+        source["disposed"]["callbacks"].as_u64().unwrap()
+    );
+    let loaded = f.store.loaded().unwrap();
+    assert!(
+        !loaded.markets
+            && !loaded.tickers
+            && !loaded.balance
+            && !loaded.positions
+            && !loaded.orders
+    );
+    assert!(
+        f.exchange.session_token_request.borrow().is_none(),
+        "startup clears its login finally after disposal"
+    );
+    assert!(
+        f.runtime.tasks.borrow().is_empty(),
+        "dispose drains pending startup and login drivers"
+    );
+    assert!(f.runtime.exceptions.borrow().is_empty());
 }

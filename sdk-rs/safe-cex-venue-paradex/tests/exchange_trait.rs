@@ -2,6 +2,7 @@
 #[path = "support/exchange_runtime.rs"]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_store::Store;
 use serde_json::json;
 use support::drive;
 fn script(wire: &support::Wire) {
@@ -15,13 +16,13 @@ fn public_constructor_and_start_execute_existing_market_workflows() {
         support::fixture_with(json!({"key":"","secret":"","publicDataOnly":true}), script);
     assert!(venue.is_public_data_only());
     drive(&rt, venue.start()).unwrap();
-    assert!(store.loaded().markets && store.loaded().tickers);
-    assert_eq!(store.markets().len(), 1);
-    assert_eq!(store.markets()[0].symbol, "BTC-USD-PERP");
-    assert_eq!(store.markets()[0].precision.amount, 0.003);
-    assert_eq!(store.markets()[0].precision.price, 0.25);
-    assert_eq!(store.tickers().len(), 1);
-    assert_eq!(store.tickers()[0].bid, 101.0);
+    assert!(store.loaded().unwrap().markets && store.loaded().unwrap().tickers);
+    assert_eq!(store.markets().unwrap().len(), 1);
+    assert_eq!(store.markets().unwrap()[0].symbol, "BTC-USD-PERP");
+    assert_eq!(store.markets().unwrap()[0].precision.amount, 0.003);
+    assert_eq!(store.markets().unwrap()[0].precision.price, 0.25);
+    assert_eq!(store.tickers().unwrap().len(), 1);
+    assert_eq!(store.tickers().unwrap()[0].bid, 101.0);
     assert!(wire.requests.borrow().iter().any(|r| r.url == "/markets"));
     venue.dispose().unwrap();
     assert!(venue.base().is_disposed());
@@ -68,13 +69,13 @@ fn public_socket_subscribes_and_delivers_throttled_source_tickers() {
     for _ in 0..8 {
         runtime.pump();
     }
-    assert_eq!(store.tickers()[0].bid, 120.25);
+    assert_eq!(store.tickers().unwrap()[0].bid, 120.25);
     push("122.5");
     for _ in 0..8 {
         runtime.pump();
     }
     assert_eq!(
-        store.tickers()[0].bid,
+        store.tickers().unwrap()[0].bid,
         120.25,
         "second source update waits for throttle"
     );
@@ -83,12 +84,12 @@ fn public_socket_subscribes_and_delivers_throttled_source_tickers() {
         runtime.pump();
     }
     assert_eq!(
-        store.tickers()[0].bid,
+        store.tickers().unwrap()[0].bid,
         122.5,
         "latest source update delivered at trailing edge"
     );
-    assert_eq!(store.tickers()[0].ask, 123.75);
-    assert_eq!(store.tickers()[0].index, 121.125);
+    assert_eq!(store.tickers().unwrap()[0].ask, 123.75);
+    assert_eq!(store.tickers().unwrap()[0].index, Some(121.125));
     assert!(
         runtime.errors.borrow().is_empty(),
         "feed callback errors: {:?}",
@@ -131,8 +132,12 @@ fn private_start_signs_jwt_and_subscribes_only_after_the_matching_auth_reply() {
         runtime.errors.borrow(),
         runtime.console.borrow()
     );
-    assert!(store.loaded().balance && store.loaded().positions && store.loaded().orders);
-    assert_eq!(store.balance().total, 500.);
+    assert!(
+        store.loaded().unwrap().balance
+            && store.loaded().unwrap().positions
+            && store.loaded().unwrap().orders
+    );
+    assert_eq!(store.balance().unwrap().total, 500.);
     let frames: Vec<serde_json::Value> = runtime
         .sent
         .borrow()
@@ -328,7 +333,7 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         "orders.ALL",
         json!({"id":"ws-order-7","market":"BTC-USD-PERP","side":"SELL","type":"LIMIT","status":"OPEN","price":"109.25","size":"0.012","remaining_size":"0.009","reduce_only":false,"time_in_force":"GoodTillCancel"}),
     );
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     assert_eq!(orders.len(), 1, "PARADEX private order census");
     let order = &orders[0];
     assert_eq!(order.id, "ws-order-7");
@@ -351,7 +356,7 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         "orders.ALL",
         json!({"id":"ws-order-7","market":"BTC-USD-PERP","side":"SELL","type":"LIMIT","status":"FILLED","price":"109.25","size":"0.012","remaining_size":"0","reduce_only":false,"time_in_force":"GoodTillCancel"}),
     );
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let terminal = orders
         .iter()
         .find(|order| order.id == "ws-order-7")
@@ -392,7 +397,7 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         "balance_events",
         json!({"total_collateral":"777.25","free_collateral":"601.5","initial_margin_requirement":"171.125"}),
     );
-    let balance = store.balance();
+    let balance = store.balance().unwrap();
     assert_eq!(
         (balance.total, balance.free, balance.used, balance.upnl),
         (777.25, 601.5, 171.125, 0.)
@@ -538,7 +543,11 @@ fn all_sixteen_exchange_entrypoints_execute_source_workflows() {
     let candles=drive(&runtime,venue.fetch_ohlcv(typed(json!({"symbol":"BTC-USD-PERP","interval":"1m","from":1699999980000.0,"to":1700000040000.0})))).unwrap();
     assert_eq!(candles.len(), 1);
     assert_eq!(candles[0].close, 102.);
-    assert!(store.loaded().markets && store.loaded().positions && store.loaded().orders);
+    assert!(
+        store.loaded().unwrap().markets
+            && store.loaded().unwrap().positions
+            && store.loaded().unwrap().orders
+    );
     let requests = wire.requests.borrow();
     let post = requests
         .iter()
@@ -862,11 +871,11 @@ fn numeric_created_at_survives_constructed_fetch_orders() {
         1784505600000.0f64.to_bits()
     );
     assert!(
-        store.loaded().orders,
+        store.loaded().unwrap().orders,
         "startup commits the native order snapshot"
     );
-    assert_eq!(store.orders().len(), 1);
-    assert_eq!(store.orders()[0].id, "epoch-order");
+    assert_eq!(store.orders().unwrap().len(), 1);
+    assert_eq!(store.orders().unwrap()[0].id, "epoch-order");
     assert!(
         wire.requests
             .borrow()
@@ -910,8 +919,8 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
         5,
         "retain every odd row and its valid sibling"
     );
-    assert!(store.loaded().orders);
-    assert_eq!(store.orders().len(), 5);
+    assert!(store.loaded().unwrap().orders);
+    assert_eq!(store.orders().unwrap().len(), 5);
     for (order, id) in orders.iter().zip([
         "null-date",
         "false-date",
@@ -925,6 +934,7 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
         assert_eq!(order.filled.to_bits(), (0.006_f64 - 0.003).to_bits());
         let stored = store
             .orders()
+            .unwrap()
             .iter()
             .find(|row| row.id == id)
             .unwrap()
@@ -1096,7 +1106,7 @@ fn constructed_orders_use_host_local_timezone(private: bool) {
             "only the local date converts, one more time during the explicit REST read"
         );
     }
-    let stored = store.orders();
+    let stored = store.orders().unwrap();
     assert_eq!(stored.len(), dates.len());
     for (index, expected) in expected.iter().enumerate() {
         let order = stored
@@ -1122,7 +1132,7 @@ fn constructed_orders_use_host_local_timezone(private: bool) {
 fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
     let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
     drive(&runtime, venue.start()).unwrap();
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
     let venue: &dyn Exchange = venue.as_ref();
     drive(&runtime, venue.cancel_all_orders()).unwrap();
     let requests = wire.requests.borrow();
@@ -1134,14 +1144,14 @@ fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
     );
     assert_eq!(deletes[0].url, "/orders");
     assert!(deletes[0].params.is_none());
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
 }
 
 #[test]
 fn cancel_symbol_orders_reaches_venue_even_when_store_is_empty() {
     let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
     drive(&runtime, venue.start()).unwrap();
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
     let venue: &dyn Exchange = venue.as_ref();
     drive(&runtime, venue.cancel_symbol_orders("BTC-USD-PERP".into())).unwrap();
     let requests = wire.requests.borrow();
@@ -1153,7 +1163,7 @@ fn cancel_symbol_orders_reaches_venue_even_when_store_is_empty() {
     );
     assert_eq!(deletes[0].url, "/orders?market=BTC-USD-PERP");
     assert!(deletes[0].params.is_none());
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
 }
 
 #[test]
@@ -1162,7 +1172,7 @@ fn venue_wide_cancellations_propagate_http_errors() {
         let (venue, runtime, store, wire) =
             support::fixture_with(private_options(), private_script);
         drive(&runtime, venue.start()).unwrap();
-        assert!(store.orders().is_empty());
+        assert!(store.orders().unwrap().is_empty());
         wire.statuses.borrow_mut().insert("/orders".into(), 400);
         let venue: &dyn Exchange = venue.as_ref();
         let result = if symbol_scoped {
@@ -1182,7 +1192,7 @@ fn venue_wide_cancellations_propagate_http_errors() {
                 .count(),
             1
         );
-        assert!(store.orders().is_empty());
+        assert!(store.orders().unwrap().is_empty());
     }
 }
 
@@ -1671,7 +1681,7 @@ fn order_identity_refusals_keep_good_rows_and_report_fields() {
                 assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
             }
             assert!(
-                store.orders().is_empty(),
+                store.orders().unwrap().is_empty(),
                 "fetch returns the snapshot; caller commits it"
             );
             let logs = logs.borrow();
@@ -1799,7 +1809,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 .unwrap();
             runtime.pump();
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
     }
     assert!(
         runtime.errors.borrow().is_empty(),
@@ -1847,8 +1857,8 @@ fn undefined_order_sides_survive_constructed_start_reads_and_store() {
     let orders = drive(&runtime, venue.fetch_orders(None))
         .expect("read must retain rows with undefined side");
     assert_eq!(orders.len(), 11);
-    assert_eq!(store.orders().len(), 11);
-    for order in orders.iter().chain(store.orders().iter()) {
+    assert_eq!(store.orders().unwrap().len(), 11);
+    for order in orders.iter().chain(store.orders().unwrap().iter()) {
         if order.id.starts_with("undefined-") {
             assert!(
                 order.side.is_undefined(),
@@ -1866,7 +1876,7 @@ fn undefined_order_sides_survive_constructed_start_reads_and_store() {
         assert_eq!(order.amount.to_bits(), 0.006_f64.to_bits());
         assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
     }
-    assert!(store.loaded().orders);
+    assert!(store.loaded().unwrap().orders);
     assert!(
         wire.requests
             .borrow()
@@ -1949,7 +1959,7 @@ fn retained_info_order_rest_keeps_opaque_native_fields() {
     let orders = drive(&runtime, venue.fetch_orders(None)).expect("native opaque order read");
     assert_eq!(orders.len(), 1, "opaque siblings cannot hide valid order");
     store.add_or_update_order(orders[0].clone()).unwrap();
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let opaque = orders[0].info.as_ref().unwrap().get("opaque").unwrap();
     assert_eq!(
         opaque.get("text").unwrap().as_text(),
@@ -1998,4 +2008,253 @@ fn actual_source_order_info_preserves_native_metadata() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "3");
+}
+
+#[test]
+fn candle_audit_failure_reports_only_and_preserves_polling_and_shared_cleanup() {
+    use std::{cell::RefCell, rc::Rc};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/candle-audit-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["reads"].as_array().unwrap().len(), 5);
+    assert_eq!(source["remainingTimers"], 0);
+    let (venue, runtime, store, wire) =
+        support::fixture_with(json!({"key":"","secret":"","publicDataOnly":true}), script);
+    drive(&runtime, venue.start()).unwrap();
+    let tickers = json!(store.tickers().unwrap());
+    let loaded = json!(store.loaded().unwrap());
+    let app_errors = Rc::new(RefCell::new(Vec::new()));
+    let sink = app_errors.clone();
+    venue.base().on_args(
+        "error",
+        Rc::new(move |_, args| {
+            sink.borrow_mut().push(args.len());
+            Ok(())
+        }),
+    );
+    for path in ["/markets/klines", "/tradingview/history"] {
+        wire.statuses.borrow_mut().insert(path.into(), 400);
+        wire.responses
+            .borrow_mut()
+            .insert(path.into(), json!({"message":"candle terminal failure"}));
+    }
+    let first = Rc::new(RefCell::new(Vec::new()));
+    let sink = first.clone();
+    let cleanup_first = venue
+        .listen_ohlcv(
+            typed(json!({"symbol":"BTC-USD-PERP","interval":"1m"})),
+            Rc::new(move |row| sink.borrow_mut().push(row.close)),
+        )
+        .unwrap();
+    let second = Rc::new(RefCell::new(Vec::new()));
+    let sink = second.clone();
+    let cleanup_second = venue
+        .listen_ohlcv(
+            typed(json!({"symbol":"BTC-USD-PERP","interval":"1m"})),
+            Rc::new(move |row| sink.borrow_mut().push(row.close)),
+        )
+        .unwrap();
+    let started = runtime.now.get();
+    let pump = |offset| {
+        runtime.now.set(started + offset);
+        for _ in 0..32 {
+            runtime.pump();
+        }
+    };
+    let candle_requests = || {
+        wire.requests
+            .borrow()
+            .iter()
+            .filter(|request| {
+                request.url.starts_with("/markets/klines?")
+                    || request.url.starts_with("/tradingview/history?")
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    pump(0.0);
+    assert!(first.borrow().is_empty() && second.borrow().is_empty());
+    assert_eq!(
+        candle_requests().len(),
+        2,
+        "both actual REST endpoints reject"
+    );
+    assert_eq!(
+        runtime.errors.borrow().len(),
+        1,
+        "detached failure has one diagnostic report"
+    );
+    assert!(runtime.errors.borrow()[0].contains("candle terminal failure"));
+    assert!(
+        app_errors.borrow().is_empty(),
+        "poll diagnostic must not emit an app error"
+    );
+    assert_eq!(
+        json!(store.tickers().unwrap()),
+        tickers,
+        "failed poll must not change Store"
+    );
+    assert_eq!(json!(store.loaded().unwrap()), loaded);
+    wire.statuses.borrow_mut().clear();
+    wire.responses.borrow_mut().insert(
+        "/markets/klines".into(),
+        json!({"results":[[1700000000000.0,101,105,100,102,7]]}),
+    );
+    pump(2999.0);
+    assert_eq!(
+        candle_requests().len(),
+        2,
+        "no poll before source's three-second deadline"
+    );
+    pump(3000.0);
+    assert_eq!(*first.borrow(), vec![102.0]);
+    assert_eq!(*second.borrow(), vec![102.0]);
+    pump(6000.0);
+    assert_eq!(first.borrow().len(), 1, "unchanged candle is suppressed");
+    cleanup_first().unwrap();
+    wire.responses.borrow_mut().insert(
+        "/markets/klines".into(),
+        json!({"results":[[1700000000000.0,101,105,100,104,7]]}),
+    );
+    pump(9000.0);
+    cleanup_second().unwrap();
+    pump(12000.0);
+    assert_eq!(
+        *first.borrow(),
+        source["first"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        *second.borrow(),
+        source["second"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    );
+    let requests = candle_requests();
+    let source_reads = source["reads"].as_array().unwrap();
+    assert_eq!(
+        requests.len(),
+        source_reads.len(),
+        "cleanup cancels the shared poll"
+    );
+    for (request, expected) in requests.iter().zip(source_reads) {
+        assert_eq!(
+            request.url.split('?').next().unwrap(),
+            expected["url"].as_str().unwrap()
+        );
+        let expected_end = started + expected["at"].as_f64().unwrap() - 1700000000000.0;
+        let parameter = if request.url.starts_with("/markets/klines?") {
+            "end_at"
+        } else {
+            "to"
+        };
+        let expected_end = if parameter == "to" {
+            (expected_end / 1000.0).floor()
+        } else {
+            expected_end
+        };
+        assert_eq!(
+            trait_request_query(request, parameter)
+                .parse::<f64>()
+                .unwrap(),
+            expected_end
+        );
+    }
+    assert!(app_errors.borrow().is_empty());
+    assert_eq!(
+        runtime.errors.borrow().len(),
+        1,
+        "recovery adds no diagnostic failures"
+    );
+    assert_eq!(json!(store.tickers().unwrap()), tickers);
+    assert_eq!(json!(store.loaded().unwrap()), loaded);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn real_socket_book_sort_accepts_nan_comparisons_without_losing_levels() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let prices = [
+        "NaN", "558", "NaN", "197", "572", "NaN", "NaN", "48", "245", "415", "459", "NaN", "665",
+        "NaN", "625", "832", "557", "440", "367", "613", "NaN", "NaN",
+    ];
+    for side in ["bids", "asks"] {
+        let (venue, runtime, store, _) =
+            support::fixture_with(json!({"key":"","secret":"","publicDataOnly":true}), script);
+        drive(&runtime, venue.start()).unwrap();
+        let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));
+        let sink = seen.clone();
+        let cleanup = venue
+            .listen_order_book(
+                "BTC-USD-PERP".into(),
+                Rc::new(move |book| sink.borrow_mut().push(book)),
+            )
+            .unwrap();
+        for _ in 0..16 {
+            runtime.pump();
+        }
+        let mut data = json!({"market":"BTC-USD-PERP","bids":[["101","2"]],"asks":[["102","3"]]});
+        data[side] = prices
+            .iter()
+            .enumerate()
+            .map(|(i, p)| json!([p, (i + 1).to_string()]))
+            .collect();
+        let frame = json!({"jsonrpc":"2.0","method":"subscription","params":{
+            "channel":"order_book.BTC-USD-PERP.snapshot@15@100ms","data":data
+        }});
+        runtime.sockets.borrow()[0]
+            .1
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        for _ in 0..16 {
+            runtime.pump();
+        }
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "{side}: {:?}",
+            runtime.console.borrow()
+        );
+        let books = seen.borrow();
+        let levels = if side == "bids" {
+            &books[0].bids
+        } else {
+            &books[0].asks
+        };
+        assert_eq!(levels.len(), prices.len());
+        for (i, price) in prices.iter().enumerate() {
+            let row = levels
+                .iter()
+                .find(|row| row.amount == (i + 1) as f64)
+                .unwrap();
+            let expected: f64 = price.parse().unwrap();
+            assert!(
+                row.price.to_bits() == expected.to_bits()
+                    || (row.price.is_nan() && expected.is_nan())
+            );
+        }
+        assert!(store.tickers().is_ok(), "NaN is valid numeric ticker data");
+        cleanup().unwrap();
+        venue.dispose().unwrap();
+    }
 }

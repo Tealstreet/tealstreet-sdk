@@ -4,7 +4,7 @@ use crate::binding::{
     globals::arg,
     promise::{JsFuture, Promise, await_js},
     rt::{Rt, Shared},
-    value::{Js, Str, Thrown, from_typed, to_json},
+    value::{Js, Thrown, from_typed, to_json},
 };
 use crate::{
     cancellation::{
@@ -47,7 +47,7 @@ fn json_arg(value: &Js) -> Result<Option<serde_json::Value>, Thrown> {
 
 fn to_orders(value: &Js) -> Result<CancelOrders<Js>, Thrown> {
     value
-        .array_values()
+        .array_values()?
         .map(|items| Rc::new(RefCell::new(items)))
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", value.to_display())))
 }
@@ -236,12 +236,14 @@ impl CancellationHost for Rt {
             ));
         }
         let selected = select.call(owner, vec![order.clone(), positions])?;
-        let mut iterator = js_iterator(&selected)?;
-        Ok(iterator.next().unwrap_or(Js::Undefined))
+        let iterator = js_iterator(&selected)?;
+        let value = iterator.next()?.unwrap_or(Js::Undefined);
+        iterator.0.close()?;
+        Ok(value)
     }
     fn market_bases(&self) -> Result<Vec<CancelKey>, Thrown> {
         let markets = self.path("store.markets")?;
-        let Some(items) = markets.array_items() else {
+        let Some(items) = markets.array_items()? else {
             return Err(Thrown::type_error(
                 "this.store.markets.map is not a function",
             ));
@@ -366,53 +368,16 @@ fn delegate<'a>(
 }
 
 /// Array/string iteration protocol (`...value`, destructuring) over the live value.
-pub(crate) enum JsIterator {
-    Array { array: Js, index: usize },
-    Chars { units: Str, index: usize },
-}
-
+pub(crate) struct JsIterator(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
 impl JsIterator {
-    fn next(&mut self) -> Option<Js> {
-        match self {
-            JsIterator::Array { array, index } => {
-                let len = array.array_items().map_or(0, |items| items.len());
-                if *index >= len {
-                    return None;
-                }
-                let value = array.get(&index.to_string()).unwrap_or(Js::Undefined);
-                *index += 1;
-                Some(value)
-            }
-            JsIterator::Chars { units, index } => {
-                let first = *units.get(*index)?;
-                let pair = (0xD800..0xDC00).contains(&first)
-                    && units
-                        .get(*index + 1)
-                        .is_some_and(|u| (0xDC00..0xE000).contains(u));
-                let width = if pair { 2 } else { 1 };
-                let value = Js::utf16(&units[*index..*index + width]);
-                *index += width;
-                Some(value)
-            }
-        }
+    fn next(&self) -> Result<Option<Js>, Thrown> {
+        self.0.step_value()
     }
 }
-
 fn js_iterator(value: &Js) -> Result<JsIterator, Thrown> {
-    match value {
-        Js::Array(_) => Ok(JsIterator::Array {
-            array: value.clone(),
-            index: 0,
-        }),
-        Js::String(s) => Ok(JsIterator::Chars {
-            units: s.clone(),
-            index: 0,
-        }),
-        other => Err(Thrown::type_error(&format!(
-            "{} is not iterable",
-            other.to_display()
-        ))),
-    }
+    Ok(JsIterator(
+        safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?,
+    ))
 }
 
 impl OrderReadsHost for Rt {
@@ -471,19 +436,20 @@ impl OrderReadsHost for Rt {
         js_iterator(value)
     }
     fn next(&self, iterator: &mut JsIterator) -> Result<Option<Js>, Thrown> {
-        Ok(iterator.next())
+        iterator.next()
     }
     fn index(&self, value: &Js, index: usize) -> Result<Js, Thrown> {
         value.get(&index.to_string())
     }
     /// Array.prototype.flatMap(mapper): depth 1, holes skipped, mapper(value, index, array).
     fn flat_map(&self, value: Js, mapper: Js) -> Result<Js, Thrown> {
-        let Some(len) = value.array_items().map(|items| items.len()) else {
+        let Js::Array(array) = &value else {
             return Err(Thrown::type_error(&format!(
                 "{}.flatMap is not a function",
                 value.type_of()
             )));
         };
+        let len = array.len();
         if !mapper.is_callable() {
             return Err(Thrown::type_error(&format!(
                 "flatMap mapper function is not callable ({})",
@@ -493,7 +459,7 @@ impl OrderReadsHost for Rt {
         let mut out: Vec<Option<Js>> = vec![];
         for i in 0..len {
             let key = i.to_string();
-            if !value.has_own(&key) {
+            if !value.has_index(i) {
                 continue;
             }
             let element = value.get(&key)?;
@@ -501,7 +467,7 @@ impl OrderReadsHost for Rt {
                 Js::Undefined,
                 vec![element, Js::Number(i as f64), value.clone()],
             )?;
-            match mapped.array_items() {
+            match mapped.array_items()? {
                 Some(items) => out.extend(items.into_iter().filter(Option::is_some)),
                 None => out.push(Some(mapped)),
             }
@@ -674,10 +640,10 @@ fn map_inverse_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
         input.as_ref(),
         &product,
         |symbol| {
-            store
-                .markets_by_symbol()
+            Ok(store
+                .markets_by_symbol()?
                 .get(symbol)
-                .and_then(|m| m.is_inverse)
+                .and_then(|m| m.is_inverse))
         },
         || safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
     )?;

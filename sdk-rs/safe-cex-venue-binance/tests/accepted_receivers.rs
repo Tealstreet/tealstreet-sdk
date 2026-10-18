@@ -50,9 +50,21 @@ fn event_from_json_retains_native_fields_bits_and_captured_prototype() {
         let EventValue::Array(items) = value.read("items").unwrap() else {
             panic!("native array")
         };
-        assert_eq!(items.borrow().len(), 2);
-        assert!(matches!(items.borrow()[0], Some(EventValue::Null)));
-        assert!(matches!(items.borrow()[1], Some(EventValue::Number(3.0))));
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            EventValue::Array(items.clone())
+                .array_items()
+                .unwrap()
+                .unwrap()[0],
+            Some(EventValue::Null)
+        ));
+        assert!(matches!(
+            EventValue::Array(items.clone())
+                .array_items()
+                .unwrap()
+                .unwrap()[1],
+            Some(EventValue::Number(3.0))
+        ));
     }
     assert!(matches!(
         <EventValue as EventOps>::from_json(json!(null)),
@@ -164,5 +176,51 @@ fn event_optional_id_coerces_existing_values_with_expression_only_in_errors() {
             error.message,
             format!("{expression}?.toString is not a function")
         );
+    }
+}
+
+#[test]
+fn event_stock_reads_keep_current_realm_referents_and_later_properties() {
+    use safe_cex_num::PrototypeScalar;
+    use std::rc::Rc;
+    let realm = Rc::new(PrototypeRealm::default());
+    let _binding = realm.bind();
+    let other = Rc::new(PrototypeRealm::default());
+    for value in [
+        EventValue::Number(-0.0),
+        EventValue::Bool(false),
+        EventValue::str("literal"),
+        EventValue::array(vec![]),
+    ] {
+        for (key, member) in [
+            ("constructor", ProtoMember::Constructor),
+            ("toString", ProtoMember::ToString),
+            ("__proto__", ProtoMember::Prototype),
+        ] {
+            let actual = value.read(key).unwrap();
+            let reference = realm.reference(member);
+            assert!(
+                actual.strict_equals(&EventValue::Builtin(reference.clone())),
+                "actual EventOps::read retains {key} from current realm"
+            );
+            assert!(
+                !actual.strict_equals(&EventValue::Builtin(other.reference(member))),
+                "different realm must retain a different identity"
+            );
+            reference.set("marker", PrototypeScalar::Number(-0.0));
+            let EventValue::Number(bits) = actual.get("marker").unwrap() else {
+                panic!("retained builtin marker must be native Number")
+            };
+            assert_eq!(bits.to_bits(), (-0.0_f64).to_bits());
+            reference.set("marker", PrototypeScalar::Boolean(false));
+            assert!(matches!(
+                actual.get("marker").unwrap(),
+                EventValue::Bool(false)
+            ));
+        }
+        assert!(matches!(
+            value.read("absent-stock-key").unwrap(),
+            EventValue::Undefined
+        ));
     }
 }

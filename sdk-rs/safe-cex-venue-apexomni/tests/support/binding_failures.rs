@@ -74,9 +74,9 @@ fn http_status_failure_preserves_envelope_and_does_not_use_legacy_resend() {
         json!({"code":20016,"msg":"signature rejected"}),
     );
     let error = h.drive(h.venue().get_account()).unwrap_err();
-    assert_eq!(error.response.as_ref().unwrap()["status"], 400.);
+    assert_eq!(error.response_json_view().as_ref().unwrap()["status"], 400.);
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["msg"],
+        error.response_json_view().as_ref().unwrap()["data"]["msg"],
         "signature rejected"
     );
     assert!(error.config.is_some());
@@ -107,8 +107,8 @@ fn read_disposal_guard_prevents_late_config_publication() {
     let exchange = h.exchange.clone();
     *h.http.after_send.borrow_mut() = Some(Box::new(move || exchange.dispose().unwrap()));
     assert!(h.drive(h.venue().fetch_positions(None)).unwrap().is_empty());
-    assert!(h.store.zk_link_config().is_none());
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.zk_link_config().unwrap().is_none());
+    assert!(h.store.positions().unwrap().is_empty());
     done(&h);
 }
 #[test]
@@ -117,7 +117,7 @@ fn orders_disposal_guard_prevents_late_results() {
     let exchange = h.exchange.clone();
     *h.http.after_send.borrow_mut() = Some(Box::new(move || exchange.dispose().unwrap()));
     assert!(h.drive(h.venue().fetch_orders(None)).unwrap().is_empty());
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     done(&h);
 }
 

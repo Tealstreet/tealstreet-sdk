@@ -40,7 +40,7 @@ pub trait BatchBindings {
 }
 fn dense(v: &EventValue, expr: &str, method: &str) -> Result<Vec<EventValue>, Failure> {
     if let EventValue::Array(a) = v {
-        return Ok(array_values(&a));
+        return array_values(&a);
     }
     if v.nullish() {
         return Err(type_error(format!(
@@ -68,8 +68,8 @@ fn spread(out: &mut Vec<EventValue>, v: EventValue) -> Result<(), Failure> {
     match v {
         EventValue::Array(a) => {
             let mut i = 0;
-            while i < a.borrow().len() {
-                out.push(a.borrow()[i].clone().unwrap_or(EventValue::Undefined));
+            while i < a.len() {
+                out.push(EventValue::Array(a.clone()).get(&i.to_string())?);
                 i += 1
             }
             Ok(())
@@ -90,12 +90,12 @@ fn spread(out: &mut Vec<EventValue>, v: EventValue) -> Result<(), Failure> {
 }
 fn message(e: &Failure) -> EventValue {
     let msg = e
-        .response
+        .retained_response_input()
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("msg"))
         .cloned()
-        .map(EventValue::from_json)
+        .map(safe_cex_exchange::js_runtime::value::from_retained_input)
         .unwrap_or(EventValue::Undefined);
     fallback(msg, string(&e.message))
 }
@@ -162,7 +162,7 @@ async fn many(orders: EventValue, b: &mut impl BatchBindings) -> Result<EventVal
     for i in 0..len {
         let o = {
             if let EventValue::Array(a) = &orders {
-                a.borrow().get(i).cloned().flatten()
+                crate::private_event_value::array_element(&a, i)?
             } else {
                 None
             }
@@ -171,7 +171,7 @@ async fn many(orders: EventValue, b: &mut impl BatchBindings) -> Result<EventVal
             let f = b.capture_format()?;
             let formatted = f(o)?;
             if let EventValue::Array(a) = formatted {
-                payloads.extend(array_values(&a))
+                payloads.extend(array_values(&a)?)
             } else {
                 payloads.push(formatted)
             }
@@ -232,9 +232,9 @@ pub async fn regular_futures(
                 )?
                 .await?;
                 if let EventValue::Array(rows) = data {
-                    let len = rows.borrow().len();
+                    let len = rows.len();
                     for i in 0..len {
-                        let o = { rows.borrow().get(i).cloned().flatten() };
+                        let o = { crate::private_event_value::array_element(&rows, i)? };
                         if let Some(o) = o {
                             if o.read("code")?.truthy() {
                                 if !post_only(b, Rejection::Row(o.clone()))? {

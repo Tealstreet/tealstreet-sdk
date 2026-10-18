@@ -119,7 +119,7 @@ fn split_limit_matches_node_uint32_coercion_utf16_and_regex_captures() {
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -143,6 +143,7 @@ fn split_limit_matches_node_uint32_coercion_utf16_and_regex_captures() {
                 Ok(value) => {
                     let rows: Vec<Value> = value
                         .array_items()
+                        .expect("fixture array property reads")
                         .unwrap()
                         .into_iter()
                         .map(|v| {

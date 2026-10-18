@@ -57,8 +57,8 @@ fn emit_account_error(
     error: ExchangeError,
     emit: impl FnOnce(Option<&Value>) -> Result<(), ExchangeError>,
 ) -> Result<Option<Value>, ExchangeError> {
-    let response_message = error
-        .response
+    let response_view = error.response_json_view();
+    let response_message = response_view
         .as_ref()
         .and_then(|response| response.get("data"))
         .and_then(|data| data.get("msg"));
@@ -77,7 +77,7 @@ pub fn fetch_balance<'a, F, Fut, W>(
     store: &'a dyn safe_cex_store::Store,
     fetch_account: F,
     mut warn: W,
-) -> impl Future<Output = Result<std::sync::Arc<safe_cex_types::Balance>, ExchangeError>> + 'a
+) -> impl Future<Output = Result<safe_cex_store::BalanceHandle, ExchangeError>> + 'a
 where
     F: FnOnce() -> Result<Fut, ExchangeError> + 'a,
     W: FnMut(&str) + 'a,
@@ -86,16 +86,18 @@ where
     let request = fetch_account();
     async move {
         let data = request?.await?;
-        let stored = store.balance_handle();
-        let parsed =
-            crate::balance::parse_balance(data.as_ref(), &stored, &mut warn).map_err(|error| {
+        if !js_truthy(data.as_ref()) {
+            return store.balance_handle().map_err(ExchangeError::from);
+        }
+        let balance =
+            crate::balance::parse_present_balance(data.as_ref().expect("truthy data"), &mut warn)
+                .map_err(|error| {
                 let mut result = ExchangeError::new(error.message);
                 result.name = error.name.into();
                 result
             })?;
-        Ok(match parsed {
-            std::borrow::Cow::Owned(balance) => std::sync::Arc::new(balance),
-            std::borrow::Cow::Borrowed(_) => stored,
-        })
+        let value = safe_cex_exchange::js_runtime::value::from_typed(&balance)
+            .map_err(|error| error.to_exchange_error())?;
+        Ok(safe_cex_exchange::native_store::balance_reference(value))
     }
 }

@@ -13,13 +13,14 @@ pub mod api_factory_proxy_region;
 pub mod api_factory_runtime;
 #[path = "support/api_factory_timeout.rs"]
 pub mod api_factory_timeout;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     http::{HttpClientOptions, HttpFailure, HttpFuture, HttpHost},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     NetworkFailure, RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportFuture, TransportRegistry,
@@ -1094,6 +1095,62 @@ fn source(script: &str, floor: usize) -> Value {
 #[test]
 fn native_response_and_clock_reentry() {
     response_cases();
+}
+#[test]
+fn native_order_mutation_network_failures_never_replay_post_bodies() {
+    for endpoint in ["/v5/order/create", "/v5/order/cancel", "/v5/order/amend"] {
+        for failure_method in [None, Some("get"), Some("GET")] {
+            let f = fixture(vec![
+                Reply::Network {
+                    url: None,
+                    method: failure_method,
+                },
+                response(r#"{"retCode":0,"retMsg":"OK"}"#),
+            ]);
+            let mut request = get(endpoint);
+            request.method = "post".into();
+            request.body = Some(RestBody::Untransformed(serde_json::json!({"x":1}).into()));
+            let result = ready(f.api.execute_with_receipt(request));
+            let requests = f.wire.requests.borrow();
+            assert_eq!(
+                requests.len(),
+                1,
+                "mutation_network_single_attempt {endpoint}/{failure_method:?}"
+            );
+            assert_eq!(requests[0].method, "post");
+            assert_eq!(requests[0].url, format!("{endpoint}?requestId=id-1"));
+            assert_eq!(signature(&requests[0]), POST_ONE);
+            assert_eq!(body_bytes(&requests[0]), Some(b"{\"x\":1}".to_vec()));
+            let error = result.unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("ERR_NETWORK"));
+            assert_eq!(error.request.url, endpoint);
+            assert_eq!(error.request.method, failure_method.unwrap_or("post"));
+            assert_eq!(f.owner.base.auth_failure_streak(), 0);
+            assert!(f.owner.accesses.borrow().is_empty());
+        }
+    }
+}
+#[test]
+#[ignore = "requires installed workspace Axios and TypeScript"]
+fn source_order_mutation_rewrites_are_an_accepted_safety_residual() {
+    let source = source("create-api-retry-config-boundaries.cjs", 6);
+    assert_eq!(source["declaredSafetyCases"], 6);
+    let cases = source["safetyCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 6);
+    for (index, endpoint) in ["/v5/order/create", "/v5/order/cancel", "/v5/order/amend"]
+        .iter()
+        .enumerate()
+    {
+        let rewritten = &cases[index * 2]["source"];
+        assert_eq!(rewritten["attempts"], 2);
+        assert_eq!(rewritten["physical"][0]["method"], "post");
+        assert_eq!(rewritten["physical"][1]["method"], "get");
+        for request in rewritten["physical"].as_array().unwrap() {
+            assert_eq!(request["url"], *endpoint);
+            assert_eq!(request["data"], "{\"x\":1}");
+        }
+        assert_eq!(cases[index * 2 + 1]["source"]["attempts"], 1);
+    }
 }
 #[test]
 fn native_retry_failure_config_and_original_read_guard() {

@@ -30,6 +30,14 @@ cd sdk-rs
 cargo build --locked --target wasm32-unknown-unknown -p safe-cex-types -p safe-cex-num -p safe-cex-store
 ```
 
+[`scripts/live-diff`](scripts/live-diff/README.md) contains the standalone live
+TypeScript versus compiled napi account probe. It records exchange HTTPS
+responses for identical-input comparisons, runs public reads before authenticated
+checks, and supports a small Binance test-account limit/cancel round trip.
+Credentials come only from the documented `yarn keys` CLI; public mode needs none.
+The same directory also provides the 60-second public WebSocket capture/four-replay
+probe, exact ordered Store/event comparisons, and within-side repeatability checks.
+
 The wasm gate commits the pure core to compatibility as dependencies land;
 empty scaffolds outside that set compile today without a wasm guarantee.
 Shared external dependencies are predeclared for later phases; each crate opts

@@ -52,10 +52,10 @@ pub trait MarketPositionHost {
     /// Original response.data items carried by a rejected typed HTTP response.
     fn error_response_items(&self, err: &PortfolioFailure) -> Option<ReadItems>;
     fn get_supported_types(&self) -> Promise<Result<Vec<String>, PortfolioFailure>>;
-    fn markets(&self) -> ReadMarkets;
-    fn market_by_id(&self, id: &str) -> Option<ReadMarket>;
-    fn cached_tickers(&self) -> ReadTickers;
-    fn cached_positions(&self) -> ReadPositions;
+    fn markets(&self) -> Result<ReadMarkets, PortfolioFailure>;
+    fn market_by_id(&self, id: &str) -> Result<Option<ReadMarket>, PortfolioFailure>;
+    fn cached_tickers(&self) -> Result<ReadTickers, PortfolioFailure>;
+    fn cached_positions(&self) -> Result<ReadPositions, PortfolioFailure>;
     fn emit_and_log_error(&self, args: &[Option<Value>]) -> Result<(), PortfolioFailure>;
     /// Pure host timezone/DST conversion used by the native Date parser.
     fn local_wall_time_to_utc(&self, millis: f64) -> f64;
@@ -140,7 +140,7 @@ fn ticker(id: String) -> Ticker {
         ask: 0.0,
         last: 0.0,
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         percentage: 0.0,
         open_interest: 0.0,
@@ -265,7 +265,7 @@ fn spot_cfm<H: MarketPositionHost + 'static>(
                 Ok(v) => Ok(v),
                 Err(err) => {
                     r.host.emit_and_log_error(&[detail(&err)])?;
-                    Ok(r.host.cached_tickers())
+                    Ok(r.host.cached_tickers()?)
                 }
             }
         }),
@@ -313,7 +313,7 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                     }
                 };
                 let mut markets = JsObjectMap::new();
-                for market in r.host.markets().borrow().iter() {
+                for market in r.host.markets()?.borrow().iter() {
                     let symbol = market.borrow().symbol.clone();
                     markets.insert(symbol, market.clone());
                 }
@@ -337,7 +337,7 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                     fields.ask = float(prop(quote, "best_ask_price")?)?;
                     fields.last = float(prop(quote, "trade_price")?)?;
                     fields.mark = float(prop(quote, "mark_price")?)?;
-                    fields.index = float(prop(quote, "index_price")?)?;
+                    fields.index = Some(float(prop(quote, "index_price")?)?);
                     fields.percentage = float(or(
                         raw.as_ref()
                             .and_then(|v| v.get("price_percentage_change_24h")),
@@ -366,7 +366,7 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                 Ok(v) => Ok(v),
                 Err(err) => {
                     r.host.emit_and_log_error(&[detail(&err)])?;
-                    Ok(r.host.cached_tickers())
+                    Ok(r.host.cached_tickers()?)
                 }
             }
         }),
@@ -382,7 +382,7 @@ pub fn fetch_tickers_v3<H: MarketPositionHost + 'static>(
             let result = (|| {
                 let mut tickers = vec![];
                 let zero = Input::from(json!("0"));
-                for market in r.host.markets().borrow().iter() {
+                for market in r.host.markets()?.borrow().iter() {
                     let m = market.borrow();
                     let info = m.info.as_ref().ok_or_else(|| {
                         error(
@@ -405,7 +405,7 @@ pub fn fetch_tickers_v3<H: MarketPositionHost + 'static>(
                     fields.ask = float(info.get("price"))?;
                     fields.last = float(info.get("price"))?;
                     fields.mark = float(info.get("price"))?;
-                    fields.index = float(info.get("price"))?;
+                    fields.index = Some(float(info.get("price"))?);
                     fields.percentage = float(info.get("price_percentage_change_24h"))?;
                     fields.funding_rate =
                         float(or(details.and_then(|v| v.get("funding_rate")), &zero))?;
@@ -422,7 +422,7 @@ pub fn fetch_tickers_v3<H: MarketPositionHost + 'static>(
                 Ok(v) => Ok(v),
                 Err(err) => {
                     r.host.emit_and_log_error(&[detail(&err)])?;
-                    Ok(r.host.cached_tickers())
+                    Ok(r.host.cached_tickers()?)
                 }
             }
         }),
@@ -456,7 +456,7 @@ pub fn fetch_positions<H: MarketPositionHost + 'static>(
     Promise::from_future(
         Box::pin(async move {
             let open = fetch_open_positions(r.clone()).await?;
-            let markets = r.host.markets();
+            let markets = r.host.markets()?;
             let missing: Vec<_> = markets
                 .borrow()
                 .iter()
@@ -496,7 +496,7 @@ pub fn fetch_open_positions_cfm<H: MarketPositionHost + 'static>(
                 let Some(item)=next else {break;};
                 index+=1;
                 let lookup_id = text(item.borrow().get("product_id"))?;
-                let market = r.host.market_by_id(&lookup_id);
+                let market = r.host.market_by_id(&lookup_id)?;
                 let contract = market.and_then(|m| {
                     let m = m.borrow();
                     if m.is_expiring == Some(true) {m.contract_size.and_then(|size| normalize_cfm_contract_size(&Input::Float(size)))} else {None}
@@ -526,7 +526,7 @@ pub fn fetch_open_positions_cfm<H: MarketPositionHost + 'static>(
                 Err(err) => {
                     r.host
                         .emit_and_log_error(&[err.value.clone(), detail(&err)])?;
-                    Ok(r.host.cached_positions())
+                    Ok(r.host.cached_positions()?)
                 }
             }
         }),
@@ -543,7 +543,7 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
             let Some(selected) = selected.filter(|p| p.borrow().r#type == "INTX") else {
                 r.host
                     .emit_and_log_error(&[Some(json!("No INTX portfolio found"))])?;
-                return Ok(r.host.cached_positions());
+                return r.host.cached_positions();
             };
             let uuid = selected.borrow().uuid.clone();
             let result: Result<ReadPositions, PortfolioFailure> = async {
@@ -590,7 +590,7 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
                 Err(err) => {
                     r.host
                         .emit_and_log_error(&[err.value.clone(), detail(&err)])?;
-                    Ok(r.host.cached_positions())
+                    Ok(r.host.cached_positions()?)
                 }
             }
         }),

@@ -81,7 +81,7 @@ fn owner(raw: &'static str, pm: bool) -> (Rc<ExchangeOwner>, Rc<Runtime>, Arc<Ht
             safe_cex_types::ExchangeName::Binance
         },
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -111,7 +111,7 @@ fn native_non_array_order_diagnostics_keep_unpaired_units_and_stringify_values()
         let EventValue::Array(rows) = rows else {
             panic!("native orders array")
         };
-        assert!(rows.borrow().is_empty());
+        assert!(rows.is_empty());
         assert_eq!(expected["rows"], 0);
         assert_eq!(expected["errors"], 0);
         assert_eq!(json!(*messages.borrow()), expected["log"]);
@@ -154,8 +154,8 @@ fn native_order_alias_lookup_does_not_traverse_unread_array_children() {
     let EventValue::Array(rows) = rows else {
         panic!("native orders array")
     };
-    assert_eq!(rows.borrow().len(), 1);
-    let row = rows.borrow()[0].clone().unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = EventValue::Array(rows.clone()).get("0").unwrap();
     assert!(row.get("id").unwrap().is_undefined());
     assert!(matches!(row.get("remaining").unwrap(), EventValue::Number(n) if n.is_nan()));
     let info = row.get("info").unwrap();
@@ -176,7 +176,7 @@ fn native_client_order_lookup_reconciles_lost_placement_response_through_signed_
         markets: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.1},"limits":{"amount":{"min":0.1,"max":10},"leverage":{"min":1,"max":100}}})).unwrap()]),
         ..Default::default()
     }, false).unwrap();
-    assert!(owner.base.store.orders().is_empty());
+    assert!(owner.base.store.orders().unwrap().is_empty());
     let result = run(
         &runtime,
         owner.invoke(
@@ -290,7 +290,7 @@ fn native_pm_order_errors_report_retained_cause_message_units() {
             }),
         );
         let rows = run(&runtime, owner.invoke(Method::Orders, vec![])).unwrap();
-        assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+        assert!(matches!(rows, EventValue::Array(ref rows) if rows.is_empty()));
         let mut expected_units = "Exchange Error: ".encode_utf16().collect::<Vec<_>>();
         expected_units.extend(
             expected["message"]
@@ -335,7 +335,7 @@ fn native_pm_repeated_error_warning_retains_message_units() {
         for _ in 0..2 {
             let rows = run(&runtime, owner.invoke(Method::Orders, vec![]))
                 .expect("source returns cached rows after each malformed snapshot");
-            assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+            assert!(matches!(rows, EventValue::Array(ref rows) if rows.is_empty()));
         }
         assert_eq!(logs.borrow().len(), 1);
         assert_eq!(json!(units(&logs.borrow()[0][0])), expected["log"][0]);

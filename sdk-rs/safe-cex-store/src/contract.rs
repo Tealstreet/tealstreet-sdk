@@ -5,6 +5,7 @@
 use crate::model_patch::{ModelPatch, PatchSource};
 use crate::notification::StoreMutationError;
 use indexmap::IndexMap;
+use safe_cex_types::StoreReadError;
 use safe_cex_types::{
     ActiveChaser, ActiveTWAP, Balance, DisplayedMargin, DisplayedPosition, FetchedLeverage, Market,
     Order, OrderRiskProfile, OrderStatus, Position, RequestOutcome, RequestOutcomeCounts,
@@ -13,7 +14,7 @@ use safe_cex_types::{
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
-use std::cell::Ref;
+use std::{any::Any, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PackedTickerDelta {
@@ -231,11 +232,17 @@ fn deserialize_present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 
 type Subscriber = StoreSubscriber;
 
+/// A borrowed native state referent; no typed snapshot is constructed for delivery.
+pub type NativeStoreSubscriber =
+    Box<dyn Fn(&dyn Any, bool) -> Result<(), safe_cex_types::StoreSubscriberError>>;
+
 /// Object-safe, local callbacks support native and browser hosts without an SDK projection.
 pub trait Store {
+    fn native_owner(&self) -> Rc<dyn Any>;
     fn update(&self, changes: StoreUpdate, from_worker: bool) -> Result<(), StoreMutationError>;
     fn reset(&self) -> Result<(), StoreMutationError>;
     fn subscribe(&self, callback: Subscriber) -> Box<dyn Fn()>;
+    fn subscribe_native(&self, callback: NativeStoreSubscriber) -> Box<dyn Fn()>;
     fn set_setting(&self, key: &str, value: bool) -> Result<(), StoreMutationError>;
     fn remove_order(&self, id: &str) -> Result<(), StoreMutationError>;
     fn update_order_status(&self, id: &str, status: OrderStatus) -> Result<(), StoreMutationError>;
@@ -290,50 +297,43 @@ pub trait Store {
         data: Option<safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), StoreMutationError>;
     fn update_user_data(&self, data: Option<Value>) -> Result<(), StoreMutationError>;
-    fn latency(&self) -> f64;
-    fn balance(&self) -> Ref<'_, Balance>;
-    /// Retain the current balance object without holding any Store borrow.
-    /// Replacing/resetting the balance leaves previously returned objects alive.
-    fn balance_handle(&self) -> std::sync::Arc<Balance>;
-    fn markets(&self) -> Ref<'_, [Market]>;
-    fn tickers(&self) -> Ref<'_, [Ticker]>;
-    fn orders(&self) -> Ref<'_, [Order]>;
-    fn orders_risk(&self) -> Ref<'_, IndexMap<String, Vec<OrderRiskProfile>>>;
-    fn positions(&self) -> Ref<'_, [Position]>;
-    fn displayed_positions(&self) -> Ref<'_, [DisplayedPosition]>;
-    fn displayed_margin(&self) -> Option<Ref<'_, DisplayedMargin>>;
-    fn active_chasers(&self) -> Ref<'_, [ActiveChaser]>;
-    fn active_twaps(&self) -> Ref<'_, [ActiveTWAP]>;
-    fn loaded(&self) -> Ref<'_, StoreDataLoaded>;
-    fn update_ids(&self) -> Ref<'_, StoreUpdateIds>;
-    fn options(&self) -> Ref<'_, StoreOptions>;
-    fn message_handler_stats(&self) -> Option<Ref<'_, Value>>;
-    fn stark_config(&self) -> Option<Ref<'_, Value>>;
-    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>>;
-    fn user_data(&self) -> Option<Ref<'_, Value>>;
-    fn tickers_by_id(&self) -> Ref<'_, IndexMap<String, Ticker>>;
-    fn markets_by_id(&self) -> Ref<'_, IndexMap<String, Market>>;
-    fn tickers_by_symbol(&self) -> Ref<'_, IndexMap<String, Ticker>>;
-    /// Property lookup beyond the borrowed own-entry view. Stores with mutable
-    /// dictionary prototypes override this stock-prototype implementation.
-    fn lookup_ticker_by_symbol(&self, symbol: &str) -> crate::ticker_lookup::TickerSymbolLookup {
-        let tickers = self.tickers_by_symbol();
-        if let Some(ticker) = tickers.get(symbol) {
-            crate::ticker_lookup::TickerSymbolLookup::OwnTicker(ticker.id.clone())
-        } else {
-            crate::ticker_lookup::stock(symbol)
-        }
-    }
-
-    fn markets_by_symbol(&self) -> Ref<'_, IndexMap<String, Market>>;
+    fn latency(&self) -> Result<f64, StoreReadError>;
+    fn balance(&self) -> Result<Balance, StoreReadError>;
+    fn balance_handle(&self) -> Result<crate::BalanceHandle, StoreReadError>;
+    fn markets(&self) -> Result<Vec<Market>, StoreReadError>;
+    fn tickers(&self) -> Result<Vec<Ticker>, StoreReadError>;
+    fn orders(&self) -> Result<Vec<Order>, StoreReadError>;
+    fn orders_risk(&self) -> Result<IndexMap<String, Vec<OrderRiskProfile>>, StoreReadError>;
+    fn positions(&self) -> Result<Vec<Position>, StoreReadError>;
+    fn displayed_positions(&self) -> Result<Vec<DisplayedPosition>, StoreReadError>;
+    fn displayed_margin(&self) -> Result<Option<DisplayedMargin>, StoreReadError>;
+    fn active_chasers(&self) -> Result<Vec<ActiveChaser>, StoreReadError>;
+    fn active_twaps(&self) -> Result<Vec<ActiveTWAP>, StoreReadError>;
+    fn loaded(&self) -> Result<StoreDataLoaded, StoreReadError>;
+    fn update_ids(&self) -> Result<StoreUpdateIds, StoreReadError>;
+    fn options(&self) -> Result<StoreOptions, StoreReadError>;
+    fn message_handler_stats(&self) -> Result<Option<Value>, StoreReadError>;
+    fn stark_config(&self) -> Result<Option<Value>, StoreReadError>;
+    fn zk_link_config(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError>;
+    fn user_data(&self) -> Result<Option<Value>, StoreReadError>;
+    fn tickers_by_id(&self) -> Result<IndexMap<String, Ticker>, StoreReadError>;
+    fn markets_by_id(&self) -> Result<IndexMap<String, Market>, StoreReadError>;
+    fn tickers_by_symbol(&self) -> Result<IndexMap<String, Ticker>, StoreReadError>;
+    fn lookup_ticker_by_symbol(
+        &self,
+        symbol: &str,
+    ) -> Result<Rc<dyn crate::ticker_lookup::TickerLookup>, StoreReadError>;
+    fn markets_by_symbol(&self) -> Result<IndexMap<String, Market>, StoreReadError>;
     fn get_markets_version(&self) -> f64;
     fn get_tickers_version(&self) -> f64;
-    fn fetched_leverage(&self) -> Ref<'_, IndexMap<String, FetchedLeverage>>;
-    fn socket_health(&self) -> Option<Ref<'_, Value>>;
+    fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError>;
+    fn socket_health(&self) -> Result<Option<Value>, StoreReadError>;
     fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError>;
-    fn request_stats(&self) -> Option<Ref<'_, RequestOutcomeCounts>>;
-    fn record_request_outcome(&self, outcome: RequestOutcome);
-    fn serialize(&self) -> StoreData;
+    fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError>;
+    fn record_request_outcome(&self, outcome: RequestOutcome) -> Result<(), StoreMutationError>;
+    fn serialize(&self) -> Result<StoreData, StoreReadError>;
 }
 
 // Private wire companions keep serde metadata without exposing permissive decoders.

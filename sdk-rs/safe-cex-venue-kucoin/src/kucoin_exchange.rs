@@ -69,7 +69,7 @@ fn assemble(
     parts.settings.client_order_id_rule = Some(globals::client_order_id_rule(spot));
     let name = js(&parts.name)?;
     let options = js(&parts.options)?;
-    let store = store::facade(parts.store.clone());
+    let store = store::facade(parts.store.clone())?;
     let http = Rc::new_cyclic(|me| ApiHost {
         me: me.clone(),
         runtime: deps.runtime.clone(),
@@ -167,7 +167,7 @@ fn define_classes(weak: &W, spot: bool) -> Result<Js, Thrown> {
 
 /// Own fields of the receiver and its sockets close over the receiver; clear
 /// them when the venue goes so the JS graph does not keep itself alive.
-fn release(this: &Js) {
+fn release(this: &Js) -> Result<(), Thrown> {
     let mut objects = vec![this.clone()];
     for key in ["publicWebsocket", "privateWebsocket"] {
         if let Ok(v) = this.get(key) {
@@ -175,13 +175,14 @@ fn release(this: &Js) {
         }
     }
     if let Ok(list) = this.get("snapshotWebsockets") {
-        objects.extend(list.array_values().unwrap_or_default());
+        objects.extend(list.array_values()?.unwrap_or_default());
     }
     for object in objects {
         if let Js::Object(o) = object {
             o.props.borrow_mut().clear();
         }
     }
+    Ok(())
 }
 
 /// The assembled receiver both venue structs dispatch through.
@@ -273,7 +274,12 @@ impl Core {
 
 impl Drop for Core {
     fn drop(&mut self) {
-        release(&self.this);
+        if let Err(error) = release(&self.this) {
+            self.shared.runtime.report_exception(
+                &err(error),
+                &serde_json::json!({"source":"Kucoin.release"}).into(),
+            );
+        }
         self.shared.extra.supers.borrow_mut().clear();
     }
 }

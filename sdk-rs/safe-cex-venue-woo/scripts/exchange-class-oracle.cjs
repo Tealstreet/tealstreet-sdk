@@ -3,7 +3,26 @@ const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
 const file=path.resolve(__dirname,'../../../packages/safe-cex/src/exchanges/woo/woo.exchange.ts');
 const ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true),klass=ast.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='WOOXExchange');assert(klass);
 const code=ts.transpileModule(klass.getText(ast).replace(/^export /,'this.C='),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-if (process.argv.includes('--bound-response')) {
+if (process.argv.includes('--class-state')) {
+  const {WOOXExchange} = require(file);
+  const {DefaultStore} = require(path.resolve(__dirname, '../../../packages/safe-cex/src/store/store.base.ts'));
+  const owner = new WOOXExchange('woo', {publicDataOnly:true, applicationId:'fixture'}, new DefaultStore());
+  const other = new WOOXExchange('woo', {publicDataOnly:true, applicationId:'fixture'}, new DefaultStore());
+  const fields = klass.members.filter(n => ts.isPropertyDeclaration(n) && !n.modifiers?.some(m => m.kind === ts.SyntaxKind.StaticKeyword)).map(n => n.name.getText(ast));
+  assert.equal(fields.length, 86);
+  const keys = Object.keys(owner).filter(k => fields.includes(k));
+  assert.equal(keys.length, 86);
+  const arrows = klass.members.filter(n => ts.isPropertyDeclaration(n) && n.initializer && ts.isArrowFunction(n.initializer)).map(n => n.name.getText(ast));
+  assert.equal(arrows.length, 68);
+  for (const key of arrows) assert.notEqual(owner[key], other[key]);
+  const maps = keys.filter(k => owner[k] instanceof Map || owner[k] instanceof Set);
+  assert.equal(maps.length, 6);
+  for (const key of maps) { assert.equal(owner[key].size, 0); assert.notEqual(owner[key], other[key]); }
+  process.stdout.write(JSON.stringify({fields:keys, arrows, maps, constants:Object.fromEntries(['MAX_FILL_POSITION_REFRESH_ATTEMPTS','FILL_POSITION_REFRESH_BASE_DELAY_MS','FUNDING_REFRESH_INTERVAL_MS'].map(k=>[k,WOOXExchange[k]]))}));
+  owner.dispose(); other.dispose();
+  return;
+}
+if (process.argv.includes('--bound-response') || process.argv.includes('--fix-audit-boundary') || process.argv.includes('--schedule-cancel')) {
   const utilityFile = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/woo/woo.utils.ts');
   const utility = {exports: {}, require: require('./oracle-runtime.cjs')};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(utilityFile, 'utf8'), {
@@ -12,8 +31,21 @@ if (process.argv.includes('--bound-response')) {
   const constructed = [], trace = [];
   let subscriptions = 0;
   const clients = [{id:31}, {id:37}, {id:41}], proxy = {id:43};
-  class BaseExchange {
-    constructor(name, options) { assert.equal(name, 'woo'); this.options = options; constructed.push(this); }
+  let ScheduleBase = class {};
+  if (process.argv.includes('--schedule-cancel')) {
+    const baseFile = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/base.ts');
+    const baseAst = ts.createSourceFile(baseFile, fs.readFileSync(baseFile, 'utf8'), ts.ScriptTarget.Latest, true);
+    const base = baseAst.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'BaseExchange');
+    const member = base.members.find(n => n.name?.getText(baseAst) === 'scheduleCancel');
+    assert(member && ts.isPropertyDeclaration(member));
+    const scope = {};
+    vm.runInNewContext(ts.transpileModule(`class ScheduleBase { ${member.getText(baseAst)} } this.ScheduleBase = ScheduleBase;`, {
+      compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS},
+    }).outputText, scope);
+    ScheduleBase = scope.ScheduleBase;
+  }
+  class BaseExchange extends ScheduleBase {
+    constructor(name, options) { super(); assert.equal(name, 'woo'); this.options = options; constructed.push(this); }
     on(name, handler) { assert.equal(name, 'fill'); assert.equal(typeof handler, 'function'); subscriptions++; }
   }
   const bound = {
@@ -33,6 +65,48 @@ if (process.argv.includes('--bound-response')) {
     assert.equal(instance.xhr, clients[0]); assert.equal(instance._primaryXhr, clients[1]);
     assert.equal(instance._secondaryXhr, clients[2]); assert.equal(instance._proxyEnforcedXhr, proxy);
     assert.equal(instance.publicWebsocket.owner, instance); assert.equal(instance.privateWebsocket.owner, instance);
+  }
+  if (process.argv.includes('--schedule-cancel')) {
+    (async () => {
+      for (const value of [undefined, null, 0, NaN]) {
+        await assert.rejects(owner.scheduleCancel(value), error => error.name === 'Error' && error.message === 'Not implemented');
+      }
+      process.stdout.write(JSON.stringify({name: 'Error', message: 'Not implemented', cases: 4}));
+    })().catch(error => { console.error(error); process.exitCode = 1; });
+    return;
+  }
+  if (process.argv.includes('--fix-audit-boundary')) {
+    const directory = path.dirname(file), visited = new Set();
+    function visit(module) {
+      if (visited.has(module)) return;
+      assert(!path.basename(module).startsWith('woo.v3.'), `V3 production dependency: ${module}`);
+      visited.add(module);
+      const tree = ts.createSourceFile(module, fs.readFileSync(module, 'utf8'), ts.ScriptTarget.Latest, true);
+      for (const statement of tree.statements) {
+        if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) || !statement.moduleSpecifier) continue;
+        if (statement.importClause?.isTypeOnly || statement.isTypeOnly) continue;
+        const name = statement.moduleSpecifier.text;
+        if (name.startsWith('.')) {
+          const target = path.resolve(path.dirname(module), name + '.ts');
+          if (target.startsWith(directory + path.sep)) visit(target);
+        }
+      }
+    }
+    for (const module of ['woo.exchange.ts', 'woo.api.ts', 'woo.ws-public.ts', 'woo.ws-private.ts']) visit(path.join(directory, module));
+    const contract = ts.createSourceFile('contracts.ts', fs.readFileSync(path.join(directory, 'woo.v3.contracts.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
+    const gate = contract.statements.filter(ts.isVariableStatement).flatMap(s => [...s.declarationList.declarations]).find(d => d.name.getText(contract) === 'WOO_V3_MIGRATION_GATES');
+    assert(gate && ts.isCallExpression(gate.initializer));
+    const gates = gate.initializer.arguments[0].properties;
+    assert.equal(gates.length, 8);
+    for (const item of gates) assert.equal(item.initializer.kind, ts.SyntaxKind.FalseKeyword);
+    for (const instance of constructed) {
+      assert.equal(Object.keys(instance).filter(k => typeof instance[k] === 'function').length, 68);
+      assert.equal('WooV3OrderBookRecoveryCoordinator' in instance, false);
+      assert.equal('pushUpdate' in instance, false);
+      assert.equal('normalizeUpdate' in instance, false);
+    }
+    process.stdout.write(JSON.stringify({constructed: 2, v3Imports: 0, gates: gates.length, legacyModules: visited.size}));
+    process.exit(0);
   }
   const arrow = owner.normalizeRequestedSymbol;
   assert.notEqual(arrow, other.normalizeRequestedSymbol);

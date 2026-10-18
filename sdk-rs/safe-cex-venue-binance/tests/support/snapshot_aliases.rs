@@ -108,7 +108,7 @@ fn constructed(
         venue,
         name,
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -138,7 +138,7 @@ fn emit_alias_reports_native_position_failure_and_propagates_listener_error() {
             }),
         );
         let result = run(&runtime.inner, owner.invoke(Method::Positions, vec![])).unwrap();
-        assert!(matches!(result, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+        assert!(matches!(result, EventValue::Array(ref rows) if rows.is_empty()));
         assert_eq!(
             errors.borrow().len(),
             1,

@@ -13,8 +13,9 @@ qualified deserialization. Restoring the private derived decoders makes all
 eleven named shape tests fail; retain that compiling regression control.
 Twenty-three top-level protocol records use the shared map-only decoder and private metadata
 companions. Optional typed fields reject explicit null; opaque payloads retain it. The 1,782-case TypeScript-checker
-corpus includes 264 deliberate lone-surrogate representation refusals; those
-rows cite the canonical shared UTF-8 boundary.
+corpus includes 264 deliberate lone-surrogate cases. Canonical retained ingress
+admits typed String replacements while direct Serde capture is measured
+separately; raw opaque carriers retain their exact units.
 All venue manifest rows now have mappings; each fixture establishes only its stated scope. Variants stay within this crate; consume
 the [shared exchange trait](../safe-cex-exchange/CLAUDE.md) and route missing
 runtime or signing primitives to their owner.
@@ -206,8 +207,9 @@ are owned; the manifest names the measured difference from live JS aliases.
 Order controls now use src/order_controls.rs with bound SDK and socket hooks.
 Keep eager guard/log/first-call effects, sequential batch continuation, authentic
 builder-error short circuit, and replacement validation before cancellation.
-Missing/null trigger info keeps the source property-access error; typed update
-keys have an explicit diagnostic fieldCount difference in the manifest.
+Missing/null trigger info keeps the source property-access error; the constructed member captures raw enumerable update-key count before typed
+projection, preserving fieldCount even for extra own keys. The pure typed helper
+counts only represented fields because it has no raw caller object.
 These methods do not claim the SDK constructor or single-order placement path.
 
 GRVT public candles/books and account leverage are in `data_reads.rs`. Configured client hooks supply transformed HTTP data or SDK responses; KlineRequest keeps native f64 limits and optional IDs until serialization. Keep current-first order-book total accumulation and cache notification before the fresh position lookup. Leverage helpers declare owned Market/returned-cache alias boundaries in the manifest and assert corresponding source/native witnesses; the account getter is live after setter logging.
@@ -390,3 +392,17 @@ and zero/existing-last mark fallback have independent fixed assertions.
 Market reads retain the native response before mapping. Signing info always owns
 `ih`, `bd` and `qd`, including missing values as Undefined. The constructed REST /
 Store regression inspects UTF-16 units, nonfinite numbers and signed-zero bits.
+
+The shared retained typed decoder admits isolated UTF-16 escapes and replaces
+them with U+FFFD only in typed String views. `tests/divergence_records.rs` keeps
+the unchanged 22-record/7-captured source matrix and its 1,782-case input source,
+checks the exact raw units independently, and observes canonical typed decoding
+for every selected record. Bare Serde is a distinct route: seven numeric roots
+capture retained text themselves, while the other selected records still reject
+those strings when called directly with serde_json. This distinction does not
+establish that every production socket/REST consumer uses canonical ingress.
+The 264 boundary cases inspect every native field recursively against the
+retained source tree before wire projection, including exact opaque string/key
+units, collection lengths/order and numeric bits. The original direct Serde
+route and ordinary Value-based native identity checks remain independently
+required; an expected-value parser failure cannot stand in for decoder refusal.

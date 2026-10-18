@@ -186,7 +186,12 @@ pub(crate) fn dispatch(
     target: &'static str,
     args: Vec<Handle<Rt>>,
 ) -> ReadResult<Rt, Return<Rt>> {
-    use crate::*;
+    use crate::{
+        book_listeners, feed_stats, futures_candles, lifecycle, message_dispatch, ohlcv_polling,
+        orderbooks, orders, periodic_sync, private_accounts, private_auth, private_control,
+        public_subscriptions, reads, rest_account, spot_balance, spot_cancel, spot_dispatch,
+        spot_reads, startup, stream_updates, tickers, trading, validation, ws_helpers,
+    };
     let name = target.rsplit("::").next().unwrap_or(target);
     let file = target
         .split("/src/")
@@ -255,9 +260,7 @@ pub(crate) fn dispatch(
             Ok(Js::Undefined)
         }),
         ("spot_cancel", "cancel_orders") => future(async move {
-            spot_cancel::cancel_orders(&rt, a0)
-                .await
-                .map_err(Thrown::from)?;
+            spot_cancel::cancel_orders(&rt, a0).await?;
             Ok(Js::Undefined)
         }),
         // ---- typed read bodies ----
@@ -491,7 +494,7 @@ pub(crate) fn dispatch(
             })
         }
         ("reads", "fetch_spot_positions") => future(async move {
-            let positions = reads::fetch_spot_positions(rt.shared.store.as_ref());
+            let positions = reads::fetch_spot_positions(rt.shared.store.as_ref())?;
             from_typed(&positions)
         }),
         ("reads", "fetch_ws_token") => {
@@ -541,11 +544,12 @@ pub(crate) fn dispatch(
                 from_typed(&result)
             })
         }
-        ("private_accounts", "income_range") => {
-            future(
-                async move { Ok((*private_accounts::income_range(&rt, a0, a1, a2).await?).clone()) },
+        ("private_accounts", "income_range") => future(async move {
+            Ok(
+                (*private_accounts::income_range(std::rc::Rc::new(rt.clone()), a0, a1, a2).await?)
+                    .clone(),
             )
-        }
+        }),
         ("private_accounts", "income_history") => future(async move {
             let opts = if a0.is_undefined() {
                 h(Js::object(vec![]))
@@ -582,7 +586,7 @@ pub(crate) fn dispatch(
                         .map_err(ex)?;
                     Ok(())
                 },
-                || rt.shared.store.loaded().clone(),
+                || rt.shared.store.loaded().map_err(ExchangeError::from),
                 |flags| {
                     rt.this
                         .get("store")

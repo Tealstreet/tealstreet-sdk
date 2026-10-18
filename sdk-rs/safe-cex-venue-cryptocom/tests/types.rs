@@ -370,14 +370,16 @@ fn live_wire_records() {
         json!([0xd800]),
         "wire_lone_surrogate:CryptocomInstrument"
     );
-    assert!(
-        js_from_str::<CryptocomInstrument>(
+    typed_utf16::assert_projection(
+        reference["wire"]["CryptocomInstrument"]["surrogateRaw"]
+            .as_str()
+            .unwrap(),
+        &(js_from_str::<CryptocomInstrument>(
             reference["wire"]["CryptocomInstrument"]["surrogateRaw"]
                 .as_str()
-                .unwrap()
-        )
-        .is_err(),
-        "wire_utf8_refusal:CryptocomInstrument"
+                .unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     let positional = Value::Array(
         reference["wire"]["CryptocomInstrument"]["fields"]
@@ -493,14 +495,16 @@ fn live_wire_records() {
         json!([0xd800]),
         "wire_lone_surrogate:CryptocomTicker"
     );
-    assert!(
-        js_from_str::<CryptocomTicker>(
+    typed_utf16::assert_projection(
+        reference["wire"]["CryptocomTicker"]["surrogateRaw"]
+            .as_str()
+            .unwrap(),
+        &(js_from_str::<CryptocomTicker>(
             reference["wire"]["CryptocomTicker"]["surrogateRaw"]
                 .as_str()
-                .unwrap()
-        )
-        .is_err(),
-        "wire_utf8_refusal:CryptocomTicker"
+                .unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     let positional = Value::Array(
         reference["wire"]["CryptocomTicker"]["fields"]
@@ -611,14 +615,16 @@ fn live_wire_records() {
         json!([0xd800]),
         "wire_lone_surrogate:CryptocomCandlestick"
     );
-    assert!(
-        js_from_str::<CryptocomCandlestick>(
+    typed_utf16::assert_projection(
+        reference["wire"]["CryptocomCandlestick"]["surrogateRaw"]
+            .as_str()
+            .unwrap(),
+        &(js_from_str::<CryptocomCandlestick>(
             reference["wire"]["CryptocomCandlestick"]["surrogateRaw"]
                 .as_str()
-                .unwrap()
-        )
-        .is_err(),
-        "wire_utf8_refusal:CryptocomCandlestick"
+                .unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     let positional = Value::Array(
         reference["wire"]["CryptocomCandlestick"]["fields"]
@@ -732,14 +738,16 @@ fn live_wire_records() {
         json!([0xd800]),
         "wire_lone_surrogate:CryptocomPositionBalance"
     );
-    assert!(
-        js_from_str::<CryptocomPositionBalance>(
+    typed_utf16::assert_projection(
+        reference["wire"]["CryptocomPositionBalance"]["surrogateRaw"]
+            .as_str()
+            .unwrap(),
+        &(js_from_str::<CryptocomPositionBalance>(
             reference["wire"]["CryptocomPositionBalance"]["surrogateRaw"]
                 .as_str()
-                .unwrap()
-        )
-        .is_err(),
-        "wire_utf8_refusal:CryptocomPositionBalance"
+                .unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     let positional = Value::Array(
         reference["wire"]["CryptocomPositionBalance"]["fields"]
@@ -846,14 +854,16 @@ fn live_wire_records() {
         json!([0xd800]),
         "wire_lone_surrogate:CryptocomError"
     );
-    assert!(
-        js_from_str::<CryptocomError>(
+    typed_utf16::assert_projection(
+        reference["wire"]["CryptocomError"]["surrogateRaw"]
+            .as_str()
+            .unwrap(),
+        &(js_from_str::<CryptocomError>(
             reference["wire"]["CryptocomError"]["surrogateRaw"]
                 .as_str()
-                .unwrap()
-        )
-        .is_err(),
-        "wire_utf8_refusal:CryptocomError"
+                .unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     let positional = Value::Array(
         reference["wire"]["CryptocomError"]["fields"]
@@ -968,14 +978,16 @@ fn live_wire_records() {
         json!([0xd800]),
         "wire_lone_surrogate:CryptocomTrade"
     );
-    assert!(
-        js_from_str::<CryptocomTrade>(
+    typed_utf16::assert_projection(
+        reference["wire"]["CryptocomTrade"]["surrogateRaw"]
+            .as_str()
+            .unwrap(),
+        &(js_from_str::<CryptocomTrade>(
             reference["wire"]["CryptocomTrade"]["surrogateRaw"]
                 .as_str()
-                .unwrap()
-        )
-        .is_err(),
-        "wire_utf8_refusal:CryptocomTrade"
+                .unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     let positional = Value::Array(
         reference["wire"]["CryptocomTrade"]["fields"]
@@ -1114,10 +1126,10 @@ fn check_account_response(reference: &Value) {
         json!([0xd800]),
         "account_ts_surrogate_retained"
     );
-    assert!(
-        js_from_str::<CryptocomAccountsResponse>(accounts["surrogateRaw"].as_str().unwrap())
-            .is_err(),
-        "account_utf8_refusal"
+    typed_utf16::assert_projection(
+        accounts["surrogateRaw"].as_str().unwrap(),
+        &(js_from_str::<CryptocomAccountsResponse>(accounts["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     assert_eq!(
         accounts["extrasObserved"],
@@ -1262,10 +1274,10 @@ fn check_balance_summary(reference: &Value) {
             json!([0xd800]),
             "summary_ts_surrogate_retained"
         );
-        assert!(
-            js_from_str::<CryptocomBalanceSummary>(row["raw"].as_str().unwrap()).is_err(),
-            "summary_utf8_refusal:{}",
-            row["path"]
+        typed_utf16::assert_projection(
+            row["raw"].as_str().unwrap(),
+            &(js_from_str::<CryptocomBalanceSummary>(row["raw"].as_str().unwrap()))
+                .expect("typed surrogate record is retained"),
         );
     }
     assert_eq!(
@@ -1477,10 +1489,10 @@ fn check_book(reference: &Value) {
     }
     for row in book["surrogates"].as_array().unwrap() {
         assert_eq!(row["units"], json!([0xd800]), "book_ts_surrogate_retained");
-        assert!(
-            js_from_str::<CryptocomBook>(row["raw"].as_str().unwrap()).is_err(),
-            "book_utf8_refusal:{}",
-            row["path"]
+        typed_utf16::assert_projection(
+            row["raw"].as_str().unwrap(),
+            &(js_from_str::<CryptocomBook>(row["raw"].as_str().unwrap()))
+                .expect("typed surrogate record is retained"),
         );
     }
     assert_eq!(
@@ -1632,9 +1644,10 @@ fn check_trade_fill(reference: &Value) {
         json!([0xd800]),
         "trade_fill_ts_surrogate_retained"
     );
-    assert!(
-        js_from_str::<CryptocomTradeFill>(fill["surrogateRaw"].as_str().unwrap()).is_err(),
-        "trade_fill_utf8_refusal"
+    typed_utf16::assert_projection(
+        fill["surrogateRaw"].as_str().unwrap(),
+        &(js_from_str::<CryptocomTradeFill>(fill["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     assert_eq!(fill["extrasRetained"], true, "trade_fill_ts_extra_retained");
     let extra: CryptocomTradeFill = js_from_str(fill["extrasRaw"].as_str().unwrap()).unwrap();
@@ -1933,16 +1946,17 @@ fn check_order(reference: &Value) {
         json!([0xd800]),
         "order_ts_surrogate_retained"
     );
-    assert!(
-        js_from_str::<CryptocomOrder>(order["surrogateRaw"].as_str().unwrap()).is_err(),
-        "order_utf8_refusal"
+    typed_utf16::assert_projection(
+        order["surrogateRaw"].as_str().unwrap(),
+        &(js_from_str::<CryptocomOrder>(order["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     let mut nested = base.clone();
     nested["exec_inst"] = json!(["SURROGATE"]);
     let nested = nested.to_string().replace("SURROGATE", "\\ud800");
-    assert!(
-        js_from_str::<CryptocomOrder>(&nested).is_err(),
-        "order_exec_utf8_refusal"
+    typed_utf16::assert_projection(
+        &nested,
+        &(js_from_str::<CryptocomOrder>(&nested)).expect("typed surrogate record is retained"),
     );
     assert_eq!(order["extrasRetained"], true, "order_ts_extra_retained");
     let extra: CryptocomOrder = js_from_str(order["extrasRaw"].as_str().unwrap()).unwrap();
@@ -1964,3 +1978,6 @@ fn check_order(reference: &Value) {
         "order_wire_extra_retained"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -23,9 +23,10 @@ The live oracle is mandatory in the Rust workflow types job after the root
 dependency install; the CI wiring audit rejects removal or failure masking.
 Keep registry-data descriptors separate from the parallel `safe-cex-exchange/src` trait.
 
-Malformed no-delimiter keys ending in an astral character are explicitly
-divergent: TS slices UTF-16 and produces a lone surrogate, while Rust strings
-truncate a Unicode scalar. Valid generated colon-bearing keys preserve Unicode.
+Subscription keys split at the last colon. The no-delimiter fallback removes one
+UTF-16 unit, matching source slice(0,-1), then replaces a remaining isolated unit
+with U+FFFD at the approved typed String boundary. Generated provider keys always
+contain a delimiter and retain their complete Unicode symbols.
 
 GatewayChannel explicitly preserves the TS unchecked `auth` cast as a declared
 runtime divergence. GatewayMessage validates the entire frame, unlike the unchecked TS cast: missing
@@ -304,3 +305,8 @@ correlation slot before venue error reporting. The JS factory reads primitive
 status/reason metadata without serializing response bodies; signing captures do
 not replace the slot, and successful responses clear it. `native_host_tunnel`
 exercises real WOO/Bybit HOW 404 reports and cyclic/nonfinite metadata profiles.
+
+Native account Store delivery subscribes to the canonical native state and retains
+that referent through the shared throttle. StoreData projection, postprocessing
+and payload encoding occur only on an actual leading/trailing invocation or an
+explicit snapshot, preserving latest-state delivery without a per-update copy.

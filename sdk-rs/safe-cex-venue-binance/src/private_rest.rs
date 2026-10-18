@@ -17,7 +17,6 @@ use crate::{
     request_weight::{Failure, type_error},
 };
 use safe_cex_types::{OrderStatus, OrderType};
-use serde_json::Value;
 use std::{
     cell::Cell,
     future::{Future, poll_fn},
@@ -92,7 +91,7 @@ fn endpoint(v: Venue, key: &str) -> &'static str {
         .1
 }
 fn empty() -> EventValue {
-    EventValue::Array(Default::default())
+    EventValue::array(vec![])
 }
 pub(crate) fn keyed(o: &EventValue, key: &str) -> Result<EventValue, Failure> {
     if o.nullish() {
@@ -131,10 +130,10 @@ pub(crate) fn map(
         }
         return Err(type_error(format!("{expression}.map is not a function")));
     };
-    let n = a.borrow().len();
+    let n = a.len();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let v = a.borrow().get(i).cloned().flatten();
+        let v = crate::private_event_value::array_element(&a, i)?;
         out.push(match v {
             Some(v) => visit(v)?,
             None => EventValue::Undefined,
@@ -377,7 +376,7 @@ pub(crate) async fn pair(
 fn concat(a: EventValue, b: EventValue) -> Result<EventValue, Failure> {
     fn values(v: EventValue) -> Result<Vec<EventValue>, Failure> {
         match v {
-            EventValue::Array(a) => Ok(array_values(&a)),
+            EventValue::Array(a) => Ok(array_values(&a)?),
             EventValue::String(s) => Ok(EventValue::String(s.clone())
                 .text()?
                 .chars()
@@ -395,12 +394,12 @@ fn arg(v: EventValue) -> SnapshotArgument {
 }
 pub(crate) fn error_message(e: &Failure) -> EventValue {
     let venue = e
-        .response
+        .retained_response_input()
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("msg"))
         .cloned()
-        .map(EventValue::from_json)
+        .map(safe_cex_exchange::js_runtime::value::from_retained_input)
         .unwrap_or(EventValue::Undefined);
     let message = safe_cex_exchange::js_runtime::value::Thrown::from((**e).clone())
         .value
@@ -481,11 +480,11 @@ pub async fn fetch_futures_orders(
                 ],
             )?;
             let response = e
-                .response
+                .retained_response_input()
                 .as_ref()
                 .and_then(|v| v.get("data"))
                 .cloned()
-                .map(EventValue::from_json)
+                .map(safe_cex_exchange::js_runtime::value::from_retained_input)
                 .unwrap_or(EventValue::Undefined);
             console(
                 b,
@@ -586,14 +585,14 @@ pub async fn fetch_pm_balance(b: &mut impl SnapshotBindings) -> Result<EventValu
         };
         let (mut total, mut used, mut free, mut upnl) = (0.0, 0.0, 0.0, 0.0);
         let mut i = 0;
-        while i < rows.borrow().len() {
-            let item = rows.borrow()[i].clone().unwrap_or(EventValue::Undefined);
+        while i < rows.len() {
+            let item = EventValue::Array(rows.clone()).get(&i.to_string())?;
             let asset = item.read("asset")?;
             if ["USDT", "USDC", "FDUSD"]
                 .iter()
                 .any(|s| asset.same(&string(*s)))
             {
-                let item = rows.borrow()[i].clone().unwrap_or(EventValue::Undefined);
+                let item = EventValue::Array(rows.clone()).get(&i.to_string())?;
                 let item_total = item.read("totalWalletBalance")?.float()?;
                 let item_free = item.read("crossMarginFree")?.float()?;
                 free += item_free;
@@ -644,7 +643,7 @@ pub async fn fetch_spot_positions_balance(
         let mut i = 0;
         loop {
             let entry = match &balances {
-                EventValue::Array(a) => a.borrow().get(i).cloned().flatten(),
+                EventValue::Array(a) => crate::private_event_value::array_element(&a, i)?,
                 EventValue::String(s) => EventValue::String(s.clone())
                     .text()?
                     .chars()
@@ -798,11 +797,13 @@ pub async fn find_futures_order_by_client_id(
     match result {
         Ok(v) => Ok(v),
         Err(e) => {
-            if e.response
+            if e.retained_response_input()
                 .as_ref()
                 .and_then(|v| v.get("data"))
                 .and_then(|v| v.get("code"))
-                .and_then(Value::as_f64)
+                .cloned()
+                .map(safe_cex_exchange::js_runtime::value::from_retained_input)
+                .and_then(|value| value.as_f64())
                 == Some(-2013.0)
             {
                 Ok(record([

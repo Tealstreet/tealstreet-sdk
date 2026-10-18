@@ -266,14 +266,17 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     ] {
         assert!(sent(&log, "GET", path), "start request {path}: {log:?}");
     }
-    let loaded = store.loaded().clone();
+    let loaded = store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders,
         "start loaded flags"
     );
-    assert!(store.options().is_hedged, "start position-mode setting");
+    assert!(
+        store.options().unwrap().is_hedged,
+        "start position-mode setting"
+    );
     assert_eq!(
-        store.balance().total.to_bits(),
+        store.balance().unwrap().total.to_bits(),
         120f64.to_bits(),
         "start balance"
     );
@@ -374,7 +377,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         "place_order payload"
     );
     assert!(
-        store.orders().iter().any(|o| o.id == "1234567"),
+        store.orders().unwrap().iter().any(|o| o.id == "1234567"),
         "optimistic regular order"
     );
 
@@ -444,7 +447,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         ],
         "set_leverage payloads"
     );
-    let fetched = store.fetched_leverage()["BTCUSDT"].clone();
+    let fetched = store.fetched_leverage().unwrap()["BTCUSDT"].clone();
     assert_eq!(
         fetched.buy_leverage.to_bits(),
         20f64.to_bits(),
@@ -468,7 +471,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         sent(&log, "GET", POSITIONS),
         "position refresh after mode change"
     );
-    assert!(!store.options().is_hedged, "one-way setting");
+    assert!(!store.options().unwrap().is_hedged, "one-way setting");
 
     // 13 change_margin_type
     drive(&rt, venue.change_margin_type(false, Some("BTCUSDT".into()))).unwrap();
@@ -481,7 +484,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         "change_margin_type payloads"
     );
     assert_eq!(
-        store.fetched_leverage()["BTCUSDT"].margin_type,
+        store.fetched_leverage().unwrap()["BTCUSDT"].margin_type,
         Some(MarginType::Cross),
         "cross margin"
     );
@@ -544,7 +547,7 @@ impl ExternalPublicData for Gateway {
         let runtime = base.runtime.clone();
         drop(runtime.clone().spawn_local(Box::pin(async move {
             runtime.sleep(1_500).await.unwrap();
-            let mut loaded = base.store.loaded().clone();
+            let mut loaded = base.store.loaded().unwrap().clone();
             loaded.markets = true;
             loaded.tickers = true;
             base.store
@@ -661,7 +664,7 @@ fn start_initializes_external_public_data_and_waits_for_it_to_load() {
         !console.iter().any(|m| m.contains("Loaded ")),
         "venue market load skipped: {console:?}"
     );
-    let loaded = store.loaded().clone();
+    let loaded = store.loaded().unwrap().clone();
     assert!(loaded.markets && loaded.tickers && loaded.orders, "loaded");
 
     // mexc.exchange.ts:599/:606 route public listeners to the provider.
@@ -733,11 +736,14 @@ fn leverage_refresh_prefers_stored_settings_over_stale_positions() {
         .unwrap();
         drive(&rt, venue.set_leverage("BTCUSDT".into(), 50.0, None)).unwrap();
         assert_eq!(
-            store.fetched_leverage()["BTCUSDT"].buy_leverage,
+            store.fetched_leverage().unwrap()["BTCUSDT"].buy_leverage,
             50.0,
             "{name}: real setter seeds settings"
         );
-        assert_eq!(store.fetched_leverage()["BTCUSDT"].sell_leverage, 50.0);
+        assert_eq!(
+            store.fetched_leverage().unwrap()["BTCUSDT"].sell_leverage,
+            50.0
+        );
         let stale: Position = serde_json::from_value(json!({"id":"stale","symbol":"BTCUSDT","side":"long","contracts":2,"leverage":20,"marginType":"isolated","positionMode":"oneway","entryPrice":50000,"notional":100000,"unrealizedPnl":0,"liquidationPrice":0,"info":{"openType":1}})).unwrap();
         Store::update(
             store.as_ref(),
@@ -778,7 +784,7 @@ fn leverage_refresh_prefers_stored_settings_over_stale_positions() {
             "{name}: actual source result"
         );
         assert_eq!(
-            store.fetched_leverage()["BTCUSDT"],
+            store.fetched_leverage().unwrap()["BTCUSDT"],
             serde_json::from_value::<safe_cex_types::FetchedLeverage>(
                 expected["storedConfig"][name]["stored"].clone()
             )
@@ -796,7 +802,7 @@ fn leverage_refresh_prefers_stored_settings_over_stale_positions() {
             expected["storedConfig"][name]["requests"].as_u64().unwrap()
         );
         assert_eq!(
-            store.positions()[0].leverage,
+            store.positions().unwrap()[0].leverage,
             20.0,
             "{name}: stale position remains untouched"
         );
@@ -935,7 +941,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 .unwrap();
             runtime.pump();
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
     }
     assert!(
         runtime.errors.borrow().is_empty(),
@@ -970,6 +976,7 @@ fn retained_raw_amount_alias_drives_real_cancel_and_replace() {
         calls(&wire);
         let mut order = store
             .orders()
+            .unwrap()
             .iter()
             .find(|order| order.id == "9001")
             .unwrap()
@@ -1079,7 +1086,7 @@ fn fetch_markets_retains_opaque_native_info_before_normalization() {
         false,
     )
     .unwrap();
-    let markets = store.markets();
+    let markets = store.markets().unwrap();
     let info = markets[0].info.as_ref().unwrap();
     assert_eq!(
         info.get("opaque").unwrap().as_text().unwrap(),
@@ -1102,3 +1109,6 @@ fn fetch_markets_retains_opaque_native_info_before_normalization() {
     assert_eq!(markets[0].symbol, "BTCUSDT");
     assert!(sent(&calls(&wire), "GET", DETAIL));
 }
+
+#[path = "support/eager_wrappers.rs"]
+mod eager_wrappers;

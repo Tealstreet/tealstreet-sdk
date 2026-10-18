@@ -1,44 +1,36 @@
 //! Transaction history request ordering over the supplied REST adapter.
 use crate::legacy_fills::{WooLegacyFillsQuery, fetch_legacy_transaction_history_rows};
 use safe_cex_transport::{RestAdapter, RestFailure, RestRequest};
-use safe_cex_types::retained_json::RetainedJsonInput;
-use serde_json::Value;
+use safe_cex_types::{QueryValue, retained_json::RetainedJsonInput};
 
 async fn request_rows(
     adapter: &dyn RestAdapter,
     query: &WooLegacyFillsQuery,
     symbol: Option<String>,
-) -> Result<Vec<Value>, RestFailure> {
-    let mut values = vec![(
-        "limit".encode_utf16().collect(),
-        RetainedJsonInput::Float(query.limit),
-    )];
+) -> Result<Vec<RetainedJsonInput>, RestFailure> {
+    let mut values = vec![("limit".into(), QueryValue::Number(query.limit))];
     if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
-        values.push((
-            "symbol".encode_utf16().collect(),
-            RetainedJsonInput::Text(symbol.encode_utf16().collect()),
-        ));
+        values.push(("symbol".into(), QueryValue::String(symbol)));
     }
     for (key, value) in [
         ("startTime", query.from_milliseconds),
         ("endTime", query.to_milliseconds),
     ] {
         if let Some(value) = value {
-            values.push((
-                key.encode_utf16().collect(),
-                RetainedJsonInput::Float(value),
-            ));
+            values.push((key.into(), QueryValue::Number(value)));
         }
     }
-    let mut request = RestRequest {
+    let request = RestRequest {
         method: "GET".into(),
         url: "/v3/trade/transactionHistory".into(),
+        query_params: Some(QueryValue::Object(values.into_iter().collect())),
+        query_profile: Some(safe_cex_transport::query::QueryProfile {
+            arrays: safe_cex_transport::query::QueryArrayFormat::Indexed,
+            encode: true,
+            key_order: safe_cex_transport::query::QueryKeyOrder::Preserve,
+        }),
         ..RestRequest::default()
     };
-    request.params = Some(match RetainedJsonInput::Object(values).into_value() {
-        Ok(params) => params,
-        Err(error) => return Err(RestFailure::pre_transmit(error.to_string(), request)),
-    });
     let response = adapter.execute(request.clone()).await?;
     let data = match response.body.into_data() {
         RetainedJsonInput::Text(text) => {
@@ -46,9 +38,6 @@ async fn request_rows(
         }
         native => native,
     };
-    let data = data
-        .into_value()
-        .map_err(|error| RestFailure::pre_transmit(error.to_string(), request))?;
     Ok(crate::response::parse_transaction_rows_from_response(&data).to_vec())
 }
 
@@ -56,7 +45,7 @@ async fn request_rows(
 pub async fn fetch_transaction_history_rows(
     adapter: &dyn RestAdapter,
     query: &WooLegacyFillsQuery,
-) -> Result<Vec<Value>, RestFailure> {
+) -> Result<Vec<RetainedJsonInput>, RestFailure> {
     let Some(symbol) = query.symbol.as_deref().filter(|s| !s.is_empty()) else {
         return request_rows(adapter, query, None).await;
     };

@@ -28,7 +28,10 @@ impl JsNumberOutput for TickerInput {
 fn number(value: Option<&Input>) -> Result<f64, JsCoercionError> {
     safe_cex_num::js_retained_parse_float(value)
 }
-fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoercionError> {
+fn project(
+    data: &TickerInput,
+    store: &dyn Store,
+) -> Result<Vec<Ticker>, crate::reads::MappingError> {
     let rows = data.value.as_array().ok_or(JsCoercionError {
         name: "TypeError",
         message: if data.value.is_null() {
@@ -43,10 +46,11 @@ fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoerc
             return Err(JsCoercionError {
                 name: "TypeError",
                 message: "Cannot read properties of null (reading 'instId')",
-            });
+            }
+            .into());
         }
         let key = safe_cex_num::js_retained_string(row.get("instId"))?;
-        let markets = store.markets_by_id();
+        let markets = store.markets_by_id()?;
         let Some(market) = markets.get(&key) else {
             if matches!(
                 js_table_lookup::<&str, ()>(&[], &key),
@@ -55,7 +59,8 @@ fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoerc
                 return Err(JsCoercionError {
                     name: "RepresentationError",
                     message: "Inherited market cannot produce a typed ticker",
-                });
+                }
+                .into());
             }
             continue;
         };
@@ -69,7 +74,7 @@ fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoerc
             ask: number(row.get("askPrice"))?,
             last,
             mark: last,
-            index: last,
+            index: Some(last),
             mid_price: None,
             timestamp: None,
             percentage,
@@ -88,12 +93,12 @@ pub fn format_tickers<E>(
     data: &TickerInput,
     store: &dyn Store,
     mut emit_and_log_error: impl FnMut(&str) -> Result<(), E>,
-) -> Result<Vec<Ticker>, E> {
+) -> Result<Vec<Ticker>, crate::reads::ReadError<E>> {
     match project(data, store) {
         Ok(tickers) => Ok(tickers),
         Err(error) => {
-            emit_and_log_error(error.message)?;
-            Ok(store.tickers().to_vec())
+            emit_and_log_error(&error.to_string()).map_err(crate::reads::ReadError::Emitter)?;
+            Ok(store.tickers()?.to_vec())
         }
     }
 }

@@ -24,10 +24,13 @@ fn coercion(e: safe_cex_num::JsCoercionError) -> Thrown {
     Thrown::error(e.name, e.message)
 }
 fn exchange_error(e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
-    let response = e.metadata.response.clone();
+    let response = e.retained_response_input();
     let thrown = Thrown::from(e);
     if let Some(response) = response {
-        let _ = thrown.value.define("response", from_json(&response));
+        let _ = thrown.value.define(
+            "response",
+            safe_cex_exchange::js_runtime::value::from_retained_input(response),
+        );
     }
     thrown
 }
@@ -117,7 +120,7 @@ pub(super) fn install(g: &Js, weak: Weak<Shared>) -> Result<(), Thrown> {
                 let bytes = await_js(&h.exchange_runtime(), buffer?)
                     .await?
                     .get("bytes")?
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("ArrayBuffer bytes are unavailable"))?
                     .iter()
                     .map(|v| v.to_number().map(|n| n as u8))
@@ -336,20 +339,18 @@ fn member(rt: &Rt, r: Js, name: &'static str) -> Js {
                     x(2).to_number()?,
                 )
                 .map(Js::Number)
-                .map_err(coercion);
+                .map_err(Thrown::from);
             }
             "parseBalance" => {
                 if !x(0).truthy() {
                     return r.get("store")?.get("balance");
                 }
                 let v = to_json(&x(0))?;
-                let balance = h.shared.store.balance();
                 return from_typed(
-                    crate::balance::parse_balance(Some(&v), &balance, |message| {
+                    &crate::balance::parse_present_balance(&v, |message| {
                         h.exchange_runtime().console("warn", message)
                     })
-                    .map_err(coercion)?
-                    .as_ref(),
+                    .map_err(coercion)?,
                 );
             }
             "getPositionAccounts" => {
@@ -542,7 +543,7 @@ async fn leverage(h: &Rt, r: &Js, name: &str, symbol: Js) -> Result<Js, Thrown> 
                 public,
                 get,
             )
-            .await,
+            .await?,
         ));
     }
     let value = crate::leverage_reads::fetch_and_sync_symbol_max_leverage(

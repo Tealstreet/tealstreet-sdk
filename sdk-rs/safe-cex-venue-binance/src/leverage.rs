@@ -69,9 +69,9 @@ async fn set_leverage<F>(
 where
     F: Future<Output = Result<(), ExchangeError>>,
 {
-    let market = store.markets_by_symbol().get(symbol).cloned();
+    let market = store.markets_by_symbol()?.get(symbol).cloned();
     let position = store
-        .positions()
+        .positions()?
         .iter()
         .find(|p| p.symbol == symbol)
         .cloned();
@@ -129,7 +129,7 @@ where
     };
     if let Err(error) = result {
         let message = error
-            .response
+            .response_json_view()
             .as_ref()
             .and_then(|r| r.get("data"))
             .and_then(|d| d.get("msg"))

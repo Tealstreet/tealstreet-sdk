@@ -103,19 +103,23 @@ pub(crate) fn normalize_market_row(
         Err(refusal) => return Ok(Err(refusal)),
     };
     Ok(Ok(Market {
+        runtime: Default::default(),
         id: symbol.clone(),
         symbol,
         base,
         quote,
         active: value.get("forwardContractFlag") != Some(&Input::Bool(false)),
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: amount_step,
             price: price_step,
         },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount {
                 min: min_amount,
-                max: max_amount,
+                max: (max_amount).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: min_leverage,
@@ -170,7 +174,7 @@ pub fn normalize_ticker(
         ask: to_number(ask.as_ref(), Some(last))?,
         last,
         mark,
-        index,
+        index: Some(index),
         mid_price: None,
         percentage: normalize_percentage(pick(&["priceChangePercent", "P"]).as_ref(), last, open)?,
         open_interest: to_number(pick(&["openInterest"]).as_ref(), None)?,

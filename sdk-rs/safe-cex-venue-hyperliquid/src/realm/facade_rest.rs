@@ -46,22 +46,7 @@ fn arg(args: &[Value], i: usize) -> Value {
 }
 
 pub(crate) fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
-    let e = r.error(&error.message);
-    if error.name != "Error" {
-        r.define_hidden(&e, PropKey::str("name"), Value::str(&error.name));
-    }
-    if let Some(code) = &error.code {
-        let code = match r.restore_typed_value(code) {
-            Ok(code) => code,
-            Err(cause) => return cause,
-        };
-        r.define_hidden(&e, PropKey::str("code"), code);
-    }
-    if let Some(response) = &error.response {
-        let response = r.from_serde(response);
-        r.define_hidden(&e, PropKey::str("response"), response);
-    }
-    e
+    r.from_exchange_error(error)
 }
 
 #[allow(clippy::arc_with_non_send_sync)]

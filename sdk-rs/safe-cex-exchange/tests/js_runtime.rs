@@ -7,6 +7,7 @@ use safe_cex_exchange::{
     },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
+use safe_cex_store::Store;
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -767,7 +768,12 @@ fn operators_follow_ecmascript_and_refuse_bigint_mixing() {
 fn set_refuses_writes_it_cannot_store_instead_of_dropping_them() {
     let array = Js::array(vec![]);
     array.set("0", Js::Number(1.0)).unwrap();
-    assert!(array.set("extra", Js::Number(1.0)).is_err());
+    array.set("extra", Js::Number(-0.0)).unwrap();
+    assert_eq!(array.get("length").unwrap().as_f64(), Some(1.0));
+    assert_eq!(
+        array.get("extra").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
     assert_eq!(
         Js::str("abc")
             .set("x", Js::Number(1.0))
@@ -1315,7 +1321,7 @@ fn assemble_with_fields(
     let parts = base_exchange::BaseExchangeParts {
         name: safe_cex_types::ExchangeName::Okx,
         options: serde_json::from_value(options.clone()).unwrap(),
-        store: Rc::new(safe_cex_store::store::DefaultStore::new()),
+        store: Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         settings,
         external_public_data: None,
     };
@@ -1809,7 +1815,7 @@ fn clear_timeout_cancels_and_fired_timers_are_released() {
             sent: RefCell::default(),
         });
         let store: Rc<dyn safe_cex_store::Store> =
-            Rc::new(safe_cex_store::store::DefaultStore::new());
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let scope = Scope {
             shared: Rc::new(ScopeShared::new(
                 runtime.clone(),
@@ -1854,7 +1860,8 @@ fn clear_timeout_cancels_and_fired_timers_are_released() {
 
 #[test]
 fn store_facade_mutators_key_on_the_entity_id() {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     let store = Rc::new(DefaultStore::new());
     Store::update(
         &*store,
@@ -1872,7 +1879,7 @@ fn store_facade_mutators_key_on_the_entity_id() {
         false,
     )
     .unwrap();
-    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone()).unwrap();
     // ts: store.updateTicker(ticker, changes) receives the ticker object.
     let ticker = Js::object(vec![("id", Js::str("BTCUSDT"))]);
     facade
@@ -1881,7 +1888,7 @@ fn store_facade_mutators_key_on_the_entity_id() {
             vec![ticker, Js::object(vec![("fundingRate", Js::Number(0.25))])],
         )
         .unwrap();
-    assert_eq!(store.tickers()[0].funding_rate, 0.25);
+    assert_eq!(store.tickers().unwrap()[0].funding_rate, 0.25);
 }
 
 /// Builtins installed over a live scope, so runtime-backed members reach `runtime`.
@@ -1898,7 +1905,7 @@ fn scoped_globals() -> (
     let shared = Rc::new(ScopeShared::new(
         runtime.clone(),
         http,
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         Js::object(vec![]),
         (),
     ));
@@ -2224,8 +2231,8 @@ fn order(id: &str, symbol: &str) -> safe_cex_types::Order {
 
 #[test]
 fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
-    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone()).unwrap();
     let g = library();
     assert_eq!(json_of(&g, facade.get("fetchedLeverage").unwrap()), "{}");
     facade
@@ -2244,11 +2251,17 @@ fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
     facade
         .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
         .unwrap();
-    assert!(store.options().is_hedged);
+    assert!(store.options().unwrap().is_hedged);
+    facade
+        .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
+        .unwrap();
     assert!(
         facade
-            .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
-            .is_err()
+            .get("options")
+            .unwrap()
+            .get("other")
+            .unwrap()
+            .strict_equals(&Js::Bool(true))
     );
 
     store.add_order(order("one", "BTC")).unwrap();
@@ -2270,6 +2283,7 @@ fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
         .unwrap();
     let statuses: Vec<_> = store
         .orders()
+        .unwrap()
         .iter()
         .map(|o| serde_json::to_value(o.status).unwrap())
         .collect();
@@ -2331,8 +2345,8 @@ fn fetch_and_set_private_snapshot_retries_and_stops_once_disposed() {
     )
     .unwrap();
     assert_eq!(*venue.calls.borrow(), [None]);
-    assert_eq!(a.base.store.orders().len(), 1);
-    assert!(a.base.store.loaded().orders);
+    assert_eq!(a.base.store.orders().unwrap().len(), 1);
+    assert!(a.base.store.loaded().unwrap().orders);
 
     // `while (count < tries)`: 2.5 tries is three attempts; null and 0 are none.
     let (a, venue) = assembled_venue(Err("down".into()));
@@ -2381,16 +2395,23 @@ fn fetch_and_set_orders_scopes_by_symbol_or_replaces_all() {
     )
     .unwrap();
     assert_eq!(scoped.get("length").unwrap().as_f64(), Some(2.0));
-    let ids: Vec<_> = a.base.store.orders().iter().map(|o| o.id.clone()).collect();
+    let ids: Vec<_> = a
+        .base
+        .store
+        .orders()
+        .unwrap()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
     assert_eq!(ids, ["one"]);
-    assert!(!a.base.store.loaded().orders);
+    assert!(!a.base.store.loaded().unwrap().orders);
     settle(
         &a.runtime,
         a.this.call_method("fetchAndSetOrders", vec![]).unwrap(),
     )
     .unwrap();
-    assert_eq!(a.base.store.orders().len(), 2);
-    assert!(a.base.store.loaded().orders);
+    assert_eq!(a.base.store.orders().unwrap().len(), 2);
+    assert!(a.base.store.loaded().unwrap().orders);
     assert_eq!(*venue.calls.borrow(), [Some(vec!["BTC".to_owned()]), None]);
 }
 
@@ -2646,7 +2667,8 @@ fn create_xhr_with_secondary_key_proxy_precedence() {
 
 #[test]
 fn store_facade_update_positions_patches_each_pair_by_position_id() {
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::Store;
     let store = Rc::new(DefaultStore::new());
     let position = |id: &str| {
         serde_json::from_value(json!({"id":id,"symbol":id,"side":"long","entryPrice":1,
@@ -2656,7 +2678,7 @@ fn store_facade_update_positions_patches_each_pair_by_position_id() {
     store
         .add_or_update_positions(vec![position("BTC"), position("ETH")])
         .unwrap();
-    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone()).unwrap();
     // ts: updatePositions(updates: Array<[Pick<Position, 'id'>, Partial<Position>]>)
     let pair = |id: &str, pnl: f64| {
         Js::array(vec![
@@ -2670,7 +2692,12 @@ fn store_facade_update_positions_patches_each_pair_by_position_id() {
             vec![Js::array(vec![pair("ETH", 7.0), pair("BTC", 3.0)])],
         )
         .unwrap();
-    let pnl: Vec<f64> = store.positions().iter().map(|p| p.unrealized_pnl).collect();
+    let pnl: Vec<f64> = store
+        .positions()
+        .unwrap()
+        .iter()
+        .map(|p| p.unrealized_pnl)
+        .collect();
     assert_eq!(pnl, [3.0, 7.0]);
 }
 
@@ -3768,7 +3795,7 @@ fn factory_owner(
     Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
         safe_cex_types::ExchangeName::Polymarket,
         serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         runtime,
         safe_cex_exchange::exchange::ExchangeSettings::default(),
     ))
@@ -3801,7 +3828,7 @@ fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_iden
         )
         .unwrap();
     }
-    assert_eq!(owner.store.request_stats().unwrap().ok, 1.0);
+    assert_eq!(owner.store.request_stats().unwrap().unwrap().ok, 1.0);
     let error =
         safe_cex_exchange::js_runtime::value::error_object("AxiosError", "connection refused");
     error.define("response", Js::Null).unwrap();
@@ -3821,8 +3848,8 @@ fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_iden
         rejected.value.strict_equals(&original),
         "the same error reaches venue handlers"
     );
-    assert_eq!(owner.store.request_stats().unwrap().network, 1.0);
-    assert_eq!(owner.store.request_stats().unwrap().other, 0.0);
+    assert_eq!(owner.store.request_stats().unwrap().unwrap().network, 1.0);
+    assert_eq!(owner.store.request_stats().unwrap().unwrap().other, 0.0);
 }
 
 #[test]
@@ -4061,7 +4088,10 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
         );
         pending.settle(Ok(marker.clone()));
         let result = settle(&runtime, returned).unwrap();
-        let values = result.array_values().unwrap();
+        let values = result
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(values.len(), 3);
         let value = |i: usize| {
             if method == "allSettled" {

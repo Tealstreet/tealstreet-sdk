@@ -3,12 +3,13 @@ mod oracle_clock;
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_bingx::{
     data_reads::{BingxDataReads, ReadTransport},
@@ -52,6 +53,16 @@ fn ready<F: Future>(f: F) -> F::Output {
         }
     }
     panic!("fixture did not settle in 1000 polls")
+}
+fn ready_on<F: Future>(host: &Host, f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    for _ in 0..1000 {
+        host.pump();
+        if let Poll::Ready(value) = f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            return value;
+        }
+    }
+    panic!("fixture runtime did not settle in 1000 turns")
 }
 fn number(n: f64) -> Value {
     json!({"number":if n.is_nan(){"NaN".into()}else{format!("{:016x}",n.to_bits())}})
@@ -123,6 +134,18 @@ struct Host {
 impl Host {
     fn call(&self, v: Value) {
         self.calls.borrow_mut().push(v);
+    }
+    fn pump(&self) {
+        let tasks = std::mem::take(&mut *self.tasks.borrow_mut());
+        for mut task in tasks {
+            if task
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+            {
+                self.tasks.borrow_mut().push(task);
+            }
+        }
     }
     fn run_timers(&self) {
         let callbacks = self
@@ -390,7 +413,7 @@ impl ReadTransport for Transport {
         };
         let result = if input["reject"] == which {
             let mut e = ExchangeError::new("network cause");
-            e.response = Some(json!({"data":{"msg":"wire denied"}}));
+            e = e.with_retained_response((json!({"data":{"msg":"wire denied"}})).into());
             Err(e)
         } else {
             let value = match which {
@@ -465,9 +488,9 @@ fn fixture(
     )
 }
 fn state(store: &DefaultStore) -> Value {
-    let l = store.loaded();
-    let b = store.balance();
-    json!({"orders":store.orders().iter().map(order_value).collect::<Vec<_>>(),"loaded":{"orders":l.orders,"balance":l.balance,"positions":l.positions,"markets":l.markets,"tickers":l.tickers},"balance":{"total":number(b.total),"free":number(b.free),"used":number(b.used),"upnl":number(b.upnl)}})
+    let l = store.loaded().unwrap();
+    let b = store.balance().unwrap();
+    json!({"orders":store.orders().unwrap().iter().map(order_value).collect::<Vec<_>>(),"loaded":{"orders":l.orders,"balance":l.balance,"positions":l.positions,"markets":l.markets,"tickers":l.tickers},"balance":{"total":number(b.total),"free":number(b.free),"used":number(b.used),"upnl":number(b.upnl)}})
 }
 fn subscribe(
     subs: &Rc<BingxSubscriptions>,
@@ -649,8 +672,11 @@ fn invoke(
             }),
         )
         .map(|()| json!({"undefined":true})),
-        "tick" => ready(history.tick(js_value_as_f64(&input["count"]).unwrap()))
-            .map(|()| json!({"undefined":true})),
+        "tick" => ready_on(
+            host,
+            history.tick(js_value_as_f64(&input["count"]).unwrap()),
+        )
+        .map(|()| json!({"undefined":true})),
         "dispose" => dispose_exchange(
             || {
                 host.call(json!({"op":"baseDispose"}));
@@ -991,7 +1017,7 @@ fn polling_owner_release_is_visible() {
         "BINGX-RS source retained callback executes next count"
     );
     let (h, s, _, host) = fixture(corpus()["cases"][32]["input"].clone());
-    ready(h.tick(1.0)).unwrap();
+    ready_on(&host, h.tick(1.0)).unwrap();
     let callback = host.loops.borrow_mut().remove(0);
     drop(h);
     drop(s);

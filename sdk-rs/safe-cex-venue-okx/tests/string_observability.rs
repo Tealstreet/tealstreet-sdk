@@ -49,7 +49,7 @@ fn source_observations(script: &str, profile: &str, assertion: &str) -> [Value; 
 
 #[test]
 #[ignore = "requires isolated TypeScript compiler; mandatory venue gate"]
-fn currency_key_observability_and_whole_record_refusal() {
+fn currency_key_observability_and_typed_replacement() {
     let cases = [
         (r#"{"id":"A-USDT-SWAP","mark":17}"#, "A", "A-USDT-SWAP"),
         (
@@ -88,17 +88,19 @@ fn currency_key_observability_and_whole_record_refusal() {
         compared += 1;
     }
     assert_eq!(compared, 5, "OKX independent native currency case floor");
-    assert!(
-        serde_json::from_str::<TickerMarkInput>(r#"{"id":"\ud800-USDT-SWAP","mark":17}"#).is_err(),
-        "OKX native whole ticker record refusal"
-    );
-    assert!(
-        serde_json::from_str::<Vec<TickerMarkInput>>(
-            r#"[{"id":"A-USDT-SWAP","mark":3},{"id":"\ud800-USDT-SWAP","mark":17}]"#
-        )
-        .is_err(),
-        "OKX native enclosing ticker batch refusal"
-    );
+    let raw = r#"{"id":"\ud800-USDT-SWAP","mark":17}"#;
+    let ticker: TickerMarkInput = serde_json::from_str(raw).unwrap();
+    assert_eq!(ticker.id.as_deref(), Some("\u{fffd}-USDT-SWAP"));
+    assert_eq!(ticker.mark, Some(17.0));
+    typed_utf16::assert_projection(raw, &ticker);
+    let raw = r#"[{"id":"A-USDT-SWAP","mark":3},{"id":"\ud800-USDT-SWAP","mark":17}]"#;
+    let batch: Vec<TickerMarkInput> = serde_json::from_str(raw).unwrap();
+    assert_eq!(batch.len(), 2);
+    assert_eq!(batch[0].id.as_deref(), Some("A-USDT-SWAP"));
+    assert_eq!(batch[0].mark, Some(3.0));
+    assert_eq!(batch[1].id.as_deref(), Some("\u{fffd}-USDT-SWAP"));
+    assert_eq!(batch[1].mark, Some(17.0));
+    typed_utf16::assert_projection(raw, &batch);
     for observation in source_observations(
         "full-source-observations.mjs",
         "okx-currency-key",
@@ -157,3 +159,6 @@ fn pretty_symbol_observability_and_argument_refusal() {
         );
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

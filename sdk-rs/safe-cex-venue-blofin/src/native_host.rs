@@ -393,6 +393,19 @@ impl BlofinExchangeHost for NativeHost {
         let sleep = self.runtime.sleep(delay.max(0.0) as u64);
         Box::pin(async move { sleep.await.map_err(ServiceError::Host) })
     }
+    fn start_async<T: 'static>(
+        &self,
+        base: &NativeBase,
+        body: crate::rest_lifecycle::LifecycleFuture<'static, T, ExchangeError>,
+    ) -> crate::rest_lifecycle::LifecycleFuture<'static, T, ExchangeError> {
+        // Keep the complete native Result as T: no error projection or cloning.
+        let waiter =
+            safe_cex_exchange::eager::start_eager(
+                &base.get().runtime,
+                async move { Ok(body.await) },
+            );
+        Box::pin(async move { waiter.await.map_err(ServiceError::Host)? })
+    }
     fn init_external_public_data(
         &self,
         base: &NativeBase,
@@ -751,13 +764,14 @@ impl PublicStreamHost for PublicHost {
     fn is_testnet(&self) -> bool {
         self.context.options.testnet == Some(true)
     }
-    fn market_ids(&self) -> Vec<String> {
-        self.context
+    fn market_ids(&self) -> Result<Vec<String>, ExchangeError> {
+        Ok(self
+            .context
             .store
-            .markets()
+            .markets()?
             .iter()
             .map(|m| m.id.clone())
-            .collect()
+            .collect())
     }
     fn has_socket(&self) -> bool {
         self.socket.has_websocket()
@@ -813,7 +827,7 @@ impl PublicStreamHost for PublicHost {
                 };
                 let added = data
                     .get("added")?
-                    .array_values()
+                    .array_values()?
                     .unwrap_or_default()
                     .iter()
                     .filter_map(|row| row.get("id").ok())

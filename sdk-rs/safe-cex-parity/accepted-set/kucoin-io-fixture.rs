@@ -33,6 +33,7 @@ pub fn market(id: &str, symbol: &str, contract_size: Option<f64>) -> safe_cex_ty
         Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,
     };
     Market {
+        runtime: Default::default(),
         id: id.into(),
         symbol: symbol.into(),
         pretty_symbol: None,
@@ -40,13 +41,16 @@ pub fn market(id: &str, symbol: &str, contract_size: Option<f64>) -> safe_cex_ty
         quote: "USDT".into(),
         active: true,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: 0.5,
             price: 0.25,
         },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount {
                 min: 0.5,
-                max: 1000.0,
+                max: (1000.0).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: 1.0,
@@ -97,7 +101,7 @@ pub fn ticker(symbol: &str, last: f64) -> safe_cex_types::Ticker {
         ask: 0.0,
         last,
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         percentage: 0.0,
         open_interest: 0.0,

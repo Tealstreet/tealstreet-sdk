@@ -58,10 +58,15 @@ fn cached_market() -> RestMarket {
         active: false,
         is_spot: None,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: 1.0,
             price: 2.0,
         },
-        amount: MarketLimitsAmount { min: 3.0, max: 4.0 },
+        amount: MarketLimitsAmount {
+            min: 3.0,
+            max: (4.0).into(),
+        },
         leverage_min: 1.0,
         leverage_max: json!(5),
     }
@@ -74,7 +79,7 @@ fn cached_ticker() -> Ticker {
         ask: 2.0,
         last: 3.0,
         mark: 4.0,
-        index: 5.0,
+        index: Some(5.0),
         percentage: 6.0,
         funding_rate: 7.0,
         funding_time: 8.0,
@@ -87,14 +92,14 @@ fn cached_ticker() -> Ticker {
     }
 }
 fn market_wire(m: &RestMarket) -> Value {
-    let mut v = json!({"id":m.id,"symbol":opt(m.symbol.as_ref()),"base":opt(m.base.as_ref()),"quote":opt(m.quote.as_ref()),"active":m.active,"precision":{"amount":number(m.precision.amount),"price":number(m.precision.price)},"limits":{"amount":{"min":number(m.amount.min),"max":number(m.amount.max)},"leverage":{"min":number(m.leverage_min),"max":m.leverage_max}}});
+    let mut v = json!({"id":m.id,"symbol":opt(m.symbol.as_ref()),"base":opt(m.base.as_ref()),"quote":opt(m.quote.as_ref()),"active":m.active,"precision":{"amount":number(m.precision.amount),"price":number(m.precision.price)},"limits":{"amount":{"min":number(m.amount.min),"max":number(safe_cex_num::numeric_value_to_number(&m.amount.max))},"leverage":{"min":number(m.leverage_min),"max":m.leverage_max}}});
     if let Some(spot) = m.is_spot {
         v["isSpot"] = json!(spot)
     }
     v
 }
 fn ticker_wire(t: &Ticker) -> Value {
-    json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":number(t.index),"percentage":number(t.percentage),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume),"openInterest":number(t.open_interest)})
+    json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":t.index.map(number).unwrap_or(Value::Null),"percentage":number(t.percentage),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume),"openInterest":number(t.open_interest)})
 }
 fn candle_wire(c: &Candle) -> Value {
     json!({"timestamp":number(c.timestamp),"open":number(c.open),"high":number(c.high),"low":number(c.low),"close":number(c.close),"volume":number(c.volume)})
@@ -117,7 +122,7 @@ impl Bindings {
         e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
             "fixture-code"
         )));
-        e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
+        e = e.with_retained_response((json!({"status":503,"data":{"msg":"venue detail"}})).into());
         Self {
             public_only: c["name"] == "public-only",
             c,
@@ -137,10 +142,10 @@ impl Bindings {
         self.trace.borrow_mut().push(v)
     }
     fn failure_wire(&self, error: &Failure) -> Value {
-        json!({"original":Rc::ptr_eq(error,&self.error),"name":error.name,"message":error.message,"code":opt(observed_error_code(&error.code).as_ref()),"response":opt(error.response.as_ref())})
+        json!({"original":Rc::ptr_eq(error,&self.error),"name":error.name,"message":error.message,"code":opt(observed_error_code(&error.code).as_ref()),"response":opt(error.response_json_view().as_ref())})
     }
     fn emissions_wire(&self) -> Vec<Value> {
-        self.emissions.iter().map(|e|match e{ErrorEmission::Error(e,prefix)=>json!({"kind":"error","original":Rc::ptr_eq(e,&self.error),"prefix":prefix,"message":null,"errorName":e.name,"errorMessage":e.message,"errorCode":opt(observed_error_code(&e.code).as_ref()),"errorResponse":opt(e.response.as_ref())}),ErrorEmission::Message(message)=>json!({"kind":"message","original":false,"prefix":null,"message":opt(message.as_ref()),"errorName":null,"errorMessage":null,"errorCode":null,"errorResponse":null})}).collect()
+        self.emissions.iter().map(|e|match e{ErrorEmission::Error(e,prefix)=>json!({"kind":"error","original":Rc::ptr_eq(e,&self.error),"prefix":prefix,"message":null,"errorName":e.name,"errorMessage":e.message,"errorCode":opt(observed_error_code(&e.code).as_ref()),"errorResponse":opt(e.response_json_view().as_ref())}),ErrorEmission::Message(message)=>json!({"kind":"message","original":false,"prefix":null,"message":opt(message.as_ref()),"errorName":null,"errorMessage":null,"errorCode":null,"errorResponse":null})}).collect()
     }
     fn wire(&self, value: Option<Value>, fallback: bool, error: Option<&Failure>) -> Value {
         json!({"name":self.name(),"trace":*self.trace.borrow(),"emissions":self.emissions_wire(),"fallback":fallback,"value":value,"failure":error.map(|e|self.failure_wire(e))})
@@ -358,7 +363,7 @@ fn assert_original(e: &Failure, b: &Bindings, label: &str) {
         "{label}: native original code"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(json!({"status":503,"data":{"msg":"venue detail"}})),
         "{label}: native original response"
     );
@@ -395,7 +400,11 @@ fn emission(b: &Bindings, v: RestVenue, original: bool, expected_message: &str, 
                     None,
                     "{label}: native generated code"
                 );
-                assert_eq!(e.response, None, "{label}: native generated response");
+                assert_eq!(
+                    e.response_json_view(),
+                    None,
+                    "{label}: native generated response"
+                );
             }
             assert_eq!(
                 prefix.as_deref(),
@@ -698,7 +707,7 @@ fn markets_test(v: RestVenue) {
                             &format!("{row_label}: native minimum"),
                         );
                         eq_number(
-                            m.amount.max,
+                            safe_cex_num::numeric_value_to_number(&m.amount.max),
                             if missing {
                                 if v == RestVenue::Spot {
                                     999_999_999.0
@@ -864,7 +873,7 @@ fn tickers_test(v: RestVenue) {
                         &format!("{r}: native mark"),
                     );
                     eq_number(
-                        t.index,
+                        t.index.unwrap(),
                         if v == RestVenue::Spot { last } else { 12.5 },
                         &format!("{r}: native index"),
                     );
@@ -1024,7 +1033,11 @@ fn ohlcv_test(v: RestVenue) {
                         None,
                         "{label}: native generated code"
                     );
-                    assert_eq!(e.response, None, "{label}: native generated response");
+                    assert_eq!(
+                        e.response_json_view(),
+                        None,
+                        "{label}: native generated response"
+                    );
                 }
                 projected.push(b.wire(None, false, Some(&e)));
             }

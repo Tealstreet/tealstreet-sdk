@@ -226,3 +226,152 @@ fn native_host_aliases_preserve_values_entries_and_original_callback_failures() 
         drive(&runtime, async { venue.dispose().unwrap() });
     }
 }
+
+#[test]
+fn native_class_callable_aliases_preserve_values_futures_and_errors() {
+    use crate::classes::{BodyFuture, BoundMember, ClassHost, NativeMember, Return};
+    use safe_cex_exchange::js_runtime::promise::await_js;
+    for name in [
+        ExchangeName::Kodiakfi,
+        ExchangeName::Mode,
+        ExchangeName::Salsadex,
+        ExchangeName::TealstreetDex,
+        ExchangeName::What,
+        ExchangeName::Woofi,
+    ] {
+        let (venue, runtime, _, wire) = fixture_for(
+            name.clone(),
+            json!({
+                "key":"fixture-key", "secret":"11111111111111111111111111111111", "applicationId":"fixture-account"
+            }),
+        );
+        let host = Host::new(&venue.rt);
+        let child = Js::object(vec![
+            ("number", Js::Number(-0.0)),
+            ("text", Js::utf16(&[0xd800])),
+            ("missing", Js::Undefined),
+        ]);
+        for asynchronous in [false, true] {
+            let expected = child.clone();
+            let bound: BoundMember<Host> = Rc::new(move |args| {
+                assert_eq!(args.len(), 1);
+                assert!(
+                    args[0].same_reference(&expected),
+                    "native BoundMember arguments retain identity"
+                );
+                let value = args[0].clone();
+                if asynchronous {
+                    let body: BodyFuture<Host> = Box::pin(async move { Ok(value) });
+                    Ok(Return::Future(body))
+                } else {
+                    Ok(Return::Value(value))
+                }
+            });
+            let arrow = host.arrow("nativeBoundAlias", bound.clone());
+            let returned = arrow.call(Js::Undefined, vec![child.clone()]).unwrap();
+            let returned =
+                drive(&runtime, await_js(&venue.rt.exchange_runtime(), returned)).unwrap();
+            assert!(
+                returned.same_reference(&child),
+                "native BoundMember result retains identity"
+            );
+            assert_eq!(
+                returned.get("number").unwrap().as_f64().unwrap().to_bits(),
+                (-0.0f64).to_bits()
+            );
+            assert_eq!(
+                returned.get("text").unwrap().as_str().unwrap().as_ref(),
+                &[0xd800]
+            );
+            assert!(returned.get("missing").unwrap().is_undefined());
+        }
+        let failure = Thrown::error("RangeError", "native bound failure");
+        failure.value.set("message", Js::utf16(&[0xd800])).unwrap();
+        failure.value.set("code", Js::Undefined).unwrap();
+        let original = failure.value.clone();
+        for asynchronous in [false, true] {
+            let failure = failure.clone();
+            let bound: BoundMember<Host> = Rc::new(move |_| {
+                if asynchronous {
+                    let failure = failure.clone();
+                    let body: BodyFuture<Host> = Box::pin(async move { Err(failure) });
+                    Ok(Return::Future(body))
+                } else {
+                    Err(failure.clone())
+                }
+            });
+            let arrow = host.arrow("nativeBoundAliasFailure", bound);
+            let result = arrow.call(Js::Undefined, vec![]);
+            let waiter: safe_cex_exchange::js_runtime::promise::JsFuture<'static> = match result {
+                Ok(value) => Box::pin(await_js(&venue.rt.exchange_runtime(), value)),
+                Err(error) => Box::pin(async move { Err(error) }),
+            };
+            let failure = drive(&runtime, waiter).unwrap_err();
+            assert!(
+                failure.value.same_reference(&original),
+                "native BoundMember failure retains identity"
+            );
+            assert_eq!(
+                failure
+                    .value
+                    .get("message")
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .as_ref(),
+                &[0xd800]
+            );
+            assert!(
+                failure.value.has_own("code") && failure.value.get("code").unwrap().is_undefined()
+            );
+        }
+        let member: NativeMember<Host> = host.member("mapMarginType", "mapMarginType");
+        let result = member(
+            Rc::new(venue.rt.this.clone()),
+            vec![Rc::new(Js::str("ISOLATED"))],
+        )
+        .unwrap();
+        let Return::Value(result) = result else {
+            panic!("native mapper must remain synchronous")
+        };
+        assert_eq!(result.to_display(), "isolated");
+        wire.responses.borrow_mut().insert(
+            "/v1/public/futures".into(),
+            json!({"success":true,"data":{"rows":[]}}),
+        );
+        let member: NativeMember<Host> = host.member("fetchTickers", "fetchTickers");
+        let result = member(Rc::new(venue.rt.this.clone()), vec![]).unwrap();
+        let Return::Future(body): Return<Host> = result else {
+            panic!("native REST member must return its actual body Future")
+        };
+        let result = drive(&runtime, body).unwrap();
+        assert_eq!(
+            result.array_values().unwrap().expect("native array").len(),
+            0
+        );
+        assert!(
+            wire.requests
+                .borrow()
+                .iter()
+                .any(|request| request.url.ends_with("/v1/public/futures")),
+            "native body Future reaches the real configured HTTP client"
+        );
+        let options = runtime.http_options.borrow();
+        assert_eq!(
+            options.len(),
+            2,
+            "both actual HTTP factory clients were constructed"
+        );
+        for (index, options) in options.iter().enumerate() {
+            let prefix = if index == 0 { "" } else { "ed25519:" };
+            assert_eq!(options.key, format!("{prefix}fixture-key"));
+            assert_eq!(
+                options.secret,
+                format!("{prefix}11111111111111111111111111111111")
+            );
+            assert_eq!(options.application_id.as_deref(), Some("fixture-account"));
+        }
+        drop(options);
+        venue.dispose().unwrap();
+    }
+}

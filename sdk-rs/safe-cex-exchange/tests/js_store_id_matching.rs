@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, Thrown, from_json},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use serde_json::{Value, json};
 use std::rc::Rc;
 fn selector(tag: &str) -> Js {
@@ -70,7 +70,7 @@ fn singular_store_ids_match_actual_source_property_access_and_lookup_rules() {
         "six mutators,eleven selectors,empty/nonempty stores"
     );
     for row in cases {
-        let facade = store::facade(Rc::new(DefaultStore::new()));
+        let facade = store::facade(Rc::new(DefaultStore::new())).unwrap();
         let state = row["state"].as_str().unwrap();
         let seed = &source["seeds"][state];
         let seeds = if row["empty"] == true {
@@ -107,7 +107,7 @@ fn singular_store_ids_match_actual_source_property_access_and_lookup_rules() {
             row["empty"]
         );
         let field = row["field"].as_str().unwrap();
-        let actual:Vec<Value>=facade.get(state).unwrap().array_values().unwrap().into_iter().map(|value|json!({"id":value.get("id").unwrap().to_display(),"value":value.get(field).unwrap().to_display()})).collect();
+        let actual:Vec<Value>=facade.get(state).unwrap().array_values().expect("fixture array property reads").unwrap().into_iter().map(|value|json!({"id":value.get("id").unwrap().to_display(),"value":value.get(field).unwrap().to_display()})).collect();
         assert_eq!(
             json!(actual),
             row["rows"],

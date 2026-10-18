@@ -182,6 +182,25 @@ fn main() {
         serde_json::to_writer(std::io::stdout(), &names).expect("name JSON");
         return;
     }
+    if arguments
+        .peek()
+        .is_some_and(|arg| arg == "--guarded-sources-json")
+    {
+        arguments.next();
+        let root = arguments.next().expect("dependency library root required");
+        assert!(
+            arguments.next().is_none(),
+            "one dependency library root required"
+        );
+        match safe_cex_parity::accepted_source::doc_guards(std::path::Path::new(&root)) {
+            Ok(sources) => println!("{}", serde_json::to_string(&sources).unwrap()),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if arguments.peek().is_some_and(|arg| arg == "--doc-guards") {
         arguments.next();
         for argument in arguments {
@@ -194,6 +213,19 @@ fn main() {
         }
         return;
     }
+    if arguments
+        .peek()
+        .is_some_and(|arg| arg == "--dependency-globs-json")
+    {
+        arguments.next();
+        let arguments: Vec<_> = arguments.collect();
+        let paths: Vec<_> = arguments.iter().map(std::path::Path::new).collect();
+        println!(
+            "{}",
+            serde_json::to_string(&dependency_globs(&paths).expect("sources parse")).unwrap()
+        );
+        return;
+    }
     let macro_origins: std::collections::HashSet<String> = if arguments
         .peek()
         .is_some_and(|arg| arg == "--macro-origins-json")
@@ -204,8 +236,26 @@ fn main() {
     } else {
         std::collections::HashSet::new()
     };
+    let mut glob_exports: std::collections::HashMap<String, Vec<String>> = if arguments
+        .peek()
+        .is_some_and(|arg| arg == "--glob-exports-json")
+    {
+        arguments.next();
+        serde_json::from_str(
+            &arguments
+                .next()
+                .expect("verified dependency exports required"),
+        )
+        .expect("dependency export names required")
+    } else {
+        std::collections::HashMap::new()
+    };
     let arguments: Vec<String> = arguments.collect();
     let paths: Vec<&std::path::Path> = arguments.iter().map(std::path::Path::new).collect();
+    let requested = dependency_globs(&paths).expect("sources parse");
+    let shadowing: std::collections::HashSet<_> =
+        glob_exports.values().flatten().cloned().collect();
+    glob_exports.retain(|root, _| requested.contains(root) && !shadowing.contains(root));
     let recipes = safe_cex_parity::accepted_source::module_recipes(&paths).expect("sources parse");
     let unused_core = if macro_origins.contains("core") {
         unreferenced_core_modules(&paths, macro_origins.contains("std"))
@@ -219,6 +269,7 @@ fn main() {
             path,
             &macro_origins,
             &recipes,
+            &glob_exports,
         )
         .expect("source parses")
         {
@@ -230,6 +281,101 @@ fn main() {
             println!("{argument}\t{name}\t{line}\t{column}");
         }
     }
+}
+
+// Request only direct dependency-root globs with no competing source binding.
+// Inspect inactive source too: uncertainty cannot inherit an extern capability.
+fn dependency_globs(paths: &[&std::path::Path]) -> Result<Vec<String>, String> {
+    use syn::visit::{self, Visit};
+    #[derive(Default)]
+    struct Bindings {
+        roots: std::collections::BTreeSet<String>,
+        names: std::collections::HashSet<String>,
+    }
+    fn name(ident: &syn::Ident) -> String {
+        ident.to_string().trim_start_matches("r#").to_owned()
+    }
+    fn uses(tree: &syn::UseTree, prefix: &[String], bindings: &mut Bindings) {
+        match tree {
+            syn::UseTree::Path(path) => {
+                let mut prefix = prefix.to_vec();
+                prefix.push(name(&path.ident));
+                uses(&path.tree, &prefix, bindings);
+            }
+            syn::UseTree::Group(group) => {
+                for tree in &group.items {
+                    uses(tree, prefix, bindings);
+                }
+            }
+            syn::UseTree::Glob(_) if prefix.len() == 1 => {
+                bindings.roots.insert(prefix[0].clone());
+            }
+            syn::UseTree::Name(item) => {
+                if item.ident == "self" {
+                    if let Some(parent) = prefix.last() {
+                        bindings.names.insert(parent.clone());
+                    }
+                } else {
+                    bindings.names.insert(name(&item.ident));
+                }
+            }
+            syn::UseTree::Rename(item) => {
+                bindings.names.insert(name(&item.rename));
+            }
+            _ => {}
+        }
+    }
+    impl<'ast> Visit<'ast> for Bindings {
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            if matches!(item, syn::Item::Mod(module) if module.attrs.iter().any(|attr| attr.path().is_ident("cfg") && attr.parse_args::<syn::Path>().is_ok_and(|path| path.is_ident("test"))))
+            {
+                return;
+            }
+            let ident = match item {
+                syn::Item::Mod(item) => Some(&item.ident),
+                syn::Item::Struct(item) => Some(&item.ident),
+                syn::Item::Enum(item) => Some(&item.ident),
+                syn::Item::Union(item) => Some(&item.ident),
+                syn::Item::Type(item) => Some(&item.ident),
+                syn::Item::Trait(item) => Some(&item.ident),
+                syn::Item::TraitAlias(item) => Some(&item.ident),
+                syn::Item::Const(item) => Some(&item.ident),
+                syn::Item::Static(item) => Some(&item.ident),
+                syn::Item::Fn(item) => Some(&item.sig.ident),
+                syn::Item::Macro(item) => item.ident.as_ref(),
+                syn::Item::ExternCrate(item) => {
+                    Some(item.rename.as_ref().map_or(&item.ident, |(_, name)| name))
+                }
+                _ => None,
+            };
+            if let Some(ident) = ident {
+                self.names.insert(name(ident));
+            }
+            visit::visit_item(self, item);
+        }
+        fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+            uses(&item.tree, &[], self);
+        }
+        fn visit_type_param(&mut self, item: &'ast syn::TypeParam) {
+            self.names.insert(name(&item.ident));
+            visit::visit_type_param(self, item);
+        }
+        fn visit_const_param(&mut self, item: &'ast syn::ConstParam) {
+            self.names.insert(name(&item.ident));
+            visit::visit_const_param(self, item);
+        }
+    }
+    let mut bindings = Bindings::default();
+    for path in paths {
+        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let syntax = syn::parse_file(&source).map_err(|error| error.to_string())?;
+        bindings.visit_file(&syntax);
+    }
+    Ok(bindings
+        .roots
+        .into_iter()
+        .filter(|root| !bindings.names.contains(root))
+        .collect())
 }
 
 struct CoreValueReferences {
@@ -456,4 +602,55 @@ fn number_output_provider(root: &std::path::Path) -> Result<serde_json::Value, S
         "exportAttribute": { "ident": "UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export", "line": export.line, "column": export.column },
         "moduleChain": ["safe-cex-num/src/lib.rs", "safe-cex-num/src/numeric_ingress.rs", "safe-cex-num/src/numeric_ingress/eligibility.rs"]
     }))
+}
+
+#[cfg(test)]
+mod dependency_glob_tests {
+    use super::*;
+
+    #[test]
+    fn dependency_roots_refuse_source_shadowing_and_nested_paths() {
+        let directory =
+            std::env::temp_dir().join(format!("accepted-glob-roots-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("lib.rs");
+        for (source, expected) in [
+            (
+                "use domain::*; fn owner() { let _ = vec![1]; }",
+                vec!["domain"],
+            ),
+            ("use ::r#domain::{*, Market};", vec!["domain"]),
+            ("use domain::nested::*;", vec![]),
+            ("use other::domain; use domain::*;", vec![]),
+            ("use other as domain; use domain::*;", vec![]),
+            ("#[cfg(any())] mod domain {} use domain::*;", vec![]),
+            ("struct r#domain; use domain::*;", vec![]),
+            ("fn owner<domain>() {} use domain::*;", vec![]),
+            ("extern crate other as domain; use domain::*;", vec![]),
+            (
+                "use domain::*; #[cfg(test)] mod tests { mod domain {} }",
+                vec!["domain"],
+            ),
+        ] {
+            std::fs::write(&file, source).unwrap();
+            assert_eq!(dependency_globs(&[&file]).unwrap(), expected, "{source}");
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn guarded_export_source_closure_retains_inactive_modules() {
+        let directory =
+            std::env::temp_dir().join(format!("accepted-glob-closure-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let root = directory.join("lib.rs");
+        let inactive = directory.join("inactive.rs");
+        std::fs::write(&root, "#[cfg(any())] mod inactive;").unwrap();
+        std::fs::write(&inactive, "pub struct Hidden;").unwrap();
+        let sources = safe_cex_parity::accepted_source::doc_guards(&root).unwrap();
+        assert_eq!(sources.len(), 2);
+        assert!(sources.contains(&root.canonicalize().unwrap()));
+        assert!(sources.contains(&inactive.canonicalize().unwrap()));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

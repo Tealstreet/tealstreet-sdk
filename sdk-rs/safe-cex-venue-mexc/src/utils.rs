@@ -121,6 +121,7 @@ pub fn normalize_market(raw: &Input) -> Result<Market, JsCoercionError> {
         None => 9_007_199_254_740_991.0,
     } * valid_contract_size;
     Ok(Market {
+        runtime: Default::default(),
         symbol: id.replace('_', ""),
         pretty_symbol: Some(id.clone()),
         id,
@@ -131,11 +132,17 @@ pub fn normalize_market(raw: &Input) -> Result<Market, JsCoercionError> {
             .is_none_or(|value| matches!(value, Input::Undefined))
             || retained_number(raw.get("state"), None)? == 0.0,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: amount_step,
             price: price_step,
         },
         limits: MarketLimits {
-            amount: MarketLimitsAmount { min, max },
+            cost: None,
+            amount: MarketLimitsAmount {
+                min,
+                max: max.into(),
+            },
             leverage: MarketLimitsLeverage {
                 min: retained_number(raw.get("minLeverage"), Some(1.0))?,
                 max: retained_number(
@@ -562,7 +569,7 @@ pub fn normalize_ticker(
         ask: to_number(pick(raw, &["ask1", "askPrice"]), Some(last))?,
         last,
         mark,
-        index: to_number(raw.get("indexPrice"), Some(last))?,
+        index: Some(to_number(raw.get("indexPrice"), Some(last))?),
         mid_price: None,
         timestamp: None,
         percentage: normalize_percentage(pick(raw, &["riseFallRate", "priceChangePercent"]))?,

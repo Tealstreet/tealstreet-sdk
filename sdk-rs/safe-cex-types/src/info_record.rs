@@ -46,6 +46,30 @@ impl serde::Serialize for crate::Market {
         if let Some(value) = &self.maker_fee {
             state.serialize_field("makerFee", value)?;
         }
+        if let Some(value) = &self.runtime.kind {
+            state.serialize_field("type", value)?;
+        }
+        if let Some(value) = &self.runtime.spot {
+            state.serialize_field("spot", value)?;
+        }
+        if let Some(value) = &self.runtime.swap {
+            state.serialize_field("swap", value)?;
+        }
+        if let Some(value) = &self.runtime.future {
+            state.serialize_field("future", value)?;
+        }
+        if let Some(value) = &self.runtime.contract {
+            state.serialize_field("contract", value)?;
+        }
+        if let Some(value) = &self.runtime.linear {
+            state.serialize_field("linear", value)?;
+        }
+        if let Some(value) = &self.runtime.inverse {
+            state.serialize_field("inverse", value)?;
+        }
+        if let Some(value) = &self.runtime.fees {
+            state.serialize_field("fees", value)?;
+        }
         state.end()
     }
 }

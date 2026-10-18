@@ -1,7 +1,8 @@
 include!("cardinality.rs.inc");
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, StoreSubscriberError};
 use safe_cex_venue_bitrue::{read_helpers::*, wire::OpaqueValue};
 use serde_json::{Value, json};
@@ -19,7 +20,7 @@ fn observe(value: Option<f64>) -> Value {
         .unwrap_or_else(|| json!({"type":"null"}))
 }
 fn native(m: &Market) -> Value {
-    json!({"id":m.id,"symbol":m.symbol,"amountMin":bits(m.limits.amount.min),"amountMax":bits(m.limits.amount.max),"leverageMin":bits(m.limits.leverage.min),"leverageMax":bits(m.limits.leverage.max)})
+    json!({"id":m.id,"symbol":m.symbol,"amountMin":bits(m.limits.amount.min),"amountMax":bits(safe_cex_num::numeric_value_to_number(&m.limits.amount.max)),"leverageMin":bits(m.limits.leverage.min),"leverageMax":bits(m.limits.leverage.max)})
 }
 #[test]
 fn leverage_matches_actual_typescript_and_store() {
@@ -46,14 +47,15 @@ fn leverage_matches_actual_typescript_and_store() {
     );
     assert!(capture["header"]["node"].as_str().unwrap().starts_with('v'));
     assert!(!capture["header"]["arch"].as_str().unwrap().is_empty());
-    assert!(
-        js_from_str::<String>(capture["utf8Raw"].as_str().unwrap()).is_err(),
-        "chosen leverage message UTF-8 refusal"
+    typed_utf16::assert_projection(
+        capture["utf8Raw"].as_str().unwrap(),
+        &(js_from_str::<String>(capture["utf8Raw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     for key in ["bracketUtf8Raw", "symbolUtf8Raw"] {
         assert!(
             js_from_str::<OpaqueValue>(capture[key].as_str().unwrap()).is_err(),
-            "chosen leverage UTF-8 refusal: {key}"
+            "opaque Value projection still refuses the unrepresentable payload: {key}"
         );
     }
     for row in capture["errors"].as_array().unwrap() {
@@ -131,7 +133,7 @@ fn leverage_matches_actual_typescript_and_store() {
                     let response = json!({"status":409,"data":{"msg":"listener-specific"}});
                     if recovered {
                         let mut original = ExchangeError::new("observer failure");
-                        original.response = Some(response);
+                        original = original.with_retained_response(response.into());
                         original.code =
                             Some(safe_cex_exchange::js_runtime::value::Js::str("E_RECOVERED"));
                         // IDs from prior Store boundaries may repeat the new
@@ -185,7 +187,7 @@ fn leverage_matches_actual_typescript_and_store() {
                             "leverage subscriber identity: fallback"
                         );
                     }
-                    let mut observed = json!({"type":"error","name":error.name,"message":error.message,"response":error.response});
+                    let mut observed = json!({"type":"error","name":error.name,"message":error.message,"response":error.response_json_view()});
                     if let Some(code) = error.code.as_ref() {
                         observed["code"] = safe_cex_exchange::js_runtime::value::to_json(code)
                             .expect("finite fixture error code");
@@ -214,7 +216,7 @@ fn leverage_matches_actual_typescript_and_store() {
             row["laterNotifications"].as_u64().unwrap(),
             "leverage native parity: setMarketMaxLeverage fanout stops; {row}"
         );
-        let markets = store.markets();
+        let markets = store.markets().unwrap();
         let expected_markets = row["markets"].as_array().unwrap();
         assert_eq!(
             expected_markets.len(),
@@ -248,3 +250,6 @@ fn leverage_matches_actual_typescript_and_store() {
     }
     native_comparisons(6876, "leverage");
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -97,8 +97,8 @@ fn testnet(rt: &Rt) -> Result<bool, Thrown> {
 /// `this._resolveMarket(symbol)` over the typed store the facade projects.
 fn resolve_market(rt: &Rt, symbol: &str) -> Result<Option<Market>, Thrown> {
     let coin = text(&rt.this.get("apiMarginCoin")?)?;
-    let markets = rt.shared.store.markets();
-    let by_symbol = rt.shared.store.markets_by_symbol();
+    let markets = rt.shared.store.markets()?;
+    let by_symbol = rt.shared.store.markets_by_symbol()?;
     Ok(crate::market::resolve_market(symbol, &coin, &markets, |s| by_symbol.get(s)).cloned())
 }
 
@@ -408,7 +408,7 @@ impl JournalFolder for ReceiverFolder {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        resolve_settle_currency: Box<dyn Fn(&str) -> String + 'a>,
+        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         Box::pin(async move {
             let this = self.this.clone();
@@ -506,7 +506,7 @@ async fn page_rows(
     .await?;
     let rows = page.get("rows")?;
     let rows = rows
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{member} rows is not an array")))?
         .iter()
         .map(to_json)
@@ -539,8 +539,8 @@ pub(crate) fn bind(
     Ok(Some(match target {
         "pnl.rs::calculate_account_upnl" => sync_member(rt, name, |rt, a| {
             let api = finite(&arg(&a, 0), 0.0);
-            let positions = rt.shared.store.positions();
-            let tickers = rt.shared.store.tickers_by_symbol();
+            let positions = rt.shared.store.positions()?;
+            let tickers = rt.shared.store.tickers_by_symbol()?;
             Ok(Js::Number(crate::pnl::calculate_account_upnl(
                 api,
                 &positions,
@@ -591,7 +591,7 @@ pub(crate) fn bind(
         "normalization.rs::resolve_liquidation_price" => sync_member(rt, name, |rt, a| {
             let id = arg(&a, 0);
             let raw = optional_json(&arg(&a, 1))?;
-            let positions = rt.shared.store.positions();
+            let positions = rt.shared.store.positions()?;
             // Stored ids are strings: a non-string id strictly equals none of them.
             let (id, stored): (String, &[Position]) = match &id {
                 Js::String(s) => (String::from_utf16_lossy(s), &positions),
@@ -609,7 +609,7 @@ pub(crate) fn bind(
                 let p = arg(&a, 0);
                 let raw = optional_json(&p)?;
                 let invalid = !uta && !matches!(raw, Some(Value::Object(_) | Value::Array(_)));
-                let positions = rt.shared.store.positions();
+                let positions = rt.shared.store.positions()?;
                 let symbol = |v: Option<&Value>| normalize_symbol(rt, v);
                 let mapped = if uta {
                     crate::positions::map_uta_position(raw.as_ref(), symbol, &positions, || {
@@ -675,11 +675,11 @@ pub(crate) fn bind(
         "stream_positions.rs::merge_rest_positions_with_fresh_ws_state" => {
             sync_member(rt, name, |rt, a| {
                 let rest_js = arg(&a, 0)
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("restPositions is not iterable"))?;
                 let current_js = rt
                     .path("store.positions")?
-                    .array_values()
+                    .array_values()?
                     .unwrap_or_default();
                 let rest: Vec<Position> = rest_js.iter().map(to_typed).collect::<Result<_, _>>()?;
                 let current: Vec<Position> =

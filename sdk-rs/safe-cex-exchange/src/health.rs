@@ -319,10 +319,13 @@ impl ExchangeHealthMonitor {
         };
         let runtime = self.runtime.clone();
         let sleep = runtime.sleep(self.recovery_window_ms);
-        let task = self.runtime.spawn_local(Box::pin(async move {
-            let now = sleep.await.is_ok().then(|| runtime.now_ms());
-            guard.finish(now);
-        }));
+        let task = self.runtime.spawn_classified(
+            crate::runtime::RuntimeTaskKind::Timer,
+            Box::pin(async move {
+                let now = sleep.await.is_ok().then(|| runtime.now_ms());
+                guard.finish(now);
+            }),
+        );
         let mut state = self.state.borrow_mut();
         if state.generation == generation && !completed.get() {
             state.timer = Some(task);

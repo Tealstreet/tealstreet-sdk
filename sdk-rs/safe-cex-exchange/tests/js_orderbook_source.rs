@@ -52,7 +52,7 @@ fn host(run: impl FnOnce(&Js)) {
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -156,6 +156,7 @@ fn orderbook_updates_match_source_raw_comparisons_and_lazy_reads() {
             let log = trace.borrow().clone();
             let inserted = levels
                 .array_values()
+                .expect("fixture array property reads")
                 .unwrap()
                 .iter()
                 .any(|v| v.strict_equals(&update));
@@ -200,7 +201,7 @@ fn orderbook_totals_match_source_side_reads_live_rows_and_raw_addition() {
                             .collect(),
                     )
                 };
-                if let Some(items) = levels.array_items() {
+                if let Some(items) = levels.array_items().expect("fixture array property reads") {
                     for (i, level) in items.into_iter().enumerate() {
                         if let Some(level) = level {
                             let amount = level.get("amount").unwrap();

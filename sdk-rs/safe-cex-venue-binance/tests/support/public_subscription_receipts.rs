@@ -85,7 +85,7 @@ fn production_native_subscription_frames_order_counts_reentry_and_send_failure()
             venue,
             serde_json::from_value(json!(name)).unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             deps,
         )
         .unwrap();

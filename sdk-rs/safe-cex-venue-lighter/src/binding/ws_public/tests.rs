@@ -293,7 +293,7 @@ fn fixture() -> Fixture {
     runtime.now.set(1_000_000.0);
     let options: ExchangeOptions =
         serde_json::from_value(json!({"key": "k", "secret": "s"})).unwrap();
-    let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let deps = LighterDependencies {
         runtime: runtime.clone(),
         http: Rc::new(Http(runtime.clone())),
@@ -1006,7 +1006,10 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
                 continue;
             }
         };
-        let entries = items.array_items().unwrap();
+        let entries = items
+            .array_items()
+            .expect("fixture array property reads")
+            .unwrap();
         let observed = entries
             .iter()
             .flatten()
@@ -1025,7 +1028,7 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
             "bidsIdentity":book.get("bids").unwrap().same_reference(&bids),
             "asksIdentity":book.get("asks").unwrap().same_reference(&asks),
             "tickerIdentity":items.same_reference(&tickers),
-            "bidHole":book.get("bids").unwrap().array_items().unwrap()[0].is_none(),
+            "bidHole":book.get("bids").unwrap().array_items().expect("fixture array property reads").unwrap()[0].is_none(),
             "tags":tags,
             "rowIdentity":entries.iter().flatten().filter(|v| !v.is_undefined()).all(|v| v.same_reference(&row)),
             "nan":observed.get("price").unwrap().to_number().unwrap().is_nan(),

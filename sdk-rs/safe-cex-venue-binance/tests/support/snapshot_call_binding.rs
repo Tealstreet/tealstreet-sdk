@@ -60,7 +60,7 @@ fn actual_case(fail: bool) -> Case {
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         deps,
     )
     .unwrap();
@@ -74,7 +74,7 @@ fn actual_case(fail: bool) -> Case {
         }),
     );
     let rows = run(&runtime, owner.invoke(Method::Orders, vec![])).unwrap();
-    assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+    assert!(matches!(rows, EventValue::Array(ref rows) if rows.is_empty()));
     let requests = requests.lock().unwrap();
     assert_eq!(
         requests.len(),

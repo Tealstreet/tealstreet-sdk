@@ -11,6 +11,7 @@ use crate::twap_manager::SerializedTwap;
 use crate::twap_manager::TwapManager;
 use indexmap::IndexMap;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::eager::start_eager;
 use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
@@ -198,7 +199,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
                 let chaser = Rc::new(ChaserOrderInstance::new(
                     self.exchange.clone(),
                     Rc::new(RefCell::new(input)),
-                ));
+                )?);
                 let id = chaser.id().to_owned();
                 self.tracked_chaser_order_ids.borrow_mut().push(id.clone());
                 self.host.add_chaser(chaser)?;
@@ -210,7 +211,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
             }
             let limit = options.borrow().use_limit_orders;
             let price = if limit {
-                let tickers = self.exchange.base().store.tickers();
+                let tickers = self.exchange.base().store.tickers()?;
                 let current_options = self.options();
                 let o = current_options.borrow();
                 let ticker = tickers.iter().find(|t| t.symbol == o.active_market.symbol);
@@ -452,7 +453,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
             }
             Ok(())
         })();
-        Box::pin(async move { result })
+        start_eager(&self.host.runtime(), async move { result })
     }
     pub fn terminate(&self) -> ExchangeFuture<'static, ()> {
         let result = (|| {
@@ -479,7 +480,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
             self.host.manager().remove(&self.id());
             Ok(())
         })();
-        Box::pin(async move { result })
+        start_eager(&self.host.runtime(), async move { result })
     }
     pub fn cleanup(&self) -> ExchangeFuture<'static, ()> {
         let result = self.update_state(TwapStateUpdate {

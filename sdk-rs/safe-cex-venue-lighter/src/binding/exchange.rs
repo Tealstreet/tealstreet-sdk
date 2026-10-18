@@ -169,7 +169,7 @@ impl LighterNativeExchange {
                 vec![
                     from_typed(&name).map_err(err)?,
                     from_typed(&options).map_err(err)?,
-                    store::facade(store),
+                    store::facade(store)?,
                 ],
                 None,
             )
@@ -669,7 +669,7 @@ mod tests {
             registry: Rc::new(TransportRegistry::default()),
             signing_entropy: None,
         };
-        let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let realm = build_realm(
             &ExchangeName::Lighter,
             &serde_json::from_value(serde_json::json!({ "key": "", "secret": "" })).unwrap(),

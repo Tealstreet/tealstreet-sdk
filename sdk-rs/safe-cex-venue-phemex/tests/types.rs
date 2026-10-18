@@ -200,9 +200,10 @@ fn types_match_live_typescript_fields_and_numeric_ingress() {
         js_from_str::<PhemexApiResponse<Overlap>>(r#"{"code":7,"msg":"ok"}"#).is_err(),
         "required metadata overlap refuses"
     );
-    assert!(
-        js_from_str::<PositionsResponse>(corpus["surrogateRaw"].as_str().unwrap()).is_err(),
-        "UTF16 surrogate boundary refuses"
+    typed_utf16::assert_projection(
+        corpus["surrogateRaw"].as_str().unwrap(),
+        &(js_from_str::<PositionsResponse>(corpus["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     eprintln!(
         "{} response cases x 3 ingress paths; {} envelopes",
@@ -210,3 +211,6 @@ fn types_match_live_typescript_fields_and_numeric_ingress() {
         corpus["envelopes"].as_array().unwrap().len()
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -1,43 +1,43 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.request.ts"
-rust_files = [ "safe-cex-venue-woo/src/v3_request.rs" ]
+rust_files = []
 
 [[symbol]]
 ts = "WooV3RequestAuth"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_request.rs::WooV3RequestAuth"
-status = "ported"
-note = "Map-only apiKey/apiSecret/timestamp declaration; private Serde companion and shared numeric capture preserve timestamp signed zero and overflow. Distinct native key/secret assertions do not roundtrip. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: no production TS importer/caller or Rust runtime caller uses this request preparer or its auth/prepared descriptors. The constructed maintained WOO class dependency walk excludes woo.v3.request.ts and the real native runtime installs no V3 preparation member. The unused Rust preparer, serializer, auth/prepared types and exact facade cases are retired; WooV3RequestInput remains for the other inert builders, with every unrelated ticker/quote case retained. All-target compiler proof and FIX_AUDIT_LEDGER.md rows 1-2 record the retirement; no V3 route or new signing path is enabled."
 
 [[symbol]]
 ts = "WooV3RequestInput"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_request.rs::WooV3RequestInput"
-status = "divergent"
-note = "CHOSEN: exact existing method/endpoint enums and map-only optional non-null ordered query/body maps. JsNumberInput retains their numeric events. The query values are opaque JSON rather than the source scalar/array/undefined union: this intentionally widens static query shape and omits executable/undefined host values, using the shared prepared JSON boundary instead of a venue-local object/value ABI. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3PreparedRequest"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_request.rs::WooV3PreparedRequest"
-status = "divergent"
-note = "CHOSEN: typed descriptor retains native method variant, path/body/payload strings, ordered headers and optional-key absence. Rust fields and headers are mutable while prepareWooV3Request freezes the source objects. Ordinary owned Rust descriptors compose with the transport model without a separate runtime freeze mechanism; callers can borrow them immutably. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: no production TS importer/caller or Rust runtime caller uses this request preparer or its auth/prepared descriptors. The constructed maintained WOO class dependency walk excludes woo.v3.request.ts and the real native runtime installs no V3 preparation member. The unused Rust preparer, serializer, auth/prepared types and exact facade cases are retired; WooV3RequestInput remains for the other inert builders, with every unrelated ticker/quote case retained. All-target compiler proof and FIX_AUDIT_LEDGER.md rows 1-2 record the retirement; no V3 route or new signing path is enabled."
 
 [[symbol]]
 ts = "serializeQuery"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_request.rs::serialize_query"
-status = "divergent"
-note = "CHOSEN: delegates repeat-array qs serialization to the existing sorted_query composition and shared pinned root collator, preserving null/number spelling and stable equal-key order. The prepared JSON boundary omits undefined array slots, executable host objects and lone UTF-16 surrogates; a host object ABI could mirror them but would split the shared transport boundary. Root collation deliberately fixes the signing profile instead of depending on an ambient locale. Seven actual installed-qs cases include lexical array-index order, Unicode keys, overflow and negative zero. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: no production TS importer/caller or Rust runtime caller uses this request preparer or its auth/prepared descriptors. The constructed maintained WOO class dependency walk excludes woo.v3.request.ts and the real native runtime installs no V3 preparation member. The unused Rust preparer, serializer, auth/prepared types and exact facade cases are retired; WooV3RequestInput remains for the other inert builders, with every unrelated ticker/quote case retained. All-target compiler proof and FIX_AUDIT_LEDGER.md rows 1-2 record the retirement; no V3 route or new signing path is enabled."
 
 [[symbol]]
 ts = "prepareWooV3Request"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_request.rs::prepare_woo_v3_request"
-status = "divergent"
-note = "CHOSEN: raw JSON input preserves method capitalization, validation order, truthiness, repeat query, JS body spelling, public bypass and complete local HMAC headers. Shared sign_payload requires an asynchronous Rust API where the source descriptor builder is synchronous; adopting the shared crypto seam avoids a venue-owned HMAC implementation. Typed auth omits malformed/executable credentials, and unsupported output methods are refused only after source body/signing phases; source HEAD acceptance and native refusal are witnessed. Ordered native descriptor/header values are mutable unlike the frozen source, to compose with ordinary owned transport models. Inherited getters and UTF-16 lone-surrogate values remain outside the shared prepared JSON boundary. 22 source cases match; one HEAD case witnesses the declared refusal. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: no production TS importer/caller or Rust runtime caller uses this request preparer or its auth/prepared descriptors. The constructed maintained WOO class dependency walk excludes woo.v3.request.ts and the real native runtime installs no V3 preparation member. The unused Rust preparer, serializer, auth/prepared types and exact facade cases are retired; WooV3RequestInput remains for the other inert builders, with every unrelated ticker/quote case retained. All-target compiler proof and FIX_AUDIT_LEDGER.md rows 1-2 record the retirement; no V3 route or new signing path is enabled."

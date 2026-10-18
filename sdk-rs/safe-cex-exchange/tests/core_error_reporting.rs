@@ -178,9 +178,11 @@ fn observe_event(value: &safe_cex_exchange::js_runtime::value::Js) -> serde_json
                 .map(|(key, value)| (String::from_utf16_lossy(&key), observe_event(&value)))
                 .collect(),
         ),
-        Js::Array(items) => serde_json::Value::Array(
-            items
-                .borrow()
+        Js::Array(_) => serde_json::Value::Array(
+            value
+                .array_items()
+                .unwrap()
+                .unwrap()
                 .iter()
                 .map(|value| {
                     value
@@ -345,7 +347,7 @@ fn removed_original_message_preserves_worker_extra_order() {
     let base = BaseExchange::new(
         safe_cex_types::ExchangeName::Bybit,
         serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         runtime.clone(),
         ExchangeSettings::default(),
     );

@@ -118,8 +118,7 @@ pub(crate) fn utf8(s: &[u16]) -> Result<String, ExchangeError> {
 }
 /// err?.response?.data?.msg || err?.message
 pub(crate) fn reason(e: &ExchangeError) -> String {
-    e.metadata
-        .response
+    e.response_json_view()
         .as_ref()
         .and_then(|r| r.get("data"))
         .and_then(|d| d.get("msg"))
@@ -369,5 +368,11 @@ impl BitunixVenue {
             || futures.dispose(),
             || private.dispose(),
         )
+    }
+}
+
+impl From<safe_cex_types::StoreReadError> for Fault {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self(ExchangeError::from(error))
     }
 }

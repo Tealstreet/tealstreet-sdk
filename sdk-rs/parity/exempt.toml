@@ -833,14 +833,6 @@ rs = "safe-cex-crypto/src/lib.rs::Encoding"
 reason = "Named inline hex/base64 encoding union in PayloadSignerRequest; no added behavior."
 
 [[exempt]]
-rs = "safe-cex-crypto/src/lib.rs::PayloadScheme"
-reason = "Named HMAC-only runtime subset of PayloadSignerRequest scheme; Stark is deliberately omitted because signPayload never constructs it."
-
-[[exempt]]
-rs = "safe-cex-crypto/src/lib.rs::PayloadSigner::sign"
-reason = "Callback invocation seam for the TypeScript PayloadSigner function type; no implementation or added signing behavior."
-
-[[exempt]]
 rs = "safe-cex-crypto/src/lib.rs::WsOutputFormat"
 reason = "Named closed inline outputFormat union from RemoteSignerRequest.wsAuth; compiler-enforced exhaustive dispatch."
 
@@ -6797,20 +6789,20 @@ rs = "safe-cex-venue-hyperliquid/src/private_class.rs::CorePrivateClassHost::def
 reason = "C3: explicit same-realm value/error alias, prototype-call discriminator/capture or native class/function/property allocation binding for the mapped private class. No additional source business algorithm or concrete JavaScript VM implementation is supplied by this plumbing."
 
 [[exempt]]
-rs = "safe-cex-store/src/ticker_lookup.rs::TickerSymbolLookup"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+rs = "safe-cex-store/src/ticker_lookup.rs::TickerLookup"
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
-rs = "safe-cex-store/src/ticker_lookup.rs::TickerSymbolLookup::is_truthy"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+rs = "safe-cex-store/src/ticker_lookup.rs::TickerLookup::is_truthy"
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
-rs = "safe-cex-store/src/ticker_lookup.rs::TickerSymbolLookup::update_id"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+rs = "safe-cex-store/src/ticker_lookup.rs::TickerLookup::update_id"
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
 rs = "safe-cex-store/src/contract.rs::Store::lookup_ticker_by_symbol"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
 rs = "safe-cex-store/src/model_patch.rs::StorePatchError::is_type_error"
@@ -7467,7 +7459,7 @@ reason = "Closed native codec payload decoder shared by the typed ingress and ou
 
 [[exempt]]
 rs = "safe-cex-types/src/retained_json/codec.rs::Input::into_native_payload"
-reason = "Closed native codec encoder for the canonical retained data tree; the ordinary JSON writer remains a separate explicit boundary. No new TypeScript behavior or duplicate carrier."
+reason = "Streaming Serde adapter for the canonical retained native payload schema, without an expanded tagged value tree; the ordinary JSON writer remains a separate explicit boundary. No new TypeScript behavior or duplicate carrier."
 
 [[exempt]]
 rs = "safe-cex-types/src/retained_json/writer.rs::RetainedJsonInput::json_stringify"
@@ -7588,3 +7580,247 @@ reason = "Native stepping of the source for-in language operation, using canonic
 [[exempt]]
 rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::own_properties"
 reason = "Stock intrinsic descriptor-name/enumerability metadata in the existing retained PrototypeRealm, consumed by canonical for-in enumeration without reading values or allocating another heap. Native/Node property-set and flag witnesses cover six actual intrinsic roles; there is no named TypeScript SDK method and public intrinsic descriptor reflection remains refused."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle"
+reason = "Rust-only captured-reference capability passed between typed Store consumers; it retains the original native balance without a cached Balance or Store back-reference. The native Store balance alias/generation/getter/drop witness exercises it."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle::new"
+reason = "Installs the existing captured referent capability; construction performs no property read or decoding and defines no TypeScript operation."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle::native_value"
+reason = "Downcasts and forwards the same captured native referent before any typed projection; required by native balance adapters, with no new JS-visible field."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle::read"
+reason = "Explicit fallible typed projection of a captured balance referent. Native adapters bypass this view; alias, old-generation, throwing-getter and owner-drop cases are covered by canonical_native_store."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceReference"
+reason = "Object-safe lower-layer capability for one retained native balance; separates native forwarding from explicit typed reading without depending on exchange-core."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceReference::native_value"
+reason = "Opaque native capability method; returns the captured value identity, not a serialized view or independently materialized state."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceReference::read"
+reason = "Fallible native-reference projection protocol; original Store read causes remain opaque and recoverable, without a TypeScript decoder method."
+
+[[exempt]]
+rs = "safe-cex-store/src/contract.rs::Store::native_owner"
+reason = "Required opaque capability for the sole material Js graph. Native facades visibly refuse unsupported implementations rather than creating StoreData copies; no independent source operation."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::PatchModel"
+reason = "Typed patch admission protocol for the existing strict model boundary. Raw native Store mutations use the canonical property algorithms directly."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::PatchModel::patch_field"
+reason = "Per-field typed patch admission used before publishing a typed model patch; no standalone TypeScript declaration or raw native property replacement."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::StorePatchError::invalid_index"
+reason = "Typed adapter error construction for an inadmissible indexed patch; it does not define source collection behavior or normalize a native property failure."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError"
+reason = "Rust typed-read error envelope carrying property/projection phase and the opaque original native cause. Native escape recovers the original Thrown before diagnostics; no replacement JS error object is claimed."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError::new"
+reason = "Constructs the lower-layer typed-read envelope without reading or formatting native cause properties; the canonical Store getter witness checks exact original cause identity."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError::native_cause"
+reason = "Recovers the retained opaque native cause for the exchange adapter; no JSON projection, getter evaluation or independent source operation."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError::phase"
+reason = "Rust diagnostic observation of whether a typed read failed at property access or projection; source native throw identity remains separately retained."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadPhase"
+reason = "Closed Rust-only read-boundary diagnostic tag, not an enum substituted for a JavaScript value or source error code."
+
+[[exempt]]
+rs = "safe-cex-venue-blofin/src/reads.rs::MappingError"
+reason = "Rust typed mapper completion distinguishing existing coercion/input refusals from a fallible Store read; conversion retains the original Store cause instead of treating it as a mapping message."
+
+[[exempt]]
+rs = "safe-cex-venue-bybit/src/inverse_position.rs::PositionMappingError"
+reason = "Rust completion envelope separating the existing typed Position refusal from a Store access failure; native error propagation retains the Store origin."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::has_property"
+reason = "Existing canonical native HasProperty engine operation exposed to the Lighter host, replacing its per-variant property/prototype replica. It checks presence without evaluating getters; no TS exported declaration corresponds to this Rust embedding capability. Native Array/Node for-in, inherited-index and callback witnesses cover the reached property path."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/array.rs::ArrayData"
+reason = "C3 native representation of the existing JavaScript Array exotic object: one sparse descriptor/length/prototype/extensibility owner, replacing the former mutable Vec. No TS SDK class/export is added. tests/js_array_storage.rs observes actual installed builtins, alias identity, holes, descriptors and numeric bits against independent Node; ARRAY_STORAGE_REVIEW.md states the finite scope."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/array.rs::ArrayData::len"
+reason = "C3 read of the canonical uint32 array length for native consumers and iterators; no new TS SDK method. Native maximum-index, blocked shrink, readonly growth and live iteration tests compare the actual Array.length behavior to Node without a dense storage mirror."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/array.rs::ArrayData::is_empty"
+reason = "C3 native emptiness view over the same canonical length slot; no standalone TypeScript declaration or second storage. Real native Binance response fixtures use it; array length/identity behavior is covered by the installed Array/Node storage witness."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/array.rs::Js::has_index"
+reason = "C3 native numeric-key HasProperty embedding operation over the canonical property engine. It retains holes versus inherited indices without evaluating getters; not a TypeScript SDK export. Native/Node inherited getter, live map and hidden for-in controls cover the corresponding operation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/array.rs::Js::sort_array_with"
+reason = "Native borrowed-callback seam into the single installed Array.sort implementation; preserves snapshot-before-comparison and checked Set/Delete without exposing a mutable Vec. No new TS SDK method. Native/Node live sort and frozen-sort tests plus existing js_sort witnesses observe actual receiver aliases, errors and numeric bits."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/array.rs::Js::splice_array"
+reason = "Native checked mutation seam for source orderbook splice callsites; delegates indexed Has/Get/Set/Delete and length to the same array owner, without a raw Vec bypass. This Rust FnMut/return-unit embedding has no TS exported declaration; actual orderbook source witnesses and native descriptor/readonly array tests cover its consumed mutations."
+
+[[exempt]]
+rs = "safe-cex-venue-backpack/src/rest_reads.rs::Host::Array"
+reason = "C3 associated host handle replacing the retired standalone Vec alias. The concrete Backpack Host binds it directly to canonical Js, retaining original response/repair arrays; scripted terminal fixtures can supply their own representation. No TS SDK type/export is added; rest_reads and native adapter_classes witnesses exercise the actual algorithm and host."
+
+[[exempt]]
+rs = "safe-cex-venue-backpack/src/rest_reads.rs::Host::array_length"
+reason = "Checked native array-length capability consumed by the existing Backpack REST bodies, replacing direct Vec borrows. The concrete Host reads canonical Js.length; it adds no TS venue method. Native adapter and maintained rest_reads source witnesses retain the original receiver and response/repair sequencing."
+
+[[exempt]]
+rs = "safe-cex-venue-backpack/src/rest_reads.rs::Host::array_element"
+reason = "Checked native live HasProperty/Get capability for the existing Backpack REST map/filter/repair loops. It preserves absent holes, inherited values and original read failures on the one Js array; no extra TS method/export. Native adapter plus source REST witnesses exercise this host."
+
+[[exempt]]
+rs = "safe-cex-venue-backpack/src/rest_reads.rs::Host::array_from"
+reason = "C3 construction capability for fresh result arrays in the existing Backpack REST bodies. The native host constructs the canonical holey Js owner; it never installs a second live response cache. No TS SDK export is added; real adapter aliases and REST source corpus cover the consuming paths."
+
+[[exempt]]
+rs = "safe-cex-venue-backpack/src/rest_reads.rs::Host::array_set"
+reason = "Checked native Set capability for Backpack REST order repair, replacing a mutable Vec slot. It writes the original canonical Js array and returns property failures; no new TS venue method/export. Source repair/native adapter tests and canonical readonly/index-set controls cover the consumed behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-binance/src/private_event_value.rs::array_element"
+reason = "C3 native HasProperty/Get helper over the canonical EventArray alias, replacing direct mutable-Vec presence reads in existing Binance callback bodies. No TS exported helper is invented. Private/public class source fixtures retain native holes, row references and original field effects; shared native/Node array controls cover inherited Get and refusal semantics."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::native_frame_receipts"
+reason = "Native replay diagnostic host observation: reads physical per-dial message/ping/pong/close counters without modifying frames. No TS business behavior is implemented. Native transport control-frame regression and controlled TLS replay validate the receipt boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::native_replay_runtime"
+reason = "Explicit isolated replay host selection with controlled Date/performance inputs; ordinary native runtimes retain real clocks. Native replay_clock and compiled native-account-replay tests exercise timer order, cancellation and isolation. This is test-host infrastructure, not an exchange-source parity claim."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::replay_checkpoint"
+reason = "Native replay host bridge to the existing source Promise checkpoint. It supplies a processing observation fence for diagnostic replay, with no corresponding maintained exchange operation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::replay_pending_jobs"
+reason = "Native replay diagnostic observation of unfinished source Promise jobs, excluding future timer jobs. Nonzero pending work prevents a processing-drain claim; no exchange-source semantics are replaced."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::replay_raw_tasks"
+reason = "Native replay diagnostic receipt for raw ExchangeRuntime tasks. Unknown, finite and awakened work blocks; only reviewed socket/timer pending leaves and the separately counted Promise driver may wait. Real native socket, timer, cancellation and wake-before-repoll tests validate this host observation, not TS business behavior."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::RuntimeTaskKind"
+reason = "Explicit host diagnostic classification of finite work, future timers, socket readers and the canonical Promise queue driver. This metadata changes neither scheduling nor cancellation and has no maintained TS declaration. Unknown spawn_local calls remain blocking; native raw_task_receipts tests enforce the distinctions."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::spawn_classified"
+reason = "Optional host diagnostic spawn annotation; its default delegates to the existing spawn_local operation. Native replay hosts alone observe pending leaves and wakeups. Ordinary native accounts and other runtime implementations keep the original task scheduling and ownership; no exchange method parity is claimed."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::task_work_started"
+reason = "Host diagnostic phase transition for an explicitly reviewed timer entering asynchronous callback work. Remaining work blocks drain even when the callback awaits another timer; default hosts do nothing. Actual native timer/async-callback and captured Binance replay regressions validate this receipt metadata, not a TS exchange operation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::ReplayClock"
+reason = "Native-only diagnostic host clock state for isolated deterministic replay. Production native accounts never select this host implicitly. The Rust replay_clock regression compares actual runtime timer callbacks and VirtualClock host readings."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::activate"
+reason = "Explicit diagnostic replay transition from fixed-clock real startup scheduling to manually driven timer deadlines. No TS exchange operation; the TS probe implements the equivalent host transition. Compiled addon tests cover activation and repeated-begin refusal."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::advance"
+reason = "Diagnostic host scheduler for recorded replay time, with monotonic validation, stable deadline/registration order and cancellation handling. Native replay_clock tests pin actual callback times; this does not claim to port a maintained exchange method."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::elapsed"
+reason = "Native replay host elapsed-time observation used by addon diagnostic receipts. No exchange algorithm or TS source declaration; fixed/fractional time behavior is exercised through compiled replay tests."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::frame_drain_receipts"
+reason = "Read-only native parser-boundary instrumentation, per physical dial, for consumed/processed/failed handlers and completed close callbacks. No TS business method. The frame_receipts regression covers text, binary, failure, close and dial separation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::FrameDrainReceipt"
+reason = "Native diagnostic counter value crossing the replay receipt boundary, not a ported exchange model. Parser-boundary and controlled TLS regressions detect missing, duplicate and unfinished processing."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_exchange.rs::native_account_replay"
+reason = "Napi-only diagnostic replay control export. Ordinary accounts refuse it, and replay accounts require an isolated keyless host. Compiled native-account-replay tests cover the exported API; no TS production exchange method is claimed."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::native_account_replay_control"
+reason = "Native account host diagnostic dispatcher for explicit replay begin/advance/receipt requests. It observes parser and transport counts and source Promise work. No production exchange business operation or source parity mapping."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::open_native_account_with_replay"
+reason = "Explicit native account host constructor selecting diagnostic clocks only when requested by isolated keyless replay. The ordinary open_native_account path retains its existing host. Compiled addon tests verify live/replay isolation."
+
+[[exempt]]
+rs = "safe-cex-store/src/virtual_clock.rs::set_thread_host_time"
+reason = "Host-time injection seam for isolated native replay, analogous to supplying VirtualClock.now. It changes no offset/server-sync policy and defaults to real time. Native replay_clock regression checks Date rounding, fractional monotonic time and actual VirtualClock readings."
+
+[[exempt]]
+rs = "safe-cex-transport/src/native.rs::NativeFrameCounts"
+reason = "Native physical WebSocket reader diagnostic counters for replay drain validation, not a maintained exchange model. Native transport regression receives text, binary, ping, pong and close over a real loopback WebSocket and checks exact counts."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::frame_receipts_enabled"
+reason = "Explicit Rust replay-host instrumentation switch, default false. Ordinary hosts retain no per-dial parser history; only the diagnostic host enables consumed/processed receipts. No TS exchange tuning or source behavior is added. The frame_receipts and compiled replay regressions exercise the enabled path."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::register_frame_receipts"
+reason = "Replay-host diagnostic counter registration, called only when frame_receipts_enabled. Retains the existing parser counters without a socket/parent owner, independently of source business socket groups. The compiled recorded Binance nested-socket regression and per-dial unit witness exercise shared histories and owner release. No TypeScript business API is added."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::native_parser_receipts"
+reason = "Native replay diagnostic projection of registered per-dial parser counters, including nested and disposed sockets. Replaces exchange-level group enumeration without changing health/watchdog membership. The compiled recorded Binance nested-socket regression checks both physical socket receipts with source-correct grouping."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::with_retained_response"
+reason = "C3: native API-error construction glue attaches one existing RetainedJsonInput response to an origin wrapper while chaining the previous opaque cause. It neither parses nor duplicates a transport response authority. No standalone TypeScript declaration; actual Binance signed cancel and nearest-origin native tests exercise this boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::retained_response_input"
+reason = "C3: reads the nearest retained response origin deterministically, using the original RestFailure for transport errors and the same canonical RetainedJsonInput for API-created errors. It exposes no JSON cache or new value tree; native cause-chain and signed Binance error emission tests cover it. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::response_json_view"
+reason = "C3: explicit computed decision-5 Rust model/report boundary over retained_response_input. Reuses the existing lossy JSON projection without storing its result or mutating the original response. No standalone TypeScript declaration; raw consumers use retained_response_input."
+
+[[exempt]]
+rs = "safe-cex-store/src/contract.rs::NativeStoreSubscriber"
+reason = "Native ABI: lower Store protocol borrows the canonical state through Any so exchange/registry callbacks retain the actual Js referent without a store-to-exchange dependency or per-notification typed copy. The compiled internal emitter getter/identity and native account burst witnesses exercise this capability."
+
+[[exempt]]
+rs = "safe-cex-store/src/contract.rs::Store::subscribe_native"
+reason = "Native ABI for the existing TS Store.subscribe data argument: required direct native-state subscription shares the canonical ordered listener registry; typed subscribe remains an explicit projection boundary. There is no fallback graph or snapshot. Base emitter getter/throw-order tests and account delivery replay exercise it."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::new_with_argument"
+reason = "Native host capability: the one shared lodash throttle retains its argument generically, allowing account delivery to carry the actual Js state until invocation. Existing StoreFrame new delegates to the same constructor/algorithm. The native argument burst test verifies one leading read, no intermediate reads, latest-state trailing delivery and cancellation."
+
+[[exempt]]
+rs = "safe-cex-transport/src/native.rs::prepare_websocket"
+reason = "Native host capability: synchronously validates physical WebSocket constructor inputs and returns the one owned handshake future shared by connect_websocket and NativeRuntime's CONNECTING bridge. There is no maintained SDK declaration for the platform WebSocket constructor or native TCP/TLS handshake. This splits the existing terminal algorithm without adding a venue scheduler; registry native_connecting_socket real upgrades and source Bitget/BaseWebSocket witnesses cover admission, stable handle identity, send/close, cancellation and frames."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/sorting.rs::stable_sort"
+reason = "Native JS intrinsic capability: one stable fallible merge sorter backs Array.sort, lodash orderBy and venue comparator ports without Rust's total-order requirement. This exposes the shared V8 TimSort implementation for cross-crate reuse; no standalone maintained TS declaration. Native js_sort coverage and constructed Paradex socket/getter regressions exercise NaN comparisons, retained levels, stability and first-throw termination."

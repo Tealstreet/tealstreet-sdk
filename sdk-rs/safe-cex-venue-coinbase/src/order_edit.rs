@@ -365,7 +365,8 @@ pub fn update_order<H: OrderEditHost + 'static>(
             if !amended_amount.is_finite()
                 || amended_amount <= 0.0
                 || amended_amount < market.borrow().limits.amount.min
-                || amended_amount > market.borrow().limits.amount.max
+                || amended_amount
+                    > safe_cex_num::numeric_value_to_number(&market.borrow().limits.amount.max)
             {
                 return reject(
                     &r.host,

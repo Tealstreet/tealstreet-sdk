@@ -69,7 +69,11 @@ fn wire(v: &EventValue) -> Value {
                     .collect()
             }
         }
-        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -103,7 +107,9 @@ fn error() -> Failure {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         -1000
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"position venue detail"}}));
+    e = e.with_retained_response(
+        (json!({"status":503,"data":{"msg":"position venue detail"}})).into(),
+    );
     Rc::new(e)
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,12 +217,13 @@ impl Host {
                 _ => {}
             }
         } else {
-            match name{"direct"|"btc-route"|"usdc-route"|"usdt-zero"=>{path(&account,&["assets","1"]).assign("asset",string("ABC"));let EventValue::Array(a)=&markets else{unreachable!()};*a.borrow_mut()=if name=="direct"{vec![Some(ev(json!({"symbol":"ABCUSDC","base":"ABC","quote":"USDC"}))),Some(ev(json!({"symbol":"ABCUSDT","base":"ABC","quote":"USDT"})))]}else{vec![Some(ev(json!({"symbol":"ABCBTC","base":"ABC","quote":"BTC"})))]};for(s,last)in[("ABCUSDC",2.125),("ABCUSDT",9.1),("ABCBTC",2.5),("BTCUSDT",4.2),("BTCUSDC",3.6)]{tickers.assign(s,ev(json!({"last":last})));}for s in["BTCUSDT","BTCUSDC"]{prop(&tickers,s).assign("symbol",string(s));}if name=="usdc-route"{let EventValue::Object(o)=&tickers else{unreachable!()};o.props.borrow_mut().shift_remove(safe_cex_exchange::js_runtime::value::utf16("BTCUSDT").as_ref());}if name=="usdt-zero"{prop(&tickers,"BTCUSDT").assign("last",number(0.0));}},"negative-stable"|"negative-nonstable"=>account.assign("assets",ev(json!([{"asset":if name=="negative-stable"{"USDT"}else{"NO"},"walletBalance":"-3.6","availableBalance":"0","initialMargin":"0","unrealizedProfit":"0"}]))),"upnl-only"=>account.assign("assets",ev(json!([{"asset":"BTC","walletBalance":"0","availableBalance":"0","initialMargin":"0","unrealizedProfit":"3.6"}]))),"zero"=>account.assign("assets",array(vec![])),"nan"=>path(&account,&["assets","0"]).assign("walletBalance",string("bad")),"error-log-mutates"|"error-log-error"|"bad-assets"=>account.assign("assets",EventValue::Bool(true)),"null"=>account=EventValue::Null,_=>{}}
+            match name{"direct"|"btc-route"|"usdc-route"|"usdt-zero"=>{path(&account,&["assets","1"]).assign("asset",string("ABC"));let EventValue::Array(a)=&markets else{unreachable!()};native_array_fixture::replace(a,if name=="direct"{vec![Some(ev(json!({"symbol":"ABCUSDC","base":"ABC","quote":"USDC"}))),Some(ev(json!({"symbol":"ABCUSDT","base":"ABC","quote":"USDT"})))]}else{vec![Some(ev(json!({"symbol":"ABCBTC","base":"ABC","quote":"BTC"})))]});for(s,last)in[("ABCUSDC",2.125),("ABCUSDT",9.1),("ABCBTC",2.5),("BTCUSDT",4.2),("BTCUSDC",3.6)]{tickers.assign(s,ev(json!({"last":last})));}for s in["BTCUSDT","BTCUSDC"]{prop(&tickers,s).assign("symbol",string(s));}if name=="usdc-route"{let EventValue::Object(o)=&tickers else{unreachable!()};o.props.borrow_mut().shift_remove(safe_cex_exchange::js_runtime::value::utf16("BTCUSDT").as_ref());}if name=="usdt-zero"{prop(&tickers,"BTCUSDT").assign("last",number(0.0));}},"negative-stable"|"negative-nonstable"=>account.assign("assets",ev(json!([{"asset":if name=="negative-stable"{"USDT"}else{"NO"},"walletBalance":"-3.6","availableBalance":"0","initialMargin":"0","unrealizedProfit":"0"}]))),"upnl-only"=>account.assign("assets",ev(json!([{"asset":"BTC","walletBalance":"0","availableBalance":"0","initialMargin":"0","unrealizedProfit":"3.6"}]))),"zero"=>account.assign("assets",array(vec![])),"nan"=>path(&account,&["assets","0"]).assign("walletBalance",string("bad")),"error-log-mutates"|"error-log-error"|"bad-assets"=>account.assign("assets",EventValue::Bool(true)),"null"=>account=EventValue::Null,_=>{}}
         }
         let cached = ev(json!([{"id":"cached","contracts":4.2}]));
         let mut secondary = ExchangeError::new("config first");
         secondary.name = "RangeError".into();
-        secondary.response = Some(json!({"status":504,"data":{"msg":"config detail"}}));
+        secondary = secondary
+            .with_retained_response((json!({"status":504,"data":{"msg":"config detail"}})).into());
         Rc::new(Self {
             kind: k,
             name: name.into(),
@@ -353,7 +360,7 @@ impl PositionSnapshotBindings for Bindings {
         }
         if self.name == "id-mutates-config" && n == 1 {
             if let EventValue::Array(a) = &self.configs {
-                if let Some(Some(c)) = a.borrow().first() {
+                if let Some(Some(c)) = native_array_fixture::slots(&a).first() {
                     c.assign("leverage", string("2.5"));
                     c.assign("marginType", string("CROSSED"));
                 }
@@ -491,7 +498,7 @@ fn native(k: Kind, name: &str) -> Value {
         assert_eq!(e.message, "position snapshot fixture");
         assert_eq!(observed_error_code(&e.code), Some(json!(-1000)));
         assert_eq!(
-            e.response,
+            e.response_json_view(),
             Some(json!({"status":503,"data":{"msg":"position venue detail"}}))
         );
     }
@@ -502,16 +509,16 @@ fn native(k: Kind, name: &str) -> Value {
         check_balance(&h, &value, name);
     }
     let input = if let EventValue::Array(a) = &h.risk {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
     let rows = if let EventValue::Array(a) = &value {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
-    json!({"name":name,"gets":h.gets.borrow().iter().map(|(c,e)|json!([if *c==SnapshotClient::Papi{"papi"}else{"private"},e])).collect::<Vec<_>>(),"ops":*h.ops.borrow(),"ids":h.ids.borrow().iter().map(|(s,side,m)|json!([s,wire(side),serde_json::to_value(m).unwrap()])).collect::<Vec<_>>(),"emits":h.emits.borrow().iter().map(wire).collect::<Vec<_>>(),"logs":h.logs.borrow().iter().map(|(m,s)|json!({"message":m,"severity":s.as_str()})).collect::<Vec<_>>(),"logged":h.logged.get(),"value":wire(&value),"failure":r.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&h.primary),"name":e.name,"message":e.message,"code":observed_error_code(&e.code),"response":e.response})),"refs":{"fallback":value.same(&h.cached),"balance":path(&value,&["balance"]).same(&h.balance),"positions":path(&value,&["positions"]).same(&h.current.borrow()),"originalInfo":rows.iter().filter(|p|input.iter().any(|i|prop(p,"info").same(i))).count(),"assets":path(&value,&["balance","info","assets"]).same(&path(&h.account,&["assets"])),"rest":!path(&value,&["balance","info"]).same(&h.account)},"marketCount":if let EventValue::Array(a)=&h.markets{a.borrow().len()}else{0}})
+    json!({"name":name,"gets":h.gets.borrow().iter().map(|(c,e)|json!([if *c==SnapshotClient::Papi{"papi"}else{"private"},e])).collect::<Vec<_>>(),"ops":*h.ops.borrow(),"ids":h.ids.borrow().iter().map(|(s,side,m)|json!([s,wire(side),serde_json::to_value(m).unwrap()])).collect::<Vec<_>>(),"emits":h.emits.borrow().iter().map(wire).collect::<Vec<_>>(),"logs":h.logs.borrow().iter().map(|(m,s)|json!({"message":m,"severity":s.as_str()})).collect::<Vec<_>>(),"logged":h.logged.get(),"value":wire(&value),"failure":r.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&h.primary),"name":e.name,"message":e.message,"code":observed_error_code(&e.code),"response":e.response_json_view()})),"refs":{"fallback":value.same(&h.cached),"balance":path(&value,&["balance"]).same(&h.balance),"positions":path(&value,&["positions"]).same(&h.current.borrow()),"originalInfo":rows.iter().filter(|p|input.iter().any(|i|prop(p,"info").same(i))).count(),"assets":path(&value,&["balance","info","assets"]).same(&path(&h.account,&["assets"])),"rest":!path(&value,&["balance","info"]).same(&h.account)},"marketCount":if let EventValue::Array(a)=&h.markets{a.len()}else{0}})
 }
 fn check_positions(h: &Host, v: &EventValue, name: &str) {
     let fallback = h.rejecting()
@@ -564,17 +571,13 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
         panic!("native position array")
     };
     let n = if name == "oneway" { 2 } else { 4 };
-    assert_eq!(
-        a.borrow().len(),
-        n,
-        "native independent unique position count"
-    );
+    assert_eq!(a.len(), n, "native independent unique position count");
     assert_eq!(
         h.ids.borrow().len(),
         if name == "empty" { 4 } else { 7 },
         "native independent ID count incl discarded duplicates"
     );
-    let rows = array_values(&a);
+    let rows = array_values(&a).expect("fixture array reads");
     let first = &rows[0];
     let real = name != "empty";
     let one = name == "oneway";
@@ -895,7 +898,7 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
     }
     assert_eq!(
         if let EventValue::Array(a) = &h.markets {
-            a.borrow().len()
+            a.len()
         } else {
             0
         },
@@ -1108,11 +1111,7 @@ fn check_balance(h: &Host, v: &EventValue, name: &str) {
         let EventValue::Array(a) = prop(&h.account, "assets") else {
             unreachable!()
         };
-        assert_eq!(
-            a.borrow().len(),
-            3,
-            "native live for-of consumes appended asset"
-        );
+        assert_eq!(a.len(), 3, "native live for-of consumes appended asset");
     }
     if name == "market-mutates-asset" {
         assert!(
@@ -1187,3 +1186,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;

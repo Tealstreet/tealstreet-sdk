@@ -39,7 +39,11 @@ for(const routeInput of routes) for(const variation of ['normal','override','emp
  if(override!==null){venue.parent.getBybitPublicWsUrl=()=>override;venue.parent.getBybitPrivateWsUrl=()=>override;}
  venue.category=category;venue.isDisposed=disposed;venue.directFallback=vm.runInContext('new WsDirectFallback()',context);
  venue.createWebsocket=(url,protocols,options)=>{assert.equal(protocols,undefined);calls.push({url,headers:options?.headers??{}});return {addEventListener(){}};};
- for(let i=0;i<6;i++)venue.connectAndSubscribe();
+ for(let i=0;i<6;i++) {
+  venue.connectAndSubscribe();
+  assert.equal(calls.length, disposed || (privateSocket && signer) ? 0 : i+1,
+   'maintained connectAndSubscribe creates its socket synchronously before returning');
+ }
  delete options.payloadSigner;
  cases.push({private:privateSocket,category,demo,options,route,override,disposed,signer,relayEnabled,relayKind:true,calls,events});
 }

@@ -90,7 +90,10 @@ fn account_reads_match_actual_typescript() {
                                 if !fault.is_null() {
                                     let mut error =
                                         ExchangeError::new(fault["message"].as_str().unwrap());
-                                    error.response = fault.get("response").cloned();
+                                    if let Some(response) = fault.get("response") {
+                                        error =
+                                            error.with_retained_response(response.clone().into());
+                                    }
                                     return Poll::Ready(Err(error));
                                 }
                                 Poll::Ready(Ok(
@@ -183,7 +186,8 @@ fn account_reads_match_actual_typescript() {
     assert_eq!(balances.len(), 12, "BITRUE-BALANCE-READ source total");
     for (i, raw) in balance_inputs.iter().enumerate() {
         for (j, reject) in [false, true].into_iter().enumerate() {
-            use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+            use safe_cex_exchange::native_store::DefaultStore;
+            use safe_cex_store::{Store, StoreUpdate};
             use safe_cex_types::Balance;
             let row = &balances[i * 2 + j];
             assert_eq!(
@@ -246,8 +250,19 @@ fn account_reads_match_actual_typescript() {
             ));
             let actual = match result {
                 Ok(value) => {
-                    let stored = store.balance();
-                    json!({"kind":"balance","stored":std::ptr::eq(&*value,&*stored),"fields":([value.total,value.free,value.used,value.upnl].map(|v|format!("{:016x}",v.to_bits()))),"currencies":value.currencies.as_ref().map(|c|c.keys().collect::<Vec<_>>()),"info":value.info})
+                    let stored = store.balance_handle().unwrap();
+                    let same = value
+                        .native_value()
+                        .downcast::<safe_cex_exchange::js_runtime::value::Js>()
+                        .unwrap()
+                        .same_reference(
+                            &stored
+                                .native_value()
+                                .downcast::<safe_cex_exchange::js_runtime::value::Js>()
+                                .unwrap(),
+                        );
+                    let value = value.read().unwrap();
+                    json!({"kind":"balance","stored":same,"fields":([value.total,value.free,value.used,value.upnl].map(|v|format!("{:016x}",v.to_bits()))),"currencies":value.currencies.as_ref().map(|c|c.keys().collect::<Vec<_>>()),"info":value.info})
                 }
                 Err(error) => json!({"kind":"error","name":error.name,"message":error.message}),
             };

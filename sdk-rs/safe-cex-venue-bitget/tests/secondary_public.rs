@@ -1,12 +1,13 @@
 #[path = "support/secondary_ws.rs"]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::ExchangeError,
     websocket::WsEvent,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::{ExchangeName, Market, PlaceOrderOpts, Ticker};
 use safe_cex_venue_bitget::secondary_public::BitgetSecondaryPublicWebsocket;
@@ -178,8 +179,8 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         "SECONDARY native first attempt"
     );
     assert!(
-        !socket.base().has_websocket(),
-        "SECONDARY owned dial window"
+        socket.base().has_websocket(),
+        "SECONDARY ready dial is installed at call time"
     );
     let expected_symbols = match index as usize {
         0 => vec!["1", "2", "7"],
@@ -272,7 +273,7 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         "SECONDARY native delivered message count"
     );
     {
-        let rows = store.tickers();
+        let rows = store.tickers().unwrap();
         assert_eq!(rows.len(), 1, "SECONDARY native ticker count");
         let t = &rows[0];
         assert_eq!(t.id, "btc", "SECONDARY native ticker id");
@@ -282,7 +283,7 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
             (t.ask, 22.5),
             (t.last, 33.75),
             (t.mark, 44.5),
-            (t.index, 55.25),
+            (t.index.unwrap(), 55.25),
             (t.percentage, 66.5),
             (t.open_interest, 7001.5),
             (t.funding_rate, 0.00775),
@@ -304,13 +305,17 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         .borrow_mut()
         .push_back(WsEvent::Message(SocketFrame::Text("pong".into())));
     pump(&runtime);
-    assert_eq!(store.latency(), 7.0, "SECONDARY native bound pong latency");
+    assert_eq!(
+        store.latency().unwrap(),
+        7.0,
+        "SECONDARY native bound pong latency"
+    );
     assert_eq!(socket.message_count(), 2.0, "SECONDARY native pong counted");
     socket
         .on_message(&SocketFrame::Binary(b"pong".to_vec()))
         .unwrap();
     assert_eq!(
-        store.latency(),
+        store.latency().unwrap(),
         7.0,
         "SECONDARY binary pong is not text pong"
     );
@@ -325,8 +330,8 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         keys,
         sent: sends,
         count: socket.message_count(),
-        latency: store.latency(),
-        ticker: store.tickers()[0].clone(),
+        latency: store.latency().unwrap(),
+        ticker: store.tickers().unwrap()[0].clone(),
     };
     socket.base().dispose();
     runtime.discard_tasks();
@@ -421,6 +426,7 @@ fn secondary_fallback_and_cancellation() {
         "SECONDARY resumable dial is pending"
     );
     runtime3.pending_dial.set(false);
+    runtime3.dial_waker.borrow_mut().take().unwrap().wake();
     pump(&runtime3);
     assert!(
         socket3.base().has_websocket(),
@@ -593,7 +599,7 @@ fn secondary_native_ingress_and_error_projection() {
         "SECONDARY explicit typed-frame UTF16 projection refusal"
     );
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         0.0,
         "SECONDARY forced whole JSON ingress refusal"
     );
@@ -604,7 +610,7 @@ fn secondary_native_ingress_and_error_projection() {
     );
     let mut original = ExchangeError::new("subscriber failed");
     original.name = "RootFailure".into();
-    original.response = Some(json!({"witness":42}));
+    original = original.with_retained_response(json!({"witness":42}).into());
     let cause = Rc::new(original);
     let failure = safe_cex_types::StoreSubscriberError::new("subscriber failed").with_cause(cause);
     let _unsubscribe = Store::subscribe(store.as_ref(), Box::new(move |_, _| Err(failure.clone())));
@@ -621,7 +627,7 @@ fn secondary_native_ingress_and_error_projection() {
         "SECONDARY native subscriber error message"
     );
     assert_eq!(
-        error.response,
+        error.response_json_view(),
         Some(json!({"witness":42})),
         "SECONDARY native subscriber response"
     );
@@ -632,7 +638,7 @@ fn secondary_native_ingress_and_error_projection() {
         "SECONDARY native subscriber identifier"
     );
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         17.0,
         "SECONDARY failed notification commits first row"
     );
@@ -671,4 +677,78 @@ fn secondary_state_views_mutate_the_bound_protocol() {
     socket.base().dispose();
     runtime.discard_tasks();
     drop(parent);
+}
+
+#[test]
+fn secondary_connect_installs_ready_socket_before_polling() {
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        let (parent, _, runtime, socket) = fixture(name, false, 1.0);
+        socket.connect_and_subscribe().unwrap();
+        assert!(
+            socket.base().has_websocket(),
+            "SECONDARY eager ready dial installs before runtime polling"
+        );
+        assert_eq!(
+            runtime.dials.borrow().as_slice(),
+            ["wss://ws.bitget.com/v2/ws/public"]
+        );
+        assert_eq!(topic_keys(&socket), ["BTC", "SOL", "BNB"]);
+        socket
+            .on_markets_changed(&["ZERO".into(), "NEW".into(), "OTHER".into()])
+            .unwrap();
+        assert_packet(
+            runtime.io.sent.borrow().last().unwrap(),
+            match parent.name() {
+                ExchangeName::Bitget => "USDT-FUTURES",
+                ExchangeName::Bitgetusdc => "USDC-FUTURES",
+                _ => "COIN-FUTURES",
+            },
+            "ticker",
+            &["NEW"],
+        );
+        socket.base().dispose();
+        runtime.discard_tasks();
+    }
+}
+
+#[test]
+fn secondary_pending_dial_starts_now_and_dispose_drops_its_io() {
+    let (parent, _, runtime, socket) = fixture(ExchangeName::Bitget, false, -0.0);
+    runtime.pending_dial.set(true);
+    let original_owners = Rc::strong_count(&runtime.io);
+    socket.connect_and_subscribe().unwrap();
+    assert_eq!(
+        runtime.dials.borrow().len(),
+        1,
+        "SECONDARY pending dial starts before runtime polling"
+    );
+    // Separate compiled presence RED is tracked in EAGER_DIAL_AUDIT.md.
+    assert!(
+        !socket.base().has_websocket(),
+        "pending native handshake has not supplied a handle yet"
+    );
+    assert!(!socket.base().is_connected());
+    assert!(
+        Rc::strong_count(&runtime.io) > original_owners,
+        "pending dial owns real host I/O"
+    );
+    socket.base().dispose();
+    assert_eq!(
+        Rc::strong_count(&runtime.io),
+        original_owners,
+        "SECONDARY dispose drops pending dial I/O before runtime polling"
+    );
+    runtime.pending_dial.set(false);
+    runtime.dial_waker.borrow_mut().take().unwrap().wake();
+    pump(&runtime);
+    assert!(
+        !socket.base().has_websocket(),
+        "cancelled eager dial never installs a stale socket"
+    );
+    drop(parent);
+    runtime.discard_tasks();
 }

@@ -44,7 +44,11 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(x) => json!(x),
         EventValue::String(x) => json!(String::from_utf16(x).unwrap()),
-        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -65,7 +69,7 @@ fn error() -> Failure {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         -1000
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"session detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"session detail"}})).into());
     Rc::new(e)
 }
 fn assert_error(r: &Result<(), Failure>, wanted: bool, e: &Failure, label: &str) {
@@ -76,7 +80,7 @@ fn assert_error(r: &Result<(), Failure>, wanted: bool, e: &Failure, label: &str)
         assert_eq!(x.message, "session fixture");
         assert_eq!(observed_error_code(&x.code), Some(json!(-1000)));
         assert_eq!(
-            x.response,
+            x.response_json_view(),
             Some(json!({"status":503,"data":{"msg":"session detail"}})),
             "native full Error response metadata"
         );
@@ -252,7 +256,9 @@ impl ConstructorBindings for Ctor {
         self.stage(s)?;
         if self.case == "tuple-mutates" && k == Factory::PublicAPI {
             if let EventValue::Array(a) = &self.split {
-                a.borrow_mut()[1] = Some(self.clients[2].clone());
+                EventValue::Array(a.clone())
+                    .set("1", self.clients[2].clone())
+                    .unwrap();
             }
         }
         Ok(self.clients[i].clone())
@@ -267,7 +273,7 @@ impl ConstructorBindings for Ctor {
     fn guards(&self, owner: EventValue, clients: EventValue) -> Result<(), Failure> {
         assert!(owner.same(&self.owner));
         if let EventValue::Array(a) = clients {
-            *self.guards.borrow_mut() = array_values(&a)
+            *self.guards.borrow_mut() = array_values(&a).expect("fixture array reads")
         } else {
             panic!("native constructor guard array")
         };
@@ -1009,12 +1015,13 @@ fn message_case(name: &str) -> Value {
             let EventValue::Array(rows) = &args[0] else {
                 panic!("native event array")
             };
-            assert_eq!(
-                rows.borrow().len(),
-                1,
-                "native routed count from expectation"
-            );
-            let row = rows.borrow()[0].clone().unwrap();
+            assert_eq!(rows.len(), 1, "native routed count from expectation");
+            let row = EventValue::Array(rows.clone())
+                .array_items()
+                .unwrap()
+                .unwrap()[0]
+                .clone()
+                .unwrap();
             number_is(
                 row.read("price").unwrap(),
                 12.3,
@@ -1035,8 +1042,10 @@ fn message_case(name: &str) -> Value {
                     let EventValue::Array(a) = d else {
                         panic!("native deep JSON array depth")
                     };
-                    assert_eq!(a.borrow().len(), 1);
-                    d = a.borrow()[0].clone().unwrap();
+                    assert_eq!(a.len(), 1);
+                    d = EventValue::Array(a.clone()).array_items().unwrap().unwrap()[0]
+                        .clone()
+                        .unwrap();
                 }
                 number_is(d, 0.0, "native deep JSON leaf");
                 assert!(
@@ -1229,7 +1238,7 @@ fn mode_case(name: &str) -> Value {
             panic!("native mode positions")
         };
         assert_eq!(
-            a.borrow().len(),
+            a.len(),
             4,
             "native confirmed four positions from independent fixture"
         );

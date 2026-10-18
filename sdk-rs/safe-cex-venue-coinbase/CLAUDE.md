@@ -354,3 +354,36 @@ class witnesses cancel a real timer and retain an independent uncancelled timer.
 `lifecycle-timer-controls.py` restores the JSON-roundtrip defect, requires both
 named native failures, restores exact source bytes and reruns both witnesses.
 The fixed timer alias has a specific non-decoder capability receipt.
+
+The last ten structural data aliases have seven native decoder records and three
+non-decoder collection roles. `data-alias-contracts.mjs` authenticates fresh
+compiler targets and reads decoded contents before reporting; its controls lose
+actual decoded rows and market metadata, require named output mismatches and
+restore the exact observations. `data_alias_native` separately exercises native
+Js decoding, shared item/market/catalog/model roots, rich retained info, candle
+numbers and the production typed-field frame adapter. The projection control
+changes that actual venue adapter, requires its compiled bit assertion to fail
+and restores exact bytes. This finite cohort does not replace underlying model
+contracts or claim every read method or arbitrary input-object identity.
+
+The shared retained/numeric typed decoder now replaces isolated UTF-16 units
+with U+FFFD in materialized String fields instead of rejecting the entire record.
+`tests/string_boundaries.rs` retains the live source corpus and exact unit/path
+pins, measures that accepted typed-view cost, and checks that ignored strings
+leave declared fields intact. Standalone serde_json::Value parsing and the
+separate bounded recursion behavior retain their own explicit checks.
+
+The two assigned FIX-audit rows are classified in `DIVERGENCE_FIX_AUDIT.md`.
+The production PEM decoder retains its native codec cause and the maintained
+`atob` name/message branches; the eleven separately labelled signing profiles
+reach both constructed WS-auth and validated REST-placement hooks. The pure
+unit-error facade remains outside that assembly. Starbase intent serialization
+is accepted only while the builder has no live transport/Store consumer; native
+blocked results still borrow the exact typed caller. Before activation, revisit
+caller-only own fields/order. `scripts/divergence-binding-controls.py` requires
+compiled production failures, exact restoration and the live inert-builder
+reachability control; existing source corpora and identity assertions stay intact.
+
+The PEM signing oracle executes the maintained Coinbase API and shared Axios
+factory: REST rejection messages include the venue's request-setup prefix, while
+direct WS signing retains the unprefixed decoder message and error name.

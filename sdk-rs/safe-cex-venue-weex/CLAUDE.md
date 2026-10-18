@@ -579,3 +579,25 @@ use binary64 bits. Closed String outputs still visibly refuse lone units.
 Ignored surrogate fields reach the fill guard/mapper without narrowing the whole
 record; depth-budget refusal remains separate. The existing source corpus and
 all ordinary ingress-route comparison counts are unchanged.
+
+The public SDK invokes its actual source member before returning the Rust
+`ExchangeFuture`. Its `invoke` and `unit` helpers await the already-running
+source Promise; they do not wrap it in a second producer. The constructed
+`tests/eager_sdk_binding.rs` regression compares whole-class TypeScript call-time
+mode Store updates and both signed order requests after the caller drops an
+unpolled waiter. Wrapper candidates across venues are recorded in
+[the shared census](../parity/PUBLIC_ASYNC_WRAPPER_CENSUS.md); this does not waive
+the deeper typed-output or per-row refusal contracts above.
+
+The exact 23-row non-UTF-8 FIX audit is in
+[`WEEX_FIX_AUDIT.md`](../parity/WEEX_FIX_AUDIT.md). The production candle/book
+adapters evaluate only the source-read fields over native Js, rather than
+capturing entire rows with ignored deep properties. Book tuples use the shared
+IteratorRecord for exactly two destructured values and iterator closure; book
+totals use the installed canonical helper. The standalone typed utilities retain
+their separate ingress contract. No whole-page numeric-bound refusal is approved
+by these scoped rulings; the observed counterexample is shared with that audit.
+The new whole-class source and constructed SDK probes cover thirteen utility
+consumer profiles and six held private-refresh profiles, including reset debounce
+and disposal before response settlement. Timer pumping never advances virtual
+time implicitly in these probes. The terminal HTTP hold retains real wakers.

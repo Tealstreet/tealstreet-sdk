@@ -36,8 +36,10 @@ never manufactures success from a resolved void future. Missing/rejected executo
 emit exec-log, with exec-result only for a supplied reqId (including an empty one).
 
 Full account position refreshes use the full Store mutator even for empty
-results; scoped refreshes remain partial. Cancelling an in-flight Rust refresh
-releases its own pending markers and reports cancellation to the waiting bridge.
+results; scoped refreshes remain partial. Position refresh uses the canonical eager Promise driver: fetch/locks start
+during helper or dispatch entry, and even ready fetches yield before Store/reply
+work. Dropping a caller waiter does not cancel the request; runtime abandonment
+releases its pending markers and reports cancellation to the bridge.
 
 Market-load buffering uses separate 500ms self-rescheduling checks and a 30s
 deadline. Timeout reports are cooled down for five minutes and contain only
@@ -57,9 +59,11 @@ Sentry worker errors read only nonempty string message/name/stack properties;
 plain structured-clone objects work, primitive rejections use the supplied
 fallbacks, and whitespace strings remain valid. Missing stacks stay omitted.
 
-Sentry serialization currently accepts JSON properties only: inherited and
-non-enumerable browser Error/DOMException fields need host materialization.
-The live TypeScript witness pins this outstanding boundary, recorded as divergent.
+Sentry serialization accepts canonical Js values and reads inherited and hidden
+message/name/stack through Get in source order. Getter failures preserve their
+original thrown value and stop later reads; functions use fallbacks without Get.
+The existing String DTO replaces isolated UTF16 units with U+FFFD under the
+approved UTF-8 addendum; retained input units and valid pairs remain unchanged.
 Payload enums reject JSON object-form enum tags; worker ops are string literals.
 Private serde remote helpers expose the derived spelling inventory to unit tests,
 while public Deserialize requires strings. Fixture mode and version are closed
@@ -598,8 +602,8 @@ The numeric capture probe executes an independent 11-token inventory, checking
 source row/pair counts and native comparison count. Empty, partial and extra
 iterations must fail even when the source-total guard is bypassed.
 
-Snapshot parity fixes its execution at 72 × 17 preparation steps and 354 ticker
-actions across 70 traces. Source per-case counts, independent native bounds and
+Snapshot parity fixes its execution at 72 × 17 preparation steps and 358 ticker
+actions across 71 traces. Source per-case counts, independent native bounds and
 full-output collection comparisons prevent truncated traces from skipping work.
 
 Task identity fixes each record's case/leaf counts and executed comparisons. Its
@@ -694,3 +698,24 @@ Constructed AsterDEX private-frame/worker emitter witnesses live in
 `../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
 The venue retains private facade tests without importing the worker crate. Both paths preserve
 variadic event arguments; the real fill bridge retains Infinity and object identity.
+
+The ticker baseline corpus includes four nullable-index actions in addition to
+its original 354 comparisons. Actual maintained worker execution observes an
+updated null baseline without a packed null value; null-to-number emits the
+numeric index delta. This preserves the source typeof-number filter.
+
+TWAP resume/terminate keep their synchronous state/timer prefix and return the
+canonical eager Promise waiter, so even ready/no-op/error results yield before
+an awaiting caller continues. Posting failures preserve earlier state commits
+and stop later cleanup/removal; tests compare actual source instances before
+polling as well as after settlement.
+
+Chaser placement/completion use the canonical eager Promise driver. Caller waiter
+abandonment cannot cancel late-placement cleanup or fill reconciliation. Typed
+leaf results cross source await checkpoints before logs, retries, fills or events;
+ready, failed, no-op and held results are compared with the actual TS manager.
+
+CallMethod dispatch starts through the canonical eager driver at either entry.
+Ready venue futures yield at the source await before replying; synchronous cases
+reply during entry. Dropping a caller waiter leaves the operation and reply owned
+by the runtime. Runtime teardown keeps the existing guarded cancellation report.

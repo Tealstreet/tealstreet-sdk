@@ -32,7 +32,10 @@ fn live_algo_mapper_preserves_partial_stop_and_copied_fields() {
     let input = from_json(&partial());
     let result =
         map(&h, "mapAlgoOrder", input.clone()).expect("real algo mapper must retain partial STOP");
-    let rows = result.array_values().unwrap();
+    let rows = result
+        .array_values()
+        .expect("fixture array property reads")
+        .unwrap();
     assert_eq!(rows.len(), 1, "partial STOP remains an order");
     let row = &rows[0];
     assert!(row.has_own("type") && row.get("type").unwrap().is_undefined());
@@ -83,7 +86,10 @@ fn live_algo_fetch_keeps_partial_stop_and_both_bracket_children() {
             }
         }))
         .unwrap();
-    let rows = result.array_values().unwrap();
+    let rows = result
+        .array_values()
+        .expect("fixture array property reads")
+        .unwrap();
     assert_eq!(
         rows.len(),
         3,
@@ -142,7 +148,10 @@ fn observe(actual: &Js, expected: &Value, label: &str) {
             "{label}: native UTF16"
         ),
         Value::Array(values) => {
-            let rows = actual.array_values().expect(label);
+            let rows = actual
+                .array_values()
+                .expect("fixture array property reads")
+                .expect(label);
             assert_eq!(rows.len(), values.len(), "{label}: count");
             for (index, (row, value)) in rows.iter().zip(values).enumerate() {
                 observe(row, value, &format!("{label}[{index}]"));
@@ -194,13 +203,17 @@ fn live_mappers_execute_all_103_source_records_without_typed_refusal_exemptions(
         let result = result
             .unwrap_or_else(|error| panic!("{label}: actual mapper refused {}", error.message()));
         observe(&result, &case["result"], &label);
-        for row in result.array_values().unwrap_or_else(|| {
-            if matches!(result, Js::Null) {
-                vec![]
-            } else {
-                vec![result]
-            }
-        }) {
+        for row in result
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap_or_else(|| {
+                if matches!(result, Js::Null) {
+                    vec![]
+                } else {
+                    vec![result]
+                }
+            })
+        {
             assert!(
                 row.get("info").unwrap().strict_equals(&input),
                 "{label}: original parent identity"
@@ -237,7 +250,11 @@ fn live_mapper_numeric_fields_keep_all_36_source_bit_witnesses() {
             serde_json::from_str(case["lexeme"].as_str().unwrap()).unwrap();
         let result = map(&h, method, from_json(&row)).unwrap();
         let order = if method == "mapAlgoOrder" {
-            result.array_values().unwrap().remove(0)
+            result
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap()
+                .remove(0)
         } else {
             result
         };
@@ -353,13 +370,16 @@ fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
                     .call_method("update", vec![Js::object(vec![("orders", rows.clone())])])
                     .expect("configured fetchOrders must not poison the Store snapshot");
                 assert_eq!(
-                    h.store.orders().len(),
+                    h.store.orders().unwrap().len(),
                     4,
                     "good rows reach the actual DefaultStore"
                 );
                 rows
             };
-            let rows = rows.array_values().unwrap();
+            let rows = rows
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap();
             assert_eq!(
                 rows.iter()
                     .map(|row| row.get("id").unwrap().to_display())
@@ -439,5 +459,101 @@ fn real_client_id_rule_matches_source_safe_integer_limits() {
             "source client-ID rule {row}"
         );
     }
+    h.exchange.dispose().unwrap();
+}
+
+#[test]
+fn constructed_order_tables_keep_source_own_entries_and_inherited_referents() {
+    let h = setup(|_| {});
+    let source: Value = serde_json::from_str(include_str!("../fixtures/constants.json")).unwrap();
+    let names = ["ORDER_TYPE", "ORDER_SIDE", "ORDER_TRIGGER_TYPE"];
+    let tables = names.map(|name| h.exchange.rt.global(name).unwrap());
+    for (name, table) in names.iter().zip(&tables) {
+        let entries = source["ordered"][name].as_array().unwrap();
+        let keys = table
+            .own_keys()
+            .iter()
+            .map(|key| String::from_utf16(key.as_ref()).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            entries
+                .iter()
+                .map(|entry| entry[0].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            "constructed {name}: source own-entry order"
+        );
+        for entry in entries {
+            let key = entry[0].as_str().unwrap();
+            assert!(table.has_own(key));
+            observe(&table.get(key).unwrap(), &entry[1], name);
+        }
+        assert!(table.get("unknown").unwrap().is_undefined());
+    }
+    for key in [
+        "constructor",
+        "toString",
+        "toLocaleString",
+        "valueOf",
+        "hasOwnProperty",
+        "isPrototypeOf",
+        "propertyIsEnumerable",
+        "__proto__",
+        "__defineGetter__",
+        "__defineSetter__",
+        "__lookupGetter__",
+        "__lookupSetter__",
+    ] {
+        let original = tables[0].get(key).unwrap();
+        if key == "__proto__" {
+            assert!(original.is_object() && !original.is_callable());
+        } else {
+            assert!(original.is_callable(), "constructed inherited {key}");
+        }
+        for table in &tables {
+            assert!(!table.has_own(key), "inherited {key} must not become own");
+            assert!(
+                table.get(key).unwrap().strict_equals(&original),
+                "constructed tables share original {key} referent"
+            );
+        }
+        let input = from_json(&json!({
+            "order_id":1,"symbol":"PERP_BTC_USDT","type":key,"side":key,
+            "quantity":2,"executed":1,"price":10,"status":"NEW"
+        }));
+        let limit = map(&h, "mapLimitOrder", input.clone()).unwrap();
+        for field in ["type", "side"] {
+            assert!(limit.get(field).unwrap().strict_equals(&original));
+        }
+        assert!(limit.get("info").unwrap().strict_equals(&input));
+        input.set("afterMapping", Js::Number(-0.0)).unwrap();
+        assert_eq!(
+            limit
+                .get("info")
+                .unwrap()
+                .get("afterMapping")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            (-0.0_f64).to_bits(),
+            "limit info remains a live alias"
+        );
+        let algo = from_json(&json!({
+            "algoOrderId":2,"symbol":"PERP_BTC_USDT","algoType":key,
+            "side":key,"triggerPriceType":key,"triggerPrice":10,
+            "quantity":2,"totalExecutedQuantity":1
+        }));
+        let row = map(&h, "mapAlgoOrder", algo)
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()
+            .remove(0);
+        for field in ["type", "side", "tpTriggerType"] {
+            assert!(row.get(field).unwrap().strict_equals(&original));
+        }
+    }
+    assert!(h.runtime.reports.borrow().is_empty());
     h.exchange.dispose().unwrap();
 }

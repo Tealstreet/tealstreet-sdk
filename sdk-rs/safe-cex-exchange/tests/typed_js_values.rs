@@ -1,5 +1,6 @@
 //! Native typed values cross the runtime before any JSON wire projection.
-use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_json, to_typed};
+use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_json, to_retained_input, to_typed};
+use safe_cex_types::retained_json::RetainedJsonInput;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,7 +35,12 @@ fn typed_numbers_retain_native_bits_in_both_directions() {
             value.to_bits(),
             "native-to-JS scalar bits"
         );
-        let array = js.get("values").unwrap().array_values().unwrap();
+        let array = js
+            .get("values")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(
             array[0].as_f64().unwrap().to_bits(),
             value.to_bits(),
@@ -140,13 +146,23 @@ fn typed_projection_keeps_enum_and_optional_object_shapes() {
             .optional
             .is_none()
     );
-    assert!(to_typed::<String>(&Js::String(vec![0xd800].into())).is_err());
+    let raw = Js::String(vec![0xd800].into());
+    assert_eq!(
+        to_retained_input(&raw).unwrap(),
+        RetainedJsonInput::Text(vec![0xd800])
+    );
+    assert_eq!(to_typed::<String>(&raw).unwrap(), "\u{fffd}");
+    assert_eq!(
+        to_retained_input(&raw).unwrap(),
+        RetainedJsonInput::Text(vec![0xd800]),
+        "typed replacement leaves the native string's original units intact"
+    );
 }
 
 #[test]
 fn currency_rows_keep_source_shapes_through_typed_store_updates() {
     use safe_cex_exchange::js_runtime::{store, value::from_json};
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_types::CurrencyBalance;
     use serde_json::json;
     use std::rc::Rc;
@@ -155,13 +171,13 @@ fn currency_rows_keep_source_shapes_through_typed_store_updates() {
         "BTC":{"used":1.0,"free":2.0,"total":3.0,"upnl":4.0}
     }});
     let native = Rc::new(DefaultStore::new());
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     facade
         .call_method("update", vec![from_json(&json!({"balance":source}))])
         .unwrap();
-    let actual = native.balance();
+    let actual = native.balance().unwrap();
     assert_eq!(
-        serde_json::to_value(&*actual).unwrap(),
+        serde_json::to_value(&actual).unwrap(),
         source,
         "Store preserves currency field names without normalization"
     );

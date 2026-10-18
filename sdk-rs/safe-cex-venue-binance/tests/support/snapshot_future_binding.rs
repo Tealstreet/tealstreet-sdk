@@ -86,7 +86,7 @@ fn exercise(rejected: bool) {
         Venue::PM,
         safe_cex_types::ExchangeName::Binancepm,
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         deps,
     )
     .unwrap();
@@ -153,7 +153,7 @@ fn exercise(rejected: bool) {
     };
     if rejected {
         assert!(
-            rows.borrow().is_empty(),
+            rows.is_empty(),
             "failed conditional continuation returns source Store fallback, never partial regular rows"
         );
         assert_eq!(
@@ -167,7 +167,10 @@ fn exercise(rejected: bool) {
             "source catch forwards rejected response.data.msg through Base formatting"
         );
     } else {
-        let rows = rows.borrow();
+        let rows = EventValue::Array(rows.clone())
+            .array_items()
+            .unwrap()
+            .unwrap();
         assert_eq!(
             rows.len(),
             2,

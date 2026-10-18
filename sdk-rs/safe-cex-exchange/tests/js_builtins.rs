@@ -110,7 +110,7 @@ fn fixture() -> (Rc<Runtime>, Rc<ScopeShared<()>>) {
     let shared = Rc::new(ScopeShared::new(
         runtime.clone(),
         Rc::new(Http(runtime.clone())),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         Js::object(vec![]),
         (),
     ));
@@ -172,6 +172,7 @@ fn cells(value: &Js) -> Value {
     Value::Array(
         value
             .array_items()
+            .expect("fixture array property reads")
             .unwrap()
             .into_iter()
             .map(|cell| match cell {

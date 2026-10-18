@@ -38,6 +38,7 @@ impl std::error::Error for StoreNotificationError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoreMutationError {
+    Access(safe_cex_types::StoreReadError),
     Patch(StorePatchError),
     Notification(StoreNotificationError),
     InvalidOperation(&'static str),
@@ -55,6 +56,11 @@ impl From<StorePatchError> for StoreMutationError {
         Self::Patch(error)
     }
 }
+impl From<safe_cex_types::StoreReadError> for StoreMutationError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Access(error)
+    }
+}
 impl From<StoreNotificationError> for StoreMutationError {
     fn from(error: StoreNotificationError) -> Self {
         Self::Notification(error)
@@ -68,6 +74,7 @@ impl From<&'static str> for StoreMutationError {
 impl std::fmt::Display for StoreMutationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Access(error) => error.fmt(f),
             Self::Patch(error) => error.fmt(f),
             Self::Notification(error) => error.fmt(f),
             Self::InvalidOperation(message) => f.write_str(message),
@@ -77,6 +84,7 @@ impl std::fmt::Display for StoreMutationError {
 impl std::error::Error for StoreMutationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Access(error) => Some(error),
             Self::Patch(error) => Some(error),
             Self::Notification(error) => Some(error),
             Self::InvalidOperation(_) => None,

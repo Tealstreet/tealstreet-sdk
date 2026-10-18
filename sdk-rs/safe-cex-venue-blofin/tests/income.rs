@@ -90,19 +90,22 @@ fn live_income_corpus() {
             let mut trace = Vec::new();
             let resolver = |id: &str| {
                 trace.push(id.to_owned());
-                case["resolved"].as_str().map(str::to_owned)
+                Ok(case["resolved"].as_str().map(str::to_owned))
             };
             let result = match case["op"].as_str().unwrap() {
-                "number" => to_number(input.as_ref()).map(bits),
-                "fill" => {
-                    map_blofin_fill_to_income_records(input.as_ref().unwrap(), resolver).map(|v| {
+                "number" => to_number(input.as_ref())
+                    .map(bits)
+                    .map_err(safe_cex_exchange::runtime::ExchangeError::from),
+                "fill" => map_blofin_fill_to_income_records(input.as_ref().unwrap(), resolver)
+                    .map(|v| {
                         pin.native(i, "/result/ok", v.len());
                         Value::Array(v.into_iter().map(income).collect())
                     })
-                }
+                    .map_err(safe_cex_exchange::runtime::ExchangeError::from),
                 "closed" => {
                     map_blofin_closed_position(input.as_ref().unwrap(), resolver, "account:unique")
                         .map(|v| v.map_or(Value::Null, closed))
+                        .map_err(safe_cex_exchange::runtime::ExchangeError::from)
                 }
                 _ => unreachable!(),
             };

@@ -53,7 +53,7 @@ pub(crate) fn preserve_recently_placed_orders(rt: &Rt, fetched: &Js) -> Result<J
         fetched,
         || now(rt),
         |id| mark_order_seen(rt, id),
-        || Ok(order_list(store.orders().to_vec())),
+        || Ok(order_list(store.orders()?.to_vec())),
     )?;
     let kept: Vec<Order> = kept.borrow().iter().map(|o| o.borrow().clone()).collect();
     from_typed(&kept)
@@ -221,7 +221,7 @@ pub(crate) fn retire_cancelled_orders(rt: &Rt, orders: &Js) -> Result<(), Thrown
     let venue = venue(rt)?;
     // The source accepts Pick<Order, 'id' | 'symbol'>, including the snapshots
     // produced by cancelSymbolOrders. No other Order fields are consumed here.
-    let orders = orders.array_values().unwrap_or_default();
+    let orders = orders.array_values()?.unwrap_or_default();
     if orders.is_empty() {
         return Ok(());
     }

@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::LogSeverity;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody};
 use safe_cex_types::*;
 use safe_cex_venue_blofin::{
@@ -292,6 +293,7 @@ impl pd::PrivateDataHost for Socket {
             self.context
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .find(|o| o.id == fill.order_id)
                 .and_then(|o| o.status.into_value()),
@@ -328,6 +330,9 @@ impl pd::PrivateDataHost for Socket {
             |message| pd::PrivateDataHost::emit_mapping_error(self, message),
         )
         .map_err(|e| match e {
+            safe_cex_venue_blofin::positions::PositionMapError::Store(e) => {
+                pd::PrivateDataError::Store(e.into())
+            }
             safe_cex_venue_blofin::positions::PositionMapError::Coercion(e) => {
                 pd::PrivateDataError::Coercion(e)
             }
@@ -346,13 +351,15 @@ impl uc::PublicStreamHost for Socket {
     fn is_testnet(&self) -> bool {
         self.context.options.testnet == Some(true)
     }
-    fn market_ids(&self) -> Vec<String> {
-        self.context
+    fn market_ids(&self) -> Result<Vec<std::string::String>, std::string::String> {
+        Ok(self
+            .context
             .store
             .markets()
+            .unwrap()
             .iter()
             .map(|m| m.id.clone())
-            .collect()
+            .collect())
     }
     fn has_socket(&self) -> bool {
         true
@@ -566,6 +573,15 @@ impl BlofinExchangeHost for ExchangeHost {
     }
     fn sleep(&self, _: f64) -> rl::LifecycleFuture<'_, (), String> {
         Box::pin(async { Ok(()) })
+    }
+    fn start_async<T: 'static>(
+        &self,
+        _: &Self::Base,
+        body: rl::LifecycleFuture<'static, T, String>,
+    ) -> rl::LifecycleFuture<'static, T, String> {
+        // This bounded assembly fixture drives all children through ready(); the
+        // production scheduling contract is tested with NativeHost separately.
+        body
     }
     fn init_external_public_data(&self, _: &Self::Base) -> rl::LifecycleFuture<'_, bool, String> {
         Box::pin(async { Ok(false) })

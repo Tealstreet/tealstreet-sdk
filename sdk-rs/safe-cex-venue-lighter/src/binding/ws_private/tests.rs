@@ -5,6 +5,7 @@ use super::super::{
     value::Microtasks,
 };
 use crate::ws_policy::{calculate_lighter_private_reconnect_delay, classify_lighter_private_close};
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch},
@@ -20,7 +21,8 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VIRTUAL_CLOCK};
+use safe_cex_store::Store;
+use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{TransportProvider, socket::SocketFrame, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use serde_json::{Value, json};
@@ -295,7 +297,7 @@ fn mapped_order(raw: &Js) -> Js {
 fn parent(world: &Rc<Runtime>, store_impl: &Rc<DefaultStore>, calls: &Calls, token: Js) -> Js {
     let runtime: Rc<dyn ExchangeRuntime> = world.clone();
     let settled = move |value: Js| Js::Promise(Promise::settled(&runtime, Ok(value)));
-    let store = store::facade(store_impl.clone());
+    let store = store::facade(store_impl.clone()).unwrap();
     store
         .define(
             "updatePositions",
@@ -573,7 +575,13 @@ fn account_all_payload_updates_orders_positions_and_throttled_balance() {
             "account": {"collateral": "100"}
         }),
     );
-    let orders: Vec<String> = world.store.orders().iter().map(|o| o.id.clone()).collect();
+    let orders: Vec<String> = world
+        .store
+        .orders()
+        .unwrap()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
     assert_eq!(
         orders,
         vec!["41"],
@@ -780,7 +788,7 @@ fn production_private_position_loop_consumes_live_iterators() {
             "{shape}: live source for-of trace"
         );
         assert!(
-            world.store.positions().is_empty(),
+            world.store.positions().unwrap().is_empty(),
             "nonzero unmapped rows do not synthesize closes"
         );
     }
@@ -869,7 +877,7 @@ fn production_private_position_loop_closes_only_after_a_body_throw() {
 fn production_private_position_close_spread_accepts_iterator_values() {
     let world = world();
     // Use the actual Store mutator rather than this fixture's dispatch recorder.
-    let native_store = store::facade(world.store.clone());
+    let native_store = store::facade(world.store.clone()).unwrap();
     world
         .socket
         .get("store")
@@ -918,7 +926,7 @@ fn production_private_position_close_spread_accepts_iterator_values() {
             Js::function("mapPosition", |_, _| Ok(Js::Undefined)),
         )
         .unwrap();
-    let revision = world.store.update_ids().positions;
+    let revision = world.store.update_ids().unwrap().positions;
     world
         .socket
         .call_method(
@@ -926,13 +934,13 @@ fn production_private_position_close_spread_accepts_iterator_values() {
             vec![Js::array(vec![Js::object(vec![("size", Js::str("0"))])])],
         )
         .unwrap();
-    let positions = world.store.positions();
+    let positions = world.store.positions().unwrap();
     assert_eq!(
         positions[0].contracts, 0.0,
         "spread must deliver its close pair to the actual Store"
     );
     assert!(positions[0].margin_size.is_undefined());
-    assert_eq!(world.store.update_ids().positions, revision + 1.0);
+    assert_eq!(world.store.update_ids().unwrap().positions, revision + 1.0);
 }
 
 #[test]
@@ -988,8 +996,8 @@ fn orders_flattening_calls_the_live_owner_helper_after_its_type_guard() {
     assert_eq!(
         json!({
             "same":result.same_reference(&expected), "calls":*calls.borrow(),
-            "stringLength":string.array_values().unwrap().len(),
-            "functionLength":function.array_values().unwrap().len(),
+            "stringLength":string.array_values().expect("fixture array property reads").unwrap().len(),
+            "functionLength":function.array_values().expect("fixture array property reads").unwrap().len(),
         }),
         source["flattenOrdersDispatch"]
     );

@@ -17,7 +17,8 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
         if let Poll::Ready(v) = f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
             return v;
         }
-        rt.now.set(rt.now.get() + 1000.0);
+        // Promise/microtask progress does not advance wall time. Advancing a
+        // full second on every poll also fires unrelated account-refresh timers.
         rt.pump();
     }
     panic!("scripted call must settle");
@@ -55,7 +56,7 @@ fn public_frames_preserve_book_sequences_and_candle_volume() {
     use safe_cex_transport::socket::SocketFrame;
     use std::cell::RefCell;
     let (venue, rt, store, _) = support::fixture();
-    let mut loaded = store.loaded().clone();
+    let mut loaded = store.loaded().unwrap().clone();
     loaded.markets = true;
     Store::update(store.as_ref(), StoreUpdate {
         markets: Some(vec![serde_json::from_value(json!({"id":"BTC-USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.1},"limits":{"amount":{"min":0.0001,"max":10000},"leverage":{"min":1,"max":150}},"contractSize":0.001})).unwrap()]),
@@ -153,10 +154,10 @@ fn public_frames_preserve_book_sequences_and_candle_volume() {
     );
     assert_eq!(
         (
-            store.tickers()[0].last,
-            store.tickers()[0].percentage,
-            store.tickers()[0].volume,
-            store.tickers()[0].quote_volume
+            store.tickers().unwrap()[0].last,
+            store.tickers().unwrap()[0].percentage,
+            store.tickers().unwrap()[0].volume,
+            store.tickers().unwrap()[0].quote_volume
         ),
         (100.0, 25.0, 8.0, 9.0)
     );
@@ -270,7 +271,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
 
     // 2 start: markets, tickers, account modes, balance/positions and orders loaded
     drive(&rt, venue.start()).unwrap();
-    let loaded = store.loaded().clone();
+    let loaded = store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders
     );
@@ -417,6 +418,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     assert!(
         store
             .positions()
+            .unwrap()
             .iter()
             .filter(|p| p.symbol == "BTCUSDT")
             .all(|p| p.leverage == 5.0),
@@ -438,6 +440,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     assert!(
         store
             .positions()
+            .unwrap()
             .iter()
             .all(|p| p.position_mode == Some(PositionMode::Hedged)),
         "confirmed mode applied"

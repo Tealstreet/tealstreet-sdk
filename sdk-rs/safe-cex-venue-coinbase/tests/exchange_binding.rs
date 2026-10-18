@@ -113,7 +113,7 @@ fn reads_are_pure_and_preserve_native_fields() {
         false,
     )
     .unwrap();
-    let before = h.store.orders().len();
+    let before = h.store.orders().unwrap().len();
     let tickers = h.drive(h.venue().fetch_tickers()).unwrap();
     assert_eq!(tickers[0].last, 123.5);
     assert_eq!(tickers[0].percentage, 2.5);
@@ -129,8 +129,8 @@ fn reads_are_pure_and_preserve_native_fields() {
             .len(),
         5
     );
-    assert_eq!(h.store.orders().len(), before);
-    assert!(h.store.tickers().is_empty());
+    assert_eq!(h.store.orders().unwrap().len(), before);
+    assert!(h.store.tickers().unwrap().is_empty());
     let balance = h.drive(h.exchange.fetch_balance()).unwrap();
     assert_eq!(balance.total, 0.0);
     assert_eq!(
@@ -204,11 +204,11 @@ fn writes_use_native_client_id_and_real_reconciliation() {
         "2.5"
     );
     assert_eq!(
-        h.store.orders()[0].parent_id.as_deref(),
+        h.store.orders().unwrap()[0].parent_id.as_deref(),
         Some("synthetic-caller-id")
     );
     h.drive(h.venue().cancel_orders(vec![order()])).unwrap();
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
     assert_eq!(
         h.http.calls("/api/v3/brokerage/orders/batch_cancel")[0].data,
         json!({"order_ids":["order-synthetic"]})
@@ -248,7 +248,7 @@ fn starts_both_sockets_and_disposes_the_same_owned_connections() {
     let h = harness(ExchangeName::Coinbase, options(), script);
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    assert!(h.store.loaded().markets);
+    assert!(h.store.loaded().unwrap().markets);
     let sockets = h.runtime.sockets.borrow();
     assert_eq!(sockets.len(), 2);
     let public = sockets
@@ -477,7 +477,7 @@ fn native_number_bits_survive_reads_and_tick_store_publication() {
         for _ in 0..20 {
             h.runtime.advance(250.0);
         }
-        let tickers = h.store.tickers();
+        let tickers = h.store.tickers().unwrap();
         assert!(!tickers.is_empty());
         if price == "-0" {
             assert_eq!(tickers[0].last.to_bits(), (-0.0_f64).to_bits());
@@ -700,8 +700,8 @@ fn startup_publication_keeps_store_subscriber_cause_after_commit() {
         &StoreSubscriberError::new("synthetic subscriber failure").with_cause(cause)
     );
     assert_eq!(later.get(), 0);
-    assert!(h.store.loaded().markets);
-    assert_eq!(h.store.markets().len(), 1);
+    assert!(h.store.loaded().unwrap().markets);
+    assert_eq!(h.store.markets().unwrap().len(), 1);
     assert!(h.runtime.sockets.borrow().is_empty());
 }
 #[test]
@@ -872,7 +872,11 @@ fn uuid_binding_mints_source_client_ids() {
         uuid_entropy(&h);
         let before = h.runtime.random_calls.get();
         assert_eq!(
-            h.venue().base().mint_client_order_id(place()).unwrap(),
+            h.venue()
+                .base()
+                .mint_client_order_id(place())
+                .unwrap()
+                .unwrap(),
             expected["minted"].as_str().unwrap()
         );
         assert_eq!(h.runtime.random_calls.get() - before, 21);
@@ -902,7 +906,7 @@ fn uuid_binding_generated_order_ids_reach_actual_http() {
         assert_eq!(calls[0].data["client_order_id"], expected["minted"]);
         assert!(h.runtime.random_values.borrow().is_empty());
         assert_eq!(
-            h.store.orders()[0].parent_id.as_deref(),
+            h.store.orders().unwrap()[0].parent_id.as_deref(),
             expected["minted"].as_str()
         );
     }
@@ -1088,7 +1092,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                     )));
                 h.runtime.pump();
             }
-            ticker_coercion::assert_native(&h.store.tickers(), case);
+            ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
         }
         assert_eq!(
             h.runtime
@@ -1107,5 +1111,229 @@ fn production_ticker_coercion_matches_constructed_typescript() {
             h.runtime.reports.borrow()
         );
         h.venue().dispose().unwrap();
+    }
+}
+
+fn divergence_binding_source() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/divergence-binding.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn divergence_pem_failure_reaches_real_ws_and_rest_bindings() {
+    let source = divergence_binding_source();
+    let payloads = [
+        "A",
+        "!",
+        "A!",
+        "Zg=",
+        "Zg===",
+        "-___",
+        "AQID\u{0085}",
+        "AAAAA",
+        "!AAAA",
+        "AAAA!",
+        "A===",
+    ];
+    let cases = source["pem"].as_array().unwrap();
+    assert_eq!(cases.len(), payloads.len(), "separate live signing corpus");
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        // Obtain native markets through the original valid public/account graph.
+        // A malformed credential can otherwise prevent discovery before signing.
+        let admitted = harness(name.clone(), options(), script);
+        let markets = admitted.drive(admitted.venue().fetch_markets()).unwrap();
+        assert!(markets.iter().any(|market| market.symbol == "BTC-USDC"));
+        for (case, payload) in cases.iter().zip(payloads) {
+            assert_eq!(case["payload"], payload, "signing payload identity");
+            assert_eq!(case["name"], "InvalidCharacterError");
+            let secret =
+                format!("-----BEGIN PRIVATE KEY-----\n{payload}\n-----END PRIVATE KEY-----");
+            assert_eq!(case["secret"], secret, "exact original PEM and markers");
+            let mut opts = options();
+            opts.secret = secret;
+            let h = harness(name.clone(), opts, script);
+            let request = serde_json::from_value(
+                json!({"id":payload,"wsAuth":{"outputFormat":"coinbase-jwt"}}),
+            )
+            .unwrap();
+            let response = h.drive(h.venue().sign_ws_auth(&request)).unwrap();
+            assert_eq!(response.id, Some(json!(payload)), "same native request ID");
+            assert_eq!(
+                response.error.as_deref(),
+                case["message"].as_str(),
+                "{name:?}/{payload:?}: source PEM error visible at actual WS hook"
+            );
+            assert!(response.ws_auth_signature.is_none());
+            assert!(
+                h.http.requests.borrow().is_empty(),
+                "malformed PEM sends no HTTP"
+            );
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    markets: Some(markets.clone()),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            h.http.requests.borrow_mut().clear();
+            let error = h
+                .drive(Box::pin(
+                    h.exchange.base().place_order(h.exchange.as_ref(), place()),
+                ))
+                .unwrap_err();
+            let variant = if name == ExchangeName::Coinbase {
+                "coinbase"
+            } else {
+                "coinbasespot"
+            };
+            let rest = &case["rest"][variant];
+            assert_eq!(error.name, rest["name"].as_str().unwrap());
+            assert_eq!(
+                error.message,
+                rest["message"].as_str().unwrap(),
+                "{name:?}/{payload:?}: source factory-enhanced PEM error at actual REST placement"
+            );
+            assert!(
+                h.http.requests.borrow().is_empty(),
+                "failed signer cannot dispatch placement"
+            );
+            assert!(
+                h.store.orders().unwrap().is_empty(),
+                "failed signer creates no optimistic order"
+            );
+            h.venue().dispose().unwrap();
+        }
+    }
+}
+
+#[test]
+fn divergence_starbase_intent_loss_is_outside_live_placement() {
+    use safe_cex_venue_coinbase::{
+        protocol, starbase_cutover::select_coinbase_starbase_cutover_plan,
+    };
+    let source = divergence_binding_source();
+    assert_eq!(
+        source["starbase"]["blocker"],
+        "contract-unit-conversion-unverified"
+    );
+    assert_eq!(source["starbase"]["retained"], json!({"retained":true}));
+    assert_eq!(
+        source["starbase"]["keys"],
+        json!([
+            "unmodeledRuntimeField",
+            "savedSymbol",
+            "side",
+            "size",
+            "type",
+            "price"
+        ])
+    );
+    assert_eq!(source["starbase"]["sourcePlacement"], "legacy-rest");
+    let plan = serde_json::to_value(select_coinbase_starbase_cutover_plan().unwrap()).unwrap();
+    assert_eq!(plan["authoritative"]["writes"], "legacy-coinbase");
+    assert_eq!(plan["httpShadow"]["active"], false);
+    assert_eq!(plan["websocket"]["active"], false);
+    assert_eq!(plan["cutover"]["runtimeActivationEnabled"], false);
+    assert!(!std::hint::black_box(
+        protocol::COINBASE_STARBASE_RUNTIME_ACTIVATION_ENABLED
+    ));
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), |http| {
+            script(http);
+            http.ok("POST", "/api/v3/brokerage/orders", json!({"success":true,"success_response":{"order_id":"audit-legacy","product_id":"BTC-USDC","side":"BUY"}}));
+        });
+        load_uuid_market(&h);
+        let ids = h
+            .drive(Box::pin(
+                h.exchange.base().place_order(h.exchange.as_ref(), place()),
+            ))
+            .unwrap();
+        assert_eq!(ids, ["audit-legacy"]);
+        let calls = h.http.calls("/api/v3/brokerage/orders");
+        assert_eq!(
+            calls.len(),
+            1,
+            "constructed exchange dispatches authoritative REST placement"
+        );
+        assert_eq!(calls[0].data["product_id"], "BTC-USDC");
+        assert_eq!(calls[0].data["client_order_id"], "synthetic-caller-id");
+        assert_eq!(
+            calls[0].data["order_configuration"]["limit_limit_gtc"]["base_size"],
+            "2.5"
+        );
+        assert!(
+            calls[0].data.get("method").is_none(),
+            "no Starbase RPC request"
+        );
+        assert_eq!(h.store.orders().unwrap()[0].id, "audit-legacy");
+        assert_eq!(
+            h.store.orders().unwrap()[0].parent_id.as_deref(),
+            Some("synthetic-caller-id")
+        );
+        assert!(
+            h.runtime.sockets.borrow().is_empty(),
+            "Starbase websocket stays inert"
+        );
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn divergence_starbase_typed_intent_identity() {
+    // The native blocked gate retains the exact typed caller, too. Serialization
+    // of that closed DTO has no runtime-only own fields; it is not a wire path.
+    use safe_cex_venue_coinbase::starbase_orders::*;
+    let intent = CoinbaseStarbasePlaceOrderIntent {
+        label: None,
+        otoco: None,
+        post_only: None,
+        price: Some(-0.0),
+        reduce_only: Some(false),
+        reject_post_only: Some(true),
+        saved_symbol: "BTC-PERP-INTX".into(),
+        side: CoinbaseStarbaseWriteSide::Buy,
+        size: CoinbaseStarbaseWriteAmountIntent::Contracts(CoinbaseStarbaseContractAmountIntent {
+            total_contracts: 2.0,
+            source: CoinbaseStarbaseContractAmountSource::GatewayContractCount,
+            unit: CoinbaseStarbaseContractAmountUnit::Contracts,
+        }),
+        time_in_force: None,
+        trigger: None,
+        trigger_offset: None,
+        trigger_price: None,
+        r#type: CoinbaseStarbaseWriteOrderType::Limit,
+        valid_until: None,
+    };
+    match build_coinbase_starbase_place_order(&intent).unwrap() {
+        CoinbaseStarbaseWriteGate::Blocked {
+            blocker,
+            intent: retained,
+        } => {
+            assert!(
+                std::ptr::eq(retained, &intent),
+                "native blocked gate borrows the exact caller"
+            );
+            assert_eq!(
+                blocker,
+                CoinbaseStarbaseWriteParityBlocker::ContractUnitConversionUnverified
+            );
+            assert_eq!(retained.price.unwrap().to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(retained.reduce_only, Some(false));
+            assert_eq!(retained.reject_post_only, Some(true));
+        }
+        CoinbaseStarbaseWriteGate::Ready { .. } => panic!("unverified contracts must stay blocked"),
     }
 }

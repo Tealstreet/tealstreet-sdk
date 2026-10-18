@@ -36,7 +36,7 @@ impl Host {
         )?))
     }
     pub(super) fn values(&self, rows: &Js) -> R<Vec<Js>> {
-        rows.array_values()
+        rows.array_values()?
             .ok_or_else(|| Thrown::type_error("Expected an array"))
     }
     pub(super) fn function(&self, name: &str, body: crate::classes::BoundMember<Self>) -> V {
@@ -101,7 +101,7 @@ impl WsHost for Host {
     fn flatten_one(&self, values: Vec<V>) -> R<Vec<V>> {
         let mut out = vec![];
         for value in values {
-            if let Some(items) = value.array_values() {
+            if let Some(items) = value.array_values()? {
                 out.extend(items.into_iter().map(v));
             } else {
                 out.push(value);

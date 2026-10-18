@@ -1,8 +1,54 @@
 # Exchange core contract
 
+The native Axios factory enhances rejections before venue interceptors, using
+the maintained helper's field order and live message getter. Its originalError
+Error snapshot excludes the self-reference under decision 2; existing owned
+metadata preserves diagnostics, extra/config data and nearest-response authority.
+Executable config capabilities retain the owned-data boundary. Constructed Aster
+and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+The typed REST host recovers owned callback errors through the canonical
+ExchangeError-to-Thrown conversion and attaches the effective request config.
+The Bitget owned-transport regression pins retry eligibility after that boundary.
+
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
+
+## Canonical Store owner
+
+`native_store::DefaultStore` owns one material `Js` graph. State arrays, rows and
+all four dictionaries expose their actual referents through the native facade;
+granular writes mutate existing rows, while full replacement and reset publish
+new generations. Retained values have no back-reference to the Store owner.
+Native mutations use the shared property/iterator algorithms and notify the live
+ordered listener registry. Typed subscribers project only at their reached slot.
+Notification transport retains the complete typed boundary in the existing opaque
+error origin before recovery, preserving nested subscriber IDs and the original
+cause without rebuilding the thrown value or replaying getters.
+Graph-backed typed reads return `StoreReadError` with property/projection phase
+and the opaque original cause; conversion recovers that cause before diagnostics.
+The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
+
+The native owner retains one lazily constructed facade. Repeated facade requests
+reuse the same object and methods, including custom descriptors across reset;
+state dictionaries still publish their normal replacement generations. The cache
+belongs to the owner capability, while the facade captures only the graph. A
+retained facade or method therefore survives Store drop without retaining its
+cache owner, and the last handle releases the graph without a reference cycle.
+
+Native snapshots retain their own undefined properties; JSON serialization is a
+separate boundary. Retained config reads keep absence distinct from an own
+undefined or null value. Source `for` loops recheck live input lengths, while
+`forEach`, `map`, `filter` and `findIndex` keep their captured iteration lengths.
+Object literal spreads finish before evaluating the following explicit fields.
+Position audits read each reached row after earlier id getters and evaluate
+diagnostic arguments before the terminal sink, preserving prethrow writes and
+skipping later revision/notification statements on failure.
+`Object.seal` and `Object.freeze` share the canonical descriptor integrity
+operation; sealing preserves existing writable bits and both retain accessors.
+Strict writes to string primitives distinguish existing read-only length/index
+slots from missing properties. The actual Bitget dictionary facade witness pins
+both errors against the maintained Store and preserves the typed projection refusal.
 
 ## Abstract venue hooks
 
@@ -83,6 +129,15 @@ Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
+Opt-in replay hosts register the canonical per-dial parser counters when a
+BaseWebSocket is constructed. The host retains only those counters, never the
+socket/parent owner. Diagnostic enumeration therefore includes nested sockets and
+disposed dial histories independently of exchange health/watchdog groups. Do not
+register nested business sockets as top-level slots to expose replay receipts.
+The recorded Binance addon regression checks both TLS/parser paths while keeping
+source-correct public grouping; the per-dial unit test checks counter identity
+and owner release with retained history. Ordinary hosts do not register histories.
+
 Synchronous venue `WsProtocol::connect_and_subscribe` implementations call
 `socket.start_websocket(url, protocols, options)`. The core owns the dial task,
 its cancellation and error diagnostics; the venue never retains its handle and
@@ -869,11 +924,14 @@ actual-source scheduling and returned-array witnesses.
 
 ## Shared income range paging
 
-`income_paging::paginate_income_range` owns no executor or transport. Its awaited
-fetch callback returns the shared typed ledger; its awaited delay operation
-receives the original f64, leaving host timer conversion explicit. Only fetch
-failures are caught: the branch becomes incomplete, while delay failures escape.
-Caller drop cancels its owned pending callback future.
+`income_paging::paginate_income_range` requires its owning runtime and owned
+fetch/delay callbacks. Canonical start_eager starts the first fetch at invocation
+and retains the walk after waiter drop; each fetch and delay uses the same
+Promise await boundary. The delay receives the original f64, leaving host timer
+conversion explicit. Fetch failures mark the branch incomplete; delay failures
+escape with their original metadata. tests/income_paging compares the maintained
+source with NativeRuntime after dropping an unpolled waiter, and retains the
+existing request, deduplication, output-bit and delay-error corpus.
 
 The pending-window stack is LIFO. Direction reads use the original global range,
 not the current subwindow; page length includes unusable rows. Identity retains
@@ -881,8 +939,10 @@ both PnL and commission from the same bill, keeps the first duplicate, and stabl
 newest-first sorting preserves insertion order on timestamp ties. No termination
 guard repairs source floating-point nonprogress for non-advancing chunks.
 
-Typed `IncomeRecord` excludes nullish/coercible/open source records and UTF-16
-lone surrogates. Returned records and options are owned rather than live aliases.
+Typed `IncomeRecord` excludes nullish/coercible/open source records. The canonical
+native String decoder replaces isolated UTF-16 units at the approved typed
+boundary; direct Serde JSON input remains a separate decoder. Returned records
+and options are owned rather than live aliases.
 These are declared choices, not source-equivalence claims for arbitrary objects.
 The six existing income-paging manifest rows own the shared implementation;
 binance, bitget, kraken and weex each have one separate wrapper call to adopt.
@@ -1047,12 +1107,13 @@ The js_runtime typed-value bridge uses the shared native serialization capture a
 
 JS socket properties are the source of truth for typed lifecycle grouping. BaseExchange installs weak, lazy lookups for the eight source fields; these create socket cores after venue assembly and observe property replacement/removal on each lookup. The JS runtime regression checks source order, public/private grouping and disposal.
 
-The js_runtime socket terminal preserves Binary as the host binary object: native
-Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
-Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
+The js_runtime socket terminal preserves Binary as Blob on native and wasm,
+matching both the source WebSocket default and the reconnecting wrapper’s explicit
+`binaryType = "blob"`, including its Node ws transport. Exact bytes remain behind
+ArrayBuffer; Blob.text performs UTF-8 replacement only when requested;
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
-checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+checks non-UTF-8 bytes, size, explicit conversion and unchanged text frames.
 
 Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
 JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
@@ -1066,8 +1127,9 @@ in ECMA-262. New fields default to undefined/false; omitted fields on an existin
 property retain their value. Read-only writes reject, non-enumerable fields stay
 out of keys/spread/JSON, and non-configurable fields survive deletion and reject
 incompatible redefinition (SameValue preserves NaN and the sign of zero).
-Arrays and accessor descriptors explicitly refuse until a source caller requires
-that representation. Existing host define_accessor remains the host accessor seam.
+Array and accessor descriptors share this checked property machinery; arrays now
+retain sparse indexed/named slots and a virtual length in one ArrayData owner.
+Existing host define_accessor remains the fallible host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
 redefinition matrix; the native error test covers Polymarket's enhanced message.
 
@@ -1317,6 +1379,13 @@ units, puts undefined before holes and rejects a present non-callable comparator
 The native-host `js_sort` target checks the compiled master panic and error count,
 plus Node ordering across merge boundaries. Ordering under an inconsistent
 comparator remains implementation-dependent under ECMAScript.
+
+Journal interval reconstruction reuses that sorter for both fills and reconstructed
+intervals. Equal timestamps with missing IDs and NaN close times need not define
+a total order. The journal target compares all position fields with maintained
+TS across 128 finite mixed-ID and 128 nonfinite-close profiles, alongside its
+192 existing interval/funding profiles. The old fill sort panics on the finite
+profiles; a separate reversed-result-order control checks the final sort.
 
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
@@ -1702,6 +1771,10 @@ elisions; IteratorStepValue terminates on abrupt next/done/value access. Normal
 IteratorClose propagates cleanup errors and rejects primitive return results.
 Throwing completion preserves the original error after cleanup effects. Existing
 Array.from, Map/Set construction and iterable collection reuse these operations.
+Public `IteratorRecord::from_iterator` captures an already acquired iterator;
+callers that retain expression-specific GetMethod diagnostics use it without
+repeating Symbol.iterator lookup. Its accepted contract executes this constructor
+and `get` independently, with native sequence/exhaustion and primitive refusals.
 The installed-global witness compares Node next/done/value/body failures, while
 normal-close cases cover skipped getters, replaced next members, original bound
 references and return methods/getters/classes. These are core prerequisites;
@@ -1804,7 +1877,8 @@ Native functions store name/length as ordinary nonenumerable configurable,
 readonly descriptors; redefining/deleting them uses the common property code.
 Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
 this does not widen the public intrinsic descriptor-reflection surface.
-Array descriptor/prototype migration remains the separate single-storage step.
+Array descriptors, virtual length and prototype links now use the same canonical
+ArrayData owner; hidden own indices suppress inherited names without reading values.
 
 ## ccxt compatibility imports
 
@@ -1851,3 +1925,141 @@ Native exception reporting retains its context through the reporter capability,
 then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
 Serialization errors stay visible; `native_console_default` checks both paths
 against Node and verifies that reporting leaves the retained input unchanged.
+
+The production REST host can carry the native PayloadSigner alongside its hosted
+RemoteSigner. `rest_http_host_with_signers` retains executable callbacks outside
+serialized options; shared BaseExchange assembly binds the same payload provider
+to its core and JS options before venue initialization. One PayloadScheme union
+covers HMAC hex/base64 and Stark felt-pair requests, using the existing runtime-owned
+Promise machinery for completion and errors. The Paradex native binding witness
+uses real NativeRuntime/reqwest and a loopback config/auth origin; maintained Node
+SDK code independently builds and signs Order, ModifyOrder and JWT preimages.
+
+Array.join retains UTF16 units through both separator and element coercion;
+UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
+`native_array_join_preserves_utf16_elements_separators_and_coercions` compares
+eight independent Node cases directly as native code units, including holes,
+nullish values, default separators, nested arrays and custom ToString results.
+
+`js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
+and the Vec<Market> info boundary. `tests/large_payload_source.mjs` captures
+maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Use `cargo run --release -p safe-cex-exchange --features native --example
+large_payload_decode` with LARGE_PAYLOAD_MANIFEST and LARGE_PAYLOAD_OUTPUT to
+measure the same recorded probe with the production allocator. The test binary
+has a counting allocator and must not supply production CPU ratios. Report CPU
+medians and spread from at least three interleaved control/candidate runs;
+input restoration and complete output observations stay outside timed phases.
+The bootstrap parse/decode budget is 250 ms process CPU per recorded venue;
+TS ratios remain diagnostic. Per-frame WebSocket timing is a separate budget.
+Native observation files encode UTF-16, own undefined and f64 bits explicitly so
+before/after byte comparisons do not hide lossy JSON projections.
+
+## Retained error responses
+
+Local `Thrown` conversions retain the original JS value in the existing opaque
+`ExchangeError.origin`. The retained Thrown's native slot holds the diagnostic
+projection before attaching that origin, avoiding a reference cycle. Recovery
+preserves original identity and numeric/string bits without replaying getters
+while the typed metadata is unchanged. Explicit diagnostic edits and retained
+response authority continue through the existing error materialization path.
+The constructed Backpack trigger-repair witness compares real TS rejection
+identity and stringify with native object, signed-zero, NaN and UTF16 values.
+
+ExchangeError has no cached JSON response field. retained_response_input reads the
+nearest response origin in its cause chain: the original RestFailure for transport
+failures, or the existing RetainedJsonInput inside the API-error origin wrapper.
+with_retained_response is construction glue for API-created errors, not a transport
+response update API. Prior opaque causes stay on the same source chain.
+
+Native error policies and callbacks read retained data before coercion or reporting.
+response_json_view computes the explicitly lossy decision-5 model/report view on
+demand; it never replaces the retained response or becomes a second authority.
+The real Binance cancel-symbol witness compares both signed DELETE calls, original
+failure propagation and emitted UTF-16/argument lists with the maintained class.
+error_response_origins separately pins nearest-origin selection across a chain.
+
+`eager::start_eager` is the typed async SDK call boundary. It starts the body
+through the existing canonical Promise driver at call time, retains native `T`
+without Clone/Serde/JSON, and returns a waiter. Dropping that waiter leaves the
+runtime-owned continuation alive. Native errors retain their original metadata
+and origin. `tests/eager_start.rs` executes the real native scheduler and checks
+prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
+boundary for an already-ready result. It does not insert suspension points into
+arbitrary ready Rust leaf futures. Venue probes must still check their actual
+ready and pending I/O phases.
+
+Store payload ticker baselines retain nullable index prices. The maintained worker
+advances its baseline for number-to-null transitions but omits non-number deltas;
+null-to-number emits the new number. Preserve this source behavior. The live
+store_payload oracle pins both transitions and unchanged-null packed arrays.
+
+Internal update listeners subscribe to the canonical Store's native state referent.
+They do not project StoreData or visit unrelated getters before emitter fanout.
+Typed subscribers remain explicit projection boundaries at their reached slots;
+native and typed slots share live order, unsubscription and first-error behavior.
+StoreUpdateThrottle accepts a retained argument type while its existing StoreFrame
+constructor remains available. Native account delivery retains the Js argument
+through bursts and projects only when leading/trailing delivery actually runs.
+See [the delivery review](NATIVE_STORE_DELIVERY_REVIEW.md) for compiled controls,
+receipt-qualified replay results, and the separate Bybit options decode timeout.
+
+`native_final_drop(base, venue_cleanup)` is the single native final-handle teardown
+entrypoint. It marks disposed before venue cleanup and always performs shared
+cleanup afterward, silencing Result errors at destruction. The callback must
+finish cancelling venue-owned tasks/state even if an earlier cleanup returns an
+error. Stored timer callbacks must use weak venue ownership so they cannot keep
+the final external handle alive; held venues must still service them normally.
+This accepted lifetime policy has one core override classification and no source
+super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
+`tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
+cleanup, while Backpack/BingX binding probes cover actual sockets/timers.
+
+`REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
+`JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
+materialization follows that source chain and the canonical retained response.
+Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
+signed requests before JSON. Original JS object identity remains an owned-tree residual.
+
+
+
+The mapped closed-position resolver requires a runtime and retained static fetch
+callbacks. It starts its selected fetch during invocation with `start_eager`;
+the runtime owns continuation after the waiter/source drop. Fetch and resolver
+Promise boundaries share the canonical driver. `closed_position_timing` checks
+six maintained-source profiles with NativeRuntime; the separate typed result
+surrogate/alias boundary remains in CLOSED_POSITIONS_AUDIT.md.
+
+The mapped loop utility requires its owning runtime on LoopHost and starts via
+start_eager. Its sleep Promise preserves the source await fence even for ready
+leaves, and waiter drop leaves the continuation alive. Positive infinity disables
+all loop host effects; remaining_utils compares invocation, continuation and
+callback scheduling with the maintained TypeScript function in Node.
+
+
+Native replay receipts include raw ExchangeRuntime tasks as well as canonical
+Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
+awakened tasks block drain. Reviewed timer/socket reader tasks qualify as waiting
+only at their actual pending sleep/receive leaves; pending handler HTTP/auth work
+still blocks. Waking invalidates the waiting observation before repoll. The sole
+Promise driver delegates to the separately counted canonical queue (including
+checkpoint callbacks). Completion and cancellation release records without
+retaining account/task bodies. This instrumentation runs only on explicit replay
+hosts; it does not cover arbitrary external Tokio tasks or transport internals.
+The public probe requires the versioned raw receipt and refuses older addons.
+Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
+the private wake-race witness checks the pre-repoll fence.
+
+
+`js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+natural-run detection, minrun, binary insertion, stack collapse, directional merges
+and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
+retain source comparisons and the first failure. The 4096-case real Node
+differential checks native result identities, comparison counts, pair-trace hashes
+and random-comparator state, alongside the constructed Paradex ticker corpus.
+Do not replace this with Rust slice sorting or a differently scheduled merge.
+
+The differential rejects other Node versions: inconsistent comparator ordering is
+engine-dependent. Array sort compacts defined values before TimSort, then writes
+undefined values and deletes remaining holes; four native/Node profiles pin the
+comparator schedule as well as sparse output.

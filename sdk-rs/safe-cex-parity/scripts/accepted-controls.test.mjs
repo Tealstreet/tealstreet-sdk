@@ -90,8 +90,8 @@ test('private Cargo targets cannot execute a stale default scanner in production
     }
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
-function run(extra = []) {
-  const result = spawnSync(process.execPath, [path.join(scripts, 'accepted-set.mjs'), `--workspace=${fixture}`, `--contracts=${path.join(fixture, 'contracts.json')}`, ...extra], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+function run(extra = [], nodeOptions = []) {
+  const result = spawnSync(process.execPath, [...nodeOptions, path.join(scripts, 'accepted-set.mjs'), `--workspace=${fixture}`, `--contracts=${path.join(fixture, 'contracts.json')}`, ...extra], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   const output = `${result.stdout}\n${result.stderr}`;
   assert.ok(!result.error, output);
   assert.doesNotMatch(output, /compile failure is not a control|error\[E\d+\]|could not compile/, output);
@@ -128,6 +128,8 @@ test('invoked local macros cannot hide global decoders while private helpers rem
     baseline();
     for (const [label, recipe] of [
       ['local macro unconditional global impl', `macro_rules! install_raw { () => { ${implementation} }; } install_raw!();`],
+      ['local literal-expression macro transcriber global impl', `macro_rules! install_raw { ($label:literal,$rows:expr) => { ${implementation} let _ = ($label, $rows); }; } install_raw!("inert impl text", 1);`],
+      ['local literal-expression macro argument global impl', `macro_rules! install_raw { ($label:literal,$rows:expr) => { let _ = ($label, $rows); }; } install_raw!("inert impl text", { ${implementation} 1 });`],
       ['local macro doc-hidden global impl', `macro_rules! install_raw { () => { #[cfg(not(doc))] ${implementation} }; } install_raw!();`],
       ['local macro doc-hidden forwarded impl', `macro_rules! install_raw { ($item:item) => { $item }; } install_raw! { #[cfg(not(doc))] ${implementation} }`],
       ['local macro cfg-disabled shadow', `macro_rules! install_raw { () => { #[cfg(not(doc))] ${implementation} }; } #[cfg(any())] macro_rules! install_raw { () => { let _ = 1; }; } install_raw!();`],
@@ -146,6 +148,8 @@ test('invoked local macros cannot hide global decoders while private helpers rem
     for (const recipe of [
       'macro_rules! make_helper { () => { #[allow(dead_code)] #[derive(serde::Deserialize)] struct Hidden { value: bool } }; } make_helper!();',
       'macro_rules! make_helper { () => { fn helper(value: &str) -> bool { value == "buy" } }; } make_helper!(); let _ = helper("buy");',
+      'macro_rules! make_entries { ($label:literal,$rows:expr) => { let _ = ($label, $rows); }; } make_entries!("impl is inert text", (1 + 2));',
+      'macro_rules! make_entries { ($label:literal,$unused:expr) => { let _ = $label; }; } make_entries!("inert", 1);',
       `#[allow(unused_macros)] macro_rules! never_called { () => { #[cfg(not(doc))] ${implementation} }; }`,
     ]) {
       fs.writeFileSync(sourcePath, `${source}\npub fn private_macro_helper() { ${recipe} }\n`);
@@ -337,11 +341,23 @@ test('external reexports retain canonical production decoder and feature coverag
     const manifest = path.join(fixture, 'reexport/Cargo.toml');
     const original = fs.readFileSync(manifest, 'utf8');
     try {
+      assert.equal(original.split('path = ".."').length, 2, 'one canonical dependency feature declaration');
       fs.writeFileSync(manifest, original.replace('path = ".."', 'path = "..", features = ["permissive"]'));
-      const result = run(selected);
-      assert.equal(result.status, 1, result.output);
-      assert.match(result.output, /accepted_set_control.*consumer and canonical owner compiler features differ/);
-      console.log('external reexport feature mismatch: named assertion; process exit 1');
+      baseline();
+      // Valid feature activation must propagate into the canonical compiler owner.
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'accepted-reexport-features-'));
+      try {
+        const loader = path.join(directory, 'loader.mjs');
+        const module = pathToFileURL(path.join(scripts, 'accepted-set.mjs')).href;
+        const anchor = 'queuePackage(owners[0], alias.artifact.features);';
+        const replacement = 'queuePackage(owners[0], []);';
+        fs.writeFileSync(loader, `import assert from 'node:assert/strict'; import { registerHooks } from 'node:module'; registerHooks({ load(url, context, next) { const loaded = next(url, context); if (url !== ${JSON.stringify(module)}) return loaded; const source = String(loaded.source); const anchor = ${JSON.stringify(anchor)}; assert.equal(source.split(anchor).length, 2, 'one canonical reexport feature propagation'); return { ...loaded, source: source.replace(anchor, ${JSON.stringify(replacement)}) }; } });`);
+        const result = run(selected, ['--import', loader]);
+        assert.equal(result.status, 1, result.output);
+        assert.match(result.output, /accepted_set_control.*canonical reexport declaration absent from compiler owner inventory/);
+        console.log('external reexport feature mismatch: named assertion; process exit 1');
+      } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+      baseline();
     } finally { fs.writeFileSync(manifest, original); }
     baseline();
   } finally { fs.writeFileSync(consumer, originalConsumer); }

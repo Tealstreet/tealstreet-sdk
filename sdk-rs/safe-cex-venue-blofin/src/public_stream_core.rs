@@ -122,7 +122,7 @@ pub trait PublicStreamHost: 'static {
     type Timer: Clone + 'static;
     fn is_disposed(&self) -> bool;
     fn is_testnet(&self) -> bool;
-    fn market_ids(&self) -> Vec<String>;
+    fn market_ids(&self) -> Result<Vec<String>, Self::Error>;
     fn has_socket(&self) -> bool;
     fn create_and_assign_socket(&self, url: &str) -> Result<(), Self::Error>;
     fn add_socket_listener(&self, event: &str) -> Result<(), Self::Error>;
@@ -161,12 +161,14 @@ pub fn connect_and_subscribe<H: PublicStreamHost>(
             .map_err(PublicStreamError::Host)?;
         let tickers = host
             .market_ids()
+            .map_err(PublicStreamError::Host)?
             .into_iter()
             .map(|id| topic("tickers", id))
             .collect();
         state.topics.borrow_mut().insert("tickers".into(), tickers);
         let funding = host
             .market_ids()
+            .map_err(PublicStreamError::Host)?
             .into_iter()
             .map(|id| topic("funding-rate", id))
             .collect();

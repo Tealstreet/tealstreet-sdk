@@ -8,7 +8,7 @@ fn ticker_bits(row: &Ticker) -> Value {
         "ask":format!("{:016x}",row.ask.to_bits()),
         "last":format!("{:016x}",row.last.to_bits()),
         "mark":format!("{:016x}",row.mark.to_bits()),
-        "index":format!("{:016x}",row.index.to_bits()),
+        "index":format!("{:016x}",row.index.unwrap().to_bits()),
         "percentage":format!("{:016x}",row.percentage.to_bits()),
         "volume":format!("{:016x}",row.volume.to_bits()),
         "quoteVolume":format!("{:016x}",row.quote_volume.to_bits()),
@@ -28,7 +28,7 @@ fn production_native_dispatch_lookup_and_capture_follow_source_prototypes() {
     ] {
         for key in ["constructor", "toString", "__proto__", "not-owned"] {
             let owner = production_native_owner(venue);
-            let mut seeded = owner.base.store.tickers()[0].clone();
+            let mut seeded = owner.base.store.tickers().unwrap()[0].clone();
             seeded.info = Some(Input::Object(vec![
                 ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
                 ("text".encode_utf16().collect(), Input::Text(vec![0xd800])),
@@ -48,11 +48,13 @@ fn production_native_dispatch_lookup_and_capture_follow_source_prototypes() {
                 false,
             )
             .unwrap();
-            assert!(owner.base.store.tickers()[0].info.is_none());
-            let capture = Capture::new(owner.base.store.clone());
-            let dictionary = capture.dictionary();
-            let row = dictionary.borrow().get("BTCUSDT").unwrap().clone();
-            let before = ticker_bits(&row.borrow());
+            assert!(owner.base.store.tickers().unwrap()[0].info.is_none());
+            let capture = Capture::new(owner.base.store.clone()).unwrap();
+            let dictionary = capture.dictionary().unwrap();
+            let row = dictionary.get("BTCUSDT").unwrap();
+            let before = ticker_bits(
+                &safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined(&row).unwrap(),
+            );
             let frame = json!({"e":"bookTicker","s":key,"b":{"toString":null},"a":"123.25"});
             let failure = owner.public.on_message(&frame.to_string()).err();
             assert_eq!(
@@ -64,19 +66,25 @@ fn production_native_dispatch_lookup_and_capture_follow_source_prototypes() {
                 assert_eq!(error.name, "TypeError");
                 json!({"name":error.name,"message":error.message})
             });
-            let after_bad = ticker_bits(&owner.base.store.tickers()[0]);
+            let after_bad = ticker_bits(&owner.base.store.tickers().unwrap()[0]);
             assert_eq!(after_bad, before, "failed lookup frame cannot patch Store");
             owner
                 .public
                 .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"-0","a":"123.25"}"#)
                 .unwrap();
-            assert_eq!(row.borrow().bid.to_bits(), (-0.0_f64).to_bits());
-            assert_eq!(row.borrow().ask.to_bits(), 123.25_f64.to_bits());
+            assert_eq!(
+                row.get("bid").unwrap().to_number().unwrap().to_bits(),
+                (-0.0_f64).to_bits()
+            );
+            assert_eq!(
+                row.get("ask").unwrap().to_number().unwrap().to_bits(),
+                123.25_f64.to_bits()
+            );
             cases.push(json!({
                 "venue":name,"key":key,"error":error,"before":before,"afterBad":after_bad,
-                "afterValid":ticker_bits(&owner.base.store.tickers()[0]),
-                "capturedBid":format!("{:016x}",row.borrow().bid.to_bits()),
-                "capturedAsk":format!("{:016x}",row.borrow().ask.to_bits()),
+                "afterValid":ticker_bits(&owner.base.store.tickers().unwrap()[0]),
+                "capturedBid":format!("{:016x}",row.get("bid").unwrap().to_number().unwrap().to_bits()),
+                "capturedAsk":format!("{:016x}",row.get("ask").unwrap().to_number().unwrap().to_bits()),
             }));
             owner.base.dispose().unwrap();
         }

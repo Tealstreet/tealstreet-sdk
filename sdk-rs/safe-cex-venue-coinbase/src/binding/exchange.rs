@@ -58,6 +58,11 @@ mod lifecycle_timer_native;
 
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/data_alias_native.rs"]
+mod data_alias_native;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/portfolio_alias_native.rs"]
 mod portfolio_alias_native;
 #[cfg(test)]
@@ -324,6 +329,7 @@ impl Exchange for CoinbaseExchange {
                                             crate::public_stream_dispatch::PublicStreamFailure {
                                                 name: error.to_exchange_error().name,
                                                 message: error.to_exchange_error().message,
+                                                native: None,
                                             },
                                         )
                                     })?;
@@ -332,6 +338,7 @@ impl Exchange for CoinbaseExchange {
                                 Rc::new(crate::public_stream_dispatch::PublicStreamFailure {
                                     name: error.to_exchange_error().name,
                                     message: error.to_exchange_error().message,
+                                    native: None,
                                 })
                             })?
                         }

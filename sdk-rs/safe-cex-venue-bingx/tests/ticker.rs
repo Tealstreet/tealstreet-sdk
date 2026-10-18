@@ -36,6 +36,8 @@ fn ticker_matches_actual_typescript() {
     let mut compared = 0;
     for case in cases {
         let precision = (!case["precision"].is_null()).then(|| MarketPrecision {
+            base: None,
+            quote: None,
             price: number(&case["precision"]["price"]),
             amount: number(&case["precision"]["amount"]),
         });

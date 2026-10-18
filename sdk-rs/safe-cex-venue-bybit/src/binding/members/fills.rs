@@ -37,7 +37,7 @@ pub(crate) fn resolve_order_symbol_for_fills(
         || {
             Ok(Rc::new(RefCell::new(
                 store
-                    .orders()
+                    .orders()?
                     .iter()
                     .map(|o| Rc::new(RefCell::new(o.clone())))
                     .collect(),
@@ -108,7 +108,7 @@ async fn fetch_order_fills(
         } else {
             result.get("list")?
         };
-        for exec in list.array_values().unwrap_or_default() {
+        for exec in list.array_values()?.unwrap_or_default() {
             let exec_order_id = exec.get("orderId")?;
             let exec_order_id = if exec_order_id.is_nullish() {
                 String::new()
@@ -153,7 +153,7 @@ pub(crate) fn fetch_fills_for_order_ids(rt: &Rt, order_ids: Js) -> Result<Js, Th
     Ok(rt.spawn(Box::pin(async move {
         let rt = body_rt;
         let map = Js::new_map();
-        let ids = order_ids.array_values().unwrap_or_default();
+        let ids = order_ids.array_values()?.unwrap_or_default();
         if ids.is_empty() {
             return Ok(map);
         }

@@ -26,8 +26,8 @@ fn report(
     error: ExchangeError,
     logger: &dyn Fn(Value) -> Result<(), ExchangeError>,
 ) -> Result<(), ExchangeError> {
-    let message = error
-        .response
+    let response_view = error.response_json_view();
+    let message = response_view
         .as_ref()
         .and_then(|r| r.get("data"))
         .and_then(|d| d.get("msg"));
@@ -51,7 +51,7 @@ where
         let input = pending.await?;
         let raw = raw(&input)?;
         if !raw.is_truthy() || raw.as_array().is_some_and(<[_]>::is_empty) {
-            return Ok(store.markets().to_vec());
+            return Ok(store.markets()?.to_vec());
         }
         let mapped = (|| -> Result<Vec<Market>, Thrown> {
             let rows = raw
@@ -68,6 +68,7 @@ where
                 )?;
                 let symbol: String = to_typed(&raw_symbol)?;
                 markets.push(Market {
+                    runtime: Default::default(),
                     id: symbol.clone(),
                     symbol,
                     pretty_symbol: None,
@@ -77,13 +78,17 @@ where
                         .get("tradingStatus")?
                         .strict_equals(&Js::str("FULL")),
                     precision: MarketPrecision {
+                        base: None,
+                        quote: None,
                         amount: market_property(&details, "minOrderSizeIncrement")?,
                         price: market_property(&instrument, "priceIncrement")?,
                     },
                     limits: MarketLimits {
+                        cost: None,
                         amount: MarketLimitsAmount {
                             min: market_property(&details, "minOrderSize")?,
-                            max: market_property(&details.get("maxOrderSize")?, "value")?,
+                            max: (market_property::<f64>(&details.get("maxOrderSize")?, "value")?)
+                                .into(),
                         },
                         leverage: MarketLimitsLeverage {
                             min: 1.0,
@@ -115,7 +120,7 @@ where
             Ok(markets) => Ok(markets),
             Err(error) => {
                 report(error.to_exchange_error(), logger)?;
-                Ok(store.markets().to_vec())
+                Ok(store.markets()?.to_vec())
             }
         }
     }
@@ -153,7 +158,7 @@ where
             Ok(input) => input,
             Err(error) => {
                 report(error, logger)?;
-                return Ok(Some(store.tickers().to_vec()));
+                return Ok(Some(store.tickers()?.to_vec()));
             }
         };
         let data = raw(&input)?;
@@ -163,7 +168,7 @@ where
                 return Ok(None);
             }
             let events = events
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("data.events?.map is not a function"))?;
             let mut fields = Vec::with_capacity(events.len());
             for event in &events {
@@ -181,7 +186,7 @@ where
             Ok(None) => return Ok(None),
             Err(error) => {
                 report(error.to_exchange_error(), logger)?;
-                return Ok(Some(store.tickers().to_vec()));
+                return Ok(Some(store.tickers()?.to_vec()));
             }
         };
         let mut tickers = Vec::with_capacity(fields.len());
@@ -196,7 +201,7 @@ where
                 ask,
                 last: bid,
                 mark: bid,
-                index: bid,
+                index: Some(bid),
                 mid_price: None,
                 percentage: 0.0,
                 open_interest: 0.0,
@@ -211,10 +216,13 @@ where
         Ok(Some(tickers))
     }
 }
-pub fn fetch_tickers<F>(store: &dyn Store, fetch: impl FnOnce(Vec<String>) -> F) -> F
+pub fn fetch_tickers<F>(
+    store: &dyn Store,
+    fetch: impl FnOnce(Vec<String>) -> F,
+) -> Result<F, ExchangeError>
 where
     F: Future<Output = Result<Option<Vec<Ticker>>, ExchangeError>>,
 {
-    let symbols = store.markets().iter().map(|m| m.symbol.clone()).collect();
-    fetch(symbols)
+    let symbols = store.markets()?.iter().map(|m| m.symbol.clone()).collect();
+    Ok(fetch(symbols))
 }

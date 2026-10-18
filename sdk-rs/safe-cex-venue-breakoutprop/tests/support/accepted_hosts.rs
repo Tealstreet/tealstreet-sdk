@@ -1,8 +1,9 @@
 // Finite hosts for production accepted-set observations; no live I/O.
 use crate::{lifecycle::*, polling::*, runtime::RuntimeReads};
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::BaseExchange, runtime::*};
 use safe_cex_num::numeric_ingress::JsNumberInput;
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::provider::RestRequest;
 use safe_cex_types::{ExchangeName, ExchangeOptions, Market, Ticker};
 use std::{cell::RefCell, rc::Rc};
@@ -141,7 +142,7 @@ pub fn ticker(symbol: String, bid: f64, ask: f64) -> Ticker {
         ask,
         last: bid,
         mark: bid,
-        index: bid,
+        index: Some(bid),
         mid_price: None,
         percentage: 0.0,
         open_interest: 0.0,

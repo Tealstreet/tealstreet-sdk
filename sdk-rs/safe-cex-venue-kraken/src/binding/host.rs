@@ -43,7 +43,7 @@ pub(crate) fn bytes_of(v: &Js) -> Result<Vec<u8>, Thrown> {
     {
         return Ok(v
             .get("bytes")?
-            .array_values()
+            .array_values()?
             .unwrap_or_default()
             .iter()
             .map(|b| b.as_f64().unwrap_or(0.0) as u8)
@@ -155,7 +155,7 @@ fn qs_parse_form(value: &Js) -> Result<Js, Thrown> {
         let value = Js::str(&qs_decode(value));
         let value = if result.has_own(&lossy(&key)) {
             let previous = result.get_key(&key)?;
-            let mut values = previous.array_values().unwrap_or_else(|| vec![previous]);
+            let mut values = previous.array_values()?.unwrap_or_else(|| vec![previous]);
             values.push(value);
             Js::array(values)
         } else {
@@ -198,7 +198,7 @@ pub(crate) fn qs_stringify(value: &Js, sorted: bool, rfc1738: bool) -> Result<St
             Js::Undefined => {}
             Js::Null => out.push(format!("{}=", qs_encode(prefix, rfc1738))),
             Js::Array(_) => {
-                for v in value.array_values().unwrap_or_default() {
+                for v in value.array_values()?.unwrap_or_default() {
                     walk(prefix, &v, collator, rfc1738, out)?;
                 }
             }
@@ -365,7 +365,7 @@ impl ReadHost for Rt {
         Ok(value.call_method("includes", vec![Js::str(text)])?.truthy())
     }
     fn items(&self, value: &Js) -> ReadResult<Self, Vec<Handle<Self>>> {
-        match value.array_values() {
+        match value.array_values()? {
             Some(items) => Ok(items.into_iter().map(h).collect()),
             None => Err(Thrown::type_error(&format!(
                 "{} is not iterable",
@@ -499,29 +499,121 @@ impl ReadHost for Rt {
             .call_method("emitAndLogError", vec![(*message).clone()])?;
         Ok(())
     }
-    // ts: kraken.fills mapKrakenFills(rows, resolveSymbol) over the live market index.
+    // ts: mapKrakenFills/mapKrakenFill over the retained runtime graph.
+    // Read only source-reached fields; JSON or whole-row DTO capture can reject
+    // an unrelated native value before the source mapper ever reads it.
     fn map_fills(&self, rows: Handle<Self>) -> ReadResult<Self, Vec<Handle<Self>>> {
-        let input = safe_cex_num::numeric_ingress::js_from_value(super::value::to_json(&rows)?)
-            .map_err(|e| Thrown::type_error(&e.to_string()))?;
-        let markets = self.this.get("store")?.get("marketsBySymbol")?;
-        let mut resolve = |symbol: &str| -> Result<Option<String>, Box<dyn std::error::Error>> {
-            let found = markets
-                .get(&symbol.to_uppercase())
-                .map_err(|e| e.message())?;
-            let symbol = if found.is_nullish() {
+        let rt = self.clone();
+        let mapper = Js::function("mapKrakenFill", move |_, args| {
+            let row = arg(&args, 0);
+            let field = |key| {
+                if row.is_nullish() {
+                    Ok(Js::Undefined)
+                } else {
+                    row.get(key)
+                }
+            };
+            let text = |key| -> Result<Js, Thrown> {
+                let value = field(key)?;
+                rt.global("String")?.call(
+                    Js::Undefined,
+                    vec![if value.is_nullish() {
+                        Js::str("")
+                    } else {
+                        value
+                    }],
+                )
+            };
+            let number = |key| -> Result<Js, Thrown> {
+                let value = rt
+                    .global("Number")?
+                    .call(Js::Undefined, vec![field(key)?])?
+                    .to_number()?;
+                Ok(Js::Number(if value.is_finite() { value } else { 0.0 }))
+            };
+            let id = text("fill_id")?;
+            let venue_symbol = text("symbol")?;
+            let milliseconds =
+                safe_cex_num::js_date_parse_utf16(&text("fillTime")?.to_js_string()?, |n| n);
+            let timestamp = if milliseconds.is_finite() {
+                (milliseconds / 1000.0).floor()
+            } else {
+                0.0
+            };
+            if !id.truthy() || !venue_symbol.truthy() || timestamp == 0.0 {
+                return Ok(Js::Null);
+            }
+            let side = text("side")?.call_method("toLowerCase", vec![])?;
+            if !side.strict_equals(&Js::str("buy")) && !side.strict_equals(&Js::str("sell")) {
+                return Ok(Js::Null);
+            }
+            let key = venue_symbol
+                .call_method("toUpperCase", vec![])?
+                .to_js_string()?;
+            let market = rt
+                .this
+                .get("store")?
+                .get("marketsBySymbol")?
+                .get_key(&key)?;
+            let symbol = if market.is_nullish() {
                 Js::Undefined
             } else {
-                found.get("symbol").map_err(|e| e.message())?
+                market.get("symbol")?
             };
-            Ok(if symbol.is_nullish() {
-                None
+            let symbol = if symbol.is_nullish() {
+                venue_symbol
             } else {
-                Some(symbol.to_display())
-            })
-        };
-        let fills = crate::fills::map_kraken_fills(input, &mut resolve, &mut |n| n)
-            .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-        fills.iter().map(|f| Ok(h(from_typed(f)?))).collect()
+                symbol
+            };
+            let order_id = if field("order_id")?.truthy() {
+                rt.global("String")?
+                    .call(Js::Undefined, vec![field("order_id")?])?
+            } else {
+                Js::Undefined
+            };
+            let price = number("price")?;
+            let qty = number("size")?;
+            let maker = text("fillType")?
+                .call_method("toLowerCase", vec![])?
+                .strict_equals(&Js::str("maker"));
+            let pnl = field("realized_pnl")?;
+            let realized_pnl = if pnl.is_nullish() || pnl.strict_equals(&Js::str("")) {
+                Js::Undefined
+            } else {
+                let value = rt
+                    .global("Number")?
+                    .call(Js::Undefined, vec![pnl])?
+                    .to_number()?;
+                if value.is_finite() {
+                    Js::Number(value)
+                } else {
+                    Js::Undefined
+                }
+            };
+            Ok(Js::object(vec![
+                ("id", id),
+                ("timestamp", Js::Number(timestamp)),
+                ("symbol", symbol),
+                ("orderId", order_id),
+                ("price", price),
+                ("qty", qty),
+                ("side", side),
+                ("maker", Js::Bool(maker)),
+                ("realizedPnl", realized_pnl),
+            ]))
+        });
+        let mapped = rows.call_method("map", vec![mapper])?;
+        let present = Js::function("isExecution", |_, args| {
+            Ok(Js::Bool(!arg(&args, 0).strict_equals(&Js::Null)))
+        });
+        let filtered = mapped.call_method("filter", vec![present])?;
+        // The source for-of still uses the shared iterator, including overrides.
+        let iterator = safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&filtered)?;
+        let mut fills = Vec::new();
+        while let Some(fill) = iterator.step_value()? {
+            fills.push(h(fill));
+        }
+        Ok(fills)
     }
     fn iso(&self, milliseconds: f64) -> ReadResult<Self, Vec<u16>> {
         Ok(units(&iso(milliseconds)?))
@@ -663,16 +755,27 @@ impl TradingHost for Rt {
         Ok(h(Js::str(&id)))
     }
     fn iterable(&self, value: &Js, expression: &str) -> ReadResult<Self, Vec<Handle<Self>>> {
-        match value {
-            Js::Array(_) | Js::String(_) => {
-                Ok(value.iterable_values()?.into_iter().map(h).collect())
-            }
-            _ => Err(Thrown::type_error(&if expression == "txids" {
-                "txids is not iterable".to_owned()
+        // Resolve the protocol method once, retaining the caller's spread diagnostic.
+        let method = if value.is_nullish() {
+            Js::Undefined
+        } else {
+            value.get_property(&Js::SymbolIterator)?
+        };
+        if !method.is_callable() {
+            return Err(Thrown::type_error(if expression == "txids" {
+                "txids is not iterable"
             } else {
-                "Spread syntax requires ...iterable[Symbol.iterator] to be a function".to_owned()
-            })),
+                "Spread syntax requires ...iterable[Symbol.iterator] to be a function"
+            }));
         }
+        let iterator = safe_cex_exchange::js_runtime::iterator::IteratorRecord::from_iterator(
+            method.call(value.clone(), vec![])?,
+        )?;
+        let mut values = Vec::new();
+        while let Some(value) = iterator.step_value()? {
+            values.push(h(value));
+        }
+        Ok(values)
     }
     fn send(
         &self,
@@ -803,42 +906,62 @@ impl ApiHost for Rt {
     // ts: utils/retryReadsOnly networkErrorOnRead(isRead): reads (and the listed
     // posted reads) retried on axios-retry's isNetworkError only.
     fn retry_condition(&self, posted: Option<Vec<&'static str>>) -> ReadResult<Self, Handle<Self>> {
-        let posted: Vec<String> = posted
-            .unwrap_or_default()
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
         Ok(h(Js::function("retryCondition", move |_, a| {
             let error = arg(&a, 0);
-            if !error.is_object() {
+            // onlyReads performs the undefined guard and then a second config read.
+            if error.get("config")?.is_undefined() {
                 return Ok(Js::Bool(false));
             }
             let config = error.get("config")?;
-            if config.is_undefined() {
-                return Ok(Js::Bool(false));
-            }
             let method = config.get("method")?;
             let method = if method.is_nullish() {
-                String::new()
+                Js::Undefined
             } else {
-                lossy(&method.to_js_string()?).to_lowercase()
+                let lower = method.get("toLowerCase")?;
+                if !lower.is_callable() {
+                    return Err(Thrown::type_error(
+                        "config.method?.toLowerCase is not a function",
+                    ));
+                }
+                lower.call(method, vec![])?
             };
-            let url = config.get("url")?;
-            let path = if url.is_nullish() {
-                String::new()
-            } else {
-                lossy(&url.to_js_string()?)
-                    .split('?')
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            let read = method == "get" || method == "head" || posted.contains(&path);
+            let mut read =
+                method.strict_equals(&Js::str("get")) || method.strict_equals(&Js::str("head"));
+            if !read && let Some(posted) = &posted {
+                let url = config.get("url")?;
+                let path = if url.is_nullish() {
+                    Js::Undefined
+                } else {
+                    let split = url.get("split")?;
+                    if !split.is_callable() {
+                        return Err(Thrown::type_error("config.url?.split is not a function"));
+                    }
+                    split.call(url, vec![Js::str("?")])?.get("0")?
+                };
+                let path = if path.is_nullish() { Js::str("") } else { path };
+                read = posted
+                    .iter()
+                    .any(|entry| path.strict_equals(&Js::str(entry)));
+            }
+            // onlyReads short-circuits all network-error property reads for writes.
+            if !read || error.get("response")?.truthy() || !error.get("code")?.truthy() {
+                return Ok(Js::Bool(false));
+            }
             let code = error.get("code")?;
-            let network = error.get("response")?.is_nullish()
-                && code.truthy()
-                && code.to_display() != "ECONNABORTED";
-            Ok(Js::Bool(read && network))
+            if ["ERR_CANCELED", "ECONNABORTED"]
+                .iter()
+                .any(|entry| code.strict_equals(&Js::str(entry)))
+            {
+                return Ok(Js::Bool(false));
+            }
+            // is-retry-allowed performs its own live read; compare native cells,
+            // without coercing arbitrary codes or losing unpaired UTF16 units.
+            let code = error.get("code")?;
+            Ok(Js::Bool(
+                !safe_cex_transport::provider::NETWORK_DENIED_CODES
+                    .iter()
+                    .any(|entry| code.strict_equals(&Js::str(entry))),
+            ))
         })))
     }
     fn retry(&self, client: Handle<Self>, config: Handle<Self>) -> ReadResult<Self, ()> {
@@ -855,12 +978,16 @@ impl ApiHost for Rt {
                 return Ok(Js::Bool(true));
             }
             let config = error.get("config")?;
-            let response = error.get("response")?;
             if !config.truthy()
-                || !response.truthy()
+                || !error.get("response")?.truthy()
                 || config.get(SIGNATURE_RETRY_CONFIG_KEY)?.truthy()
-                || !api::is_kraken_spot_signature_rejection(&host, &response.get("data")?)?
             {
+                return Ok(Js::Bool(false));
+            }
+            if !api::is_kraken_spot_signature_rejection(
+                &host,
+                &error.get("response")?.get("data")?,
+            )? {
                 return Ok(Js::Bool(false));
             }
             config.set(SIGNATURE_RETRY_CONFIG_KEY, Js::Bool(true))?;

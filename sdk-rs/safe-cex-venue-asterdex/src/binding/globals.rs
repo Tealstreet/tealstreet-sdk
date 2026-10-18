@@ -23,7 +23,7 @@ fn spawn(rt: &Rt, body: safe_cex_exchange::js_runtime::promise::JsFuture<'static
 }
 fn bytes(value: &Js) -> Result<Vec<u8>, Thrown> {
     let values = value
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("expected a byte array"))?;
     values
         .iter()
@@ -291,7 +291,7 @@ pub(super) fn build(weak: Weak<Shared>) -> Js {
     bind("isBinanceStyleSignatureRejection", |_, a| {
         Ok(Js::Bool(
             safe_cex_transport::signature_rejection::is_binance_style_signature_rejection(
-                &to_json(&arg(&a, 0))?,
+                &safe_cex_exchange::js_runtime::value::to_retained_input(&arg(&a, 0))?,
             )
             .map_err(coercion)?,
         ))

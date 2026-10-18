@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     runtime::{ExchangeFuture, ExchangeTask, LogSeverity},
     websocket::{
@@ -6,7 +7,7 @@ use safe_cex_exchange::{
         WsSocket,
     },
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{DirectTransport, TransportProvider, socket::TunnelHost};
 use safe_cex_types::ExchangeOptions;
 use std::{
@@ -63,6 +64,8 @@ struct Runtime {
     tasks: RefCell<Vec<TaskFuture>>,
     inline: Cell<bool>,
     pending_timers: Cell<bool>,
+    pending_dial: Cell<bool>,
+    dial_owner: Rc<()>,
     dials: RefCell<Vec<Value>>,
     provider: RefCell<Option<Arc<dyn TransportProvider>>>,
     relay_host: Rc<dial_tests::PendingTunnelHost>,
@@ -161,6 +164,13 @@ impl WsRuntime for Runtime {
         self.dials
             .borrow_mut()
             .push(json!({"url":url,"protocols":protocols,"headers":headers}));
+        if self.pending_dial.get() {
+            let owner = self.dial_owner.clone();
+            return Box::pin(std::future::poll_fn(move |_| {
+                let _owner = &owner;
+                Poll::Pending
+            }));
+        }
         let socket: Rc<dyn WsSocket> = self.wire.clone();
         Box::pin(async move { Ok(socket) })
     }

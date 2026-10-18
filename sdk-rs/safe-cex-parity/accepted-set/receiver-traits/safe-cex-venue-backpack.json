@@ -9,6 +9,6 @@
     "category": "delegated",
     "file": "safe-cex-venue-backpack/src/native_value.rs",
     "reason": "Reviewed the complete production NativeValue impl for the shared Js receiver. field applies the explicit own-data prepared profile: nullish receivers refuse with their existing field error, own object fields delegate to shared Js::get and retain the original native cell, and other lookups yield Undefined. It adds no model schema or JSON projection. Native witness tests/adapter_classes.rs::native_field_receiver_forwards_own_cells_without_projection covers alias identity, own versus absent undefined, UTF-16, NaN, negative-zero bits, primitive fallthrough and exact nullish errors.",
-    "itemSha256": "3fa40d858a7127c1de19b8217fa0ba4479b591ea6b87936757f8f96a5dd08288"
+    "itemSha256": "10ba45812bbffbbc770c3e38df5028ea0ad54c7dd2285c1689a90ef86496c4c2"
   }
 }

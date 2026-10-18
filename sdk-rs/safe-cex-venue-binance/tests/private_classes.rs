@@ -1,3 +1,6 @@
+#[cfg(feature = "native")]
+#[path = "support/api_factory_binding.rs"]
+mod api_factory_binding;
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
 #[cfg(feature = "native")]
@@ -380,8 +383,8 @@ fn fixture(
     let parent = Rc::new(Parent {
         remote_sign_call: Default::default(),
         options: record([("key", string("key")), ("secret", string("secret"))]),
-        orders: Default::default(),
-        positions: Default::default(),
+        orders: native_array_fixture::owner(vec![]),
+        positions: native_array_fixture::owner(vec![]),
         balance: record([]),
         loaded: record([("tickers", EventValue::Bool(true))]),
         effects: Default::default(),
@@ -585,10 +588,8 @@ fn shared_runtime_graph_enters_bound_private_orders_without_projection() {
             Js::object(vec![("o", data.clone())])
         };
         let events = Js::array(vec![event]);
-        let Js::Array(slots) = &events else {
-            unreachable!()
-        };
-        slots.borrow_mut().insert(0, None);
+        events.splice_array(0, 0, vec![Js::Undefined]).unwrap();
+        events.delete(&[u16::from(b'0')]).unwrap();
         owner.handle_events(1, events).unwrap();
         let effects = parent.effects.borrow();
         let adds = effects
@@ -1385,10 +1386,9 @@ impl ExchangeImports for Imports {
             }
             Poll::Ready(safe_cex_venue_binance::private_rest::SnapshotCompletion {
                 reaction_order: 0,
-                result: Ok(routed.clone().map_or_else(
-                    || EventValue::Array(Default::default()),
-                    EventValue::from_json,
-                )),
+                result: Ok(routed
+                    .clone()
+                    .map_or_else(|| EventValue::array(vec![]), EventValue::from_json)),
             })
         })))
     }
@@ -1443,7 +1443,9 @@ impl ExchangeImports for Imports {
         if let Some(response) = self.rejected_response.borrow().clone() {
             return response;
         }
-        Ok(error.response.clone().map(EventValue::from_json))
+        Ok(error
+            .retained_response_input()
+            .map(safe_cex_exchange::js_runtime::value::from_retained_input))
     }
     fn external_provider(
         &self,
@@ -1509,7 +1511,7 @@ impl ExchangeImports for Imports {
 }
 #[test]
 fn exchange_class_quiescent_ownership_releases_after_last_lease() {
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     for (venue, stem) in [
         (Venue::Futures, "binance"),
         (Venue::PM, "binancepm"),
@@ -1531,6 +1533,18 @@ fn exchange_class_quiescent_ownership_releases_after_last_lease() {
                 },
             )
             .unwrap();
+            assert!(
+                owner
+                    .base
+                    .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::PublicSecondary)
+                    .is_none(),
+                "nested market sockets are not exchange-level secondary sockets: {venue:?}"
+            );
+            assert_eq!(
+                owner.public.market_websocket.get().is_some(),
+                venue != Venue::Spot,
+                "Futures/PM retain their nested market owner"
+            );
             let state = Rc::downgrade(&owner.state);
             let socket = Rc::downgrade(owner.public.base());
             let public = Rc::downgrade(&owner.public);
@@ -1574,7 +1588,8 @@ fn exchange_class_quiescent_ownership_releases_after_last_lease() {
 
 #[test]
 fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
-    use safe_cex_store::{Store, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::Store;
     let mut native = vec![];
     for (venue, stem) in [
         (Venue::Futures, "binance"),
@@ -1677,7 +1692,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
                 "native fulfilled response keeps original identity"
             );
             let mut original = ExchangeError::new("original guard rejection");
-            original.response = Some(json!({}));
+            original = original.with_retained_response(json!({}).into());
             let original = Rc::new(original);
             let rejected = imports.rejected_guards.borrow()[0](original.clone())
                 .expect("native missing rejection status returns original rejection future");
@@ -1744,7 +1759,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
             "native too-long client ID rejected"
         );
         let before = owner.base.options().key;
-        let mut balance = store.balance().clone();
+        let mut balance = store.balance().unwrap().clone();
         balance.total = f64::INFINITY;
         balance.free = f64::NAN;
         balance.used = -0.0;
@@ -1761,7 +1776,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
         )
         .unwrap();
         assert!(
-            store.balance().total.is_infinite(),
+            store.balance().unwrap().total.is_infinite(),
             "native Store keeps Infinity before owner projection"
         );
         let snapshot = PrivateParent::balance(owner.state.as_ref()).unwrap();
@@ -1794,7 +1809,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
             matches!(nested.read("used").unwrap(),EventValue::Number(v) if v==0.0 && v.is_sign_negative()),
             "native nested Store balance retains negative zero"
         );
-        let mut changed = store.balance().clone();
+        let mut changed = store.balance().unwrap().clone();
         changed.total = 4.2;
         Store::update(
             store.as_ref(),
@@ -2108,7 +2123,7 @@ fn class_owner(venue: Venue, imports: Rc<Imports>, runtime: Rc<Runtime>) -> Rc<E
         venue,
         serde_json::from_value(json!(stem)).unwrap(),
         serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         ExchangeDependencies {
             runtime,
             imports,
@@ -2195,7 +2210,7 @@ fn exchange_class_ownership_keeps_child_and_running_operation_leases() {
             }))
             .unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             ExchangeDependencies {
                 runtime: runtime.clone(),
                 imports: imports.clone(),
@@ -2483,7 +2498,7 @@ fn exchange_class_sdk_dispatch_preserves_routes_defaults_and_capability_brands()
                 "native SDK leverage request retains exact native 7.25"
             );
             assert_eq!(
-                owner.base.store.positions()[0].leverage,
+                owner.base.store.positions().unwrap()[0].leverage,
                 7.25,
                 "native SDK leverage updates canonical Store"
             );
@@ -2646,7 +2661,7 @@ fn exchange_class_sdk_worker_confirmation_keeps_store_notification_errors() {
     let error =
         result.expect_err("native SDK worker confirmation propagates Store notification rejection");
     assert!(
-        owner.base.store.options().is_hedged,
+        owner.base.store.options().unwrap().is_hedged,
         "native SDK worker mode setting commits before subscriber error"
     );
     assert!(
@@ -2682,7 +2697,7 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
             };
             let name = serde_json::from_value(json!(stem)).unwrap();
             let options = serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap();
-            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
             let (exchange, owner): (Rc<dyn Exchange>, Rc<ExchangeOwner>) = match venue {
                 Venue::Futures => {
                     let v = Rc::new(BinanceExchange::new(name, options, store, deps).unwrap());
@@ -2737,7 +2752,14 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
             runtime.sleep_clock.set(11000.0);
             runtime.pump();
             assert_eq!(
-                state.upgrade().unwrap().base.store.socket_health().unwrap()["publicHealthy"],
+                state
+                    .upgrade()
+                    .unwrap()
+                    .base
+                    .store
+                    .socket_health()
+                    .unwrap()
+                    .unwrap()["publicHealthy"],
                 json!(true),
                 "native watchdog performs real canonical health publication"
             );
@@ -3132,7 +3154,7 @@ fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() 
         };
         let name = serde_json::from_value(json!(stem)).unwrap();
         let options = serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap();
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let exchange: Rc<dyn Exchange> = match venue {
             Venue::Futures => Rc::new(BinanceExchange::new(name, options, store, deps).unwrap()),
             Venue::PM => Rc::new(BinancePMExchange::new(name, options, store, deps).unwrap()),
@@ -3345,7 +3367,7 @@ fn production_native_owner(venue: Venue) -> Rc<ExchangeOwner> {
         Venue::PM => "binancepm",
         Venue::Spot => "binancespot",
     };
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     safe_cex_store::Store::update(
         store.as_ref(),
         safe_cex_store::StoreUpdate {
@@ -3399,6 +3421,7 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
         let minted = owner
             .base
             .mint_client_order_id(&mint_opts)
+            .unwrap()
             .expect("production rule mint must produce a valid venue ID");
         assert!(minted.starts_with("x-s3vFFRQp"));
         assert!(minted.len() <= "x-s3vFFRQp".len() + 21);
@@ -3447,14 +3470,31 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
                 (result, EventValue::array(vec![]))
             };
             assert_eq!(
-                regular.array_values().unwrap().len() + algo.array_values().unwrap().len(),
+                regular
+                    .array_values()
+                    .expect("fixture array property reads")
+                    .unwrap()
+                    .len()
+                    + algo
+                        .array_values()
+                        .expect("fixture array property reads")
+                        .unwrap()
+                        .len(),
                 count,
                 "real formatted payload count {venue:?} {kind}"
             );
-            for row in regular.array_values().unwrap() {
+            for row in regular
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap()
+            {
                 check(&row, "newClientOrderId", true);
             }
-            for row in algo.array_values().unwrap() {
+            for row in algo
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap()
+            {
                 check(&row, "clientAlgoId", true);
             }
         }
@@ -3465,7 +3505,9 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
             result
         };
         assert_eq!(
-            rows.array_values().unwrap()[0]
+            rows.array_values()
+                .expect("fixture array property reads")
+                .unwrap()[0]
                 .read("newClientOrderId")
                 .unwrap()
                 .text()
@@ -3475,9 +3517,18 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
         if venue != Venue::Spot {
             let opts = serde_json::from_value(json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"buy","amount":1,"price":90})).unwrap();
             let rows = owner.format_trailing(&opts).unwrap();
-            assert_eq!(rows.array_values().unwrap().len(), 1);
+            assert_eq!(
+                rows.array_values()
+                    .expect("fixture array property reads")
+                    .unwrap()
+                    .len(),
+                1
+            );
             check(
-                &rows.array_values().unwrap()[0],
+                &rows
+                    .array_values()
+                    .expect("fixture array property reads")
+                    .unwrap()[0],
                 if venue == Venue::PM {
                     "newClientOrderId"
                 } else {
@@ -3493,9 +3544,18 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
             } else {
                 rows
             };
-            assert_eq!(rows.array_values().unwrap().len(), 1);
+            assert_eq!(
+                rows.array_values()
+                    .expect("fixture array property reads")
+                    .unwrap()
+                    .len(),
+                1
+            );
             check(
-                &rows.array_values().unwrap()[0],
+                &rows
+                    .array_values()
+                    .expect("fixture array property reads")
+                    .unwrap()[0],
                 if venue == Venue::PM {
                     "newClientOrderId"
                 } else {
@@ -3555,7 +3615,7 @@ fn production_native_private_orders_frames_update_the_real_store() {
             .private
             .on_message(string(native_order_frame(venue, false).to_string()))
             .unwrap();
-        let rows = owner.base.store.orders();
+        let rows = owner.base.store.orders().unwrap();
         assert_eq!(
             rows.len(),
             1,
@@ -3601,7 +3661,7 @@ fn production_native_private_fill_frames_emit_and_update_the_real_order() {
             .private
             .on_message(string(native_order_frame(venue, true).to_string()))
             .unwrap();
-        let rows = owner.base.store.orders();
+        let rows = owner.base.store.orders().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].filled, rows[0].remaining), (0.75, 2.25));
         assert_eq!(rows[0].status, safe_cex_types::OrderStatus::Open);
@@ -3625,7 +3685,7 @@ fn production_native_private_position_frames_update_the_real_store() {
         // Native test time starts at 0: the production throttle schedules its
         // REST repair, allowing this immediate WS mutation to be observed first.
         owner.private.on_message(string(frame.to_string())).unwrap();
-        let positions = owner.base.store.positions();
+        let positions = owner.base.store.positions().unwrap();
         let p = positions
             .iter()
             .find(|p| {
@@ -3665,7 +3725,7 @@ fn production_native_pm_position_info_does_not_grow_per_frame() {
     let mut first_depth = None;
     for index in 0..8 {
         owner.private.on_message(string(frame.clone())).unwrap();
-        let positions = owner.base.store.positions();
+        let positions = owner.base.store.positions().unwrap();
         let position = positions.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
         assert_eq!((position.contracts, position.entry_price), (2.0, 110.0));
         let mut info = position.info.as_ref();
@@ -3695,7 +3755,7 @@ fn production_native_pm_position_info_is_the_current_position_without_info() {
             "up":upnl.to_string(),"ps":"BOTH"
         }],"B":[]}});
         owner.private.on_message(string(frame.to_string())).unwrap();
-        let positions = owner.base.store.positions();
+        let positions = owner.base.store.positions().unwrap();
         let position = positions.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
         assert_eq!(position.entry_price, entry);
         assert_eq!(position.contracts, amount.abs());
@@ -3749,14 +3809,14 @@ fn production_native_private_balance_frames_follow_each_source_family() {
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let owner = production_native_owner(venue);
         let fills = native_fill_events(&owner);
-        let old_balance = owner.base.store.balance().clone();
+        let old_balance = owner.base.store.balance().unwrap().clone();
         let frame = if venue == Venue::Spot {
             json!({"subscriptionId":7,"event":{"e":"outboundAccountPosition","B":[{"a":"USDT","f":"8","l":"2"}]}})
         } else {
             json!({"e":"ACCOUNT_UPDATE","a":{"P":[],"B":[{"a":"USDT","wb":"10","cw":"8","bc":"0"}]}})
         };
         owner.private.on_message(string(frame.to_string())).unwrap();
-        let balance = owner.base.store.balance();
+        let balance = owner.base.store.balance().unwrap();
         if venue == Venue::Spot {
             assert_eq!(
                 (balance.free, balance.used, balance.total, balance.upnl),
@@ -3775,7 +3835,7 @@ fn production_native_private_balance_frames_follow_each_source_family() {
                 (8.0, 2.0, 10.0)
             );
             assert_eq!(
-                owner.base.store.positions().len(),
+                owner.base.store.positions().unwrap().len(),
                 1,
                 "spot account topic does not invent derivative positions"
             );
@@ -3791,7 +3851,7 @@ fn production_native_private_balance_frames_follow_each_source_family() {
                 )
             );
         }
-        assert!(owner.base.store.orders().is_empty());
+        assert!(owner.base.store.orders().unwrap().is_empty());
         assert!(fills.borrow().is_empty(), "balance topic must emit no fill");
     }
 }
@@ -3850,7 +3910,7 @@ fn native_stop_limit_snapshot_case(venue: Venue) {
                 None,
                 safe_cex_exchange::native::NativeHttpEvents::default(),
             );
-            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
             let owner = ExchangeOwner::new(
                 venue,
                 serde_json::from_value(json!(if venue == Venue::Futures {
@@ -3873,7 +3933,10 @@ fn native_stop_limit_snapshot_case(venue: Venue) {
             safe_cex_venue_binance::class_jobs::reaction(owner.invoke(Method::Orders, vec![])),
         )
         .unwrap();
-        let raw = mapped.array_values().unwrap();
+        let raw = mapped
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(raw.len(), 3);
         for row in raw.iter().skip(1) {
             if unmapped {
@@ -3938,10 +4001,10 @@ fn native_stop_limit_snapshot_case(venue: Venue) {
         let exchange = sdk_class(venue, owner.clone());
         run(&runtime, exchange.fetch_and_set_private_snapshot(1)).unwrap();
         assert!(
-            owner.base.store.loaded().orders,
+            owner.base.store.loaded().unwrap().orders,
             "real binding snapshot sets loaded.orders"
         );
-        assert_eq!(owner.base.store.orders().len(), 3);
+        assert_eq!(owner.base.store.orders().unwrap().len(), 3);
         assert_eq!(adapter.calls.lock().unwrap().len(), 2);
     }
 }
@@ -3976,7 +4039,7 @@ fn native_stop_limit_frame_case(venue: Venue) {
         .private
         .on_message(string(native_order_frame(venue, false).to_string()))
         .unwrap();
-    let orders = owner.base.store.orders();
+    let orders = owner.base.store.orders().unwrap();
     assert_eq!(
         orders.len(),
         3,
@@ -4019,7 +4082,7 @@ fn production_native_private_post_only_rejection_keeps_the_rejection_reason() {
     frame["o"]["X"] = json!("CANCELED");
     frame["o"]["r"] = json!("GTX order rejected");
     owner.private.on_message(string(frame.to_string())).unwrap();
-    let rows = owner.base.store.orders();
+    let rows = owner.base.store.orders().unwrap();
     assert_eq!(
         rows.len(),
         1,
@@ -4059,6 +4122,7 @@ fn projection_host() -> (
     Rc<Runtime>,
     Rc<dyn ExchangeImports>,
     std::sync::Arc<ProjectionWire>,
+    Rc<ExchangeOwner>,
 ) {
     let runtime = Rc::new(Runtime::default());
     let wire = std::sync::Arc::new(ProjectionWire::default());
@@ -4069,7 +4133,16 @@ fn projection_host() -> (
         None,
         Default::default(),
     );
-    (runtime, deps.imports, wire)
+    let imports = deps.imports.clone();
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+        deps,
+    )
+    .unwrap();
+    (runtime, imports, wire, owner)
 }
 #[cfg(feature = "native")]
 fn projection_client(imports: &dyn ExchangeImports, kind: Factory) -> EventValue {
@@ -4083,7 +4156,7 @@ fn projection_client(imports: &dyn ExchangeImports, kind: Factory) -> EventValue
 #[cfg(feature = "native")]
 fn native_projection_query_bigint_is_rendered_instead_of_dropping_every_parameter() {
     for method in [HttpMethod::Get, HttpMethod::Delete] {
-        let (runtime, imports, wire) = projection_host();
+        let (runtime, imports, wire, _owner) = projection_host();
         let client = projection_client(imports.as_ref(), Factory::PublicAPI);
         let params = record([
             ("symbol", string("BTCUSDT")),
@@ -4112,7 +4185,7 @@ fn native_projection_query_bigint_is_rendered_instead_of_dropping_every_paramete
 #[cfg(feature = "native")]
 fn native_projection_body_bigint_rejects_before_any_transport_call() {
     for method in [HttpMethod::Post, HttpMethod::Put] {
-        let (runtime, imports, wire) = projection_host();
+        let (runtime, imports, wire, _owner) = projection_host();
         let client = projection_client(imports.as_ref(), Factory::PublicAPI);
         let data = record([(
             "quantity",
@@ -4141,7 +4214,7 @@ fn native_projection_signing_observes_bigint_query_and_body_before_serialization
     let mut vectors = vec![];
     let mut queries = vec![];
     for method in [HttpMethod::Get, HttpMethod::Post] {
-        let (runtime, imports, wire) = projection_host();
+        let (runtime, imports, wire, _owner) = projection_host();
         let client = projection_client(imports.as_ref(), Factory::API);
         let payload = record([
             ("symbol", string("BTCUSDT")),
@@ -4221,7 +4294,7 @@ fn native_projection_signing_observes_bigint_query_and_body_before_serialization
 #[test]
 #[cfg(feature = "native")]
 fn native_projection_unsigned_private_body_keeps_json_bigint_refusal() {
-    let (runtime, imports, wire) = projection_host();
+    let (runtime, imports, wire, _owner) = projection_host();
     let options = EventValue::from_json(json!({"key":"","secret":""}));
     let owner = record([("name", string("binance")), ("options", options.clone())]);
     let client = imports
@@ -4339,7 +4412,7 @@ fn market_asset_refusal_case(venue: Venue) {
                     .unwrap(),
                     serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true}))
                         .unwrap(),
-                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                    Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                     deps,
                 )
                 .unwrap();
@@ -4355,7 +4428,7 @@ fn market_asset_refusal_case(venue: Venue) {
                 let exchange = sdk_class(venue, owner.clone());
                 let markets = if refresh {
                     run(&runtime, exchange.refresh_markets()).unwrap();
-                    owner.base.store.markets().to_vec()
+                    owner.base.store.markets().unwrap().to_vec()
                 } else {
                     run(&runtime, exchange.fetch_markets()).unwrap()
                 };
@@ -4475,7 +4548,7 @@ fn market_field_refusal_case(venue: Venue, leverage: bool) {
                 None,
                 safe_cex_exchange::native::NativeHttpEvents::default(),
             );
-            let owner=ExchangeOwner::new(venue,serde_json::from_value(json!(match venue{Venue::Futures=>"binance",Venue::PM=>"binancepm",Venue::Spot=>"binancespot"})).unwrap(),serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret","publicDataOnly":!leverage})).unwrap(),Rc::new(safe_cex_store::store::DefaultStore::new()),deps).unwrap();
+            let owner=ExchangeOwner::new(venue,serde_json::from_value(json!(match venue{Venue::Futures=>"binance",Venue::PM=>"binancepm",Venue::Spot=>"binancespot"})).unwrap(),serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret","publicDataOnly":!leverage})).unwrap(),Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),deps).unwrap();
             let errors = Rc::new(RefCell::new(Vec::new()));
             let capture = errors.clone();
             owner.base.on(
@@ -4488,7 +4561,7 @@ fn market_field_refusal_case(venue: Venue, leverage: bool) {
             let exchange = sdk_class(venue, owner.clone());
             let markets = if refresh {
                 run(&runtime, exchange.refresh_markets()).unwrap();
-                owner.base.store.markets().to_vec()
+                owner.base.store.markets().unwrap().to_vec()
             } else {
                 run(&runtime, exchange.fetch_markets()).unwrap()
             };
@@ -4650,7 +4723,7 @@ fn production_depth_binding_preserves_the_source_type_error_and_recovers() {
             venue,
             serde_json::from_value(json!(name)).unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             deps,
         )
         .unwrap();
@@ -4769,7 +4842,7 @@ fn native_ticker_coercion(venue: Venue, name: &str, count: usize) {
         for frame in case["frames"].as_array().unwrap() {
             socket.on_message(frame.as_str().unwrap()).unwrap();
         }
-        ticker_coercion::assert_native(&owner.base.store.tickers(), case);
+        ticker_coercion::assert_native(&owner.base.store.tickers().unwrap(), case);
     }
     owner.base.dispose().unwrap();
 }
@@ -4853,7 +4926,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             Venue::Futures,
             safe_cex_types::ExchangeName::Binance,
             serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();
@@ -4867,14 +4940,11 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             .unwrap();
         let result = run(&runtime, request).result;
         if status == 200 {
-            assert!(
-                matches!(result.unwrap(), EventValue::Array(ref rows) if rows.borrow().is_empty())
-            );
+            assert!(matches!(result.unwrap(), EventValue::Array(ref rows) if rows.is_empty()));
         } else {
             let error = result.unwrap_err();
             let response = error
-                .response
-                .as_ref()
+                .response_json_view()
                 .expect("the original HTTP response is retained");
             assert_eq!(response["status"], 429);
             assert_eq!(response["data"]["code"], -1003);
@@ -4960,7 +5030,7 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
             None,
             safe_cex_exchange::native::NativeHttpEvents::default(),
         );
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let owner = ExchangeOwner::new(
             Venue::Futures,
             safe_cex_types::ExchangeName::Binance,
@@ -4976,14 +5046,17 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
             .set(if delayed { 0.0 } else { -10_000.0 });
         owner.private.position.pending_events.set(true);
         let private = owner.private.clone();
-        let positions_before = owner.base.store.update_ids().positions;
+        let positions_before = owner.base.store.update_ids().unwrap().positions;
         let starter: PositionFetchStarter<Failure> = Rc::new(move || private.throttled_positions());
         starter().unwrap();
         if delayed {
             runtime.pump();
             assert!(owner.private.position.scheduled.get());
             assert!(requests.lock().unwrap().is_empty());
-            assert_eq!(owner.base.store.update_ids().positions, positions_before);
+            assert_eq!(
+                owner.base.store.update_ids().unwrap().positions,
+                positions_before
+            );
             let deadline = owner.private.position.throttle_ms.get();
             assert_eq!(*runtime.sleeps.borrow(), [deadline as u64]);
             runtime.now.set(deadline);
@@ -5005,7 +5078,7 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
             "the actual starter reaches both configured native REST requests"
         );
         assert_eq!(
-            owner.base.store.update_ids().positions,
+            owner.base.store.update_ids().unwrap().positions,
             positions_before + 1.0,
             "the actual refresh publishes one complete position snapshot"
         );
@@ -5074,18 +5147,18 @@ fn production_native_class_future_completes_store_after_held_http() {
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
     owner.private.position.last_fetch_time.set(-10_000.0);
     owner.private.position.pending_events.set(true);
-    let before = owner.base.store.update_ids().positions;
+    let before = owner.base.store.update_ids().unwrap().positions;
     owner.private.throttled_positions().unwrap();
     for _ in 0..32 {
         runtime.pump();
     }
-    assert_eq!(owner.base.store.update_ids().positions, before);
+    assert_eq!(owner.base.store.update_ids().unwrap().positions, before);
     assert!(owner.private.position.in_flight.get());
     assert_eq!(requests.lock().unwrap().len(), 2);
     assert_eq!(completed.load(Ordering::SeqCst), 0);
@@ -5094,7 +5167,7 @@ fn production_native_class_future_completes_store_after_held_http() {
         runtime.pump();
     }
     assert_eq!(
-        owner.base.store.update_ids().positions,
+        owner.base.store.update_ids().unwrap().positions,
         before + 1.0,
         "the detached native class future publishes its completed position snapshot"
     );
@@ -5113,51 +5186,57 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
 
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let owner = production_native_owner(venue);
-        let capture = Capture::new(owner.base.store.clone());
-        let initial: Dictionary = capture.dictionary();
-        let row: TickerReference = initial.borrow().get("BTCUSDT").unwrap().clone();
+        let capture = Capture::new(owner.base.store.clone()).unwrap();
+        let initial: Dictionary = capture.dictionary().unwrap();
+        let row: TickerReference = initial.get("BTCUSDT").unwrap();
         assert!(
-            Rc::ptr_eq(&initial, &capture.dictionary()),
+            initial.same_reference(&capture.dictionary().unwrap()),
             "same dictionary generation {venue:?}"
         );
-        assert_eq!(row.borrow().last.to_bits(), 100.0_f64.to_bits());
+        assert_eq!(
+            row.get("last").unwrap().to_number().unwrap().to_bits(),
+            100.0_f64.to_bits()
+        );
 
         owner
             .public
             .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"-0","a":"123.25"}"#)
             .unwrap();
         assert_eq!(
-            row.borrow().bid.to_bits(),
+            row.get("bid").unwrap().to_number().unwrap().to_bits(),
             (-0.0_f64).to_bits(),
             "constructor subscription updates captured bid before dictionary reread {venue:?}"
         );
         assert_eq!(
-            row.borrow().ask.to_bits(),
+            row.get("ask").unwrap().to_number().unwrap().to_bits(),
             123.25_f64.to_bits(),
             "constructor subscription updates captured ask before dictionary reread {venue:?}"
         );
-        let patched: Dictionary = capture.dictionary();
+        let patched: Dictionary = capture.dictionary().unwrap();
         assert!(
-            Rc::ptr_eq(&initial, &patched),
+            initial.same_reference(&patched),
             "patch retains Dictionary identity {venue:?}"
         );
         assert!(
-            Rc::ptr_eq(&row, patched.borrow().get("BTCUSDT").unwrap()),
+            row.same_reference(&patched.get("BTCUSDT").unwrap()),
             "patch retains TickerReference identity {venue:?}"
         );
         assert_eq!(
-            row.borrow().bid.to_bits(),
+            row.get("bid").unwrap().to_number().unwrap().to_bits(),
             (-0.0_f64).to_bits(),
             "retained row sees native signed zero {venue:?}"
         );
-        assert_eq!(row.borrow().ask.to_bits(), 123.25_f64.to_bits());
         assert_eq!(
-            owner.base.store.tickers()[0].bid.to_bits(),
+            row.get("ask").unwrap().to_number().unwrap().to_bits(),
+            123.25_f64.to_bits()
+        );
+        assert_eq!(
+            owner.base.store.tickers().unwrap()[0].bid.to_bits(),
             (-0.0_f64).to_bits(),
             "real Store receives native frame {venue:?}"
         );
 
-        let mut replacement = owner.base.store.tickers()[0].clone();
+        let mut replacement = owner.base.store.tickers().unwrap()[0].clone();
         replacement.id = "fresh-BTCUSDT".into();
         replacement.last = 77.5;
         Store::update(
@@ -5169,20 +5248,23 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
             false,
         )
         .unwrap();
-        let replaced: Dictionary = capture.dictionary();
-        let fresh: TickerReference = replaced.borrow().get("BTCUSDT").unwrap().clone();
+        let replaced: Dictionary = capture.dictionary().unwrap();
+        let fresh: TickerReference = replaced.get("BTCUSDT").unwrap();
         assert!(
-            !Rc::ptr_eq(&initial, &replaced),
+            !initial.same_reference(&replaced),
             "replacement creates Dictionary generation {venue:?}"
         );
         assert!(
-            !Rc::ptr_eq(&row, &fresh),
+            !row.same_reference(&fresh),
             "replacement creates TickerReference generation {venue:?}"
         );
-        assert_eq!(fresh.borrow().id, "fresh-BTCUSDT");
-        assert_eq!(fresh.borrow().last.to_bits(), 77.5_f64.to_bits());
+        assert_eq!(fresh.get("id").unwrap().to_display(), "fresh-BTCUSDT");
         assert_eq!(
-            row.borrow().last.to_bits(),
+            fresh.get("last").unwrap().to_number().unwrap().to_bits(),
+            77.5_f64.to_bits()
+        );
+        assert_eq!(
+            row.get("last").unwrap().to_number().unwrap().to_bits(),
             100.0_f64.to_bits(),
             "captured prior generation retains original fields {venue:?}"
         );
@@ -5191,18 +5273,18 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
             .public
             .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"6.25","a":"7.5"}"#)
             .unwrap();
-        assert!(Rc::ptr_eq(&replaced, &capture.dictionary()));
+        assert!(replaced.same_reference(&capture.dictionary().unwrap()));
         assert_eq!(
-            fresh.borrow().bid.to_bits(),
+            fresh.get("bid").unwrap().to_number().unwrap().to_bits(),
             6.25_f64.to_bits(),
             "native class patches replacement id {venue:?}"
         );
         assert_eq!(
-            owner.base.store.tickers()[0].bid.to_bits(),
+            owner.base.store.tickers().unwrap()[0].bid.to_bits(),
             6.25_f64.to_bits()
         );
         assert_eq!(
-            row.borrow().bid.to_bits(),
+            row.get("bid").unwrap().to_number().unwrap().to_bits(),
             (-0.0_f64).to_bits(),
             "prior row stays detached after replacement {venue:?}"
         );
@@ -5294,7 +5376,7 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
                 serde_json::from_value(json!(name)).unwrap(),
                 serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
                     .unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 dependencies,
             )
             .unwrap();
@@ -5372,8 +5454,7 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
             } else {
                 let error = result.unwrap_err();
                 let response = error
-                    .response
-                    .as_ref()
+                    .response_json_view()
                     .expect("HTTP rejection retains response");
                 assert_eq!(response["status"], 400);
                 assert_eq!(response["data"]["code"], -1121);
@@ -5447,7 +5528,7 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -5551,7 +5632,7 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
             None,
             safe_cex_exchange::native::NativeHttpEvents::default(),
         );
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let markets: Vec<safe_cex_types::Market> = ["BTCUSDT", "ETHUSDT", "SOLUSDT"].into_iter().map(|symbol|
             serde_json::from_value(json!({"id":symbol,"symbol":symbol,"base":symbol.trim_end_matches("USDT"),"quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.01},"limits":{"amount":{"min":0.01,"max":9},"leverage":{"min":1,"max":3},"price":{"min":0.1,"max":999999}}})).unwrap()
         ).collect();
@@ -5590,7 +5671,7 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
             safe_cex_venue_binance::class_jobs::reaction(operation),
         )
         .unwrap();
-        let observed = owner.base.store.markets();
+        let observed = owner.base.store.markets().unwrap();
         assert_eq!(
             observed.len(),
             markets.len(),
@@ -5711,7 +5792,7 @@ fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
             }))
             .unwrap(),
             serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();
@@ -5847,3 +5928,7 @@ fn production_native_ticker_owner_source_cases_are_current() {
     }
     assert_eq!(observed, 164);
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;
