@@ -428,8 +428,36 @@ impl RetainedJsonInput {
             _ => None,
         }
     }
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Self> {
+        match self {
+            Self::Object(values) => values
+                .iter_mut()
+                .rev()
+                .find(|(units, _)| units.iter().copied().eq(key.encode_utf16()))
+                .map(|(_, value)| value),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&[(Vec<u16>, Self)]> {
+        match self {
+            Self::Object(values) => Some(values),
+            _ => None,
+        }
+    }
+
     pub fn as_array(&self) -> Option<&[Self]> {
-        match self { Self::Array(values) => Some(values), _ => None }
+        match self {
+            Self::Array(values) => Some(values),
+            _ => None,
+        }
+    }
+
+    pub fn as_array_mut(&mut self) -> Option<&mut [Self]> {
+        match self {
+            Self::Array(values) => Some(values),
+            _ => None,
+        }
     }
 
     pub fn is_nullish(&self) -> bool {
@@ -437,7 +465,8 @@ impl RetainedJsonInput {
     }
 
     pub fn text_equals(&self, expected: &str) -> bool {
-        self.as_text().is_some_and(|units| units.iter().copied().eq(expected.encode_utf16()))
+        self.as_text()
+            .is_some_and(|units| units.iter().copied().eq(expected.encode_utf16()))
     }
 
     pub fn as_f64(&self) -> Option<f64> {
