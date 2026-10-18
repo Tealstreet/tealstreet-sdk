@@ -154,7 +154,7 @@ fn parse_tickers_family(
             ask: value("ask1Price")?,
             last,
             mark: value("markPrice")?,
-            index: value("indexPrice")?,
+            index: Some(value("indexPrice")?),
             percentage: value("price24hPcnt")? * 100.,
             open_interest: value("openInterest")?,
             funding_rate: if spot || market.is_expiring == Some(true) {

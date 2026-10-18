@@ -588,7 +588,7 @@ fn gateway_native_decode_subscriptions_heartbeat_reconnect_and_late_events() {
                 ticker.mark,
                 ticker.index
             ),
-            (163.0, 167.0, 107.0, 109.0, 113.0),
+            (163.0, 167.0, 107.0, 109.0, Some(113.0)),
             "PUBLIC native decoded ticker prices"
         );
         assert_eq!(

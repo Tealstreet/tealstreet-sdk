@@ -83,6 +83,34 @@ fn sync_position_mode_retains_native_axios_error_observations() {
                 "ASTER-NATIVE-ERROR must preserve {field}"
             );
         }
+        assert!(
+            !error
+                .value
+                .get("originalError")
+                .unwrap()
+                .strict_equals(&error.value),
+            "approved originalError snapshot must not point back to the Error"
+        );
+        let snapshot = error.value.get("originalError").unwrap();
+        assert!(matches!(&snapshot, Js::Object(object) if object.class == "Error"));
+        assert!(!snapshot.has_own("originalError"));
+        for field in [
+            "name",
+            "message",
+            "code",
+            "stack",
+            "isAxiosError",
+            "enhancedMessage",
+        ] {
+            assert!(
+                snapshot
+                    .get(field)
+                    .unwrap()
+                    .strict_equals(&error.value.get(field).unwrap()),
+                "original Error snapshot preserves {field}"
+            );
+        }
+
         let native = error.native.as_ref().unwrap();
         assert!(native.is_axios_error);
         assert_eq!(

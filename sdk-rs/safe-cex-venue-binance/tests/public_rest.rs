@@ -79,7 +79,7 @@ fn cached_ticker() -> Ticker {
         ask: 2.0,
         last: 3.0,
         mark: 4.0,
-        index: 5.0,
+        index: Some(5.0),
         percentage: 6.0,
         funding_rate: 7.0,
         funding_time: 8.0,
@@ -99,7 +99,7 @@ fn market_wire(m: &RestMarket) -> Value {
     v
 }
 fn ticker_wire(t: &Ticker) -> Value {
-    json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":number(t.index),"percentage":number(t.percentage),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume),"openInterest":number(t.open_interest)})
+    json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":t.index.map(number).unwrap_or(Value::Null),"percentage":number(t.percentage),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume),"openInterest":number(t.open_interest)})
 }
 fn candle_wire(c: &Candle) -> Value {
     json!({"timestamp":number(c.timestamp),"open":number(c.open),"high":number(c.high),"low":number(c.low),"close":number(c.close),"volume":number(c.volume)})
@@ -873,7 +873,7 @@ fn tickers_test(v: RestVenue) {
                         &format!("{r}: native mark"),
                     );
                     eq_number(
-                        t.index,
+                        t.index.unwrap(),
                         if v == RestVenue::Spot { last } else { 12.5 },
                         &format!("{r}: native index"),
                     );

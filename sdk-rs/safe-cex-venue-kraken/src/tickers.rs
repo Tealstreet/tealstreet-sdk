@@ -108,7 +108,7 @@ where
                 ask: number(Some(&keyed(row, "ask")?))?,
                 last,
                 mark: if mark > 0.0 { mark } else { last },
-                index: if index > 0.0 { index } else { last },
+                index: Some(if index > 0.0 { index } else { last }),
                 mid_price: None,
                 timestamp: None,
                 percentage,

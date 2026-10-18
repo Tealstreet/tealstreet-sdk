@@ -247,7 +247,7 @@ fn maintained_typescript_first_ticker_update_numeric_bits() {
                         "fundingRate" => ticker.funding_rate,
                         "fundingTime" => ticker.funding_time,
                         "mark" => ticker.mark,
-                        "index" => ticker.index,
+                        "index" => ticker.index.unwrap(),
                         "bid" => ticker.bid,
                         "ask" => ticker.ask,
                         "last" => ticker.last,
@@ -381,7 +381,7 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
             "interest" => ticker.open_interest,
             "funding" => ticker.funding_rate,
             "mark" => ticker.mark,
-            "index" => ticker.index,
+            "index" => ticker.index.unwrap(),
             _ => unreachable!(),
         };
         assert_eq!(value, 9.0, "notification commit before rejection {method}");

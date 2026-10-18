@@ -569,7 +569,7 @@ pub fn normalize_ticker(
         ask: to_number(pick(raw, &["ask1", "askPrice"]), Some(last))?,
         last,
         mark,
-        index: to_number(raw.get("indexPrice"), Some(last))?,
+        index: Some(to_number(raw.get("indexPrice"), Some(last))?),
         mid_price: None,
         timestamp: None,
         percentage: normalize_percentage(pick(raw, &["riseFallRate", "priceChangePercent"]))?,

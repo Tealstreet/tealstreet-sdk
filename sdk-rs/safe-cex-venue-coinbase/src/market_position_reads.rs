@@ -140,7 +140,7 @@ fn ticker(id: String) -> Ticker {
         ask: 0.0,
         last: 0.0,
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         percentage: 0.0,
         open_interest: 0.0,
@@ -337,7 +337,7 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                     fields.ask = float(prop(quote, "best_ask_price")?)?;
                     fields.last = float(prop(quote, "trade_price")?)?;
                     fields.mark = float(prop(quote, "mark_price")?)?;
-                    fields.index = float(prop(quote, "index_price")?)?;
+                    fields.index = Some(float(prop(quote, "index_price")?)?);
                     fields.percentage = float(or(
                         raw.as_ref()
                             .and_then(|v| v.get("price_percentage_change_24h")),
@@ -405,7 +405,7 @@ pub fn fetch_tickers_v3<H: MarketPositionHost + 'static>(
                     fields.ask = float(info.get("price"))?;
                     fields.last = float(info.get("price"))?;
                     fields.mark = float(info.get("price"))?;
-                    fields.index = float(info.get("price"))?;
+                    fields.index = Some(float(info.get("price"))?);
                     fields.percentage = float(info.get("price_percentage_change_24h"))?;
                     fields.funding_rate =
                         float(or(details.and_then(|v| v.get("funding_rate")), &zero))?;
