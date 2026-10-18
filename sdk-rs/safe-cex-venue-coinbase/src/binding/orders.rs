@@ -76,7 +76,7 @@ impl Host {
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info = (Some(order.info.borrow().clone())).into();
+                fields.info = (Some(order.info.borrow().clone().into())).into();
                 fields
             })
             .collect()
@@ -240,7 +240,7 @@ impl CoinbaseOrderHost for OrderHost {
                 remaining: order.remaining,
                 extra: (Some(order.extra.clone())).into(),
                 reduce_only: order.reduce_only.into(),
-                info: (Some(info)).into(),
+                info: (Some(info.into())).into(),
                 last_update: order.last_update,
                 close: (None).into(),
                 client_order_id: (None).into(),
