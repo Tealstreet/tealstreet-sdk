@@ -67,7 +67,7 @@ async fn observe(name: ExchangeName, malformed: bool, expected: &Value) {
     let venue = constructor
         .construct(
             name.clone(),
-            serde_json::from_value(json!({"tuning":{"consoleLogging":false}})).unwrap(),
+            serde_json::from_value(json!({"key":"", "secret":"", "tuning":{"consoleLogging":false}})).unwrap(),
             Rc::new(DefaultStore::new()),
         )
         .unwrap();
