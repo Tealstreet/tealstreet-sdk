@@ -41,5 +41,6 @@ explicitly applies decision 2 to that self-cycle, so originalError===error remai
 a documented residual. Native weak-reference assertions require release after the
 error is dropped. Snapshot fields retain class, diagnostics, extra data, config
 data and the same response authority; executable config callbacks retain the
-existing owned-data capability boundary. No second origin carrier is added. The plain underlying Axios client keeps its scalar rejection
-contract. WOO supplies an independent constructed-client/typed-bridge witness.
+existing owned-data capability boundary. No second origin carrier is added.
+The plain underlying Axios client keeps its scalar rejection contract. WOO
+supplies an independent constructed-client/typed-bridge witness.
