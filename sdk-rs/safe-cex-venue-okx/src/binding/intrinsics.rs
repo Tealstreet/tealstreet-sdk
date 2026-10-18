@@ -199,7 +199,7 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
             Js::Undefined
         }
         "delete-index" => {
-            x.delete(&y.to_js_string()?);
+            x.delete(&y.to_js_string()?)?;
             Js::Bool(true)
         }
         "define-literal-field" => {

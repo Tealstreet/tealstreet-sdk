@@ -67,7 +67,7 @@ async function nativeProbe(mode){
   const macroOrigins=verifiedMacroOrigins(doc,pkg,metadata,artifacts,sysroot.stdout.trim());
   const {runProbes}=await import('./accepted-probes.mjs');
   assert.equal(injected,mode==='baseline'?0:1,'Fields mutation hook must execute before production compilation');
-  const rows=runProbes(root,metadata,[{package:pkg.name,target,types:[],publicAliases:aliases,externalTypeAliases,macroOrigins,locals:[]}],{[name]:contract(aliases[0],grvtFieldsWitnesses)},{target:selectedTarget,features:[],jobs:1});
+  const rows=runProbes(root,metadata,[{package:pkg.name,target,features:artifacts.find(row=>row.package_id===pkg.id && row.target.name===target.name).features,types:[],publicAliases:aliases,externalTypeAliases,macroOrigins,locals:[]}],{[name]:contract(aliases[0],grvtFieldsWitnesses)},{target:selectedTarget,features:[],jobs:1});
   console.log('GRVT_FIELDS_NATIVE '+JSON.stringify({mode,rows}));
   assert.equal(rows.length,1);assert.equal(rows[0].name,name);assert.ok(!rows[0].classificationOnly);
   assert.deepEqual(rows[0].failures,[],'actual Fields routes native keys identity and trait observations');

@@ -34,7 +34,7 @@ function probe(reviewedHelpers = helpers) {
   assert.ok(owner?.deserialize, 'WS helper must execute the actual compiler-inventoried parent');
   assert.equal(path.resolve(root, owner.span.filename), sourcePath);
   assert.equal(reviewedLocalHelper({ label: helperLabel, line: 170, column: 9 }, reviewedHelpers, fs.readFileSync(sourcePath), [owner], contracts), true);
-  return runProbes(root, metadata, [{ package: member.name, target, types: [owner], locals: [], delegatedLocals: [{ name: helperLabel, runtimeOwner: ownerName }] }], contracts);
+  return runProbes(root, metadata, [{ package: member.name, target, features: [], types: [owner], locals: [], delegatedLocals: [{ name: helperLabel, runtimeOwner: ownerName }] }], contracts);
 }
 function passed(results) {
   assert.deepEqual(results.map(row => row.name), [ownerName, helperLabel]);

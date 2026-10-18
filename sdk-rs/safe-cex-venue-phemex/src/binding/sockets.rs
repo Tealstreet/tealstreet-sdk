@@ -284,7 +284,7 @@ fn listen_candles(h: &mut Host, opts: Js, cb: Js) -> Result<Js, Thrown> {
     let s = ws::listen_ohlcv(h, opts, cb)?;
     *subscription.borrow_mut() = Some(s.clone());
     h.rt.this
-        .delete(&"__newParser".encode_utf16().collect::<Vec<_>>());
+        .delete(&"__newParser".encode_utf16().collect::<Vec<_>>())?;
     let host = h.clone();
     Ok(Js::function("unsubscribe", move |_, _| {
         s.dispose(&mut host.clone())?;
@@ -305,7 +305,7 @@ fn listen_book(h: &mut Host, symbol: Js, cb: Js) -> Result<Js, Thrown> {
     let s = ws::listen_order_book(h, symbol, cb)?;
     *subscription.borrow_mut() = Some(s.clone());
     h.rt.this
-        .delete(&"__newParser".encode_utf16().collect::<Vec<_>>());
+        .delete(&"__newParser".encode_utf16().collect::<Vec<_>>())?;
     let host = h.clone();
     Ok(Js::function("unsubscribe", move |_, _| {
         s.dispose(&mut host.clone())?;
