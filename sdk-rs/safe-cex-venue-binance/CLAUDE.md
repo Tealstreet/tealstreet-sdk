@@ -588,3 +588,12 @@ zero and replacement generations before serialization. The separate
 updates independently, requires the named native assertion to fail, restores exact
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
+
+The legacy `public_message`, `private_message`, `spot_public_message` and
+`public_candle_delegate` callback extractions have no production callers and were
+removed with `message_entry` and its standalone oracle/control receipts. All
+nine mapped source members retain their existing concrete native class bodies.
+Use `private_classes --features native` for actual native private frame/Store,
+public ticker generations, candle delegation/cleanup and depth recovery proofs.
+Registry/N-API construction reaches those concrete classes. The current wasm FFI
+exports only `parity_probe`/`version`, with no legacy message entry.
