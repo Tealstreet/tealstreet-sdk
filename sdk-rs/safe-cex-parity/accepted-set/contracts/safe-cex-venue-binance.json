@@ -15222,5 +15222,198 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::private_classes::Action": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "This exact alias is a shared fallible zero-argument native callback. Production private sockets store captured source arrows with their original receiver and base lease; the alias is an executable capability and has no raw-input parsing role.",
+    "evidence": "The actual native_dependencies/ExchangeOwner witness production_native_private_clones_share_settlement_and_captured_receiver holds the real listen-key request, drops the original settlement, observes retained clones, and invokes the cloned captured reconnect arrow to start the second real request. An independent production control replaces CapturedAction's invocation with a no-op, requires that named compiled native witness to fail, restores the exact production bytes and requires GREEN. Fresh authenticated probes inspect this actual compiler alias rather than a test callback type."
+  },
+  "safe_cex_venue_binance::private_classes::PinKey": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_binance::listen_key::ListenKeyResponse",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "resolved_path": {
+                                                                              "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "resolved_path": {
+                                                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "This exact alias is an owned pinned HTTP continuation producing the typed listen-key outcome or original request failure. It is a suspended computation, not an input parser; this classification does not classify its payload or other futures.",
+    "evidence": "tests/private_classes.rs::private_action_key_binding::private_pin_key_retains_native_value_and_request_rejection_after_suspension invokes the real ExchangeState PrivateParent::post_key using native_dependencies for Futures and PM. It holds each POST, observes Pending before release, then reads negative-zero bits, NaN and own-undefined from the actual native listenKey referent. Genuine RestFailure rejection retains the original HTTP error message and response detail, with one request and no resend. An independent production control replaces the actual data.listenKey read with undefined, requires the compiled named native witness to fail, then exact source restoration passes. Trait classification is separate from executing these real request continuations."
   }
 }
