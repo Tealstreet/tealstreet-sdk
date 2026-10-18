@@ -28,7 +28,7 @@ fn facade() -> (Js, Rc<ScopeShared<()>>, Rc<dyn Exchange>) {
         runtime.clone(),
         Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
     );
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let shared = Rc::new(ScopeShared::new(
         runtime,
         http,

@@ -6,13 +6,13 @@ mod virtual_time {
         "/../test-support/virtual_time.rs"
     ));
 }
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     external::ExternalPublicData,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider, socket::TunnelHost,
@@ -346,5 +346,5 @@ pub fn fixture_with_settings_and_local_time(
         },
         external,
     );
-    (venue, runtime, store, wire)
+    (venue.unwrap(), runtime, store, wire)
 }

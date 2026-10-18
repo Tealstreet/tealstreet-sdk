@@ -865,7 +865,20 @@ mod strict_codecs {
 
     impl<'de> serde::Deserialize<'de> for super::StoreData {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireStoreData::deserialize(crate::strict_decode::object(deserializer))
+            struct StoreRecordVisitor;
+            impl<'de> serde::de::Visitor<'de> for StoreRecordVisitor {
+                type Value = super::StoreData;
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    formatter.write_str("a Store data record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    deserializer: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireStoreData::deserialize(crate::strict_decode::object(deserializer))
+                }
+            }
+            deserializer.deserialize_newtype_struct(crate::STORE_RECORD, StoreRecordVisitor)
         }
     }
 

@@ -50,7 +50,7 @@ pub(super) fn assemble(
     let args = vec![
         from_typed(&parts.name)?,
         from_typed(&parts.options)?,
-        safe_cex_exchange::js_runtime::store::facade(parts.store.clone()),
+        safe_cex_exchange::js_runtime::store::facade(parts.store.clone())?,
     ];
     let http = (deps.http)(&parts.options)?;
     let shared = Rc::new_cyclic(|weak| {

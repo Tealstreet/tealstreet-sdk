@@ -293,7 +293,7 @@ impl RestAdapter for Http {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Arc<Http>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<WeexExchange>,
 }
 pub fn options() -> ExchangeOptions {
@@ -306,7 +306,7 @@ pub fn harness(options: ExchangeOptions, script: impl FnOnce(&Http)) -> Harness 
     let http = Arc::new(Http::default());
     script(&http);
     let host = safe_cex_exchange::js_runtime::client::rest_http_host(runtime.clone(), http.clone());
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = WeexExchange::new(
         ExchangeName::Weex,
         options,

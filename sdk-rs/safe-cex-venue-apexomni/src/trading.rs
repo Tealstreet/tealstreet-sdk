@@ -145,7 +145,7 @@ impl ApexOmniExchange {
         let market = self
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&opts.symbol)
             .cloned()
             .ok_or_else(|| failure(format!("Market {} not found", opts.symbol)))?;
@@ -185,7 +185,7 @@ impl ApexOmniExchange {
                 let ticker = self
                     .base
                     .store
-                    .tickers_by_symbol()
+                    .tickers_by_symbol()?
                     .get(&opts.symbol)
                     .cloned()
                     .ok_or_else(|| failure("typed market order requires a ticker".into()))?;
@@ -200,13 +200,15 @@ impl ApexOmniExchange {
                 ))
             }
             Some(OrderType::StopLoss | OrderType::TakeProfit) => {
-                let effective = present(trigger).or(present(price)).unwrap_or_else(|| {
-                    self.base
+                let effective = match present(trigger).or(present(price)) {
+                    Some(value) => value,
+                    None => self
+                        .base
                         .store
-                        .tickers_by_symbol()
+                        .tickers_by_symbol()?
                         .get(&opts.symbol)
-                        .map_or(f64::NAN, |t| t.mark)
-                });
+                        .map_or(f64::NAN, |t| t.mark),
+                };
                 js_number_string(exchange_utils::calculate_tp_sl_price(
                     side, effective, p_price,
                 ))
@@ -326,9 +328,9 @@ impl ApexOmniExchange {
             let config = self
                 .base
                 .store
-                .zk_link_config()
+                .zk_link_config()?
                 .as_ref()
-                .map_or(R::Undefined, |v| (**v).clone());
+                .map_or(R::Undefined, |v| v.clone());
             let account_id = crate::response::text(crate::response::get(&config, "id"))?;
             let client = match &caller {
                 Some(id) => id.clone(),
@@ -490,7 +492,7 @@ impl ApexOmniExchange {
         let composite = order.id.contains("__take_profit") || order.id.contains("__stop_loss");
         let (base, mut next) = if composite {
             let base_id = order.id.split("__").next().unwrap();
-            let orders = self.base.store.orders();
+            let orders = self.base.store.orders()?;
             let base = orders
                 .iter()
                 .find(|o| {
@@ -553,7 +555,7 @@ impl ApexOmniExchange {
         } else {
             self.base
                 .store
-                .orders()
+                .orders()?
                 .iter()
                 .filter(|o| o.symbol == symbol && o.r#type != OrderType::Limit)
                 .cloned()
@@ -564,7 +566,7 @@ impl ApexOmniExchange {
         } else {
             self.base
                 .store
-                .markets_by_symbol()
+                .markets_by_symbol()?
                 .get(symbol)
                 .map(|m| m.id.clone())
                 .ok_or_else(|| failure("typed cancellation requires a known market".into()))?

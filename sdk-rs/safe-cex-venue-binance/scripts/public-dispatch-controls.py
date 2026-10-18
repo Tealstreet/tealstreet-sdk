@@ -23,12 +23,12 @@ cases = [
      b'let _ = events.clone();',
      'public_frame_guard::production_native_public_frame_guard_releases_success_error_and_unwind'),
     ('Capture::new', capture,
-     b'if let Some(capture) = weak.upgrade() {\n                capture.refresh();\n            }',
-     b'if let Some(_capture) = weak.upgrade() {}',
+     b'Ok(Rc::new(Self {',
+     b'let facade = Js::object(vec![("tickersBySymbol", facade.get("tickersBySymbol").map_err(native_error)?)]);\n        Ok(Rc::new(Self {',
      'production_native_ticker_capture_aliases_retain_cells_and_replace_generations'),
     ('lookup', capture,
-     b'.then_some(Target::StockInherited)',
-     b'.then_some(Target::StockInherited).filter(|_| false)',
+     b'row.truthy().then_some(Target(row))',
+     b'(row.truthy() && dictionary.has_own(symbol)).then_some(Target(row))',
      'public_dispatch_contracts::production_native_dispatch_lookup_and_capture_follow_source_prototypes'),
 ]
 requested = sys.argv[1:]

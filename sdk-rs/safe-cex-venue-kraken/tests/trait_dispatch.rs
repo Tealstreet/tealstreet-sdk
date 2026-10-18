@@ -153,7 +153,7 @@ impl JournalFolder for Folder {
         _: f64,
         _: f64,
         symbol_scoped: bool,
-        _: Box<dyn Fn(&str) -> String + 'a>,
+        _: Box<dyn Fn(&str) -> Result<String, safe_cex_exchange::runtime::ExchangeError> + 'a>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         self.0.borrow_mut().push((account.into(), symbol_scoped));
         Box::pin(async { Ok(vec![json!({"folded": true})]) })
@@ -234,7 +234,9 @@ fn spot_fetch_and_set_orders_replaces_the_full_set() {
     h.drive(h.venue().fetch_and_set_orders(Some(vec!["XBT/USD".into()])))
         .unwrap();
     assert!(
-        safe_cex_store::Store::orders(h.store.as_ref()).is_empty(),
+        safe_cex_store::Store::orders(h.store.as_ref())
+            .unwrap()
+            .is_empty(),
         "Kraken spot fetchAndSetOrders must replace every order"
     );
 }

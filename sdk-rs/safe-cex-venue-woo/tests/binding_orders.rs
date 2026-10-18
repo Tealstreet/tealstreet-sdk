@@ -498,7 +498,7 @@ fn already_canceled_sibling_is_marked_canceled_and_placement_continues() {
         json!({"symbol":"BTCUSDT","type":"take_profit_market","side":"sell","amount":0,"price":110}),
     );
     assert_eq!(ids, Ok(vec!["54".to_string()]), "{}", log(&h));
-    let status = serde_json::to_value(h.store.orders()[0].status).unwrap();
+    let status = serde_json::to_value(h.store.orders().unwrap()[0].status).unwrap();
     assert_eq!(status, json!("canceled"));
 }
 

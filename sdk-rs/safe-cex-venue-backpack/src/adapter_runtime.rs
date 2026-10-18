@@ -19,9 +19,9 @@ pub enum Data {
     Orders(Vec<Order>),
     Account,
 }
-pub fn loaded(base: &BaseExchange) -> Vec<(JsString, bool)> {
-    let l = base.store.loaded();
-    [
+pub fn loaded(base: &BaseExchange) -> Result<Vec<(JsString, bool)>, ExchangeError> {
+    let l = base.store.loaded()?;
+    Ok([
         ("balance", l.balance),
         ("orders", l.orders),
         ("markets", l.markets),
@@ -30,7 +30,7 @@ pub fn loaded(base: &BaseExchange) -> Vec<(JsString, bool)> {
     ]
     .into_iter()
     .map(|(k, v)| (k.encode_utf16().collect(), v))
-    .collect()
+    .collect())
 }
 pub fn loaded_patch(v: Vec<(JsString, bool)>) -> Result<StoreDataLoaded, ExchangeError> {
     let get = |k: &str| -> bool {
@@ -188,7 +188,7 @@ impl source::RuntimeHost for Frame {
         Ok(())
     }
     fn loaded(&mut self) -> Result<Vec<(JsString, bool)>, ExchangeError> {
-        Ok(loaded(&self.owner.base))
+        loaded(&self.owner.base)
     }
     fn update(
         &mut self,

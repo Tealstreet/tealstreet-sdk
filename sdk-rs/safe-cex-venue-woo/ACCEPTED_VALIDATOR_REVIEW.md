@@ -43,8 +43,8 @@ The runner uses ordinary complete compiler discovery, selected actual Cargo
 artifacts, authenticated macro/number-provider origins and selected source-scope
 checks before the maintained production `runProbes`. It retains all 645 owners,
 10 aliases and nine construction obligations in discovery, then requests these
-30 complete function APIs for native evidence. The existing exact `sorted`
-local-function review remains load-bearing. Every Cargo invocation uses one job.
+30 complete function APIs for native evidence. The unused candle mapper's `sorted`
+helper and its policy are subsequently retired together. Every Cargo invocation uses one job.
 
 The control changes only copied production functions after unchanged contract
 validation: each actual body is short-circuited to an error. Original bodies stay

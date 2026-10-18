@@ -152,19 +152,25 @@ fn actual_typescript_position_reads() {
                 },
                 || {
                     note(json!(["markets"]));
-                    f.get("markets")
+                    Ok(f.get("markets")
                         .cloned()
                         .unwrap_or(json!([{"symbol":"BTCUSDT"},{"symbol":"ETHUSDT"}]))
                         .as_array()
                         .unwrap()
                         .iter()
                         .map(|v| v["symbol"].as_str().unwrap().into())
-                        .collect()
+                        .collect())
                 },
-                || vec![cached],
+                || Ok(vec![cached]),
                 |e: &Error| note(json!(["report", e.0])),
             ));
-            json!(result.into_iter().map(position).collect::<Vec<_>>())
+            json!(
+                result
+                    .unwrap()
+                    .into_iter()
+                    .map(position)
+                    .collect::<Vec<_>>()
+            )
         } else {
             counts[1] += 1;
             let regular = Rc::new(json!({"id":"R"}));

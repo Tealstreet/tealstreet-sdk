@@ -76,7 +76,7 @@ fn native_final_drop_completes_after_both_venue_and_store_errors() {
             "venue error cannot suppress shared cancellation"
         );
         assert!(
-            !store.loaded().orders,
+            !store.loaded().unwrap().orders,
             "Store reset committed despite its failing observer"
         );
         assert_eq!(errors.load(Ordering::SeqCst), 1);

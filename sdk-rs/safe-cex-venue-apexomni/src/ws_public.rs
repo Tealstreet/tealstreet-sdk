@@ -230,10 +230,19 @@ impl ApexOmniPublicWebsocket {
                 .parent
                 .base
                 .store
-                .tickers_by_symbol()
+                .tickers_by_symbol()?
                 .get(&symbol)
-                .cloned()
-                .or_else(|| self.parent.base.store.tickers_by_id().get(&symbol).cloned());
+                .cloned();
+            let ticker = match ticker {
+                Some(value) => Some(value),
+                None => self
+                    .parent
+                    .base
+                    .store
+                    .tickers_by_id()?
+                    .get(&symbol)
+                    .cloned(),
+            };
             if let Some(ticker) = ticker {
                 let mut patch = ModelPatch::default();
                 let mut reference = 0.;
@@ -277,7 +286,7 @@ impl ApexOmniPublicWebsocket {
                         .parent
                         .base
                         .store
-                        .markets_by_symbol()
+                        .markets_by_symbol()?
                         .get(&symbol)
                         .cloned();
                     if market.is_none_or(|m| m.is_inverse == Some(true)) {
@@ -287,7 +296,7 @@ impl ApexOmniPublicWebsocket {
                         .parent
                         .base
                         .store
-                        .positions()
+                        .positions()?
                         .iter()
                         .filter(|p| p.symbol == symbol && p.contracts != 0.)
                         .cloned()

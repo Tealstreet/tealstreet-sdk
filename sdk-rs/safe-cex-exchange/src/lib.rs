@@ -15,6 +15,7 @@ pub mod http;
 pub mod income_paging;
 pub mod journal;
 pub mod js_runtime;
+pub use js_runtime::native_store;
 pub mod lifecycle;
 pub mod message_stats;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
@@ -65,3 +66,6 @@ pub mod how_facade;
 
 mod native_teardown;
 pub use native_teardown::native_final_drop;
+
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod replay_clock;

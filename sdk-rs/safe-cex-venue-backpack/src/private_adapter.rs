@@ -279,7 +279,7 @@ impl BackpackPrivateWebSocket {
             .parent()?
             .base
             .store
-            .tickers()
+            .tickers()?
             .iter()
             .map(|t| (units(&t.symbol), Some(t.last), Some(t.mark)))
             .collect::<Vec<_>>();
@@ -480,7 +480,7 @@ impl events::UpdateHost<Value> for PrivateFrame {
             .parent()?
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.id == s)
             .cloned())
@@ -544,7 +544,7 @@ impl events::PositionHost<Value> for PrivateFrame {
         Ok(self.owner.parent()?.get_position_mode())
     }
     fn positions(&mut self) -> Result<Vec<Position>, ExchangeError> {
-        Ok(self.owner.parent()?.base.store.positions().to_vec())
+        Ok(self.owner.parent()?.base.store.positions()?.to_vec())
     }
     fn positions_len(&mut self, p: &Vec<Position>) -> Result<usize, ExchangeError> {
         Ok(p.len())
@@ -663,7 +663,7 @@ impl events::FetchHost for PrivateFrame {
             .map_err(Into::into)
     }
     fn loaded(&mut self) -> Result<Vec<(JsString, bool)>, ExchangeError> {
-        Ok(crate::adapter_runtime::loaded(&self.owner.parent()?.base))
+        crate::adapter_runtime::loaded(&self.owner.parent()?.base)
     }
     fn update_orders(
         &mut self,

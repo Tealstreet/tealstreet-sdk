@@ -49,7 +49,7 @@ pub type CancelOrderHandle = Rc<RefCell<Order>>;
 /// synchronous throw, future models async settlement. An observation future's
 /// drop must not cancel an already-started request at the configured boundary.
 pub async fn cancel_binance_symbol_orders<F>(
-    get_orders: impl FnOnce() -> Vec<CancelOrderHandle>,
+    get_orders: impl FnOnce() -> Result<Vec<CancelOrderHandle>, safe_cex_types::StoreReadError>,
     symbol: &str,
     mut delete: impl FnMut(&'static str, CancelSymbolRequest) -> Result<F, Rc<ExchangeError>>,
     mut update_status: impl FnMut(&[CancelOrderHandle], OrderStatus) -> Result<(), StoreMutationError>,
@@ -62,7 +62,7 @@ where
         // Retain object handles, not early ID copies. Classification stays fixed
         // while later changes to the captured objects remain visible.
         let (regular_orders, algo_orders) = {
-            let orders = get_orders();
+            let orders = get_orders()?;
             let mut regular_orders = vec![];
             let mut algo_orders = vec![];
             for handle in orders {
@@ -136,7 +136,7 @@ where
         .await
         .map_err(CancelSymbolError::Request)?;
         let matching: Vec<String> = store
-            .orders()
+            .orders()?
             .iter()
             .filter(|order| order.symbol == symbol)
             .map(|order| order.id.clone())
@@ -173,7 +173,7 @@ where
         .await
         .map_err(CancelSymbolError::Request)?;
         let matching: Vec<String> = store
-            .orders()
+            .orders()?
             .iter()
             .filter(|order| order.symbol == symbol)
             .map(|order| order.id.clone())
@@ -250,5 +250,11 @@ fn finish(
             emit_error(message).map_err(CancelSymbolError::Emission)?;
             Err(error)
         }
+    }
+}
+
+impl From<safe_cex_types::StoreReadError> for CancelSymbolError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(Box::new(error.into()))
     }
 }

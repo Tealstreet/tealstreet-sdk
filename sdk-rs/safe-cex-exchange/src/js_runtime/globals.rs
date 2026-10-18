@@ -540,6 +540,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             "freeze",
             Js::function("freeze", |_, args| arg(&args, 0).freeze()),
         ),
+        ("seal", Js::function("seal", |_, args| arg(&args, 0).seal())),
         (
             "preventExtensions",
             Js::function("preventExtensions", |_, args| {

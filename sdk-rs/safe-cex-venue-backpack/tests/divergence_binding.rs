@@ -87,11 +87,11 @@ fn real_orders_reconciliation_silently_catches_failure() {
         support::ready(&runtime, private.fetch_orders_throttled()).is_ok(),
         "source silently catches real orders read failure"
     );
-    assert!(!store.loaded().orders);
+    assert!(!store.loaded().unwrap().orders);
     assert!(private.state.orders_timeout.borrow().is_none());
     put(&wire, "/api/v1/orders", json!([]));
     support::ready(&runtime, private.fetch_orders_throttled()).unwrap();
-    assert!(store.loaded().orders);
+    assert!(store.loaded().unwrap().orders);
     assert_eq!(wire.requests.lock().unwrap().len(), 2);
     assert!(runtime.errors.borrow().is_empty());
 }
@@ -114,8 +114,8 @@ fn real_balance_reconciliation_silently_catches_failure() {
         json!({"netEquity":"25","netEquityAvailable":"18","netEquityLocked":"7","pnlUnrealized":"-0"}),
     );
     support::ready(&runtime, private.execute_balance_fetch()).unwrap();
-    assert_eq!(store.balance().total, 25.0);
-    assert_eq!(store.balance().upnl.to_bits(), (-0.0f64).to_bits());
+    assert_eq!(store.balance().unwrap().total, 25.0);
+    assert_eq!(store.balance().unwrap().upnl.to_bits(), (-0.0f64).to_bits());
     assert_eq!(wire.requests.lock().unwrap().len(), 2);
     assert!(runtime.errors.borrow().is_empty());
 }
@@ -133,11 +133,11 @@ fn real_reconciliation_continues_after_dropped_waiters() {
     drop(private.execute_balance_fetch());
     runtime.pump();
     assert!(
-        store.loaded().orders,
+        store.loaded().unwrap().orders,
         "owned order reconciliation continuation"
     );
     assert_eq!(
-        store.balance().total,
+        store.balance().unwrap().total,
         31.0,
         "owned balance reconciliation continuation"
     );
@@ -183,7 +183,7 @@ fn real_public_receiver_stays_live_while_exchange_is_held() {
     runtime.now.set(1000.0);
     runtime.pump();
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         20.0,
         "held exchange retains trailing throttle receiver"
     );
@@ -315,9 +315,9 @@ fn real_private_store_failures_remain_silent_after_commit() {
             "real Store notification executed"
         );
         if orders {
-            assert!(store.loaded().orders);
+            assert!(store.loaded().unwrap().orders);
         } else {
-            assert_eq!(store.balance().total, 37.0);
+            assert_eq!(store.balance().unwrap().total, 37.0);
         }
         unsubscribe();
         assert!(runtime.errors.borrow().is_empty());
@@ -348,8 +348,8 @@ fn real_private_post_await_disposal_policies_stay_distinct() {
         gate.store(true, Ordering::SeqCst);
         runtime.pump();
         // Source orders has only a pre-fetch guard; balance also checks after await.
-        assert_eq!(store.loaded().orders, orders);
-        assert_eq!(store.balance().total, 0.0);
+        assert_eq!(store.loaded().unwrap().orders, orders);
+        assert_eq!(store.balance().unwrap().total, 0.0);
         assert!(runtime.errors.borrow().is_empty());
     }
 }
@@ -358,7 +358,7 @@ fn real_private_post_await_disposal_policies_stay_distinct() {
 fn real_pending_market_timer_does_not_retain_final_exchange() {
     let (owner, runtime, store, _) = support::fixture();
     owner
-        .subscribe_to_all_markets(store.markets().to_vec())
+        .subscribe_to_all_markets(store.markets().unwrap().to_vec())
         .unwrap();
     let base = owner.base.clone();
     let weak = Rc::downgrade(&owner);
@@ -431,7 +431,7 @@ fn real_pending_poll_loop_does_not_retain_final_exchange() {
 fn real_delayed_market_subscription_keeps_held_receiver() {
     let (owner, runtime, store, _) = support::fixture();
     owner
-        .subscribe_to_all_markets(store.markets().to_vec())
+        .subscribe_to_all_markets(store.markets().unwrap().to_vec())
         .unwrap();
     assert_eq!(
         owner

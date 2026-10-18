@@ -130,8 +130,8 @@ pub(crate) enum Kind {
 /// Keyed views (store tables) materialize one entry per lookup rather than
 /// converting the whole table on every read.
 pub(crate) trait Exotic {
-    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value>;
-    fn keys(&self) -> Vec<PropKey>;
+    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Result<Option<Value>, Thrown>;
+    fn keys(&self, realm: &mut Realm) -> Result<Vec<PropKey>, Thrown>;
 }
 
 pub(crate) struct ObjectData {
@@ -141,6 +141,7 @@ pub(crate) struct ObjectData {
     pub extensible: bool,
     /// Mirror successful host-owned option writes without changing descriptors.
     pub after_set: Option<AfterSet>,
+    pub native_error: Option<Rc<safe_cex_exchange::runtime::ExchangeError>>,
 }
 
 impl Value {
@@ -293,6 +294,7 @@ impl ObjectData {
             kind,
             extensible: true,
             after_set: None,
+            native_error: None,
         }
     }
     pub(crate) fn own(&self, key: &PropKey) -> Option<&Prop> {
