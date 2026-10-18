@@ -159,7 +159,7 @@ pub type TimerCallback = Box<dyn FnMut() -> Result<(), ExchangeError>>;
 pub trait TickerBatchHost<T> {
     fn is_disposed(&self) -> bool;
     fn is_connected(&self) -> bool;
-    fn markets(&self) -> Rc<AddedMarkets>;
+    fn markets(&self) -> Result<Rc<AddedMarkets>, ExchangeError>;
     fn clear(&self, timer: &T) -> Result<(), ExchangeError>;
     fn schedule(&self, delay_ms: f64, callback: TimerCallback) -> Result<T, ExchangeError>;
     fn send(&self, request: &RpcRequest, wire: &str) -> Result<(), ExchangeError>;
@@ -176,7 +176,7 @@ pub fn subscribe_to_all_tickers<T: Clone + PartialEq + 'static>(
     }
     state.cancel_ticker_batches(|timer| host.clear(timer))?;
     let generation = state.ticker_batch_generation.get();
-    let markets = host.markets();
+    let markets = host.markets()?;
     if markets.borrow().is_empty() {
         return Ok(());
     }

@@ -60,7 +60,7 @@ fn private_orders_reach_the_store_for_each_bound_family() {
     for name in names() {
         let (h, fills, symbol) = setup(name);
         push(&h, "order", json!([order(&symbol)]));
-        let rows = h.store.orders();
+        let rows = h.store.orders().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "stream-o");
         assert_eq!(rows[0].symbol, symbol);
@@ -90,8 +90,8 @@ fn private_partial_fills_emit_once_and_update_each_bound_family() {
             *fills.borrow(),
             vec![json!({"id":"stream-o","symbol":symbol,"side":"buy","price":100.0,"amount":2.0})]
         );
-        assert_eq!(h.store.orders().len(), 1);
-        assert!(h.store.orders()[0].filled > 0.0);
+        assert_eq!(h.store.orders().unwrap().len(), 1);
+        assert!(h.store.orders().unwrap()[0].filled > 0.0);
         h.venue().dispose().unwrap();
     }
 }
@@ -101,7 +101,7 @@ fn private_positions_reach_derivative_stores_and_are_ignored_by_spot() {
         let spot = name == ExchangeName::Bybitspot;
         let (h, fills, symbol) = setup(name);
         push(&h, "position", json!([position(&symbol)]));
-        let rows = h.store.positions();
+        let rows = h.store.positions().unwrap();
         if spot {
             assert!(rows.is_empty());
         } else {
@@ -122,15 +122,15 @@ fn private_balance_follows_source_position_sync_and_ignores_wallet_frames() {
         let primary = matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo);
         let (h, fills, symbol) = setup(name);
         push(&h, "position", json!([position(&symbol)]));
-        let upnl = h.store.balance().upnl;
+        let upnl = h.store.balance().unwrap().upnl;
         assert_eq!(upnl, if primary { 3.0 } else { 21.0 });
         push(
             &h,
             "wallet",
             json!([{"totalEquity":"999","totalPerpUPL":"999"}]),
         );
-        assert_eq!(h.store.balance().upnl, upnl);
-        assert_eq!(h.store.balance().total, 100.0);
+        assert_eq!(h.store.balance().unwrap().upnl, upnl);
+        assert_eq!(h.store.balance().unwrap().total, 100.0);
         assert!(fills.borrow().is_empty());
         h.venue().dispose().unwrap();
     }
@@ -168,7 +168,7 @@ fn spot_unknown_stop_types_survive_rest_and_private_store_projection() {
                 .is_none()
         );
         push(&h, "order", json!([known, unknown]));
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         assert_eq!(orders.len(), 2);
         let retained = orders.iter().find(|o| o.id == "unknown-stop").unwrap();
         assert!(matches!(

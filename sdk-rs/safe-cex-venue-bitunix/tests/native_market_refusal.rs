@@ -37,7 +37,7 @@ fn typed_market_refusal_reports_the_base_and_omits_the_row() {
             )
             .unwrap();
         }
-        let cached = store.markets().to_vec();
+        let cached = store.markets().unwrap().to_vec();
         wire.bodies.lock().unwrap().insert(
             "/api/v1/futures/market/trading_pairs".into(),
             json!({"code":0,"data":[{"base":false,"symbol":"BTCUSDT","quote":"USDT","symbolStatus":"OPEN","isApiSupported":true}]}),
@@ -48,7 +48,7 @@ fn typed_market_refusal_reports_the_base_and_omits_the_row() {
             "all refused rows produce an empty fresh result"
         );
         assert_eq!(
-            store.markets().as_ref(),
+            store.markets().unwrap().as_slice(),
             cached.as_slice(),
             "fetch does not mutate the Store"
         );
@@ -130,6 +130,7 @@ fn market_refresh_commits_valid_rows_around_a_refused_base() {
     assert_eq!(
         store
             .markets()
+            .unwrap()
             .iter()
             .map(|m| m.symbol.as_str())
             .collect::<Vec<_>>(),
@@ -202,7 +203,7 @@ fn scalar_market_refusal_case(maximum: bool, refresh: bool) {
         );
         let markets = if refresh {
             drive(&rt, venue.refresh_markets()).unwrap();
-            store.markets().to_vec()
+            store.markets().unwrap().to_vec()
         } else {
             drive(&rt, venue.fetch_markets()).unwrap()
         };

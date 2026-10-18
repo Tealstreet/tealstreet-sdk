@@ -3,8 +3,8 @@
 pub mod terminal;
 #[cfg(not(test))]
 use crate as venue;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{js_runtime::value::Js, native::NativeHttpEvents};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{RestAdapter, RestFuture, RestRequest, RestResponse};
 #[cfg(test)]
 use safe_cex_venue_binance as venue;

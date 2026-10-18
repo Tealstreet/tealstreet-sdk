@@ -242,12 +242,12 @@ impl OrderExecution {
     }
     fn capacity(&self, symbol: &str, count: f64) -> Result<(), ExchangeError> {
         let result = {
-            let markets = self.owner.store.markets_by_symbol();
+            let markets = self.owner.store.markets_by_symbol()?;
             h::assert_algo_order_capacity(
                 symbol,
                 count,
                 markets.get(symbol),
-                &self.owner.store.orders(),
+                &self.owner.store.orders()?,
             )
         };
         if let Err((name, message)) = result {
@@ -384,7 +384,7 @@ impl OrderExecution {
                 let market = self
                     .owner
                     .store
-                    .markets_by_symbol()
+                    .markets_by_symbol()?
                     .get(&opts.symbol)
                     .cloned()
                     .ok_or_else(|| {
@@ -474,7 +474,7 @@ impl OrderExecution {
                     }
                 }
                 let position_side =
-                    h::get_order_position_side(opts, self.owner.store.options().is_hedged);
+                    h::get_order_position_side(opts, self.owner.store.options()?.is_hedged);
                 if position_side != "BOTH" {
                     params["positionSide"] = json!(position_side);
                 }
@@ -490,7 +490,7 @@ impl OrderExecution {
                         opts.amount,
                         market.precision.amount
                     )));
-                    if opts.reduce_only == Some(true) && !self.owner.store.options().is_hedged {
+                    if opts.reduce_only == Some(true) && !self.owner.store.options()?.is_hedged {
                         params["reduceOnly"] = json!("true");
                     }
                 }
@@ -708,7 +708,7 @@ impl OrderExecution {
                 continue;
             };
             let id = {
-                let tickers = self.owner.store.tickers_by_symbol();
+                let tickers = self.owner.store.tickers_by_symbol()?;
                 let entries: Vec<_> = tickers.iter().map(|(k, v)| (k.as_str(), v)).collect();
                 match safe_cex_num::js_table_lookup(&entries, &symbol) {
                     safe_cex_num::TableHit::Mapped(ticker) => {
@@ -792,7 +792,7 @@ impl OrderExecution {
             let symbols: Vec<_> = self
                 .owner
                 .store
-                .tickers()
+                .tickers()?
                 .iter()
                 .map(|t| t.symbol.clone())
                 .filter(|s| !s.is_empty())

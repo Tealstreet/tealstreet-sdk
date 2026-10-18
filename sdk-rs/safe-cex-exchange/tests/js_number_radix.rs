@@ -69,7 +69,7 @@ fn number_radix_matches_node_for_extremes_fractions_all_radices_and_coercion() {
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));

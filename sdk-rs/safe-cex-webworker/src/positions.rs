@@ -101,7 +101,7 @@ impl UpdatePositionsHandler {
                 if self.exchange.base().is_disposed() {
                     return Ok(false);
                 }
-                if !positions_equal(&positions, &self.exchange.base().store.positions()) {
+                if !positions_equal(&positions, &self.exchange.base().store.positions()?) {
                     if guard.symbols.is_none() {
                         self.exchange
                             .base()

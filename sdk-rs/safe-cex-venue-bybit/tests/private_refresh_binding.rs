@@ -39,22 +39,27 @@ fn snapshot(name: ExchangeName) {
         "venue resync must refresh balance"
     );
     assert_eq!(
-        h.store.balance().total,
+        h.store.balance().unwrap().total,
         if name == ExchangeName::Bybitinverse {
             97.0
         } else {
             100.0
         }
     );
-    assert!(h.store.loaded().orders && h.store.loaded().positions && h.store.loaded().balance);
+    assert!(
+        h.store.loaded().unwrap().orders
+            && h.store.loaded().unwrap().positions
+            && h.store.loaded().unwrap().balance
+    );
     if name == ExchangeName::Bybitspot {
         assert!(h.wire.calls("/v5/position/list").is_empty());
-        assert!(h.store.positions().is_empty());
+        assert!(h.store.positions().unwrap().is_empty());
     } else {
         assert!(!h.wire.calls("/v5/position/list").is_empty());
         assert!(
             h.store
                 .positions()
+                .unwrap()
                 .iter()
                 .any(|p| p.symbol == symbol && p.entry_price == 80.0)
         );

@@ -38,7 +38,7 @@ pub fn update_positions_with_leverage(
     let updates: Vec<_> = exchange
         .base()
         .store
-        .positions()
+        .positions()?
         .iter()
         .filter(|position| position.symbol == symbol)
         .filter_map(|position| {
@@ -76,7 +76,7 @@ fn clear_fetched_leverage(
     exchange: &dyn Exchange,
     symbol: &str,
 ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
-    let mut fetched = exchange.base().store.fetched_leverage().clone();
+    let mut fetched = exchange.base().store.fetched_leverage()?.clone();
     fetched.shift_remove(symbol);
     exchange.base().store.update(
         safe_cex_store::StoreUpdate {
@@ -116,7 +116,7 @@ pub async fn handle_active_margin_symbol_change(
     let Some(symbol) = symbol.filter(|symbol| enabled && !symbol.is_empty()) else {
         return Ok(());
     };
-    let mut fetched = exchange.base().store.fetched_leverage().clone();
+    let mut fetched = exchange.base().store.fetched_leverage()?.clone();
     let entries: Vec<_> = fetched.iter().collect();
     // ts-bug: inherited Object.prototype entries count as existing leverage and suppress fetching.
     if safe_cex_num::js_table_lookup(&entries, symbol).is_present() {

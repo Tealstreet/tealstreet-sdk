@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::js_from_value;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
@@ -401,6 +402,9 @@ fn live_reads_corpus() {
                         Err(ReadError::Emitter(error)) => {
                             assert!(Rc::ptr_eq(&error, &sentinel), "READ emitter identity");
                             json!({"error":"Error","message":"host:unique","identity":true})
+                        }
+                        Err(ReadError::Store(error)) => {
+                            panic!("unexpected fixture Store failure: {error}")
                         }
                         Err(ReadError::Ingress(error)) => {
                             panic!("READ unexpected ingress {i}: {error}")

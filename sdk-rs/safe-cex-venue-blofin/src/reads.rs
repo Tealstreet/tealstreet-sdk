@@ -13,8 +13,55 @@ use serde_json::Value;
 /// The original emitter error is retained without conversion or loss of identity.
 #[derive(Debug)]
 pub enum ReadError<E> {
+    Store(safe_cex_types::StoreReadError),
     Ingress(serde_json::Error),
     Emitter(E),
+}
+
+/// Model mapping can reject a closed field or fail while reading live Store data.
+#[derive(Debug)]
+pub enum MappingError {
+    Coercion(safe_cex_num::JsCoercionError),
+    Store(safe_cex_types::StoreReadError),
+    Input(String),
+}
+impl From<safe_cex_num::JsCoercionError> for MappingError {
+    fn from(error: safe_cex_num::JsCoercionError) -> Self {
+        Self::Coercion(error)
+    }
+}
+impl From<safe_cex_types::StoreReadError> for MappingError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error)
+    }
+}
+impl From<String> for MappingError {
+    fn from(error: String) -> Self {
+        Self::Input(error)
+    }
+}
+impl From<&str> for MappingError {
+    fn from(error: &str) -> Self {
+        Self::Input(error.into())
+    }
+}
+impl std::fmt::Display for MappingError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Coercion(error) => formatter.write_str(error.message),
+            Self::Store(error) => error.fmt(formatter),
+            Self::Input(error) => formatter.write_str(error),
+        }
+    }
+}
+impl From<MappingError> for safe_cex_exchange::runtime::ExchangeError {
+    fn from(error: MappingError) -> Self {
+        match error {
+            MappingError::Coercion(error) => error.into(),
+            MappingError::Store(error) => error.into(),
+            MappingError::Input(error) => Self::new(error),
+        }
+    }
 }
 
 fn body<E>(body: &RestResponseBody) -> Result<TickerInput, ReadError<E>> {
@@ -90,14 +137,19 @@ pub async fn fetch_tickers<E>(
     match raw_tickers {
         Some(data) => format_tickers(&data, store, |message| {
             emit_and_log_error(&Value::String(message.into()))
-        })
-        .map_err(ReadError::Emitter),
+        }),
         None => {
             emit_and_log_error(&Value::String(
                 "Cannot read properties of undefined (reading 'reduce')".into(),
             ))
             .map_err(ReadError::Emitter)?;
-            Ok(store.tickers().to_vec())
+            Ok(store.tickers()?.to_vec())
         }
+    }
+}
+
+impl<E> From<safe_cex_types::StoreReadError> for ReadError<E> {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error)
     }
 }

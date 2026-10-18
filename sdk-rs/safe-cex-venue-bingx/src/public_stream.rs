@@ -321,7 +321,7 @@ impl BingxPublicStream {
             };
             for contract in rows {
                 let key = text(contract.get("symbol"))?;
-                let ticker = self.parent.base.store.tickers_by_id().get(&key).cloned();
+                let ticker = self.parent.base.store.tickers_by_id()?.get(&key).cloned();
                 let inherited = ticker.is_none()
                     && matches!(
                         safe_cex_num::js_table_lookup::<&str, ()>(&[], &key),
@@ -333,14 +333,16 @@ impl BingxPublicStream {
                 let last = parse_positive_finite_number(|| {
                     js_number(alias(contract, "tradePrice")?).map_err(|e| type_error(e.message))
                 })?;
-                let market = ticker.as_ref().and_then(|ticker| {
-                    self.parent
+                let market = match ticker.as_ref() {
+                    Some(ticker) => self
+                        .parent
                         .base
                         .store
-                        .markets_by_symbol()
+                        .markets_by_symbol()?
                         .get(&ticker.symbol)
-                        .cloned()
-                });
+                        .cloned(),
+                    None => None,
+                };
                 let touches = last.zip(market.as_ref()).map(|(last, market)| {
                     crate::ticker::derive_ticker_bid_ask(Some(&market.precision), last)
                 });

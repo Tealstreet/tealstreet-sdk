@@ -43,14 +43,14 @@ fn private_order_snapshot_replaces_store_orders_without_emitting_fill() {
         &h,
         json!({"type":"snapshot","orders_p":[private_order_row("New","0.003")]}),
     );
-    assert_eq!(h.store.orders().len(), 1);
-    let order = h.store.orders()[0].clone();
+    assert_eq!(h.store.orders().unwrap().len(), 1);
+    let order = h.store.orders().unwrap()[0].clone();
     assert_eq!(order.id, "private-order");
     assert_eq!(order.symbol, SYMBOL);
     assert_eq!(order.status, OrderStatus::Open);
     assert_eq!(order.filled, 0.003);
     assert_eq!(order.remaining, 0.006);
-    assert!(h.store.loaded().orders);
+    assert!(h.store.loaded().unwrap().orders);
     assert!(
         fills.borrow().is_empty(),
         "source snapshots never notify fills"
@@ -76,6 +76,7 @@ fn private_filled_order_updates_store_and_emits_execution_price() {
     let order = h
         .store
         .orders()
+        .unwrap()
         .iter()
         .find(|o| o.id == "private-order")
         .unwrap()
@@ -102,7 +103,7 @@ fn private_position_frame_updates_supported_market_only() {
     let mut unsupported = row.clone();
     unsupported["symbol"] = json!("UNSUPPORTEDUSDT");
     private_frame(&h, json!({"positions_p":[row,unsupported]}));
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let position = positions
         .iter()
         .find(|p| p.symbol == SYMBOL && p.side == PositionSide::Long)
@@ -118,13 +119,13 @@ fn private_position_frame_updates_supported_market_only() {
 #[test]
 fn private_account_frame_merges_currency_balance_and_position_pnl() {
     let h = authenticated_private();
-    let previous = h.store.balance().clone();
-    let positions = h.store.positions().to_vec();
+    let previous = h.store.balance().unwrap().clone();
+    let positions = h.store.positions().unwrap().to_vec();
     private_frame(
         &h,
         json!({"accounts_p":[{"currency":"USDT","accountBalanceRv":"500","totalUsedBalanceRv":"50","marker":"private-account"}]}),
     );
-    let balance = h.store.balance();
+    let balance = h.store.balance().unwrap();
     let currencies = balance.currencies.as_ref().unwrap();
     let usdt = currencies.get("USDT").unwrap().as_balance().unwrap();
     assert_eq!(usdt.total, 480.0);
@@ -143,7 +144,10 @@ fn private_account_frame_merges_currency_balance_and_position_pnl() {
         currencies.get("USDC"),
         previous.currencies.as_ref().unwrap().get("USDC")
     );
-    assert_eq!(h.store.positions().as_ref(), positions.as_slice());
+    assert_eq!(
+        h.store.positions().unwrap().as_slice(),
+        positions.as_slice()
+    );
     drop(balance);
     h.venue().dispose().unwrap();
 }

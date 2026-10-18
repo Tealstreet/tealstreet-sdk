@@ -200,8 +200,8 @@ pub trait PortfolioHost {
         portfolio_uuid: Option<String>,
     ) -> CoinbaseStarbasePromise<Result<PortfolioReply, PortfolioFailure>>;
     fn emit_and_log_error(&self, args: &[Option<Value>]) -> Result<(), PortfolioFailure>;
-    fn cached_balance(&self) -> Balance;
-    fn position_upnls(&self) -> Vec<f64>;
+    fn cached_balance(&self) -> Result<Balance, PortfolioFailure>;
+    fn position_upnls(&self) -> Result<Vec<f64>, PortfolioFailure>;
     /// Optional virtual method override, e.g. an application-specific supported-type provider.
     fn supported_types_override(
         &self,
@@ -541,7 +541,7 @@ pub fn fetch_balance_cfm<H: PortfolioHost + 'static>(
                 Ok(balance) => Ok(balance),
                 Err(err) => {
                     r.host.emit_and_log_error(&[detail(&err)])?;
-                    Ok(r.host.cached_balance())
+                    Ok(r.host.cached_balance()?)
                 }
             }
         }),
@@ -559,7 +559,7 @@ pub fn fetch_balance_intx<H: PortfolioHost + 'static>(
                 Some(p) if p.borrow().r#type == "INTX" => p,
                 _ => {
                     emit(&r, "No INTX portfolio found")?;
-                    return Ok(r.host.cached_balance());
+                    return r.host.cached_balance();
                 }
             };
             let result = async {
@@ -567,7 +567,7 @@ pub fn fetch_balance_intx<H: PortfolioHost + 'static>(
                 let reply = r.host.get(INTX, Some(uuid)).await?;
                 let total = amount(&reply.data, "summary", "total_balance")?;
                 let free = amount(&reply.data, "summary", "buying_power")?;
-                let upnl = r.host.position_upnls().iter().fold(0.0, |acc, p| acc + p);
+                let upnl = r.host.position_upnls()?.iter().fold(0.0, |acc, p| acc + p);
                 Ok(scalar_balance(total, free, upnl))
             }
             .await;
@@ -575,7 +575,7 @@ pub fn fetch_balance_intx<H: PortfolioHost + 'static>(
                 Ok(balance) => Ok(balance),
                 Err(err) => {
                     r.host.emit_and_log_error(&[detail(&err)])?;
-                    Ok(r.host.cached_balance())
+                    Ok(r.host.cached_balance()?)
                 }
             }
         }),
@@ -593,7 +593,7 @@ pub fn fetch_spot_currencies<H: PortfolioHost + 'static>(
                 Some(p) if p.borrow().r#type != "INTX" => p,
                 _ => {
                     emit(&r, "No spot portfolio found")?;
-                    return Ok(r.host.cached_balance().borrow().currencies.clone());
+                    return Ok(r.host.cached_balance()?.borrow().currencies.clone());
                 }
             };
             let result = async {
@@ -634,7 +634,7 @@ pub fn fetch_spot_currencies<H: PortfolioHost + 'static>(
                 Ok(currencies) => Ok(currencies),
                 Err(err) => {
                     r.host.emit_and_log_error(&[detail(&err)])?;
-                    Ok(r.host.cached_balance().borrow().currencies.clone())
+                    Ok(r.host.cached_balance()?.borrow().currencies.clone())
                 }
             }
         }),
@@ -656,7 +656,7 @@ pub fn fetch_balance<H: PortfolioHost + 'static>(
             let has = |kind: &str| supported.borrow().iter().any(|v| v == kind);
             if has("intx") && has("cfm") {
                 emit(&r, "Cannot have both INTX and CFM portfolios")?;
-                return Ok(r.host.cached_balance());
+                return r.host.cached_balance();
             }
             let mut balance = scalar_balance(0.0, 0.0, 0.0);
             if has("intx") {
@@ -711,10 +711,10 @@ impl<H: PortfolioHost> PortfolioHost for Rc<H> {
     fn emit_and_log_error(&self, args: &[Option<Value>]) -> Result<(), PortfolioFailure> {
         (**self).emit_and_log_error(args)
     }
-    fn cached_balance(&self) -> Balance {
+    fn cached_balance(&self) -> Result<Balance, PortfolioFailure> {
         (**self).cached_balance()
     }
-    fn position_upnls(&self) -> Vec<f64> {
+    fn position_upnls(&self) -> Result<Vec<f64>, PortfolioFailure> {
         (**self).position_upnls()
     }
     fn supported_types_override(

@@ -139,7 +139,11 @@ fn check(name: ExchangeName) {
             (balance.total, balance.free),
             if spot { (7.0, 7.0) } else { (1000.0, 800.0) }
         );
-        assert_eq!(h.store.balance().total, 0.0, "fetchBalance is pure");
+        assert_eq!(
+            h.store.balance().unwrap().total,
+            0.0,
+            "fetchBalance is pure"
+        );
         let calls = relay.calls.borrow();
         assert_eq!(
             calls.len(),

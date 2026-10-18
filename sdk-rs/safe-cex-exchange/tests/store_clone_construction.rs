@@ -1,8 +1,9 @@
 //! Native observations supporting the four private-construction Clone reviews.
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
 use safe_cex_store::{
-    Store, StoreMutationError, StoreUpdate,
+    StoreMutationError, StoreUpdate,
     risk::{calculate_orders_risk, format_pnl},
-    store::DefaultStore,
     store_stub::STUB_STORE,
     virtual_clock::VirtualClock,
 };
@@ -55,7 +56,7 @@ fn patch_error_clone_is_owned_failure_data_after_a_real_store_refusal() {
             false,
         )
         .unwrap();
-    let before = store.orders().to_vec();
+    let before = store.orders().unwrap().to_vec();
     let fields = Map::from_iter([("amount".into(), json!("invalid-native-number"))]);
     let StoreMutationError::Patch(original) =
         store.update_order(&before[0].id, &fields).unwrap_err()
@@ -72,7 +73,7 @@ fn patch_error_clone_is_owned_failure_data_after_a_real_store_refusal() {
     drop(original);
     assert_eq!(copy.to_string(), message);
     assert_eq!(
-        *store.orders(),
+        store.orders().unwrap(),
         before,
         "cloning failure data cannot commit the refused patch"
     );
@@ -121,7 +122,7 @@ fn notification_error_clone_preserves_subscriber_and_shared_native_cause() {
     );
     assert_eq!(calls.get(), 1, "cloning the error never repeats fanout");
     assert!(
-        store.options().is_hedged,
+        store.options().unwrap().is_hedged,
         "source mutation committed before the original failure"
     );
 }
