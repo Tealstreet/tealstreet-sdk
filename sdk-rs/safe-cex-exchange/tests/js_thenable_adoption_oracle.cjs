@@ -84,5 +84,20 @@
     trace.push('returned'); await body;
     output.fifo.push({kind,trace});
   }
+  output.turns = [];
+  for (const route of ['await', 'return']) for (const kind of ['scalar', 'promise', 'thenable']) {
+    const trace = [];
+    const value = kind === 'scalar' ? -0 : kind === 'promise' ? Promise.resolve(-0) : {
+      get then() { trace.push('get'); return resolve => { trace.push('call'); resolve(-0); }; }
+    };
+    const body = route === 'await'
+      ? (async () => { trace.push('body'); await value; trace.push('resumed'); })()
+      : (async () => { trace.push('body'); return value; })();
+    const done = body.then(() => { trace.push('done'); });
+    let tail = Promise.resolve();
+    for (const label of ['q1','q2','q3']) tail = tail.then(() => { trace.push(label); });
+    trace.push('returned'); await done; await tail;
+    output.turns.push({route,kind,trace});
+  }
   process.stdout.write(JSON.stringify(output));
 })().catch(error => {console.error(error);process.exitCode=1;});

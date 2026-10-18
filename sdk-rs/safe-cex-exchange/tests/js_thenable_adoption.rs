@@ -418,3 +418,89 @@ fn scalar_and_native_promise_await_keep_one_fifo_boundary() {
         assert_eq!(json!(rows), oracle()["fifo"]);
     });
 }
+
+#[test]
+fn await_and_async_return_preserve_engine_job_turns() {
+    run(|scope| async move {
+        let mut rows = vec![];
+        for route in ["await", "return"] {
+            for kind in ["scalar", "promise", "thenable"] {
+                let trace = Trace::default();
+                let runtime = scope.exchange_runtime();
+                let constructor = scope.global("Promise").unwrap();
+                let value = match kind {
+                    "scalar" => Js::Number(-0.),
+                    "promise" => constructor
+                        .call_method("resolve", vec![Js::Number(-0.)])
+                        .unwrap(),
+                    _ => {
+                        let value = Js::object(vec![]);
+                        let seen = trace.clone();
+                        value.define_accessor(
+                            "then",
+                            Some(Rc::new(move |_| {
+                                seen.borrow_mut().push("get".into());
+                                let seen = seen.clone();
+                                Ok(Js::function("then", move |_, args| {
+                                    seen.borrow_mut().push("call".into());
+                                    arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
+                                    Ok(Js::Undefined)
+                                }))
+                            })),
+                            None,
+                        );
+                        value
+                    }
+                };
+                let seen = trace.clone();
+                let body = Promise::spawn(
+                    &runtime,
+                    Box::pin(async move {
+                        seen.borrow_mut().push("body".into());
+                        if route == "await" {
+                            await_js(value).await?;
+                            seen.borrow_mut().push("resumed".into());
+                            Ok(Js::Undefined)
+                        } else {
+                            Ok(value)
+                        }
+                    }),
+                );
+                let seen = trace.clone();
+                let Js::Promise(done) = Js::Promise(body)
+                    .call_method(
+                        "then",
+                        vec![Js::function("done", move |_, _| {
+                            seen.borrow_mut().push("done".into());
+                            Ok(Js::Undefined)
+                        })],
+                    )
+                    .unwrap()
+                else {
+                    panic!("native promise")
+                };
+                let mut tail = constructor.call_method("resolve", vec![]).unwrap();
+                for label in ["q1", "q2", "q3"] {
+                    let seen = trace.clone();
+                    tail = tail
+                        .call_method(
+                            "then",
+                            vec![Js::function(label, move |_, _| {
+                                seen.borrow_mut().push(label.into());
+                                Ok(Js::Undefined)
+                            })],
+                        )
+                        .unwrap();
+                }
+                trace.borrow_mut().push("returned".into());
+                done.wait().await.unwrap();
+                let Js::Promise(tail) = tail else {
+                    panic!("native promise")
+                };
+                tail.wait().await.unwrap();
+                rows.push(json!({"route":route,"kind":kind,"trace":*trace.borrow()}));
+            }
+        }
+        assert_eq!(json!(rows), oracle()["turns"]);
+    });
+}
