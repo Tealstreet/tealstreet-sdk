@@ -49,7 +49,7 @@ fn output(result: Result<Option<String>, ExchangeError>) -> Value {
         Err(error) => json!({"error":{"name":error.name,"message":error.message}}),
     }
 }
-fn health(text: &Value) -> Option<Value> {
+fn health(text: &Value) -> Option<safe_cex_types::retained_json::RetainedJsonInput> {
     text.as_str()
         .map(|text| serde_json::from_str(text).unwrap())
 }
@@ -123,7 +123,7 @@ fn diagnostic_and_grace_wait_match_live_health_states_and_coercion_errors() {
         let runtime = Rc::new(Runtime::default());
         runtime.advance(0);
         let store = Rc::new(test_store::TestStore::new());
-        store.data.borrow_mut().socket_health = Some(health);
+        store.data.borrow_mut().socket_health = Some(health.into());
         let exchange = venue(ExchangeName::Bybitdemo, store, runtime.clone());
         assert_eq!(
             get_bybit_demo_dead_private_ws_reason(exchange.as_ref())
@@ -160,7 +160,7 @@ fn dropping_grace_wait_releases_exchange_and_holds_no_store_borrow() {
     let runtime = Rc::new(Runtime::default());
     runtime.advance(0);
     let store = Rc::new(test_store::TestStore::new());
-    store.data.borrow_mut().socket_health = Some(json!({}));
+    store.data.borrow_mut().socket_health = Some(json!({}).into());
     let exchange = venue(ExchangeName::Bybitdemo, store.clone(), runtime.clone());
     let weak = Rc::downgrade(&exchange);
     let mut future = Box::pin(wait_for_bybit_demo_private_ws(exchange.as_ref()));
@@ -170,7 +170,7 @@ fn dropping_grace_wait_releases_exchange_and_holds_no_store_borrow() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
-    store.data.borrow_mut().socket_health = Some(json!({"privateInitialized":true}));
+    store.data.borrow_mut().socket_health = Some(json!({"privateInitialized":true}).into());
     drop(future);
     drop(exchange);
     assert!(weak.upgrade().is_none());
