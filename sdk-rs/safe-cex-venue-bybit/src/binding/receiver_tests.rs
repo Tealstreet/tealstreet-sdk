@@ -10,7 +10,8 @@ use safe_cex_exchange::{
     },
     native::{NativeHttpHost, native_runtime},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, TransportFuture, rate_limit::RateLimitClock,
 };

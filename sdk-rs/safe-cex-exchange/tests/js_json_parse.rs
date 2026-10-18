@@ -155,7 +155,7 @@ fn real_http_json_response_retains_lone_surrogate_fields_and_rows() {
 #[test]
 fn real_http_surrogate_market_batch_reaches_the_production_store() {
     use safe_cex_exchange::js_runtime::{store, value::to_retained_input};
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
     let output = Command::new("node")
