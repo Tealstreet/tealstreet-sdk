@@ -643,7 +643,10 @@ pub(crate) fn bind(
                 info: if info.is_nullish() {
                     (None).into()
                 } else {
-                    (Some(to_json(&info)?)).into()
+                    (Some(safe_cex_exchange::js_runtime::value::to_retained_input(
+                        &info,
+                    )?))
+                    .into()
                 },
                 extra: (None).into(),
                 last_update: (None).into(),

@@ -620,7 +620,7 @@ impl<H: CoinbaseConstructionHost + 'static> crate::portfolios_balances::Portfoli
 struct ClassSigningView<'a, H: CoinbaseConstructionHost>(&'a CoinbaseExchange<H>);
 fn class_option_truthy(value: Option<Frame>) -> bool {
     match value {
-        None | Some(Frame::Null) => false,
+        None | Some(Frame::Null | Frame::Undefined) => false,
         Some(Frame::Bool(value)) => value,
         Some(Frame::Number(value)) => value != 0.0 && !value.is_nan(),
         Some(Frame::String(value)) => !value.is_empty(),

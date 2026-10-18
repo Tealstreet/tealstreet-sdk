@@ -6,6 +6,47 @@ use serde_json::{Value, json};
 use std::rc::Rc;
 
 #[test]
+fn local_utf16_error_metadata_uses_the_retained_cause_without_repeating_getters() {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use std::cell::Cell;
+
+    let reads = Rc::new(Cell::new(0));
+    let seen = reads.clone();
+    let value = safe_cex_exchange::js_runtime::value::error_object("Error", "seed");
+    value.define_accessor(
+        "message",
+        Some(Rc::new(move |_| {
+            seen.set(seen.get() + 1);
+            Ok(Js::utf16(&[0xd800, 120, 0xdc00]))
+        })),
+        None,
+    );
+    let mut error = Thrown::new(value).to_exchange_error();
+    assert_eq!(reads.get(), 1, "read the original message exactly once");
+    let origin = error.origin.clone().expect("original native cause");
+    let restored = Thrown::from(error.clone());
+    assert_eq!(
+        restored
+            .value
+            .get("message")
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        &[0xd800, 120, 0xdc00]
+    );
+    assert_eq!(restored.to_exchange_error().origin.as_ref(), Some(&origin));
+    error.message = "edited diagnostic".into();
+    assert!(
+        Thrown::from(error)
+            .value
+            .get("message")
+            .unwrap()
+            .strict_equals(&Js::str("edited diagnostic"))
+    );
+}
+
+#[test]
 fn thrown_error_codes_preserve_falsy_and_structured_values() {
     for code in [
         Value::Null,

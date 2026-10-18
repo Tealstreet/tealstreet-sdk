@@ -290,10 +290,10 @@ impl Drop for ParadexExchange {
     fn drop(&mut self) {
         if !self.rt.base().is_disposed() {
             if let Err(e) = self.dispose() {
-                self.rt
-                    .shared
-                    .runtime
-                    .report_exception(&e, &serde_json::json!({"source":"ParadexExchange.drop"}));
+                self.rt.shared.runtime.report_exception(
+                    &e,
+                    &serde_json::json!({"source":"ParadexExchange.drop"}).into(),
+                );
             }
         }
         for (_, task) in self.rt.shared.timers.borrow_mut().drain(..) {
@@ -358,3 +358,7 @@ impl safe_cex_exchange::journal::JournalFolder for NativeJournal {
 #[cfg(test)]
 #[path = "sdk_quantum_probe.rs"]
 mod sdk_quantum_probe;
+
+#[cfg(test)]
+#[path = "../tests/support/retained_order_info_binding.rs"]
+mod retained_order_info_binding;

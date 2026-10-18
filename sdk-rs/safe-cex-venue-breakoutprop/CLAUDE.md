@@ -70,9 +70,9 @@ cached rows. Balance never projects side, entry price or contracts it does not r
 remain undefined (`None`) for open positions and orders, distinct from `[]`.
 Balance catches its resulting reduce error; positions propagates its filter error.
 
-Raw `info` is captured separately using `js_deserialize_passthrough` BEFORE Value
-construction. Unknown fields and numeric lexemes remain represented; do not
-rebuild info by serializing the typed response. Rust returns owned info and store
+Raw `info` remains canonical RetainedJsonInput across raw reads, joins and
+truthiness checks. Native numbers, undefined and UTF16 survive without Value
+construction; do not rebuild info by serializing the typed response. Rust returns owned info and store
 fallback snapshots; live source-alias witnesses disclose this shared boundary.
 
 `tests/portfolio_oracle.cjs` executes the actual exchange module and actual

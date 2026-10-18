@@ -1,5 +1,5 @@
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref, js_value_as_f64};
+use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref};
 use safe_cex_store::{StoreUpdate, store::DefaultStore};
 use safe_cex_types::{Balance, ModelField, Order, Position};
 use safe_cex_venue_breakoutprop::portfolio::*;
@@ -28,14 +28,10 @@ static ORACLE: LazyLock<Value> = LazyLock::new(|| {
 fn number(value: f64) -> Value {
     json!({"number":format!("{:016x}",if value.is_nan() {0x7ff8000000000000} else {value.to_bits()})})
 }
-fn observe(value: &Value) -> Value {
-    match value {
-        Value::Number(_) => number(js_value_as_f64(value).unwrap()),
-        Value::Array(v) => Value::Array(v.iter().map(observe).collect()),
-        Value::Object(v) => Value::Object(v.iter().map(|(k, v)| (k.clone(), observe(v))).collect()),
-        v => v.clone(),
-    }
-}
+#[path = "support/retained_info_values.rs"]
+mod retained_info_values;
+use retained_info_values::observe;
+
 fn optional(value: &mut Value, name: &str, field: Option<Value>) {
     if let Some(field) = field {
         value[name] = field;
@@ -228,11 +224,17 @@ fn owned_info_boundary() {
             _ => panic!("method inventory"),
         };
         if method == "formatBalance" {
-            info["portfolios"][0]["positions"][0]["openPrice"] = json!(999);
+            *info.get_mut("portfolios").unwrap().as_array_mut().unwrap()[0]
+                .get_mut("positions")
+                .unwrap()
+                .as_array_mut()
+                .unwrap()[0]
+                .get_mut("openPrice")
+                .unwrap() = json!(999).into();
         } else if method == "formatOrders" {
-            info["orderCode"] = json!("changed-through-result");
+            *info.get_mut("orderCode").unwrap() = json!("changed-through-result").into();
         } else {
-            info["openPrice"] = json!(999);
+            *info.get_mut("openPrice").unwrap() = json!(999).into();
         }
         let decoded: safe_cex_venue_breakoutprop::types::PortfolioResponse =
             input.clone().decode().unwrap();

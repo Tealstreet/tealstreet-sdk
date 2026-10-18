@@ -180,7 +180,7 @@ impl Host {
     fn report(&self, e: &ExchangeError) {
         self.scope
             .runtime
-            .report_exception(e, &json!({"venue":"bingx"}));
+            .report_exception(e, &json!({"venue":"bingx"}).into());
     }
 }
 impl PublicSocketHost for Host {
@@ -403,10 +403,13 @@ impl PrivateEventHost for Host {
         Host::spawn(self, future);
         Ok(())
     }
-    fn emit_fill(&self, payload: Value) -> Result<(), ExchangeError> {
+    fn emit_fill(
+        &self,
+        payload: safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), ExchangeError> {
         self.base().emit(
             "fill",
-            safe_cex_exchange::js_runtime::value::from_json(&payload),
+            safe_cex_exchange::js_runtime::value::from_retained_input(payload),
         )
     }
     fn report_exception(&self, e: &ExchangeError) {

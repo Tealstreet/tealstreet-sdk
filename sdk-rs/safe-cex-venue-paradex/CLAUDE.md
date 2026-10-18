@@ -122,9 +122,8 @@ never drop the virtualClock value or add a venue-local sidecar.
 
 `order_reads.rs` maps fetchOrders orchestration through xhr.get and mapOrder
 capabilities. Bind the generic mapper capability to `order_mapper::map_order`
-when composing the venue. GET supplies retained
-JSON own-property data; do not decode arbitrary numeric tokens with ordinary
-serde_json first. Preserve initialization before JWT observation, all four exact
+when composing the venue. GET supplies canonical `RetainedJsonInput` own-property data directly to the
+order mapper; never JSON-project the response or row before capturing info. Preserve initialization before JWT observation, all four exact
 open statuses and the filter-before-map ordering. Logging/coercion errors can
 replace a caught error; all such capabilities are fallible. The live corpus pins
 per-case input content independently in Rust, not merely the case count.
@@ -149,8 +148,9 @@ and falsy configs, as observed in the actual-source witness. Its native state
 assertions precede serialized effect traces; start/tick and API composition remain
 separate pending rows.
 
-`order_mapper.rs` maps mapOrder into shared Order. Capture retained JSON before
-Value construction; preserve unknown raw info keys and numeric ingress. The
+`order_mapper.rs` maps canonical retained data into shared Order. Both the real
+REST consumer and direct constructed mapOrder receiver retain unknown raw info
+keys, own undefined, native binary64 values and UTF16 metadata without Value ingress. The
 shared owned info copy differs from the source alias, and None differs from its
 own undefined timeInForce property. Observe both boundaries in the oracle.
 Required non-string identity fields and inherited prototype enum values fail
@@ -248,3 +248,12 @@ caches preserve the stale guard, cooldown, warning-before-forced-subscribe order
 The real Exchange candle regression compares resubscription counts and warnings
 at initial, three-second and thirty-second polls with the maintained TS method,
 then verifies cleanup still cancels REST polling and callback delivery.
+
+The retained-order-info source witness runs the unchanged maintained fetchOrders
+and mapOrder methods for direct, REST and filtered-page profiles. The constructed
+REST/Store and child-module receiver tests inspect raw info before serialization.
+Input dates/numbers use shared retained coercion helpers; typed identity and enum
+admission stay strict. Source live-info alias versus native owned snapshot remains
+a declared boundary. `scripts/retained-order-info-controls.py` compiles three
+isolated faults (member JSON projection, REST JSON projection, undefined loss),
+requires the named real-binding test to fail and restores exact source bytes.

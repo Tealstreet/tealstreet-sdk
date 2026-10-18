@@ -4,12 +4,13 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, LogSeverity},
     snapshots::MarketChanges,
 };
-use safe_cex_num::{js_truthy, parse_float};
+use safe_cex_num::js_retained_parse_float;
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,
+    retained_json::RetainedJsonInput as Input,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::future::Future;
 
 fn error(name: &str, message: impl Into<String>) -> ExchangeError {
@@ -18,36 +19,43 @@ fn error(name: &str, message: impl Into<String>) -> ExchangeError {
     error
 }
 
-fn parsed(value: Option<&Value>, fallback: &str) -> Result<f64, ExchangeError> {
-    let text = if js_truthy(value) {
-        safe_cex_types::js_coercion::js_string(value)
-            .map_err(|cause| error(cause.name, cause.message))?
-    } else {
-        fallback.into()
-    };
-    Ok(parse_float(&text))
+fn parsed(value: Option<&Input>, fallback: &str) -> Result<f64, ExchangeError> {
+    let default = Input::Text(fallback.encode_utf16().collect());
+    js_retained_parse_float(Some(
+        value.filter(|value| value.is_truthy()).unwrap_or(&default),
+    ))
+    .map_err(|cause| error(cause.name, cause.message))
+}
+
+fn text(value: Option<&Input>) -> Option<String> {
+    value
+        .and_then(Input::as_text)
+        .and_then(|units| String::from_utf16(units).ok())
 }
 
 // Source evaluation errors take precedence over a typed-output refusal in an earlier row.
-fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, ExchangeError> {
+fn project_instrument(inst: &Input) -> Result<Result<Market, ExchangeError>, ExchangeError> {
     if inst.is_null() {
         return Err(error(
             "TypeError",
             "Cannot read properties of null (reading 'k')",
         ));
     }
-    let is_perpetual = inst.get("k").and_then(Value::as_str) == Some("PERPETUAL");
+    let is_perpetual = inst
+        .get("k")
+        .is_some_and(|value| value.text_equals("PERPETUAL"));
     let min_size = parsed(inst.get("ms"), "0.001")?;
     let tick_size = parsed(inst.get("ts"), "0.1")?;
     let id = match inst.get("i") {
-        Some(Value::String(id)) => id.clone(),
-        None => {
+        Some(Input::Text(id)) => String::from_utf16(id)
+            .map_err(|_| error("RepresentationError", "GRVT market id is not UTF-8"))?,
+        None | Some(Input::Undefined) => {
             return Err(error(
                 "TypeError",
                 "Cannot read properties of undefined (reading 'toUpperCase')",
             ));
         }
-        Some(Value::Null) => {
+        Some(Input::Null) => {
             return Err(error(
                 "TypeError",
                 "Cannot read properties of null (reading 'toUpperCase')",
@@ -58,18 +66,22 @@ fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, Exc
     let symbol = id.to_uppercase();
     let max = parsed(
         inst.get("mp")
-            .filter(|v| js_truthy(Some(v)))
+            .filter(|v| v.is_truthy())
             .or_else(|| inst.get("mxs")),
         "999999999",
     )?;
-    let info: Map<_, _> = ["ih", "bd", "qd"]
-        .into_iter()
-        .filter_map(|key| inst.get(key).map(|value| (key.into(), value.clone())))
-        .collect();
-    let (Some(base), Some(quote)) = (
-        inst.get("b").and_then(Value::as_str),
-        inst.get("q").and_then(Value::as_str),
-    ) else {
+    let info = Input::Object(
+        ["ih", "bd", "qd"]
+            .into_iter()
+            .map(|key| {
+                (
+                    key.encode_utf16().collect(),
+                    inst.get(key).cloned().unwrap_or(Input::Undefined),
+                )
+            })
+            .collect(),
+    );
+    let (Some(base), Some(quote)) = (text(inst.get("b")), text(inst.get("q"))) else {
         return Ok(Err(error(
             "RepresentationError",
             "GRVT market base and quote must be strings for the shared Market model",
@@ -79,9 +91,9 @@ fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, Exc
         id,
         symbol,
         pretty_symbol: None,
-        base: base.into(),
-        quote: quote.into(),
-        active: inst.get("ia") != Some(&Value::Bool(false)),
+        base,
+        quote,
+        active: inst.get("ia") != Some(&Input::Bool(false)),
         precision: MarketPrecision {
             amount: min_size,
             price: tick_size,
@@ -100,7 +112,7 @@ fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, Exc
         is_spot: Some(false),
         is_perpetual: Some(is_perpetual),
         is_read_only: None,
-        info: Some(Value::Object(info)),
+        info: Some(info),
         taker_fee: None,
         maker_fee: None,
         option: None,
@@ -108,7 +120,7 @@ fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, Exc
 }
 
 /// ts: GrvtExchange.fetchMarkets. The post hook returns already transformed response.data.
-pub fn fetch_markets<F: Future<Output = Result<Value, ExchangeError>>>(
+pub fn fetch_markets<F: Future<Output = Result<Input, ExchangeError>>>(
     post: impl FnOnce(&str, Value) -> F,
     mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError>,
 ) -> impl Future<Output = Result<Vec<Market>, ExchangeError>> {
@@ -117,33 +129,37 @@ pub fn fetch_markets<F: Future<Output = Result<Value, ExchangeError>>>(
         let source_result = async {
             let data = request.await?;
             let rows = data.get("r");
-            if !js_truthy(rows) {
+            if !rows.is_some_and(Input::is_truthy) {
                 return Ok(Vec::new());
             }
             let rows = rows
-                .and_then(Value::as_array)
+                .and_then(Input::as_array)
                 .ok_or_else(|| error("TypeError", "response.data.r.map is not a function"))?;
             let markets = rows
                 .iter()
                 .enumerate()
-                .map(|(index, inst)| {
-                    project_instrument(inst).map(|result| {
-                        result.map_err(|cause| {
-                            let field = |key| {
-                                inst.get(key)
-                                    .map_or_else(|| "undefined".into(), Value::to_string)
-                            };
-                            format!(
-                                "Refused GRVT market row {index} id={}: base={} quote={}: {}",
-                                field("i"),
-                                field("b"),
-                                field("q"),
-                                cause.message
-                            )
-                        })
-                    })
+                .map(|(index, inst)| match project_instrument(inst)? {
+                    Ok(market) => Ok(Ok(market)),
+                    Err(cause) => {
+                        let field = |key| -> Result<String, ExchangeError> {
+                            match inst.get(key) {
+                                None => Ok("undefined".into()),
+                                Some(value) => value
+                                    .json_stringify()
+                                    .map(|value| value.unwrap_or_else(|| "undefined".into()))
+                                    .map_err(|cause| error(cause.name, cause.message)),
+                            }
+                        };
+                        Ok(Err(format!(
+                            "Refused GRVT market row {index} id={}: base={} quote={}: {}",
+                            field("i")?,
+                            field("b")?,
+                            field("q")?,
+                            cause.message
+                        )))
+                    }
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, ExchangeError>>()?;
             log(
                 &format!("Fetched {} GRVT markets", markets.len()),
                 LogSeverity::Debug,

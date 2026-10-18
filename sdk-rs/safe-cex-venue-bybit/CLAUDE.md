@@ -18,8 +18,8 @@ request parameter spelling use safe_cex_num::js_number_string, never Rust Displa
 oracle via Node and the workspace TypeScript dependency. It compares all runtime
 exports of both table files and the rate table, plus origin normalization over
 all non-surrogate BMP code points. JavaScript trim excludes U+0085: do not replace
-the shared `safe_cex_num::js_trim` shim with Rust `is_whitespace`. The helper domain is Rust
-Unicode strings; lone UTF-16 surrogates cannot be represented.
+the shared `safe_cex_num::js_trim` shim with Rust `is_whitespace`. Origin and site helpers consume Rust Unicode strings. Response messages and
+clock/signature predicates retain UTF-16 code units, including lone surrogates.
 
 Read the TS symbolType table before instrument mapping: empty and innovation
 both mean crypto; marketRegion is not an instrument-class substitute.
@@ -35,10 +35,10 @@ union member and optional omission. Rate-limit numeric fields use f64, not an
 integer restriction absent from TypeScript. Simulator NEXT_PUBLIC settings are
 Cargo build-time values; the live oracle tests both empty and configured builds.
 
-Raw proxy JSON with a lone UTF-16 surrogate is a declared divergence in
-parseRawResponse/getBybitResponseMeta: TS accepts it; Rust drops the raw envelope
-and any status/message supplied only there. A bidirectional source-driven test
-pins this limitation. Both helpers use the shared js_trim shim.
+Raw proxy envelopes and response messages retain UTF-16, including lone
+surrogates. BybitResponseMeta stores message code units with strict string Serde;
+normalization and retry predicates preserve them. Native Errors reuse the shared
+retained-cause projection through the typed ExchangeError diagnostic view.
 
 Live Node tests require the frozen root dependency installation (including qs
 and Axios). CI runs the command above in the `types` job after that installation;
@@ -856,10 +856,9 @@ error code and verifies later lots still place; a single order without a caller
 ID also skips classification, while a caller-ID control still reaches it.
 
 The retained HTTP body carries lone UTF-16 surrogate units through the common
-response hook. The legacy api_factory typed response view still refuses those
-strings visibly under the strict-output decision; its RestFailure retains the
-original response and effective request. This is a post-response consumer
-refusal, not a network failure. The native factory observer records canonical
+response hook. The API factory carries those units through response metadata and status
+handling. Its native Error message remains retained through the canonical
+ExchangeError origin; the physical response and effective request stay unchanged. The native factory observer records canonical
 retained input, and its compiled control fails if the original response is lost.
 Numeric fixture comparisons check exact binary64 bits and source JSON spelling,
 rather than serde number lexemes.
@@ -907,3 +906,24 @@ finite Store resets and native binary64 assertions. Spot's ignored funding time
 and truthy rate-to-zero behavior remain source-equal. The shared control runner
 must fail all four family witnesses and the configured Hyro witness under live
 last/bid misrouting, then pass after exact source restoration.
+
+The response factory and typed HTTP receiver retain canonical Input through status,
+retry and mapper dispatch. Market rows and option instruments consume Input;
+the mutable public-data graph keeps UTF-16 text and keys without changing array
+or object allocation identity. Native market/position regressions cover opaque
+surrogates, overflow and the reliability score's nonempty UTF-16 price test.
+
+Retained market/option numeric readers forward the coercion error's message to
+the existing TypeError wrapper. Formatting the whole JsCoercionError there adds
+a second class prefix to public errors and best-effort option-refresh warnings.
+The actual primary/demo and option-category regressions compare maintained source
+messages while preserving the option Store fallback. The bounded
+scripts/accepted-retained-info-contracts.mjs checks nine changed retained-input
+function owners with fresh compiler APIs and native field/bit observations;
+it does not classify unrelated Bybit package inventory debt.
+
+The retMsg diagnostic witness crosses real signed native HTTP, production
+response normalization, `emitAndLogError` and typed error rematerialization.
+Position-mode failure extras also retain raw message units while the source
+continues with its `oneway` placement fallback. Runtime report contexts remain
+canonical retained inputs through the terminal reporting capability.

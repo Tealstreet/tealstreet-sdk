@@ -2,38 +2,23 @@
 use safe_cex_exchange::{
     js_runtime::{
         ops,
-        value::{Js, Thrown, from_json, from_typed, to_typed},
+        value::{Js, Thrown, from_retained_input, from_typed, to_retained_input, to_typed},
     },
     runtime::ExchangeError,
 };
-use safe_cex_num::{
-    js_date_parse_utf16, js_number_output, js_time_clip, math_max,
-    numeric_ingress::{JsNumberInput, JsNumberOutput, js_deserialize_passthrough},
-};
+use safe_cex_num::{js_date_parse_utf16, js_time_clip, math_max, numeric_ingress::JsNumberInput};
 use safe_cex_store::Store;
 use safe_cex_types::{
     Balance, MarginType, Order, OrderTimeInForce, Position, PositionMode, PositionSide,
     model_utils::create_position_id,
 };
-use serde::Serialize;
-use serde_json::Value;
 
-#[derive(Serialize)]
-#[serde(transparent)]
-struct RawPortfolio {
-    raw: Value,
-}
-impl JsNumberOutput for RawPortfolio {
-    fn check_number_output(&self) {
-        js_number_output!(self, struct {} passthrough { raw });
-    }
-}
-fn decode(input: &JsNumberInput) -> Result<(Js, Value), ExchangeError> {
-    let raw = input
+fn decode(input: &JsNumberInput) -> Result<Js, ExchangeError> {
+    input
         .clone()
-        .decode_with(|d| js_deserialize_passthrough(d).map(|raw| RawPortfolio { raw }))
-        .map_err(|e| ExchangeError::new(e.to_string()))?;
-    Ok((from_json(&raw.raw), raw.raw))
+        .decode::<safe_cex_types::retained_json::RetainedJsonInput>()
+        .map(from_retained_input)
+        .map_err(|error| ExchangeError::new(error.to_string()))
 }
 fn truthy(number: f64) -> bool {
     number != 0.0 && !number.is_nan()
@@ -46,7 +31,7 @@ fn native_open_positions(
     report: &dyn Fn(&str) -> Result<(), ExchangeError>,
 ) -> Result<Option<Vec<Js>>, ExchangeError> {
     let result: Result<_, ExchangeError> = (|| {
-        let (data, raw) = decode(input)?;
+        let data = decode(input)?;
         let portfolio = data.get("portfolios")?.get("0")?;
         if portfolio.is_nullish() {
             return Ok(None);
@@ -59,12 +44,8 @@ fn native_open_positions(
         let rows = rows.array_values().ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.positions.map is not a function")
         })?;
-        let raw_portfolio = raw["portfolios"]
-            .get(0)
-            .or_else(|| raw["portfolios"].get("0"))
-            .expect("native portfolio zero has a retained counterpart");
         let mut positions = Vec::with_capacity(rows.len());
-        for (index, position) in rows.iter().enumerate() {
+        for position in &rows {
             let side_key = to_typed::<String>(&Js::String(position.get("side")?.to_js_string()?))?;
             let side = match safe_cex_num::js_table_lookup(crate::types::POSITION_SIDE, &side_key) {
                 safe_cex_num::TableHit::Mapped(value) => Js::str(value),
@@ -116,7 +97,7 @@ fn native_open_positions(
                 ("positionMode", from_typed(&PositionMode::OneWay)?),
                 ("marginType", from_typed(&MarginType::Cross)?),
                 ("lastUpdate", Js::Number(last_update)),
-                ("info", from_json(&raw_portfolio["positions"][index])),
+                ("info", position.clone()),
             ]));
         }
         Ok(Some(positions))
@@ -165,7 +146,7 @@ pub fn format_balance(
 ) -> Result<Balance, ExchangeError> {
     let mut projection_refusal = false;
     let result: Result<_, ExchangeError> = (|| {
-        let (data, raw) = decode(input)?;
+        let data = decode(input)?;
         let portfolio = data.get("portfolios")?.get("0")?;
         let balances = if portfolio.is_nullish() {
             Js::Undefined
@@ -214,7 +195,7 @@ pub fn format_balance(
             free: total - used,
             upnl,
             used,
-            info: Some(raw),
+            info: Some(to_retained_input(&data)?),
             currencies: None,
             coins: None,
         })
@@ -297,7 +278,7 @@ pub fn format_orders(
 ) -> Result<Option<Vec<Order>>, ExchangeError> {
     let mut refusal = None;
     let result: Result<_, ExchangeError> = (|| {
-        let (data, raw) = decode(input)?;
+        let data = decode(input)?;
         let portfolio = data.get("portfolios")?.get("0")?;
         if portfolio.is_nullish() {
             return Ok(None);
@@ -309,12 +290,8 @@ pub fn format_orders(
         let rows = rows.array_values().ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.orders.map is not a function")
         })?;
-        let raw_portfolio = raw["portfolios"]
-            .get(0)
-            .or_else(|| raw["portfolios"].get("0"))
-            .expect("native portfolio zero has a retained counterpart");
         let mut orders = Vec::with_capacity(rows.len());
-        for (index, order) in rows.iter().enumerate() {
+        for order in &rows {
             let mut mapped =
                 |table: &[(&str, &str)], key: &str, field| match safe_cex_num::js_table_lookup(
                     table, key,
@@ -367,7 +344,7 @@ pub fn format_orders(
                 ("filled", filled),
                 ("remaining", remaining),
                 ("reduceOnly", Js::Bool(reduce_only)),
-                ("info", from_json(&raw_portfolio["orders"][index])),
+                ("info", order.clone()),
                 (
                     "timeInForce",
                     from_typed(&OrderTimeInForce::GoodTillCancel)?,

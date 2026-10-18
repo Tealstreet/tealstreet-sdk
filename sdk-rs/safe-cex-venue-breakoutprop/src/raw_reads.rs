@@ -1,43 +1,29 @@
 //! Raw REST read ordering and source error selection, over injected host hooks.
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{
-    js_number_output, js_truthy,
-    numeric_ingress::{JsNumberInput, JsNumberOutput, js_deserialize_passthrough, js_from_value},
-};
+use safe_cex_num::{js_truthy, numeric_ingress::JsNumberInput};
 use safe_cex_transport::provider::RestRequest;
-use serde::Serialize;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 use std::future::Future;
 
-#[derive(Serialize)]
-#[serde(transparent)]
-struct Raw {
-    value: Value,
-}
-impl JsNumberOutput for Raw {
-    fn check_number_output(&self) {
-        js_number_output!(self,struct {} passthrough {value});
-    }
-}
 fn project(input: JsNumberInput, key: &str) -> Result<JsNumberInput, ExchangeError> {
-    let raw = input
-        .decode_with(|d| js_deserialize_passthrough(d).map(|value| Raw { value }))
-        .map_err(|e| ExchangeError::new(e.to_string()))?
-        .value;
-    if raw.is_null() {
+    let raw: Input = input
+        .decode()
+        .map_err(|error| ExchangeError::new(error.to_string()))?;
+    if raw.is_nullish() {
         return Err(ExchangeError::new(format!(
-            "Cannot read properties of null (reading '{key}')"
+            "Cannot read properties of {} (reading '{key}')",
+            if raw.is_null() { "null" } else { "undefined" }
         )));
     }
-    let field = raw.get(key);
-    let rows = match field {
-        Some(Value::Array(rows)) => rows,
-        None => {
+    let rows = match raw.get(key) {
+        Some(Input::Array(rows)) => rows,
+        None | Some(Input::Undefined) => {
             return Err(ExchangeError::new(
                 "Cannot read properties of undefined (reading 'filter')",
             ));
         }
-        Some(Value::Null) => {
+        Some(Input::Null) => {
             return Err(ExchangeError::new(
                 "Cannot read properties of null (reading 'filter')",
             ));
@@ -50,16 +36,20 @@ fn project(input: JsNumberInput, key: &str) -> Result<JsNumberInput, ExchangeErr
     };
     let mut filtered = Vec::new();
     for row in rows {
-        if row.is_null() {
-            return Err(ExchangeError::new(
-                "Cannot read properties of null (reading 'symbol')",
-            ));
+        if row.is_nullish() {
+            return Err(ExchangeError::new(format!(
+                "Cannot read properties of {} (reading 'symbol')",
+                if row.is_null() { "null" } else { "undefined" }
+            )));
         }
-        if row.get("symbol").and_then(Value::as_str) != Some("XBTUSD") {
+        if !row
+            .get("symbol")
+            .is_some_and(|value| value.text_equals("XBTUSD"))
+        {
             filtered.push(row.clone());
         }
     }
-    js_from_value(json!({key:filtered})).map_err(|e| ExchangeError::new(e.to_string()))
+    Ok(Input::Object(vec![(key.encode_utf16().collect(), Input::Array(filtered))]).into())
 }
 fn read<S, A, R>(
     session: impl FnOnce() -> S,

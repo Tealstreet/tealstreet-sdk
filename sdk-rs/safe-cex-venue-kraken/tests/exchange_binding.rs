@@ -1631,3 +1631,104 @@ fn production_ticker_coercion_futures_matches_constructed_typescript() {
 fn production_ticker_coercion_spot_matches_constructed_typescript() {
     ticker_corpus(ExchangeName::Krakenspot, "krakenspot", 40);
 }
+
+#[test]
+fn rest_models_retain_opaque_info_before_json_projection() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, from_typed};
+    for (path, key, payload) in [
+        ("/v3/tickers", "tickers", tickers()),
+        ("/v3/openorders", "openOrders", open_orders()),
+    ] {
+        let h = futures(|_| {});
+        loaded(&h);
+        let raw = from_json(&payload);
+        let row = raw.get(key).unwrap().get("0").unwrap();
+        row.define("opaque", Js::utf16(&[0xd800, 65, 0xdc00]))
+            .unwrap();
+        row.define("infinity", Js::Number(f64::INFINITY)).unwrap();
+        row.define("nan", Js::Number(f64::NAN)).unwrap();
+        row.define("zero", Js::Number(-0.0)).unwrap();
+        row.define("undefined", Js::Undefined).unwrap();
+        h.http.routes.borrow_mut().retain(|(_, url, _)| url != path);
+        h.http.route_native("GET", path, 200., raw);
+        let models = if key == "tickers" {
+            let rows = h.drive(h.venue().fetch_tickers()).unwrap();
+            assert_eq!(rows.len(), 1, "actual REST ticker admission");
+            from_typed(&rows).unwrap()
+        } else {
+            let rows = h.drive(h.venue().fetch_orders(None)).unwrap();
+            assert_eq!(rows.len(), 1, "actual REST order admission");
+            from_typed(&rows).unwrap()
+        };
+        let info = models.get("0").unwrap().get("info").unwrap();
+        assert_eq!(
+            info.get("opaque").unwrap().as_str().unwrap().as_ref(),
+            &[0xd800, 65, 0xdc00]
+        );
+        assert_eq!(
+            info.get("infinity").unwrap().as_f64().unwrap().to_bits(),
+            f64::INFINITY.to_bits()
+        );
+        assert!(info.get("nan").unwrap().as_f64().unwrap().is_nan());
+        assert_eq!(
+            info.get("zero").unwrap().as_f64().unwrap().to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert!(info.has_own("undefined"));
+        assert!(info.get("undefined").unwrap().is_undefined());
+    }
+}
+
+#[test]
+fn retained_numeric_prefixes_match_source_before_utf8_string_admission() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-info-number-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    for (path, key, field, payload, expected) in [
+        ("/v3/tickers", "tickers", "bid", tickers(), "ticker"),
+        (
+            "/v3/openorders",
+            "openOrders",
+            "limitPrice",
+            open_orders(),
+            "order",
+        ),
+    ] {
+        let h = futures(|_| {});
+        loaded(&h);
+        let raw = from_json(&payload);
+        raw.get(key)
+            .unwrap()
+            .get("0")
+            .unwrap()
+            .define(field, Js::utf16(&[49, 50, 46, 53, 0xd800]))
+            .unwrap();
+        h.http.routes.borrow_mut().retain(|(_, url, _)| url != path);
+        h.http.route_native("GET", path, 200., raw);
+        let actual = if key == "tickers" {
+            let rows = h.drive(h.venue().fetch_tickers()).unwrap();
+            assert_eq!(rows.len(), 1, "source admits native ticker prefix");
+            rows[0].bid
+        } else {
+            let rows = h.drive(h.venue().fetch_orders(None)).unwrap();
+            assert_eq!(rows.len(), 1, "source admits native order prefix");
+            rows[0].price.to_number()
+        };
+        assert_eq!(
+            format!("{:016x}", actual.to_bits()),
+            source[expected]["number"],
+            "actual source {expected}"
+        );
+    }
+}

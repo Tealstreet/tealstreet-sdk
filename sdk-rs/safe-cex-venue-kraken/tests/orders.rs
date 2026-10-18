@@ -1,5 +1,5 @@
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
+use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::{
     Order, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType,
@@ -26,26 +26,37 @@ fn bits(value: f64) -> String {
         }
     )
 }
-fn assert_json(native: &Value, expected: &Value) {
+fn assert_json(native: &safe_cex_types::retained_json::RetainedJsonInput, expected: &Value) {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match native {
-        Value::Number(_) => assert_eq!(
-            bits(js_value_as_f64(native).unwrap()),
+        Input::Float(_) | Input::Lexeme(_) => assert_eq!(
+            bits(native.as_f64().unwrap()),
             expected["number"],
             "ORDERS native retained number"
         ),
-        Value::Array(rows) => {
+        Input::Array(rows) => {
             assert_eq!(rows.len(), expected.as_array().unwrap().len());
             for (i, row) in rows.iter().enumerate() {
                 assert_json(row, &expected[i]);
             }
         }
-        Value::Object(values) => {
+        Input::Object(values) => {
             assert_eq!(values.len(), expected.as_object().unwrap().len());
             for (key, value) in values {
-                assert_json(value, &expected[key]);
+                assert_json(value, &expected[&String::from_utf16(key).unwrap()]);
             }
         }
-        _ => assert_eq!(native, expected, "ORDERS native retained primitive"),
+        Input::Undefined => assert_eq!(expected, &json!({"undefined":true})),
+        Input::Null => assert!(expected.is_null()),
+        Input::Bool(value) => assert_eq!(Some(*value), expected.as_bool()),
+        Input::Text(value) => assert_eq!(
+            *value,
+            expected
+                .as_str()
+                .unwrap()
+                .encode_utf16()
+                .collect::<Vec<_>>()
+        ),
     }
 }
 fn trigger(value: Option<OrderStopTriggerType>, expected: Option<&Value>) {
@@ -152,7 +163,7 @@ fn fallback(tag: &str, n: f64) -> Order {
         remaining: n + 4.125,
         reduce_only: true.into(),
         close: (None).into(),
-        info: (Some(json!({"tag":tag}))).into(),
+        info: (Some(json!({"tag":tag}).into())).into(),
         time_in_force: (Some(OrderTimeInForce::PostOnly)).into(),
         last_update: n + 5.5,
         trigger_type: (None).into(),

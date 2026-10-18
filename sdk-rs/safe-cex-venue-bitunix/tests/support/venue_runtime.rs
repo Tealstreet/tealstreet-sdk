@@ -38,6 +38,7 @@ pub struct Runtime {
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
     pub console: RefCell<Vec<(String, String)>>,
+    pub diagnostics: Cell<bool>,
     /// When set, dials open a scripted socket instead of failing.
     pub dial: Cell<bool>,
     pub dialed: RefCell<Vec<(String, Rc<FakeSocket>)>>,
@@ -153,10 +154,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.375
     }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.errors.borrow_mut().push(e.message.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -200,7 +209,7 @@ impl WsRuntime for Runtime {
         3000.0
     }
     fn diagnostics_enabled(&self) -> bool {
-        false
+        self.diagnostics.get()
     }
     fn lifecycle_logs_enabled(&self) -> bool {
         false

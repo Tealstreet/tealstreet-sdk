@@ -1,5 +1,12 @@
 # Concrete Polymarket binding evidence
 
+Constructor capture reads the original imported `ethers.Wallet` and
+`SDK.OrderBuilder` values before invoking their construct capability. The shared
+dotted-call convenience wrapper retains method receivers but is not the imported
+constructor. The 15 wallet-backed `exchange_binding` cases from the #848 failure
+cohort fail on master `a2efcc3246` and pass with this raw-member capture; their
+address, signing, wire-payload and private Store assertions remain unchanged.
+
 Implementation foundation: `0c95c79ff1`. Native waiter repair: `9041a2f57a`.
 Supplied-account regressions: `7ce9221719` and fixture correction `2d171832bf`.
 Latest master/Balance integration measured at `a799d01d06`.

@@ -108,10 +108,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.375
     }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.errors.borrow_mut().push(e.message.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -166,6 +174,7 @@ impl WsRuntime for Runtime {
 pub struct Wire {
     pub requests: RefCell<Vec<RestRequest>>,
     pub bodies: RefCell<BTreeMap<String, Value>>,
+    pub retained_bodies: RefCell<BTreeMap<String, RestResponseBody>>,
 }
 pub fn path(url: &str) -> &str {
     url.split('?').next().unwrap_or(url)
@@ -173,6 +182,7 @@ pub fn path(url: &str) -> &str {
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
         self.requests.borrow_mut().push(r.clone());
+        let retained = self.retained_bodies.borrow().get(path(&r.url)).cloned();
         // Active-order pagination completes on the page after a cursor.
         let paged = r.params.as_ref().is_some_and(|p| !p["after"].is_null());
         let body = if paged {
@@ -189,9 +199,11 @@ impl RestAdapter for Wire {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(
-                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
-                ),
+                body: retained.unwrap_or_else(|| {
+                    RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+                    )
+                }),
             })
         })
     }

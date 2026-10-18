@@ -295,9 +295,7 @@ fn native_secondary_reads_do_not_consume_primary_rate_budget() {
         let mut request = Exchange::fetch_markets(owner.as_ref());
         assert!(
             matches!(
-                request
-                    .as_mut()
-                    .poll(&mut Context::from_waker(Waker::noop())),
+                runtime.poll_checkpoint(request.as_mut()),
                 Poll::Ready(Ok(_))
             ),
             "secondary read {index} must be unlimited"
@@ -313,9 +311,7 @@ fn native_secondary_reads_do_not_consume_primary_rate_budget() {
         );
         assert!(
             matches!(
-                request
-                    .as_mut()
-                    .poll(&mut Context::from_waker(Waker::noop())),
+                runtime.poll_checkpoint(request.as_mut()),
                 Poll::Ready(Ok(_))
             ),
             "primary write {index} retains its own budget"
@@ -328,10 +324,7 @@ fn native_secondary_reads_do_not_consume_primary_rate_budget() {
         safe_cex_num::JsJsonValue::Object(vec![]),
     );
     assert!(
-        request
-            .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-            .is_pending(),
+        runtime.poll_checkpoint(request.as_mut()).is_pending(),
         "primary writes must still stop at ten per second"
     );
     assert_eq!(wire.requests.lock().unwrap().len(), 21);

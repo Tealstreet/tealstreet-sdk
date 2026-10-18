@@ -121,10 +121,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         self.random_values.borrow_mut().pop_front().unwrap_or(0.375)
     }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.errors.borrow_mut().push(e.message.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -208,7 +216,7 @@ impl WsRuntime for Runtime {
 #[derive(Default)]
 pub struct Wire {
     pub requests: RefCell<Vec<(String, String, Value)>>,
-    pub bodies: RefCell<BTreeMap<String, Value>>,
+    pub bodies: RefCell<BTreeMap<String, safe_cex_types::retained_json::RetainedJsonInput>>,
 }
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -230,15 +238,13 @@ impl RestAdapter for Wire {
             .borrow()
             .get(&r.url)
             .cloned()
-            .unwrap_or(json!({"success":true,"code":0,"data":[]}));
+            .unwrap_or_else(|| json!({"success":true,"code":0,"data":[]}).into());
         Box::pin(async move {
             Ok(RestResponse {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(
-                    safe_cex_types::retained_json::RetainedJsonInput::from_value(response).unwrap(),
-                ),
+                body: RestResponseBody::Untransformed(response),
             })
         })
     }

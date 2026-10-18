@@ -15,17 +15,21 @@ pub fn get_position_updated_time(position: &Position) -> Result<f64, &'static st
         .info
         .as_ref()
         .and_then(|info| info.get("updatedTime"));
-    let value = number(time.filter(|value| !value.is_null()).or(Some(&Value::Null)))?;
+    let value = safe_cex_num::js_retained_number(time.filter(|value| !value.is_nullish()).or(
+        Some(&safe_cex_types::retained_json::RetainedJsonInput::Null),
+    ))
+    .map_err(|error| error.message)?;
     Ok(if value.is_finite() { value } else { 0. })
 }
 // ts: BybitExchange.getPositionReliabilityScore
 pub fn get_position_reliability_score(position: &Position) -> Result<u32, &'static str> {
     let info = position.info.as_ref();
-    let seq = number(info.and_then(|info| info.get("seq")))?;
+    let seq = safe_cex_num::js_retained_number(info.and_then(|info| info.get("seq")))
+        .map_err(|error| error.message)?;
     let status = info
         .and_then(|info| info.get("positionStatus"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
+        .and_then(|value| value.as_text())
+        .unwrap_or(&[]);
     let average = info.and_then(|info| info.get("avgPrice"));
     let mut score = 0;
     if position.contracts.is_finite() && position.contracts != 0. {
@@ -37,11 +41,15 @@ pub fn get_position_reliability_score(position: &Position) -> Result<u32, &'stat
     if seq.is_finite() && seq >= 0. {
         score += 50;
     }
-    if !safe_cex_num::js_trim(status).is_empty() {
+    if !safe_cex_num::js_trim(&String::from_utf16_lossy(status)).is_empty() {
         score += 20;
     }
-    if let Some(value) = average.filter(|value| !value.is_null())
-        && !safe_cex_num::js_trim(&string_value(value)?).is_empty()
+    if let Some(value) = average.filter(|value| !value.is_nullish())
+        && !safe_cex_num::js_trim(&String::from_utf16_lossy(
+            &safe_cex_types::js_coercion::js_retained_string_utf16(value)
+                .map_err(|error| error.message)?,
+        ))
+        .is_empty()
     {
         score += 5;
     }

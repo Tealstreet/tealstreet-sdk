@@ -647,8 +647,8 @@ fn native_compiled_routing_table_matches_source_channels() {
     let source = source();
     assert_eq!(
         source.routes.len(),
-        1152,
-        "TRANSPORT independent route floor (48*2*2*3*2)"
+        1176,
+        "TRANSPORT independent route floor (49*2*2*3*2)"
     );
     for case in source.routes {
         let actual = resolve_exchange_routing(&case.exchange, &case.options);

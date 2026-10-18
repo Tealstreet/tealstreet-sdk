@@ -14,9 +14,13 @@ use std::{
 
 fn set_market(store: &dyn Store, size: f64) {
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":size,"maxLeverage":20})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":size,"maxLeverage":20})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(
@@ -121,8 +125,16 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
                     );
                 }
                 assert_eq!(
-                    positions[0].info.as_ref().unwrap()["probe"]["marker"].as_u64(),
-                    Some(7),
+                    positions[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("probe")
+                        .unwrap()
+                        .get("marker")
+                        .unwrap()
+                        .as_f64(),
+                    Some(7.0),
                     "private native initial position info marker"
                 );
             } else {
@@ -140,8 +152,16 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
                     );
                 }
                 assert_eq!(
-                    orders[0].info.as_ref().unwrap()["probe"]["marker"].as_u64(),
-                    Some(7),
+                    orders[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("probe")
+                        .unwrap()
+                        .get("marker")
+                        .unwrap()
+                        .as_f64(),
+                    Some(7.0),
                     "private native initial order info marker"
                 );
             }
@@ -159,13 +179,29 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
                     "private native caller changed nested producer"
                 );
                 let marker = if kind == "position" {
-                    store.positions()[0].info.as_ref().unwrap()["probe"]["marker"].clone()
+                    store.positions()[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("probe")
+                        .unwrap()
+                        .get("marker")
+                        .unwrap()
+                        .clone()
                 } else {
-                    store.orders()[0].info.as_ref().unwrap()["probe"]["marker"].clone()
+                    store.orders()[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("probe")
+                        .unwrap()
+                        .get("marker")
+                        .unwrap()
+                        .clone()
                 };
                 assert_eq!(
-                    marker.as_u64(),
-                    Some(7),
+                    marker.as_f64(),
+                    Some(7.0),
                     "private native owned info snapshot keeps marker7"
                 );
             }

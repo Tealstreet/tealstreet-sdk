@@ -50,11 +50,16 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {}
+    fn report_exception(
+        &self,
+        _: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+    }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Err(ExchangeError::new("unexpected worker request")) })
     }
@@ -251,7 +256,7 @@ fn maintained_typescript_response_body_lookup_and_sequential_placement() {
                     return Ok(vec![]);
                 };
                 let mut order:Order=serde_json::from_value(json!({"id":"mapped-order","status":"open","symbol":"BTCUSDT","type":"limit","side":"buy","price":1,"amount":1,"filled":0,"remaining":1,"reduceOnly":false,"lastUpdate":123})).unwrap();
-                order.info = (Some(row.clone())).into();
+                order.info = (Some(row.clone().into())).into();
                 Ok(vec![order])
             };
             match ready(find_order_by_client_order_id(

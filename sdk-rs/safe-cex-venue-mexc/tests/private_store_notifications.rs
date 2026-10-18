@@ -64,9 +64,13 @@ fn private_handlers_commit_before_original_subscriber_failure_and_abort_later_ef
         let kind = method.strip_prefix("direct-").unwrap_or(method);
         let store = ObservedStore::new();
         let market = normalize_market(
-            json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
-                .as_object()
-                .unwrap(),
+            &serde_json::Value::Object(
+                (json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
+                    .as_object()
+                    .unwrap())
+                .clone(),
+            )
+            .into(),
         )
         .unwrap();
         Store::update(
@@ -285,7 +289,7 @@ fn private_handlers_commit_before_original_subscriber_failure_and_abort_later_ef
                 ("__mexcStopOrder", "__mexcPlanOrder")
             };
             assert_eq!(
-                info.get(wanted).and_then(Value::as_bool),
+                info.get(wanted).and_then(|value| value.as_bool()),
                 Some(true),
                 "private native correct plan/stop info classification"
             );

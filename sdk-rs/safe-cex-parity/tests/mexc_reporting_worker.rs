@@ -85,7 +85,11 @@ impl ExchangeRuntime for ReportingRuntime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, data: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         // Retain the host's original value before any finite fixture observation.
         self.raw_reports.borrow_mut().push(error.clone());
         let error = native_report_shape(error);
@@ -94,7 +98,11 @@ impl ExchangeRuntime for ReportingRuntime {
             .borrow_mut()
             .push(json!({"error":error,"data":data}));
     }
-    fn report_exception(&self, error: &ExchangeError, data: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.trace.borrow_mut().push("typed-report".into());
         self.reports
             .borrow_mut()
@@ -285,12 +293,9 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
             let label = fixture["label"].as_str().unwrap();
             for method in ["positions", "validate", "account"] {
                 let store = Rc::new(history_store::ObservedStore::new());
-                let market = normalize_market(
-                    json!({"symbol":"BTC_USDT","contractSize":0.1})
-                        .as_object()
-                        .unwrap(),
-                )
-                .unwrap();
+                let market =
+                    normalize_market(&json!({"symbol":"BTC_USDT","contractSize":0.1}).into())
+                        .unwrap();
                 let mut position = fake_positions_for_market(&market, None, None, None).remove(0);
                 position.id = "fallback".into();
                 Store::update(

@@ -286,6 +286,7 @@ fn bits(v: f64, e: &Value, label: &str) {
 }
 fn frame(v: &Frame, e: &Value, label: &str) {
     match v {
+        Frame::Undefined => assert_eq!(e["$undefined"], true, "native undefined"),
         Frame::Null => assert!(e.is_null(), "{label}: native null"),
         Frame::Bool(v) => assert_eq!(Some(*v), e.as_bool(), "{label}: native bool"),
         Frame::Number(v) => bits(*v, e, label),

@@ -62,7 +62,6 @@ pub fn resolve_trade_qty(
     parsed_price: f64,
 ) -> Result<f64, JsCoercionError> {
     let zero = Value::from(0);
-    let one = Value::from(1);
     let raw_qty = js_number(Some(
         entry.get("qty").filter(|v| !v.is_null()).unwrap_or(&zero),
     ))?;
@@ -77,11 +76,10 @@ pub fn resolve_trade_qty(
         .get(symbol)
         .and_then(|market| market.info.as_ref())
         .and_then(|info| info.get("multiplier"));
-    let multiplier = js_number(if js_truthy(multiplier) {
-        multiplier
-    } else {
-        Some(&one)
-    })?;
+    let multiplier =
+        safe_cex_num::js_retained_number(multiplier.filter(|value| value.is_truthy()).or(Some(
+            &safe_cex_types::retained_json::RetainedJsonInput::Float(1.0),
+        )))?;
     let qty_from_amount = if parsed_price > 0.0 && raw_amount > 0.0 {
         raw_amount / parsed_price
     } else {

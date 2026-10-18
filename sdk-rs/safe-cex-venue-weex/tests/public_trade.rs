@@ -1,5 +1,7 @@
 #[path = "support/input_identity.rs"]
 mod input_identity;
+#[path = "support/retained_input.rs"]
+mod retained_input;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_types::OrderSide;
 use safe_cex_venue_weex::{public_trade::normalize_public_trade, utils::WeexUtilityInput};
@@ -62,7 +64,8 @@ fn public_trades_match_actual_typescript() {
                     serde_json::json!(false),
                     Value::Null,
                     serde_json::json!("true"),
-                ];
+                ]
+                .map(safe_cex_types::retained_json::RetainedJsonInput::from);
                 let slot = index - 15;
                 assert_eq!(
                     [
@@ -169,10 +172,18 @@ fn public_trades_match_actual_typescript() {
             case["accepted"], true,
             "public_trade::source_refusal_acceptance"
         );
-        assert!(
-            js_from_str::<WeexUtilityInput>(&expected[index]).is_err(),
-            "public_trade::retained_refusal"
-        );
+        if index == 0 {
+            let native = retained_input::admit_utf16(&expected[index]);
+            assert!(
+                normalize_public_trade(&native, "B/Q", |value| value).is_err(),
+                "UTF-8 model id refusal remains visible"
+            );
+        } else {
+            assert!(
+                js_from_str::<WeexUtilityInput>(&expected[index]).is_err(),
+                "public_trade::depth_refusal"
+            );
+        }
     }
     assert_eq!(
         corpus["callable"]["bits"], "401d000000000000",

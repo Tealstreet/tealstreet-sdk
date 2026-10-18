@@ -1,5 +1,7 @@
 #[path = "support/oracle_clock.rs"]
 mod oracle_clock;
+#[path = "support/retained_observe.rs"]
+mod retained_observe;
 
 use safe_cex_exchange::{
     exchange::BaseExchange,
@@ -141,11 +143,15 @@ impl ExchangeRuntime for Host {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         if !e.message.starts_with("Exchange Error:") {
             self.exceptions.borrow_mut().push(e.message.clone());
         }
@@ -536,7 +542,10 @@ impl PrivateEventHost for Host {
     fn spawn(&self, f: ExchangeFuture<'static, ()>) -> Result<(), ExchangeError> {
         ready(f)
     }
-    fn emit_fill(&self, v: Value) -> Result<(), ExchangeError> {
+    fn emit_fill(
+        &self,
+        v: safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), ExchangeError> {
         self.call(json!({"op":"fill","payload":v}));
         Ok(())
     }
@@ -766,15 +775,15 @@ fn run(case: &Value) {
             "BINGX-C direct native reduce-only"
         );
         assert_eq!(
-            native.info.as_ref().map(observe),
-            expected.info.as_ref().map(observe),
+            native.info.as_ref().map(retained_observe::observe),
+            expected.info.as_ref().map(retained_observe::observe),
             "BINGX-C direct native retained info"
         );
     }
     let native_balance = s.balance();
     assert_eq!(
         native_balance.info,
-        case["balance"].get("info").cloned(),
+        case["balance"].get("info").cloned().map(Into::into),
         "BINGX-C direct native balance info"
     );
     for (field, n) in [

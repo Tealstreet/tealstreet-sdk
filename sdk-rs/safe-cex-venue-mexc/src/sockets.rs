@@ -111,7 +111,7 @@ impl PrivateProtocol {
                 })), redact:None})?;
                 Ok::<_, ExchangeError>(())
             }.await;
-            if let Err(error) = result {owner.base().runtime.report_exception(&error, &json!({"operation":"MEXC private sendLogin"}));}
+            if let Err(error) = result {owner.base().runtime.report_exception(&error, &json!({"operation":"MEXC private sendLogin"}).into());}
         });
         Ok(())
     }
@@ -215,10 +215,10 @@ impl WsProtocol for PrivateProtocol {
             let owner = parent.clone();
             parent.base().start_owned_operation(async move {
                 if let Err(error) = owner.fetch_and_set_private_snapshot(10).await {
-                    owner
-                        .base()
-                        .runtime
-                        .report_exception(&error, &json!({"operation":"MEXC private snapshot"}));
+                    owner.base().runtime.report_exception(
+                        &error,
+                        &json!({"operation":"MEXC private snapshot"}).into(),
+                    );
                 }
             });
             socket.emit_ws_reconnected()

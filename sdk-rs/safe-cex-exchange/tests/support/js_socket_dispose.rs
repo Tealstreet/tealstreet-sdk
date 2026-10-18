@@ -113,6 +113,6 @@ fn inherited_socket_dispose_and_throwing_override_still_close_and_reset_guard() 
     assert_eq!(exceptions.len(), 2);
     for (message, context) in exceptions.iter() {
         assert!(message.contains("synthetic cleanup failure"));
-        assert_eq!(context, &json!({"operation":"dispose"}));
+        assert_eq!(context, &json!({"operation":"dispose"}).into());
     }
 }

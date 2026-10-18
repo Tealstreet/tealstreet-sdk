@@ -1,4 +1,9 @@
+#[path = "support/retained_info.rs"]
+mod retained_info;
+#[path = "support/retained_mutation.rs"]
+mod retained_mutation;
 use indexmap::IndexMap;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Market, OrderSide, OrderStatus, OrderType};
 use safe_cex_venue_coinbase::{
     cdp_signing::*,
@@ -130,10 +135,14 @@ fn value(a: Option<&Value>, e: &Value, n: &str) {
 }
 fn frame(a: Option<Frame>, e: &Value, n: &str) {
     if e.get("$undefined") == Some(&json!(true)) {
-        assert!(a.is_none(), "{n}: native undefined");
+        assert!(
+            matches!(a, None | Some(Frame::Undefined)),
+            "{n}: native undefined"
+        );
         return;
     }
     match a.expect("native frame") {
+        Frame::Undefined => assert_eq!(e["$undefined"], true, "native undefined"),
         Frame::Null => assert!(e.is_null(), "{n}: null"),
         Frame::Bool(v) => assert_eq!(Some(v), e.as_bool(), "{n}: bool"),
         Frame::Number(v) => num(v, e, n),
@@ -294,7 +303,7 @@ fn orders(a: &SyncedOrders, e: &Value, indices: &Value, roots: &[ReadItem], n: &
             Rc::ptr_eq(&a.info, &roots[ix]),
             "{n}: native original raw info root"
         );
-        value(Some(&a.info.borrow()), &e["info"], n);
+        retained_info::assert_info(Some(&a.info.borrow()), &e["info"], n);
         assert_eq!(
             e.as_object().unwrap().len(),
             14,
@@ -809,7 +818,7 @@ fn raw_items(v: &Value) -> ReadItems {
             .unwrap()
             .iter()
             .cloned()
-            .map(|v| Rc::new(RefCell::new(v)))
+            .map(|v| Rc::new(RefCell::new(Input::from(v))))
             .collect(),
     ))
 }
@@ -872,7 +881,11 @@ impl OrderSnapshotHost for SnapshotHost {
         );
         num(query.limit, &p["limit"], "native snapshot page limit");
         value(
-            query.cursor.as_ref(),
+            query
+                .cursor
+                .as_ref()
+                .map(|v| v.clone().into_value().unwrap())
+                .as_ref(),
             p.get("cursor").unwrap_or(&json!({"$undefined":true})),
             "native pagination cursor",
         );
@@ -904,14 +917,22 @@ impl OrderSnapshotHost for SnapshotHost {
         );
         if self.input["mutateResolve"] == true {
             for raw in self.roots.borrow().iter() {
-                if raw.borrow()["product_id"] == product {
-                    raw.borrow_mut()["product_id"] = json!("changed")
+                if raw
+                    .borrow()
+                    .get("product_id")
+                    .is_some_and(|v| v.text_equals(&product))
+                {
+                    retained_mutation::set(
+                        &mut raw.borrow_mut(),
+                        "product_id",
+                        json!("changed").into(),
+                    )
                 }
             }
         }
         if product == "BTC-USD" {
             if let Some(raw) = self.append.borrow_mut().take() {
-                let raw = Rc::new(RefCell::new(raw));
+                let raw = Rc::new(RefCell::new(Input::from(raw)));
                 self.first_page.borrow_mut().push(raw.clone());
                 self.roots.borrow_mut().push(raw);
             }
@@ -988,8 +1009,8 @@ fn snapshot_pagination_native_orders_and_fetch_error_identity() {
                 (
                     OrderPage {
                         orders: p.get("orders").map(raw_items).unwrap_or_default(),
-                        has_next: p.get("has_next").cloned(),
-                        cursor: p.get("cursor").cloned(),
+                        has_next: p.get("has_next").cloned().map(Input::from),
+                        cursor: p.get("cursor").cloned().map(Input::from),
                     },
                     p.get("error").cloned().map(failure),
                 )
@@ -1095,8 +1116,8 @@ impl EventHost {
         if self.input["mutateStore"] == true {
             let o = orders.borrow()[0].clone();
             let mut o = o.borrow_mut();
-            o.info.borrow_mut()["status"] = json!("FILLED");
-            o.info.borrow_mut()["avg_price"] = json!("");
+            retained_mutation::set(&mut o.info.borrow_mut(), "status", json!("FILLED").into());
+            retained_mutation::set(&mut o.info.borrow_mut(), "avg_price", json!("").into());
             o.fields.symbol = "changed".into();
             o.fields.filled = 9.0;
         }
@@ -1120,13 +1141,13 @@ impl PrivateOrderEventHost for EventHost {
         if self.input["mutateResolve"] == true {
             for raw in self.roots.borrow().iter() {
                 let mut raw = raw.borrow_mut();
-                raw["cumulative_quantity"] = json!("99");
-                raw["leaves_quantity"] = json!("98");
-                raw["limit_price"] = json!("11");
+                retained_mutation::set(&mut raw, "cumulative_quantity", json!("99").into());
+                retained_mutation::set(&mut raw, "leaves_quantity", json!("98").into());
+                retained_mutation::set(&mut raw, "limit_price", json!("11").into());
             }
         }
         if let Some(raw) = self.append.borrow_mut().take() {
-            let raw = Rc::new(RefCell::new(raw));
+            let raw = Rc::new(RefCell::new(Input::from(raw)));
             self.raw_orders.borrow_mut().push(raw.clone());
             self.roots.borrow_mut().push(raw);
         }
@@ -1197,7 +1218,7 @@ impl PrivateOrderEventHost for EventHost {
                 OrderSide::Sell
             }
         );
-        value(
+        retained_info::assert_info(
             Some(&fill.price),
             &v["price"],
             "native fill retains avg-price scalar",
