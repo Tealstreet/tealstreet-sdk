@@ -18,7 +18,7 @@ use safe_cex_transport::{
     socket::TunnelHost,
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use safe_cex_venue_binanceinverse::{BinanceInverseDependencies, BinanceInverseExchange};
+use safe_cex_venue_binance::inverse::{BinanceInverseDependencies, BinanceInverseExchange};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},

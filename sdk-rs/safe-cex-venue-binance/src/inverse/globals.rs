@@ -1,5 +1,5 @@
 //! Bind source-generated COIN-M constants to the shared native JavaScript graph.
-use crate::types::*;
+use super::types::*;
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_typed};
 
 fn table<T: serde::Serialize>(rows: &[(&str, T)]) -> Result<Js, Thrown> {

@@ -1,4 +1,4 @@
-#[path = "support/rest_runtime.rs"]
+#[path = "support/inverse_rest_runtime.rs"]
 mod support;
 use safe_cex_exchange::{
     js_runtime::{

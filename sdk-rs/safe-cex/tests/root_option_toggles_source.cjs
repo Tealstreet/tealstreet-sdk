@@ -28,7 +28,7 @@ if(process.argv.includes('--hyro-modes')) {
  process.exit(0);
 }
 const fields=['enableSpotMarkets','enableOptionMarkets','enableInverseMarkets'];
-const names=Object.keys(metadata.exchangeMetadata);assert.equal(names.length,48,'all declared exchange metadata entries');
+const names=Object.keys(metadata.exchangeMetadata);assert.equal(names.length,49,'all declared exchange metadata entries');
 const rows=[];
 for(const exchange of names)for(const field of fields)for(const enabled of ['absent',false,true])for(const override of ['absent','undefined',false,true]){
  const input={exchange,name:'toggle-witness',apiKey:'',apiSecret:'',...(enabled==='absent'?{}:{[field]:enabled})};
@@ -38,7 +38,7 @@ for(const exchange of names)for(const field of fields)for(const enabled of ['abs
  const expected=Object.fromEntries(fields.filter(key=>Object.hasOwn(value,key)&&value[key]!==undefined).map(key=>[key,value[key]]));
  rows.push({account:input,field,override,expected,warnings});
 }
-assert.equal(rows.length,1728,'48 venues x 3 independent toggles x 3 inputs x 4 override states');
+assert.equal(rows.length,1764,'49 venues x 3 independent toggles x 3 inputs x 4 override states');
 assert.equal(rows.some(row=>row.field==='enableOptionMarkets'&&row.expected.enableOptionMarkets===true),true);
 assert.equal(rows.some(row=>row.field==='enableInverseMarkets'&&row.expected.enableInverseMarkets===true),true);
 process.stdout.write(JSON.stringify(rows));

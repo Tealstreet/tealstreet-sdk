@@ -5,7 +5,17 @@ use safe_cex_types::{ExchangeName, exchange_metadata::*};
 #[test]
 fn full_metadata_native_fields_unified_mobile_and_domains() {
     let table = exchange_metadata();
-    assert_eq!(table.len(), 48); // independently counted source object entries, stopped at record 48.
+    assert_eq!(table.len(), 49); // independently counted source object entries, stopped at record 49.
+    let inverse = get_exchange_metadata("binanceinverse", false).unwrap();
+    assert_eq!(inverse.exchange_name, ExchangeName::Binanceinverse);
+    assert_eq!(inverse.pretty_name, "Binance Inverse");
+    assert_eq!(inverse.default_quote, "USD");
+    assert_eq!(inverse.latency_domain, "dapi.binance.com");
+    assert!(!inverse.enabled);
+    assert!(inverse.enabled_in_dev);
+    assert!(!inverse.supported_on_mobile);
+    assert!(!inverse.supports_testnet);
+    assert!(inverse.requires_tickers_for_markets_loaded);
     let grvt = get_exchange_metadata("grvt", false).unwrap();
     assert!(grvt.requires_cors, "native GRVT requiresCors");
     assert!(!grvt.forbid_cors, "native GRVT forbidCors");

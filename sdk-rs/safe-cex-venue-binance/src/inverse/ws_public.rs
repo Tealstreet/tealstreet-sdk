@@ -1,5 +1,10 @@
 //! COIN-M public socket. Imported Binance dispatch and depth algorithms keep their owners.
-use crate::{Rt, Shared};
+use super::{Rt, Shared};
+use crate::{
+    orderbook,
+    protocol_types::BinanceOrderBookApplyResult,
+    public_dispatch::{Handler, Handlers, dispatch_binance_message},
+};
 use safe_cex_exchange::{
     js_runtime::{
         ops,
@@ -11,11 +16,6 @@ use safe_cex_exchange::{
     websocket::BaseWebSocket,
 };
 use safe_cex_types::OrderBook;
-use safe_cex_venue_binance::{
-    orderbook,
-    protocol_types::BinanceOrderBookApplyResult,
-    public_dispatch::{Handler, Handlers, dispatch_binance_message},
-};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -219,7 +219,7 @@ fn on_message(rt: &Rt, data: Js) -> Result<(), Thrown> {
                             .call(this.clone(), vec![events])
                             .map(|_| ())
                             .map_err(|e| Rc::new(e.to_exchange_error()))
-                    }) as safe_cex_venue_binance::public_listeners::Parser
+                    }) as crate::public_listeners::Parser
                 })
                 .collect();
             Handler::List(Rc::new(RefCell::new(callbacks)))

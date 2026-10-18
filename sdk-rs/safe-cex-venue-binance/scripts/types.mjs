@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const inverse = process.argv.includes('--inverse');
-const crate = fileURLToPath(new URL(inverse ? '../../safe-cex-venue-binanceinverse/' : '../', import.meta.url));
+const crate = fileURLToPath(new URL('../', import.meta.url));
 const variants = inverse ? ['binanceinverse'] : ['binance', 'binancepm', 'binancespot'];
 const parse = (file) => ts.createSourceFile(file, fs.readFileSync(root + file, 'utf8'), ts.ScriptTarget.Latest, true);
 const shared = parse('packages/safe-cex/src/types.ts');

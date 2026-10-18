@@ -1,5 +1,5 @@
 //! COIN-M private stream bodies over the assembled exchange receiver.
-use crate::Rt;
+use super::Rt;
 use safe_cex_exchange::{
     js_runtime::{
         promise::await_js,

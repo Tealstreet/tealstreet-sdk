@@ -1,5 +1,5 @@
 //! binanceinverse.api.ts: actual Axios clients over the owning transport/host.
-use crate::Rt;
+use super::Rt;
 use safe_cex_exchange::js_runtime::{
     client::{self, axios_headers_from},
     library::qs_stringify,
@@ -146,7 +146,10 @@ pub(crate) fn create(rt: &Rt, options: Js, public: bool) -> Result<Js, Thrown> {
         (
             "transformResponse",
             Js::function("bigIntAsStringJsonParse", |_, a| {
-                let text = arg(&a, 0).to_js_string()?;
+                let input = arg(&a, 0);
+                let Some(text) = input.as_str() else {
+                    return Ok(input);
+                };
                 Ok(from_retained_input(
                     safe_cex_transport::how::big_int_as_string_json_parse_utf16(&text),
                 ))
@@ -212,7 +215,7 @@ pub(crate) fn create(rt: &Rt, options: Js, public: bool) -> Result<Js, Thrown> {
             }
             // Array.includes compares against `${config.url}`.
             let url = Js::utf16(&config.get("url")?.to_js_string()?);
-            if crate::types::PUBLIC_ENDPOINTS
+            if super::types::PUBLIC_ENDPOINTS
                 .iter()
                 .any(|path| url.strict_equals(&Js::str(path)))
             {
@@ -223,11 +226,11 @@ pub(crate) fn create(rt: &Rt, options: Js, public: bool) -> Result<Js, Thrown> {
             Ok(rt.clone().spawn(Box::pin(async move {
                 let window = optional(&options.get("extra")?, "recvWindow")?;
                 let window = if window.is_nullish() {
-                    Js::Number(crate::types::RECV_WINDOW)
+                    Js::Number(super::types::RECV_WINDOW)
                 } else {
                     window
                 };
-                safe_cex_venue_binance::signing::sign_binance_request_native(
+                crate::signing::sign_binance_request_native(
                     &config,
                     &options,
                     rt.shared.extra.name.clone(),
@@ -268,7 +271,7 @@ pub(crate) fn create(rt: &Rt, options: Js, public: bool) -> Result<Js, Thrown> {
                     let data = response.get("data")?;
                     if data.truthy()
                         && data.type_of() == "object"
-                        && crate::ops::contains(&data, "code")?
+                        && super::ops::contains(&data, "code")?
                         && data.get("code")?.to_number()? < 0.0
                     {
                         let code = data.get("code")?;

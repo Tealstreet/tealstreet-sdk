@@ -4124,21 +4124,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "safe-cex-venue-binanceinverse"
-version = "0.1.0"
-dependencies = [
- "safe-cex-crypto",
- "safe-cex-exchange",
- "safe-cex-num",
- "safe-cex-store",
- "safe-cex-transport",
- "safe-cex-types",
- "safe-cex-venue-binance",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "safe-cex-venue-bingx"
 version = "0.1.0"
 dependencies = [
