@@ -305,8 +305,8 @@ are explicit boundaries. The live oracle runs once per native test corpus.
 The legacy history fetcher executes the supplied production RestAdapter once per
 candidate, followed by the unqualified request. Empty successes retain the last
 RestFailure unchanged; nonempty rows stop the loop. Native query numbers use
-shared RetainedJsonInput, preserving signed zero and infinities while refusing
-NaN before sending. Immutable options, owned returned arrays, typed failures and
+canonical QueryValue, preserving signed zero, infinities and NaN until the
+selected serializer. The JS REST adapter restores those native values before signing. Immutable options, owned returned arrays, typed failures and
 response-transform parity are separate declared boundaries. Response phases
 retain native data; only strings enter the parser. The factory can
 supply the adapter; no exchange lifecycle registration is added by this helper.
@@ -321,8 +321,8 @@ public-data check, REST adapter and fallible reporter. Parsing completes before
 filtering. Direct fills sort stably by seconds; internal trades sort by milliseconds
 and synthesize missing order IDs before the fallback seconds sort. Output asset
 refusal occurs only after slicing and is separate from source-error reporting.
-Nonfinite bounds are ignored before JSON conversion; a NaN limit retains the
-existing shared parameter refusal. These functions do not register a WOO runtime.
+Nonfinite bounds are ignored before JSON conversion; a NaN limit reaches signed
+HTTP before the source slice produces an empty result. These functions do not register a WOO runtime.
 
 The order-page source witness fixes request and output counts independently of
 captured lengths. It observes copy-before-recursion, terminal array aliasing and
@@ -535,3 +535,6 @@ The five structural aliases have individually reviewed native trait/output recor
 records the exact two-slot array registration and documents the constructed class
 cache/signing witness plus independent compiled production controls. Unknown
 array/tuple identities remain refused; no V3 migration route is enabled.
+
+`HISTORY_QUERY_REVIEW.md` records the history QueryValue cutover, actual signed
+class witnesses, TypeScript URL/HMAC comparison and native query-kind observations.
