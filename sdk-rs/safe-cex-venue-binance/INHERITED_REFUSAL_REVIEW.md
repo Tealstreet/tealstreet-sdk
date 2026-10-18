@@ -21,8 +21,23 @@ It mutates each actual inherited method, requires that method's named native
 assertion failure, restores exact source bytes and requires a pass. Compiler
 failures do not satisfy a control. Final source/native comparison must pass.
 
-The initial source/native run passes9 tests (16 profiles). Eight independent
-controls are pending; this preparation does not yet add constant-output policy
-or classify the remaining class decoder APIs. A reviewed exact-source policy
-extension needs to retain compiler API/span, source and fixture hashes, distinct
-genuine inputs and actual inherited refusal/zero-HTTP assertions.
+The source/native run passes9 tests (16 profiles). The eight independent
+production-method controls require compiled named failures and byte-exact
+restored passes, followed by the complete source/native target.
+
+The shared inherited-constant gate recognizes only these eight exact
+class/Exchange-method pairs. It retains actual compiler API/span, package and
+source hashes, the maintained base excerpt and venue inheritance hashes, the
+terminal I/O fixture, native observer and maintained-source oracle hashes. It
+also requires genuine distinct inputs, Error/Not implemented, HTTP0, events0
+and reports0. The focused policy tests inject controlled review records and
+check metadata/path/fixture corruption, plus three removed-guard controls.
+The original gate refuses this bounded Binance package; the updated gate
+accepts the exact controlled records and refuses the negative controls.
+
+No Binance policy record or partial class contract is installed here. The
+remaining complete class receipt cohort must provide every compiler-discovered
+entrypoint and its separate actual method witnesses. This prerequisite neither
+marks unresolved class entries as typed nor pads constant outputs with echoed
+inputs. The compiler metadata fixture contains only the eight actual APIs for
+provenance guard tests; it is not a replacement compiler inventory.

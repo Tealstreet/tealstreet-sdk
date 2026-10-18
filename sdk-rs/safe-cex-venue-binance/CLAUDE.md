@@ -968,3 +968,11 @@ with the full maintained TS constructors. `INHERITED_REFUSAL_REVIEW.md` records
 its finite scope; `scripts/inherited-refusal-controls.py` requires eight compiled
 method-specific failures and exact-restoration passes. Keep these execution
 witnesses separate from decoder classification and constant-output permission.
+
+The inherited-refusal proof constructs the actual Futures/PM/Spot classes with
+native_dependencies and compares eight methods/two genuine argument profiles
+against maintained constructors. Native name/message and zero HTTP/events/reports
+are read before projection. inherited-refusal-controls.py independently faults
+each actual Exchange method and requires a named runtime failure plus exact
+restoration. The exact-method constant-output gate support is preparatory: no
+partial class contract or Binance constant-policy permission is installed.
