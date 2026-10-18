@@ -1226,6 +1226,17 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+The shared Promise global is a native constructor with its existing static
+methods. It runs the executor synchronously with resolve/reject functions that
+share a first-call lock, including while adopting a pending value. Resolution
+reads a thenable's `then` synchronously and queues its invocation in the same
+runtime FIFO as Promise reactions;
+self-resolution rejects and original thrown values survive. The native scheduler
+retains the queued job after observer drop. `tests/js_promise_constructor.rs`
+uses NativeRuntime/native HTTP hosting without replacement hosts and compares
+executor/thenable traces with Node; Bitrue's production binding witnesses
+connected candle-request resolution, cache reuse and timeout rejection.
+
 `__configureRateLimit` registers a request interceptor at the source registration point. Axios LIFO ordering therefore waits before the earlier signing interceptor, while later request hooks still run before the wait. Each registration owns its window. The queued nonce regression and installed Axios oracle are `tests/js_runtime.rs::rate_limit_dequeues_before_signing_and_keeps_interceptor_registration_order` and `tests/rate-limit-signing-source.cjs`.
 
 JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
