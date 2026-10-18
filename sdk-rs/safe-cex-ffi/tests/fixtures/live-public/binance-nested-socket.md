@@ -119,3 +119,29 @@ reviewed Exchange declaration through line 521, all 53 default APIs/bodies and
 16 classifications are byte-identical; refreshing only the pin and its scoped
 evidence makes the same real test pass. The health runtime delta is unchanged
 from the frozen release pair.
+
+Final normally merged source `9fa32c7fb9` builds addon
+`061cbaad8e693374ae8fa27047005a5a84c0eb5b60fa8ea6e1954356fbc589da`.
+The seven real health checks, strict replay API, request-stats regression and
+affected types/Store/exchange/worker/venue tests pass. Native all-targets and
+portable Wasm strict Clippy, full parity index (7563 rows / 16351 public items),
+all-features cancellation, scanner, scoped fmt and all 376 CI-wiring tests pass.
+Root typecheck/lint/test also pass. Binance notifications separately pass 10
+cases with one existing ignored case.
+
+The Coinbase notification audit initially rejects the old JSON-argument source
+pattern after the retained carrier migration. Pinning the actual
+`update_socket_health(&Value::Object(update).into())` call preserves the existing
+StoreMutationError origin mapping. All 21 declaration/mutation/isolation cases
+pass, retaining all 262 reviewed roots and 13 source callsites; a new control
+rejects substituting null for the original retained partial update. No Rust
+production behavior changes in this guard repair.
+
+Two coordinator-approved inherited exceptions remain separate from health:
+Binance history's virtual-clock fixture waker (107 other private-class cases
+pass, two existing ignored; isolated failure also reproduced), repaired by
+#1195; and actual compiler inventory's stale `runtime.rs::LOCAL_FUNCTION:utf8_view`
+source fingerprint (stored d8f2c7e2 versus actual 41f010fd), routed to #1154's
+owner. runtime.rs and that nested function are unchanged by this PR. The real
+Exchange default-trait pin test above passes; the broader inventory refusal is
+not presented as an inventory pass.

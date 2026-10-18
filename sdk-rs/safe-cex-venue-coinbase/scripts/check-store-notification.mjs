@@ -213,7 +213,7 @@ for (const [name, error] of [
     }
   }
 }
-assert.match(rustHealth, /update_socket_health\(&update\)\s*\.map_err\(\|error\| Rc::new\(PortfolioThrown::from\(error\)\)\)\?;/,
+assert.match(rustHealth, /update_socket_health\(&Value::Object\(update\)\.into\(\)\)\s*\.map_err\(\|error\| Rc::new\(PortfolioThrown::from\(error\)\)\)\?;/,
   'health native origin bridge retains StoreMutationError');
 assert.match(rustHealth, /log\(reason, "warning"\)\?;/, 'health log failure must propagate');
 assert.match(rustHealth, /emit_warning\(reason\)\?;/, 'health warning failure must propagate');
