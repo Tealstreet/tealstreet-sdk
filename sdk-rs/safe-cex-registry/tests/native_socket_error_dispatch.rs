@@ -7,7 +7,7 @@ use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc, time::Duration};
-use tokio::{io::AsyncWriteExt, net::TcpListener, sync::oneshot};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::oneshot};
 use tokio_tungstenite::tungstenite::{
     Message,
     protocol::{CloseFrame, frame::coding::CloseCode},
@@ -38,23 +38,31 @@ fn source(name: &str) -> Value {
     serde_json::from_str(receipts[0]).unwrap()
 }
 
-async fn observe(name: ExchangeName, malformed: bool, expected: &Value) {
+async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     let (release, released) = oneshot::channel();
     let server = tokio::task::spawn_local(async move {
         let (tcp, _) = listener.accept().await.unwrap();
-        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
-        if malformed {
-            socket.get_mut().write_all(&[0x83, 0x00]).await.unwrap();
+        if rejected_handshake {
+            let mut tcp = tcp;
+            let mut request = Vec::new();
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let mut bytes = [0; 1024];
+                let length = tcp.read(&mut bytes).await.unwrap();
+                assert_ne!(length, 0, "actual WebSocket upgrade request");
+                request.extend_from_slice(&bytes[..length]);
+            }
+            assert!(request.starts_with(b"GET / HTTP/1.1\r\n"));
+            tcp.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            tcp.shutdown().await.unwrap();
         } else {
-            socket
-                .send(Message::Close(Some(CloseFrame {
-                    code: CloseCode::Away,
-                    reason: "server close".into(),
-                })))
-                .await
-                .unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            socket.send(Message::Close(Some(CloseFrame {
+                code: CloseCode::Away, reason: "server close".into(),
+            }))).await.unwrap();
+            released.await.unwrap();
+            return;
         }
         released.await.unwrap();
     });
@@ -85,7 +93,7 @@ async fn observe(name: ExchangeName, malformed: bool, expected: &Value) {
     socket.start_websocket(url, vec![], None);
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let done = if malformed {
+            let done = if rejected_handshake {
                 logs.borrow()
                     .iter()
                     .any(|line| line.contains("WebSocket error:"))
@@ -110,7 +118,7 @@ async fn observe(name: ExchangeName, malformed: bool, expected: &Value) {
         expected.as_u64().unwrap() as usize,
         "{name:?}: base error listener suppresses later handlers; actual close still runs"
     );
-    if malformed {
+    if rejected_handshake {
         assert!(
             !logs
                 .borrow()
