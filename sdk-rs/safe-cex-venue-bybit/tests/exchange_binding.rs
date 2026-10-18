@@ -1944,6 +1944,103 @@ fn retained_info_market_undefined_parents_follow_source_failure() {
     );
 }
 #[test]
+fn retained_info_market_coercion_keeps_source_error_name_and_message() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-position-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    let expected = &expected["coercionErrors"][0];
+    assert_eq!(expected["variant"], "bybit");
+    for name in [
+        safe_cex_types::ExchangeName::Bybit,
+        safe_cex_types::ExchangeName::Bybitdemo,
+    ] {
+        let h = support::harness_as(name.clone(), options(), |wire| {
+            wire.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+            wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+            let mut row = instrument("BTCUSDT", "Trading");
+            row["lotSizeFilter"]["qtyStep"] = json!({"toString":null});
+            wire.retained_routes.borrow_mut().push((
+                "/v5/market/instruments-info".into(),
+                retained_instrument_packet(vec![row.into()]),
+            ));
+        });
+        let error = h.drive(h.venue().fetch_markets()).unwrap_err();
+        assert_eq!(
+            json!({"name":error.name,"message":error.message}),
+            json!({"name":expected["name"],"message":expected["message"]}),
+            "BYBIT_RETAINED source error through constructed {name:?} binding"
+        );
+    }
+}
+
+#[test]
+fn retained_info_option_coercion_keeps_source_warning_message() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-position-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    let mut opts = options();
+    opts.enable_option_markets = Some(true);
+    opts.public_data_only = Some(true);
+    let h = harness(opts, |wire| {
+        wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+        wire.ok(
+            "GET",
+            "/v5/market/option-base-coins",
+            json!({"list":[{"baseCoin":"SOL"}]}),
+        );
+        let mut row = instrument("SOL-6NOV26-112d5-P", "Trading");
+        row["optionsType"] = json!("Put");
+        row["lotSizeFilter"]["qtyStep"] = json!({"toString":null});
+        wire.route_when(
+            "GET",
+            "/v5/market/instruments-info",
+            "category",
+            "option",
+            json!({"retCode":0,"retMsg":"OK","result":{"list":[row],"nextPageCursor":""}}),
+        );
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert!(
+        markets.is_empty(),
+        "source keeps the previously empty option Store on failure"
+    );
+    let prefix = "Failed to load Bybit option markets, keeping the last ones: ";
+    let logs = h.runtime.logs.borrow();
+    let warnings: Vec<_> = logs
+        .iter()
+        .filter_map(|line| line.find(prefix).map(|at| &line[at..]))
+        .collect();
+    assert_eq!(
+        warnings,
+        [format!(
+            "{prefix}{}",
+            expected["optionCoercionError"]["message"].as_str().unwrap()
+        )],
+        "BYBIT_RETAINED actual option receiver warning preserves maintained message"
+    );
+}
+
+#[test]
 fn retained_info_market_missing_and_undefined_fee_symbols_match() {
     use safe_cex_types::retained_json::RetainedJsonInput as I;
     let h = harness(options(), |wire| {

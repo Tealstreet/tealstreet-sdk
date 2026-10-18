@@ -3894,7 +3894,97 @@
       }
     },
     "evidence": "Reviewed source formatSymbolOut first matching market then info.symbol truthiness fallback. Expected native JSON kinds include string, number and boolean; duplicate-key first-falsy/second-truthy input must fall back rather than scan onward. Inputs and all native expected outputs are independently authored from the actual TS body. Only the existing UTF8/JSON, owned-snapshot and typed Store domain is claimed; typed-edge findings and raw Js paths stay separate.",
-    "call": "{ let markets=$value.get(\"markets\").map(|v|serde_json::from_value::<Vec<safe_cex_types::Market>>(v.clone()).expect(\"independently authored valid typed markets\")); super::format_symbol_out(markets.as_deref(), $value.get(\"symbol\").and_then(serde_json::Value::as_str)) }",
+    "call": "{ let markets=$value.get(\"markets\").map(|v|serde_json::from_value::<Vec<safe_cex_types::Market>>(v.clone()).expect(\"independently authored valid typed markets\")); super::format_symbol_out(markets.as_deref(), $value.get(\"symbol\").and_then(serde_json::Value::as_str)).into_value().expect(\"final finite observation projection\") }",
+    "nativeObservation": {
+      "call": "{ use safe_cex_types::retained_json::RetainedJsonInput as I; let mut market: safe_cex_types::Market=serde_json::from_str(r#\"{\"id\":\"btc-contract\",\"symbol\":\"BTCUSDT\",\"base\":\"BTC\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":0.003,\"price\":0.25},\"limits\":{\"amount\":{\"min\":0.003,\"max\":100},\"leverage\":{\"min\":1,\"max\":50}}}\"#).unwrap(); let value=match $value.as_str().unwrap(){\"surrogate\"=>I::Text(vec![0xd800]),\"infinity\"=>I::Float(f64::INFINITY),\"nan\"=>I::Float(f64::NAN),\"negative-zero\"=>I::Float(-0.0),\"undefined\"=>I::Undefined,\"object\"=>I::Object(vec![(vec![0xdfff],I::Undefined)]),_=>unreachable!()}; market.info=Some(I::Object(vec![(\"symbol\".encode_utf16().collect(),value)])); let output=$type(Some(&[market]),Some(\"BTCUSDT\")); match output { I::Text(units)=>serde_json::json!({\"ok\":true,\"kind\":\"text\",\"payload\":units}),I::Float(number)=>serde_json::json!({\"ok\":true,\"kind\":\"number\",\"payload\":format!(\"{:016x}\",number.to_bits())}),I::Object(entries)=>serde_json::json!({\"ok\":true,\"kind\":\"object\",\"payload\":entries.iter().map(|(key,value)|serde_json::json!([key,matches!(value,I::Undefined)])).collect::<Vec<_>>()}),_=>panic!(\"unexpected source result\") } }",
+      "nativeFields": [
+        "kind",
+        "payload"
+      ],
+      "cases": [
+        {
+          "input": "surrogate",
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "payload": [
+              55296
+            ]
+          }
+        },
+        {
+          "input": "infinity",
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "payload": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "nan",
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "payload": [
+              66,
+              84,
+              67,
+              85,
+              83,
+              68,
+              84
+            ]
+          }
+        },
+        {
+          "input": "negative-zero",
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "payload": [
+              66,
+              84,
+              67,
+              85,
+              83,
+              68,
+              84
+            ]
+          }
+        },
+        {
+          "input": "undefined",
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "payload": [
+              66,
+              84,
+              67,
+              85,
+              83,
+              68,
+              84
+            ]
+          }
+        },
+        {
+          "input": "object",
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "payload": [
+              [
+                [
+                  57343
+                ],
+                true
+              ]
+            ]
+          }
+        }
+      ]
+    },
     "cases": [
       {
         "input": {},

@@ -13,6 +13,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
+pub(crate) const NATIVE_MODULE_ROOTS: [&str; 1] = ["p-iteration"];
+
 fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
 }
@@ -53,6 +55,37 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
         out = out.get(part)?;
     }
     Ok(out)
+}
+
+/// Imported lodash groupBy for native data collections and the existing
+/// function/property iteratee profile. Values remain the original referents.
+pub fn group_by(collection: &Js, by: &Js) -> Result<Js, Thrown> {
+    let result = Js::object(vec![]);
+    if collection.is_nullish() {
+        return Ok(result);
+    }
+    let length = if collection.is_callable() {
+        Js::Undefined
+    } else {
+        collection.get("length")?
+    };
+    let keys: Box<dyn Iterator<Item = Vec<u16>>> = match length {
+        Js::Number(n) if n >= 0.0 && n.fract() == 0.0 && n <= 9_007_199_254_740_991.0 => {
+            Box::new((0..n as usize).map(|index| index.to_string().encode_utf16().collect()))
+        }
+        _ => Box::new(collection.own_keys().into_iter().map(|key| key.to_vec())),
+    };
+    for key in keys {
+        let value = collection.get_key(&key)?;
+        let key = iteratee(by, value.clone())?.to_js_string()?;
+        if result.own_keys().iter().any(|own| **own == *key) {
+            result.get_key(&key)?.call_method("push", vec![value])?;
+        } else {
+            // lodash baseAssignValue defines an own __proto__ data property.
+            result.define_key(&key, Js::array(vec![value]))?;
+        }
+    }
+    Ok(result)
 }
 
 pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
@@ -1460,44 +1493,77 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             Ok(Js::array(out))
         })))
     });
+    let module = rt
+        .upgrade()
+        .and_then(|scope| scope.native_module("p-iteration"))
+        .unwrap_or_else(|| Js::object(vec![]));
+    let Js::Object(module_data) = &module else {
+        unreachable!()
+    };
+    if let Some(scope) = rt.upgrade() {
+        scope.retain_native_module("p-iteration", module_data.clone());
+    }
+    let module_weak = Rc::downgrade(module_data);
     let series = |collect: bool| {
         let rt = rt.clone();
+        let module_weak = module_weak.clone();
         Js::function("series", move |_, a| {
             let s = scope_of(&rt)?;
             let array = arg(&a, 0);
-            let f = arg(&a, 1);
+            let callback = arg(&a, 1);
+            let runtime = s.exchange_runtime();
+            let supplied = arg(&a, 2);
+            let receiver = if supplied.truthy() {
+                supplied
+            } else {
+                Js::Object(
+                    module_weak
+                        .upgrade()
+                        .ok_or_else(|| Thrown::error("Error", "p-iteration module unavailable"))?,
+                )
+            };
             Ok(s.spawn(Box::pin(async move {
-                let mut out = vec![];
-                let len = list(&array).len();
-                for i in 0..len {
-                    let Some(Some(v)) = array.array_items().and_then(|xs| xs.get(i).cloned())
-                    else {
-                        out.push(Js::Undefined);
-                        continue;
-                    };
-                    out.push(
-                        await_js(call(&f, vec![v, Js::Number(i as f64), array.clone()])?).await?,
-                    );
+                let out = Js::array(vec![]);
+                let mut index = 0usize;
+                while ops::less_than(&Js::Number(index as f64), &array.get("length")?)? {
+                    let key = index.to_string();
+                    if in_operator(&array, &key)? {
+                        let call = callback.get("call")?;
+                        let value =
+                            await_js(Js::Promise(Promise::resolve(&runtime, array.get(&key)?)))
+                                .await?;
+                        let pending = call.call(
+                            callback.clone(),
+                            vec![
+                                receiver.clone(),
+                                value,
+                                Js::Number(index as f64),
+                                array.clone(),
+                            ],
+                        )?;
+                        let value =
+                            await_js(Js::Promise(Promise::resolve(&runtime, pending))).await?;
+                        if collect {
+                            out.set(&key, value)?;
+                        }
+                    }
+                    index += 1;
                 }
-                Ok(if collect {
-                    Js::array(out)
-                } else {
-                    Js::Undefined
-                })
+                Ok(if collect { out } else { Js::Undefined })
             })))
         })
     };
     let (map_series, for_each_series) = (series(true), series(false));
     def("mapSeries", map_series.clone());
     def("forEachSeries", for_each_series.clone());
-    def(
-        "p-iteration",
-        Js::object(vec![
-            ("map", p_map),
-            ("mapSeries", map_series),
-            ("forEachSeries", for_each_series),
-        ]),
-    );
+    for (name, value) in [
+        ("map", p_map),
+        ("mapSeries", map_series),
+        ("forEachSeries", for_each_series),
+    ] {
+        define_on(&module, name, value);
+    }
+    def("p-iteration", module);
 
     let numeric = |name: &'static str, f: fn(f64, f64) -> f64| {
         func(name, move |a| {

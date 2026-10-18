@@ -1699,3 +1699,58 @@ HTTP_STATS singleton after proxy authorization, including rejected HTTP statuses
 Its normal response interceptor preserves the source absence of recordError.
 The native runtime request-counter regression uses actual HTTP200/404 receipts;
 it fails with an unchanged total on the previous factory.
+
+The installed p-iteration serial helpers read live lengths and inherited slots,
+await each input and callback result, and preserve sparse result indices. Callback
+`call` lookup precedes the input read. Falsy thisArg values select the original
+CommonJS module receiver; the shared scope roots that module while exported
+functions hold weak references. Both pre-publication and live installation use
+that same scope-owned root. `tests/js_series_iteration.rs` compares forty-eight actual
+installed-package cases and checks escaped exports, signed-zero stringify and
+scope/module release; its three compiled mutation controls restore exact source.
+
+Promise.resolve and the installed Promise constructor share the core thenable
+resolution operation. Serial helpers use it before awaiting input and callback
+results, preserving synchronous then lookup, deferred invocation, first-call
+settlement and original rejection identity. General direct await/async-return
+and combinator adoption remains a separately recorded follow-up after #901.
+
+Ordinary Js objects, including host-resource objects, allocate with the active
+PrototypeRealm's real Object.prototype reference. A None prototype slot is null,
+so there is no implicit stock-prototype String fallback. Legacy __proto__ writes
+and Object.setPrototypeOf reuse one ordinary Object/Function metadata operation:
+primitive legacy values are ignored, own data/accessor shadows retain their
+behavior, original receivers are preserved, and cycle/non-extensibility checks
+run before mutation. Opaque resources remain attached to the same referent and
+are neither inherited nor copied by changing its prototype.
+
+The Object facade exposes the same realm prototype as a nonenumerable immutable
+property. setPrototypeOf validates target/prototype in source order, preserves
+primitive target identity, and bypasses shadowable __proto__ properties. Mutable
+prototype storage for arrays, Map/Set and other nonordinary variants remains a
+separate representation boundary; unsupported changes refuse explicitly.
+`tests/js_object_prototypes.rs` compares actual Node observations with production
+allocation/property algorithms and the installed Object facade.
+
+Native host objects retain one opaque Rc<dyn Any> on their canonical ObjectData.
+Js::host_object creates the ordinary reference, and resource<T> downcasts only its
+own attachment; prototypes and object spread never transfer that native slot.
+Ordinary descriptors, reflection, freeze and explicit JSON use the existing JS
+property operations, with the resource excluded from those property views.
+The native resource target checks original Rc identity, number bits, type refusal,
+private-slot mutation through freeze, inherited getter receivers and final release.
+Independent dropped-retention and leaked-retention faults must compile, fail named
+assertions, restore exact source and pass. This adds no native resource wire codec
+and does not switch a Hyperliquid consumer or change default prototype policy.
+
+Ordinary objects can retain one native WriteObserver, installed or cleared by
+set_write_observer. Successful assignments notify after the property operation,
+including inherited setters, using the original receiver, UTF-16 key and value.
+The callback runs outside storage borrows, can replace itself or reenter writes,
+and propagates its original failure without rolling back the completed assignment.
+Refused assignments and own data definitions do not notify; prototypes and spread
+do not transfer the native callback. tests/js_write_observers.rs compares immediate
+native account identity reads with the maintained TS constructor's shared options
+and checks reentry, exact references/bits, capture release and refusal behavior.
+Missing-publication and premature-publication production mutations must compile,
+fail the named source-visible assertions, restore exact bytes and pass.

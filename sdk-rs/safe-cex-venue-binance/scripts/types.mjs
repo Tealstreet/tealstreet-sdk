@@ -8,8 +8,9 @@ import { spawnSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
 const root = fileURLToPath(new URL('../../../', import.meta.url));
+const inverse = process.argv.includes('--inverse');
 const crate = fileURLToPath(new URL('../', import.meta.url));
-const variants = ['binance', 'binancepm', 'binancespot'];
+const variants = inverse ? ['binanceinverse'] : ['binance', 'binancepm', 'binancespot'];
 const parse = (file) => ts.createSourceFile(file, fs.readFileSync(root + file, 'utf8'), ts.ScriptTarget.Latest, true);
 const shared = parse('packages/safe-cex/src/types.ts');
 const enums = Object.fromEntries(shared.statements.filter(ts.isEnumDeclaration).map(node => [node.name.text, node]));
@@ -108,7 +109,9 @@ for (const variant of variants) {
       const name = pascal(sourceName);
       const node = statement.type;
       rows[sourceName] = [name];
-      if (ts.isArrayTypeNode(node)) {
+      if (ts.isArrayTypeNode(node) && ts.isTypeReferenceNode(node.elementType)) {
+        output += `pub type ${name} = Vec<${pascal(node.elementType.typeName.getText(ast))}>;\n`;
+      } else if (ts.isArrayTypeNode(node)) {
         output += record(name + 'Row', node.elementType);
         output += `pub type ${name} = Vec<${name}Row>;\n`;
         rows[sourceName].push(name + 'Row');
@@ -147,11 +150,14 @@ for (const variant of variants) {
   });
   assert.equal(formatted.status, 0, formatted.stderr);
   const file = `${crate}src/generated/${variant}.rs`;
-  if (process.argv.includes('--generate')) fs.writeFileSync(file, formatted.stdout);
+  if (process.argv.includes('--generate')) {
+    fs.mkdirSync(`${crate}src/generated`, { recursive: true });
+    fs.writeFileSync(file, formatted.stdout);
+  }
   else if (!process.argv.includes('--oracle') && !process.argv.includes('--schema')) assert.equal(fs.readFileSync(file, 'utf8'), formatted.stdout, `${source} generated table/type drift`);
   mappings[variant] = rows;
 }
 if (process.argv.includes('--mappings')) console.log(JSON.stringify(mappings));
 else if (process.argv.includes('--schema')) console.log(JSON.stringify(schemas));
 else if (process.argv.includes('--oracle')) console.log(JSON.stringify(snapshots));
-else console.log('Binance types: three live source modules match generated Rust.');
+else console.log(inverse ? 'Binance inverse types: live source module matches generated Rust.' : 'Binance types: three live source modules match generated Rust.');

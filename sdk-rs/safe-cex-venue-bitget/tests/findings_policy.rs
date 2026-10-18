@@ -54,9 +54,14 @@ fn inherited_order_fields_and_native_info_input_have_separate_prices() {
         for (i, key) in KEYS.into_iter().enumerate() {
             let input = json!({"orderId":"x","status":key,"orderType":"limit","side":"buy","symbol":"BTCUSD","size":"1","price":"1"});
             let result = if inverse {
-                map_inverse_order(Some(&input), "coin-futures", |_| None, || 1.0)
+                map_inverse_order(
+                    Some(&input.clone().into()),
+                    "coin-futures",
+                    |_| None,
+                    || 1.0,
+                )
             } else {
-                map_order(Some(&input), "usdt-futures", || 1.0)
+                map_order(Some(&input.clone().into()), "usdt-futures", || 1.0)
             };
             let Err(error) = result else {
                 panic!("BITGET-NATIVE-CLOSED-OUTPUT must refuse whole result");
@@ -81,9 +86,14 @@ fn inherited_order_fields_and_native_info_input_have_separate_prices() {
             "BITGET-NATIVE-NAN-INPUT Value has already excluded NaN BEFORE mapper"
         );
         let records = if inverse {
-            map_inverse_order(Some(&input), "coin-futures", |_| None, || 1.0)
+            map_inverse_order(
+                Some(&input.clone().into()),
+                "coin-futures",
+                |_| None,
+                || 1.0,
+            )
         } else {
-            map_order(Some(&input), "usdt-futures", || 1.0)
+            map_order(Some(&input.clone().into()), "usdt-futures", || 1.0)
         }
         .unwrap();
         assert_eq!(records.len(), 1, "ordinary record positive control");

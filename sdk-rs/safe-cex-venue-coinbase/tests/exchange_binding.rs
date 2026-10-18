@@ -310,7 +310,10 @@ fn edits_only_a_proven_reconciled_native_spot_order() {
         .unwrap()
         .as_object_mut()
         .unwrap()
-        .push(("product_type".encode_utf16().collect(), json!("SPOT").into()));
+        .push((
+            "product_type".encode_utf16().collect(),
+            json!("SPOT").into(),
+        ));
     let mut canonical = order();
     let info = canonical.info.as_mut().unwrap();
     info.as_object_mut().unwrap().extend(

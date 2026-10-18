@@ -2,11 +2,11 @@
 //! runtime owns the rest, independently of whoever later awaits the handle.
 use super::{
     jobs::{self, Jobs},
-    value::{Js, Thrown},
+    value::{Js, Thrown, arg},
 };
 use crate::runtime::ExchangeRuntime;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -35,6 +35,14 @@ impl Promise {
     pub fn settled(runtime: &Rc<dyn ExchangeRuntime>, result: Result<Js, Thrown>) -> Self {
         let promise = Self::pending(runtime);
         promise.settle(result);
+        promise
+    }
+    pub(super) fn resolve(runtime: &Rc<dyn ExchangeRuntime>, value: Js) -> Self {
+        if let Js::Promise(promise) = value {
+            return promise;
+        }
+        let promise = Self::pending(runtime);
+        resolve_promise(promise.clone(), value);
         promise
     }
     pub fn pending(runtime: &Rc<dyn ExchangeRuntime>) -> Self {
@@ -177,6 +185,72 @@ impl Drop for PromiseWait {
         };
         drop(removed);
     }
+}
+
+// CreateResolvingFunctions shares one lock for resolve/reject, including while
+// resolving to a still-pending promise or thenable.
+pub(super) fn resolving_functions(promise: Promise) -> (Js, Js, Rc<Cell<bool>>) {
+    let called = Rc::new(Cell::new(false));
+    let resolved = called.clone();
+    let rejected = called.clone();
+    let target = promise.clone();
+    let resolve = Js::function("", move |_, args| {
+        if !resolved.replace(true) {
+            resolve_promise(target.clone(), arg(&args, 0));
+        }
+        Ok(Js::Undefined)
+    });
+    let reject = Js::function("", move |_, args| {
+        if !rejected.replace(true) {
+            promise.settle(Err(Thrown::new(arg(&args, 0))));
+        }
+        Ok(Js::Undefined)
+    });
+    (resolve, reject, called)
+}
+fn resolve_promise(promise: Promise, value: Js) {
+    if let Js::Promise(other) = &value {
+        if promise.ptr_eq(other) {
+            promise.settle(Err(Thrown::type_error(
+                "Chaining cycle detected for promise",
+            )));
+            return;
+        }
+    }
+    if !matches!(
+        &value,
+        Js::Array(_)
+            | Js::Object(_)
+            | Js::Function(_)
+            | Js::Promise(_)
+            | Js::Map(_)
+            | Js::Set(_)
+            | Js::Builtin(_)
+    ) {
+        promise.settle(Ok(value));
+        return;
+    }
+    // Get then synchronously, but invoke it as a promise job after this stack.
+    let then = match value.get("then") {
+        Ok(then) if then.is_callable() => then,
+        Ok(_) => {
+            promise.settle(Ok(value));
+            return;
+        }
+        Err(error) => {
+            promise.settle(Err(error));
+            return;
+        }
+    };
+    let runtime = promise.runtime();
+    super::jobs::for_runtime(&runtime).spawn(Box::pin(async move {
+        let (resolve, reject, called) = resolving_functions(promise.clone());
+        if let Err(error) = then.call(value, vec![resolve, reject]) {
+            if !called.replace(true) {
+                promise.settle(Err(error));
+            }
+        }
+    }));
 }
 
 async fn adopt(body: JsFuture<'static>) -> Result<Js, Thrown> {

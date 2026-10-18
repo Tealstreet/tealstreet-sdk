@@ -39,7 +39,7 @@ pub(crate) fn map_market(
                     }
                 )
             })?;
-        js_retained_parse_float(object.get(key)).map_err(|error| error.to_string())
+        js_retained_parse_float(object.get(key)).map_err(|error| error.message.to_owned())
     };
     let mut fee = None;
     if !spot {
@@ -98,15 +98,19 @@ pub(crate) fn map_market(
     let is_expiring = if spot {
         false
     } else {
-        let value =
-            js_retained_parse_float(raw.get("deliveryTime")).map_err(|error| error.to_string())?;
+        let value = js_retained_parse_float(raw.get("deliveryTime"))
+            .map_err(|error| error.message.to_owned())?;
         value != 0. && !value.is_nan()
     };
     let taker_fee = fee
-        .map(|f| js_retained_parse_float(f.get("takerFeeRate")).map_err(|error| error.to_string()))
+        .map(|f| {
+            js_retained_parse_float(f.get("takerFeeRate")).map_err(|error| error.message.to_owned())
+        })
         .transpose()?;
     let maker_fee = fee
-        .map(|f| js_retained_parse_float(f.get("makerFeeRate")).map_err(|error| error.to_string()))
+        .map(|f| {
+            js_retained_parse_float(f.get("makerFeeRate")).map_err(|error| error.message.to_owned())
+        })
         .transpose()?;
     let Some(id) = raw
         .get("symbol")

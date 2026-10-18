@@ -402,3 +402,9 @@ Unknown UTF-16 plan metadata follows the source typed-order fallback after Strin
 coercion. Only exact table keys select TableHit; an unpaired unit cannot match an
 ASCII key. The constructed exchange control checks eight source cases across
 Classic, USDC and inverse variants without projecting Order.info through JSON.
+
+Both concrete order mappers capture the original row as retained input before
+reading aliases. Unread UTF-16 units, nonfinite numbers, negative zero and own
+undefined survive in the owned info snapshot; the constructed mapper witness
+covers Classic, USDC and inverse. The live order corpus observes those native
+values and property presence before its legacy JSON comparison.

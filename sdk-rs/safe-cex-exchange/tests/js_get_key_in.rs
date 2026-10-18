@@ -40,7 +40,7 @@ fn input(label: &str) -> Js {
             let Js::Object(data) = &obj else {
                 unreachable!()
             };
-            *data.proto.borrow_mut() = Some(Js::Null);
+            *data.proto.borrow_mut() = None;
             obj
         }
         "inherited" | "shadow" => {
