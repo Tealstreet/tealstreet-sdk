@@ -4910,3 +4910,98 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
         owner.dispose().unwrap();
     }
 }
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_venue_binance::ticker_capture::{Capture, Dictionary, TickerReference};
+
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let capture = Capture::new(owner.base.store.clone());
+        let initial: Dictionary = capture.dictionary();
+        let row: TickerReference = initial.borrow().get("BTCUSDT").unwrap().clone();
+        assert!(
+            Rc::ptr_eq(&initial, &capture.dictionary()),
+            "same dictionary generation {venue:?}"
+        );
+        assert_eq!(row.borrow().last.to_bits(), 100.0_f64.to_bits());
+
+        owner
+            .public
+            .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"-0","a":"123.25"}"#)
+            .unwrap();
+        let patched: Dictionary = capture.dictionary();
+        assert!(
+            Rc::ptr_eq(&initial, &patched),
+            "patch retains Dictionary identity {venue:?}"
+        );
+        assert!(
+            Rc::ptr_eq(&row, patched.borrow().get("BTCUSDT").unwrap()),
+            "patch retains TickerReference identity {venue:?}"
+        );
+        assert_eq!(
+            row.borrow().bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "retained row sees native signed zero {venue:?}"
+        );
+        assert_eq!(row.borrow().ask.to_bits(), 123.25_f64.to_bits());
+        assert_eq!(
+            owner.base.store.tickers()[0].bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "real Store receives native frame {venue:?}"
+        );
+
+        let mut replacement = owner.base.store.tickers()[0].clone();
+        replacement.id = "fresh-BTCUSDT".into();
+        replacement.last = 77.5;
+        Store::update(
+            owner.base.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(vec![replacement]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let replaced: Dictionary = capture.dictionary();
+        let fresh: TickerReference = replaced.borrow().get("BTCUSDT").unwrap().clone();
+        assert!(
+            !Rc::ptr_eq(&initial, &replaced),
+            "replacement creates Dictionary generation {venue:?}"
+        );
+        assert!(
+            !Rc::ptr_eq(&row, &fresh),
+            "replacement creates TickerReference generation {venue:?}"
+        );
+        assert_eq!(fresh.borrow().id, "fresh-BTCUSDT");
+        assert_eq!(fresh.borrow().last.to_bits(), 77.5_f64.to_bits());
+        assert_eq!(
+            row.borrow().last.to_bits(),
+            100.0_f64.to_bits(),
+            "captured prior generation retains original fields {venue:?}"
+        );
+
+        owner
+            .public
+            .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"6.25","a":"7.5"}"#)
+            .unwrap();
+        assert!(Rc::ptr_eq(&replaced, &capture.dictionary()));
+        assert_eq!(
+            fresh.borrow().bid.to_bits(),
+            6.25_f64.to_bits(),
+            "native class patches replacement id {venue:?}"
+        );
+        assert_eq!(
+            owner.base.store.tickers()[0].bid.to_bits(),
+            6.25_f64.to_bits()
+        );
+        assert_eq!(
+            row.borrow().bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "prior row stays detached after replacement {venue:?}"
+        );
+        owner.base.dispose().unwrap();
+    }
+}
