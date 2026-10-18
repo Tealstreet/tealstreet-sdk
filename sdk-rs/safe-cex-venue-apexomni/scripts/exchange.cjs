@@ -69,4 +69,16 @@ for(const name of names){for(let variant=0;variant<3;variant++){
  }catch(error){throw new Error(`${name}/${variant} source failed: ${error.stack}`);}
 }}
 assert.equal(rows.length,54,'exchange case floor');console.log(JSON.stringify({rows,fixtures:{market,ticker,position,balance,contract,account,order,rawPosition},header:{node:process.version,nodeArch:process.arch,rustArch:process.env.SAFE_CEX_RUST_ARCH}}));}
-main().catch(error=>{console.error(error);process.exitCode=1;});
+async function retainedInfo() {
+ const opaque={text:String.fromCharCode(0xd800),nan:NaN,infinity:Infinity,negativeZero:-0,ownUndefined:undefined};
+ const assertOpaque=value=>{assert.equal(value.text.charCodeAt(0),0xd800);assert.equal(value.text.length,1);assert.ok(Number.isNaN(value.nan));assert.equal(value.infinity,Infinity);assert.ok(Object.is(value.negativeZero,-0));assert.ok(Object.hasOwn(value,'ownUndefined'));assert.equal(value.ownUndefined,undefined);};
+ const s=store(),exchange=new Class('apexomni',{key:'key',secret:'secret',passphrase:'pass'},s);
+ responses['/v3/open-orders']={code:0,data:[{...order,openSlParams:{triggerPrice:'0'},openTpParam:{triggerPrice:'0'},opaque},{...order,openSlParams:{triggerPrice:'0'},openTpParam:{triggerPrice:'0'}}]};
+ const orders=await exchange.fetchOrders();assert.equal(orders.length,2);assertOpaque(orders[0].info.opaque);assert.ok(!Object.hasOwn(orders[1].info,'opaque'));
+ responses['/v3/account-balance']={code:0,data:{totalEquityValue:'100',maintenanceMargin:'2',initialMargin:'10',opaque}};
+ assertOpaque((await exchange.fetchRawBalance()).info.opaque);
+ responses['/v3/symbols']={code:0,data:{contractConfig:{perpetualContract:[{...contract,opaque},contract],opaque}}};
+ const markets=await exchange.fetchMarkets();assert.equal(markets.length,2);assertOpaque(markets[0].info.opaque);assertOpaque(s.zkLinkConfig.contractConfig.opaque);assertOpaque(s.zkLinkConfig.contractConfig.perpetualContract[0].opaque);
+ console.log('actual Apex TS retained order/balance/market/config PASS');
+}
+(process.argv.includes('--retained-info')?retainedInfo():main()).catch(error=>{console.error(error);process.exitCode=1;});
