@@ -45,7 +45,7 @@ rg -n 'dials|dial_options|urls\.borrow|sockets\.borrow|connections|trace' sdk-rs
 | OKX | Skipped-heartbeat log failure must not reconnect. Zero dial remains valid. |
 | WEEX, Hyperliquid | Constructor-only cases intentionally create no connection. External startup guards remain. |
 | Orderly, AsterDEX | Failed authentication/admission prevents socket startup. Zero dial remains valid. |
-| Coinbase, Crypto.com, Polymarket, Phemex | Constructor/inert capability and no-extra-recovery-chain guards remain valid. |
+| Coinbase, Crypto.com, Polymarket, Phemex | Inert startup/capability, failed Store notification, disposal during held HTTP, and no-extra-recovery-chain guards remain valid. |
 | Kraken | Unsupported Futures candle streaming creates no physical socket. Empty-cache/admission checks remain valid. |
 | Lighter | Recovery no-extra-dial and disposed/guarded fixture traces remain valid. |
 | WOO | Disposed open, disposed timer and inert-startup checks remain valid. |
@@ -67,6 +67,12 @@ The shared Promise driver can serve unrelated work: cancellation must drop the
 owned operation immediately, while the driver itself is reaped on a later poll.
 The fixture no longer mistakes the driver's temporary registration for live I/O.
 
-Independent production controls and final gate results are recorded below once
-executed. No production source, source mapping, alias guard or identity policy is
+Independent production controls in Bybit's `scripts/eager-dial-controls.py`
+compiled and failed the named witness after (1) changing the actual core dial
+boundary to lazy scheduling and (2) leaking the cancelled owned future. Exact
+byte restoration passed the same test after each fault. The pending-I/O fault
+fails with owner count 2 instead of 1 at `BYBIT-DIAL-CANCEL`; the lazy fault fails
+at `BYBIT-EAGER-DIAL`. Logs: `target/bybit-eager-dial-controls/`.
+
+Final gate results are recorded below once executed. No production source, source mapping, alias guard or identity policy is
 changed by this sweep.
