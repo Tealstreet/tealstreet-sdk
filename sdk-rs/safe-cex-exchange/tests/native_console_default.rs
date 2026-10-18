@@ -214,16 +214,16 @@ fn native_error_diagnostics_read_data_without_executing_user_hooks() {
             )
             .unwrap();
         runtime.console_values("error", std::slice::from_ref(&error));
-        error.delete("message").unwrap();
+        error.delete(&utf16("message")).unwrap();
         error.set("message", Js::Number(7.0)).unwrap();
         runtime.console_values("error", std::slice::from_ref(&error));
         error.set("name", Js::str("")).unwrap();
         error.set("message", Js::str("only message")).unwrap();
         runtime.console_values("error", std::slice::from_ref(&error));
-        error.delete("name").unwrap();
-        error.delete("message").unwrap();
-        parent.delete("name").unwrap();
-        parent.delete("message").unwrap();
+        error.delete(&utf16("name")).unwrap();
+        error.delete(&utf16("message")).unwrap();
+        parent.delete(&utf16("name")).unwrap();
+        parent.delete(&utf16("message")).unwrap();
         *parent_data.proto.borrow_mut() = Some(error.clone());
         runtime.console_values("error", std::slice::from_ref(&error));
         *parent_data.proto.borrow_mut() = None;
