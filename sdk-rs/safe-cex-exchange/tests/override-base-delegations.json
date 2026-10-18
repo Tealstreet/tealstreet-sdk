@@ -639,8 +639,8 @@
           "class": "BaseExchange",
           "definition_file": "packages/safe-cex/src/exchanges/base.ts",
           "definition_class": "BaseExchange",
-          "start_line": 1343,
-          "end_line": 1398,
+          "start_line": 1345,
+          "end_line": 1400,
           "own": true,
           "super_call": false
         }

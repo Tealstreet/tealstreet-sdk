@@ -408,6 +408,30 @@ fn adversarial_dropped_nuke_orders_does_not_permanently_latch_nuking() {
 }
 
 #[test]
+fn adversarial_dropped_nuke_cancel_releases_shared_guard() {
+    let venue = PendingCancelVenue {
+        inner: venue(),
+        calls: Cell::new(0),
+        ready: Cell::new(false),
+    };
+    let mut request = Box::pin(venue.base().nuke(&venue, 3));
+    assert!(
+        request
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    drop(request);
+    venue.ready.set(true);
+    ready(venue.base().nuke(&venue, 3)).unwrap();
+    assert_eq!(
+        venue.calls.get(),
+        2,
+        "dropping the shared nuke while cancellation is pending must release NukeGuard"
+    );
+}
+
+#[test]
 fn native_bulk_registration_receives_target_typed_batch_after_whole_preflight() {
     let mut venue = venue();
     assert!(
