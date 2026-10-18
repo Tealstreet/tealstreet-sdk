@@ -600,6 +600,13 @@ Futures/PM overlay witness checks signed bracket requests, Store publication and
 unchanged market fields. `scripts/account-leverage-alias-contracts.mjs` measures
 their actual native traits with the maintained authenticated compiler context.
 
+The two `margin_mode` free functions are typed asynchronous commands, with exact
+compiler API classifications rather than decoder-admission claims. Their separate
+production-function witnesses in `margin_mode` and `margin_dispose` compare 64
+maintained source cases and poll both futures margin modes across a pending POST.
+Run the canonical accepted-set `--measure --module=margin_mode` for classification
+receipts; those receipts do not execute the commands or cover arbitrary JS inputs.
+
 ### Position snapshot callback alias receipts
 
 `position_snapshots::{Emit,Log}` are executable capabilities captured from the
@@ -669,6 +676,19 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+
+The private REST `SnapshotCall` capture preserves each source console argument
+as a native value and forwards the explicit log severity. Caught errors use the
+canonical `Thrown` materialization, so their name/message reach the console sink
+as an Error rather than a message string. `snapshot_call_binding` in the native
+`private_classes` target executes actual signed order requests and observes the
+captured severity, original data bits/presence and caught Error before projection.
+`scripts/snapshot-call-controls.py` independently corrupts those three production
+forwarding paths, requires compiled named assertion failures and exact-restoration
+passes. `scripts/snapshot-call-alias-contracts.mjs` authenticates fresh compiler
+metadata and checks only the selected alias classification; it does not replace
+the native callback execution witnesses or classify the continuation aliases.
 
 The public ticker handlers consume canonical native EventArray values from the
 constructed public classes. The old PublicEvent/PublicEvents JSON adapter and its

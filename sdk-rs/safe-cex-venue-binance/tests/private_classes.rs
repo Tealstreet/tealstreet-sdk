@@ -48,6 +48,7 @@ struct Runtime {
     sleep_clock: Rc<Cell<f64>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
+    console_frames: RefCell<Vec<(String, Vec<EventValue>)>>,
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     dial_socket: RefCell<Option<Rc<dyn WsSocket>>>,
 }
@@ -88,7 +89,11 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(f);
         Box::new(Task)
     }
-    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
+    fn console_values(&self, level: &str, values: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_frames
+            .borrow_mut()
+            .push((level.into(), values.to_vec()));
+    }
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -5364,6 +5369,10 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
 #[cfg(feature = "native")]
 #[path = "support/order_throttle_binding.rs"]
 mod order_throttle_binding;
+
+#[cfg(feature = "native")]
+#[path = "support/snapshot_call_binding.rs"]
+mod snapshot_call_binding;
 
 #[test]
 #[cfg(feature = "native")]
