@@ -99,6 +99,12 @@ fn actual_public_factory_bypasses_private_provider_routing() {
         store,
         exchange,
     };
+    let before_requests = safe_cex_exchange::http::HTTP_STATS
+        .lock()
+        .unwrap()
+        .get_stats(h.runtime.now.get())["total"]
+        .as_u64()
+        .unwrap();
     let pending = h
         .exchange
         .receiver()
@@ -152,6 +158,17 @@ fn actual_public_factory_bypasses_private_provider_routing() {
         "main and unlimited source clients route; publicNoProxy never invokes rest routing"
     );
     assert_eq!(h.runtime.transport().name(), "recording-routing-provider");
+    let after_requests = safe_cex_exchange::http::HTTP_STATS
+        .lock()
+        .unwrap()
+        .get_stats(h.runtime.now.get())["total"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(
+        after_requests - before_requests,
+        2,
+        "source records both the public NoProxy request and the private routed request"
+    );
     h.exchange
         .receiver()
         .call_method("dispose", vec![])
