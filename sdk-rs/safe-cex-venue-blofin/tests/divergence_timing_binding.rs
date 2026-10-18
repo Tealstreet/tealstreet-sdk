@@ -207,7 +207,7 @@ fn cached_mode_race(kind: &str) {
         String::from_utf8_lossy(&output.stderr)
     );
     let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(profiles.len(), 3, "independent source case floor");
+    assert_eq!(profiles.len(), 4, "independent source case floor");
     let source = profiles.iter().find(|row| row["kind"] == kind).unwrap();
     let (venue, runtime, store, wire) = support::fixture();
     let market = json!({"id":"BTC-USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":1,"price":0.1},"limits":{"amount":{"min":1,"max":100},"leverage":{"min":1,"max":100}},"contractSize":0.001,"info":{"lotSize":"1","minSize":"1","contractValue":0.001}});
@@ -252,18 +252,39 @@ fn cached_mode_race(kind: &str) {
             &[json!(false)],
         )
         .unwrap();
-    let kind_type = match kind {
-        "normal" => "limit",
-        "algo" => "stop_market",
-        "trigger" => "conditional",
-        _ => unreachable!(),
+    let make_opts = |kind: &str| -> PlaceOrderOpts {
+        let kind_type = match kind {
+            "normal" => "limit",
+            "algo" => "stop_market",
+            "trigger" => "conditional",
+            _ => unreachable!(),
+        };
+        let mut opts =
+            json!({"symbol":"BTCUSDT","type":kind_type,"side":"buy","amount":2,"price":100});
+        if kind == "trigger" {
+            opts["triggerPrice"] = json!(105);
+        }
+        serde_json::from_value(opts).unwrap()
     };
-    let mut opts = json!({"symbol":"BTCUSDT","type":kind_type,"side":"buy","amount":2,"price":100});
-    if kind == "trigger" {
-        opts["triggerPrice"] = json!(105);
-    }
-    let opts: PlaceOrderOpts = serde_json::from_value(opts).unwrap();
-    let pending = venue.base().place_order(venue.as_ref(), opts);
+    let pending = async {
+        if kind == "batch" {
+            venue
+                .base()
+                .place_orders(
+                    venue.as_ref(),
+                    ["normal", "algo", "trigger"]
+                        .iter()
+                        .map(|kind| make_opts(kind))
+                        .collect(),
+                )
+                .await
+        } else {
+            venue
+                .base()
+                .place_order(venue.as_ref(), make_opts(kind))
+                .await
+        }
+    };
     let mut pending = std::pin::pin!(pending);
     assert!(
         pending
@@ -283,9 +304,21 @@ fn cached_mode_race(kind: &str) {
             &[json!(true)],
         )
         .unwrap();
+    if kind == "batch" {
+        venue
+            .after_method_called_in_worker(
+                &Value::Null,
+                CallableMethodsInWorker::ChangeMarginType,
+                &[json!(true)],
+            )
+            .unwrap();
+    }
     let ids = drive(&runtime, pending).unwrap();
     assert_eq!(json!(ids), source["ids"]);
-    assert_eq!(wire.requests.borrow().len(), 1);
+    assert_eq!(
+        wire.requests.borrow().len(),
+        if kind == "batch" { 3 } else { 1 }
+    );
     let requests: Vec<Value> = wire.requests.borrow().iter().map(|r| {
         let body = r.body.as_ref().unwrap().untransformed().unwrap().clone().into_value().unwrap();
         let row = body.as_array().map(|a| &a[0]).unwrap_or(&body);
@@ -309,4 +342,9 @@ fn cached_position_side_in_algo_formatter_defers_the_margin_observation() {
 #[test]
 fn cached_margin_read_in_trigger_formatter_defers_the_position_mode_observation() {
     cached_mode_race("trigger");
+}
+
+#[test]
+fn cached_pair_in_batch_placement_defers_all_formatter_observations() {
+    cached_mode_race("batch");
 }

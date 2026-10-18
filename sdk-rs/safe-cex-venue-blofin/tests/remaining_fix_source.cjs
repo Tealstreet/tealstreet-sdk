@@ -5,7 +5,7 @@ const root = path.resolve(__dirname,'../../..');
 const {BlofinExchange} = require(path.join(root,'packages/safe-cex/src/exchanges/blofin/blofin.exchange.ts'));
 const {DefaultStore} = require(path.join(root,'packages/safe-cex/src/store/store.base.ts'));
 const market = {id:'BTC-USDT',symbol:'BTCUSDT',base:'BTC',quote:'USDT',active:true,precision:{amount:1,price:0.1},limits:{amount:{min:1,max:100},leverage:{min:1,max:100}},contractSize:0.001,info:{lotSize:'1',minSize:'1',contractValue:0.001}};
-const profiles = ['normal','algo','trigger'];
+const profiles = ['normal','algo','trigger','batch'];
 (async()=>{
  const results = [];
  for(const kind of profiles){
@@ -26,15 +26,17 @@ const profiles = ['normal','algo','trigger'];
   try {
    venue.afterMethodCalledInWorker(null,'changePositionMode',false);
    venue.afterMethodCalledInWorker(null,'changeMarginType',false);
-   const opts={symbol:'BTCUSDT',type:kind==='normal'?'limit':kind==='algo'?'stop_market':'conditional',side:'buy',amount:2,price:100, ...(kind==='trigger'?{triggerPrice:105}:{})};
-   const pending = venue.placeOrder(opts);
+   const makeOpts = kind=>({symbol:'BTCUSDT',type:kind==='normal'?'limit':kind==='algo'?'stop_market':'conditional',side:'buy',amount:2,price:100, ...(kind==='trigger'?{triggerPrice:105}:{})});
+   const pending = kind==='batch' ? venue.placeOrders(['normal','algo','trigger'].map(makeOpts)) : venue.placeOrder(makeOpts(kind));
    const prefix = requests.length;
    // A legitimate worker acknowledgement arrives before the next Promise reaction.
    venue.afterMethodCalledInWorker(null,kind==='algo'?'changeMarginType':'changePositionMode',true);
+   if(kind==='batch') venue.afterMethodCalledInWorker(null,'changeMarginType',true);
    const ids = await pending;
-   assert.equal(prefix,0); assert.equal(requests.length,1);
+   assert.equal(prefix,0); assert.equal(requests.length,kind==='batch'?3:1);
    if(kind==='algo') assert.equal(requests[0].marginMode,'isolated');
    else assert.equal(requests[0].positionSide,'long');
+   if(kind==='batch') assert.ok(requests.every(row=>row.marginMode==='isolated'));
    results.push({kind,prefix,ids,requests});
   } finally {venue.dispose();}
  }

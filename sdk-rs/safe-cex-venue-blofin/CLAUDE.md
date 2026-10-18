@@ -389,7 +389,7 @@ Its master regression compiled and failed with zero prefix logs versus three.
 ## Order-family continuation ownership
 
 `fetchOrdersWithRetry` creates three independently owned family operations using
-`BlofinExchangeHost::start_order_read`. The concrete NativeHost delegates to the
+`BlofinExchangeHost::start_async`. The concrete NativeHost delegates to the
 shared typed `start_eager` boundary, retaining `Result<Vec<Order>, ServiceError>`
 as a native value. Its Promise.all-style join owns only the waiters: rejecting
 one family does not cancel successful siblings or their subsequent pages.
