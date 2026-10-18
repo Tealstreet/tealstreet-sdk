@@ -267,20 +267,21 @@ impl ReadHost for Rt {
         }
         Ok(h(value.get_key(key)?))
     }
-    // ts: utils/get-key `v(obj, key)` — own key, then snake_case, then camelCase.
+    // ts: utils/get-key `v(obj, key)` — inherited keys count, in spelling order.
     fn keyed(&self, value: &Js, key: &str) -> ReadResult<Self, Handle<Self>> {
-        if value.is_object() {
-            for name in [
-                key.to_owned(),
-                safe_cex_num::lodash_snake_case(key),
-                safe_cex_num::lodash_camel_case(key),
-            ] {
-                if value.has_own(&name) {
-                    return Ok(h(value.get(&name)?));
-                }
+        if value.is_nullish() {
+            return Ok(h(Js::Undefined));
+        }
+        for name in [
+            key.to_owned(),
+            safe_cex_num::lodash_snake_case(key),
+            safe_cex_num::lodash_camel_case(key),
+        ] {
+            if safe_cex_exchange::js_runtime::library::in_operator(value, &name)? {
+                return Ok(h(value.get(&name)?));
             }
         }
-        self.field(value, &units(key), true)
+        Ok(h(Js::Undefined))
     }
     fn truthy(&self, value: &Js) -> bool {
         value.truthy()
