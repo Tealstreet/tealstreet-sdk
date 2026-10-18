@@ -73,3 +73,11 @@ This migration does not close the separate manifest full-block findings (for
 example, comparing different unpaired asset/contract strings before a classifier).
 It measures the twelve existing cases and the named five failures only; no
 manifest status or audit finding is relabeled as parity by this repair.
+
+Reachability ruling for the old standalone fill refusal: ACCEPT as unobservable
+through composed/native, registry, FFI/napi and Wasm venue paths after #1146. A
+whole-sdk production Rust search for `map_kraken_fill`/`map_kraken_fills` finds
+only the two declarations and their internal batch-to-row call in `fills.rs`.
+Actual venues call the distinct `ReadHost::map_fills`, witnessed above. This
+ruling applies to that old refusal assertion only, not to the public standalone
+Rust API's declared String projection or any open comparison finding.
