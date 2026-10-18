@@ -362,7 +362,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         .cloned();
     let body = placed
         .and_then(|r| r.body)
-        .map(|b| b.untransformed().unwrap().clone());
+        .map(|b| b.untransformed().unwrap().clone().into_value().unwrap());
     assert_eq!(
         body.as_ref().map(|b| &b[0]["instId"]),
         Some(&json!("BTC-USDT"))
@@ -511,7 +511,15 @@ fn amendment_omits_undefined_type_and_side_on_the_signed_wire() {
     assert_eq!(drive(&rt, venue.update_order(opts)).unwrap(), ["n1"]);
     let requests = wire.requests.borrow();
     let placed = requests.iter().find(|r| r.url == BATCH).unwrap();
-    let body = placed.body.as_ref().unwrap().untransformed().unwrap();
+    let body = placed
+        .body
+        .as_ref()
+        .unwrap()
+        .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
+        .unwrap();
     let row = body[0].as_object().unwrap();
     assert!(!row.contains_key("side") && !row.contains_key("orderType"));
     drop(requests);

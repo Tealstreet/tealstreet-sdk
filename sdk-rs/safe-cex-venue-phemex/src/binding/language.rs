@@ -163,7 +163,14 @@ impl WsHost for Host {
         ))
     }
     fn error_text(&mut self, e: Thrown) -> Result<Vec<u16>, Thrown> {
-        Ok(e.value.to_js_string()?.to_vec())
+        // Source uses Error.message, and String(value) for other rejections.
+        let message = if matches!(&e.value, Js::Object(object) if matches!(object.class, "Error" | "AxiosError"))
+        {
+            e.value.get("message")?
+        } else {
+            e.value
+        };
+        Ok(message.to_js_string()?.to_vec())
     }
 }
 

@@ -286,3 +286,7 @@ MEXC native construction uses the shared secondary-key option derivation. Its
 source xhr.get reads use the secondary credentials/proxy; writes remain primary.
 Both clients retain their signing, retry and receipt behavior. The actual account
 HTTP/HMAC witness is tests/native_account_mexc_secondary.rs.
+
+Native metadata updates share CallMethodHandler's symbol_metadata_throttler
+constructor, acknowledge without awaiting venue work, and clear keyed trailing
+calls on disposal/deactivation. Keep watch references to that manager weak.

@@ -1,7 +1,12 @@
 //! Stateful account reads/configuration from AsterDEXExchange. Configured REST
 //! instances are supplied by the host; API construction and exchange startup
 //! remain separate rows. Futures must be polled by the caller.
-use crate::{exchange_helpers as helpers, types::*};
+use crate::{
+    exchange_helpers as helpers,
+    types::{
+        AsterDEXAPIVersion, AsterDEXMarketResponse, AsterDEXOrderResponse, AsterDEXTickerResponse,
+    },
+};
 use safe_cex_exchange::{exchange::BaseExchange, runtime::ExchangeError};
 use safe_cex_num::{js_number_string, js_string, js_truthy, parse_float};
 use safe_cex_store::StoreUpdate;
@@ -57,24 +62,35 @@ impl AccountFetch {
         url: String,
         body: Option<Value>,
     ) -> Result<Value, ExchangeError> {
-        let response = adapter.execute(RestRequest { method: method.into(), url, body: body.map(RestBody::Untransformed), ..Default::default() }).await.map_err(|failure| {
-            // Preserve the available shared REST failure metadata, rather than
-            // inventing a JS Error object identity at the native boundary.
-            let mut error = ExchangeError::new(failure.message);
-            error.is_axios_error = true;
-            error.code = failure.code.map(Value::String);
-            error.context = failure.context.map(|context| *context);
-            error.method = Some(failure.request.method);
-            error.url = Some(failure.request.url);
-            if let Some(response) = failure.response {
-                error.response = Some(json!({"status": response.status, "data": response.body.into_data(), "headers": response.headers}));
-            }
-            error
-        })?;
-        Ok(response
+        let response = adapter
+            .execute(RestRequest {
+                method: method.into(),
+                url,
+                body: body
+                    .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                    .transpose()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?
+                    .map(RestBody::Untransformed),
+                ..Default::default()
+            })
+            .await
+            .map_err(|failure| {
+                // Preserve the available shared REST failure metadata, rather than
+                // inventing a JS Error object identity at the native boundary.
+                let method = failure.request.method.clone();
+                let url = failure.request.url.clone();
+                let mut error: ExchangeError = failure.into();
+                error.is_axios_error = true;
+                error.method = Some(method);
+                error.url = Some(url);
+                error
+            })?;
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     fn finish<T>(
         &self,

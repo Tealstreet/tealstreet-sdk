@@ -93,6 +93,10 @@ pub struct PreparedWebSocket {
 pub trait WsProtocol {
     fn dispose(&self) {}
 
+    fn reconnect(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.reconnect_base()
+    }
+
     fn recovers_after_offline(&self) -> bool {
         true
     }
@@ -2140,6 +2144,9 @@ impl BaseWebSocket {
         }
     }
     pub fn reconnect(self: &Rc<Self>) -> Result<(), ExchangeError> {
+        self.protocol.reconnect(self)
+    }
+    pub(crate) fn reconnect_base(self: &Rc<Self>) -> Result<(), ExchangeError> {
         self.parent.log(
             "Explicit reconnect call from ping pong miss or online status change",
             LogSeverity::Info,
@@ -4349,7 +4356,7 @@ mod tests {
             let (socket, parent, runtime, _) = fixture();
             let mut expected = ExchangeError::new("resync log listener failed");
             expected.name = "TypeError".into();
-            expected.code = Some(json!("E_LISTENER"));
+            expected.code = Some(crate::js_runtime::value::Js::str("E_LISTENER"));
             *parent.log_error.borrow_mut() = Some(expected.clone());
             parent.snapshot_failure.set(true);
             parent.snapshot_gate.set(false);

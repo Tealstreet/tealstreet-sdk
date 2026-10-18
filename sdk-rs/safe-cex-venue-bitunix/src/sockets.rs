@@ -121,7 +121,10 @@ impl WsParent for Parent {
         self.live()?.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.base.emit(event, Value::String(message.into()))
+        self.live()?.base.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.base.sync_socket_health_to_store()
@@ -772,12 +775,11 @@ impl Socket {
         *self.markets_listener.borrow_mut() = Some(id);
         Ok(())
     }
-    fn on_markets_changed(&self, payload: &Value) -> Result<(), ExchangeError> {
-        let added = payload
-            .get("added")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+    fn on_markets_changed(
+        &self,
+        payload: &safe_cex_exchange::js_runtime::value::Js,
+    ) -> Result<(), ExchangeError> {
+        let added = payload.get("added")?.array_values().unwrap_or_default();
         let mut tracked = vec![];
         crate::websocket_public::on_markets_changed(
             || Ok(!added.is_empty()),
@@ -785,10 +787,10 @@ impl Socket {
             || Ok(self.disposed()),
             || Ok(self.is_secondary()),
             || Ok(added.clone()),
-            |m| Ok(self.allowed(&js_string(m.get("symbol")).map_err(crate::adapter::coercion)?)),
+            |m| Ok(self.allowed(&utf8(&m.get("symbol")?.to_js_string()?)?)),
             |m, channel| {
                 Ok(Self::arg(
-                    &js_string(m.get("symbol")).map_err(crate::adapter::coercion)?,
+                    &utf8(&m.get("symbol")?.to_js_string()?)?,
                     channel,
                 ))
             },
@@ -1424,10 +1426,10 @@ impl ConnectionHost for Conn {
             .map(|(_, u)| (*u).to_owned()))
     }
     fn proxy_info(&mut self, message: Vec<u16>) -> Result<(), ExchangeError> {
-        self.socket
-            .venue()?
-            .base
-            .emit("grafana-info", Value::String(utf8(&message)?))
+        self.socket.venue()?.base.emit(
+            "grafana-info",
+            safe_cex_exchange::js_runtime::value::Js::String(message.into()),
+        )
     }
     fn create(&mut self, url: &Option<String>) -> Result<(), ExchangeError> {
         let url = url

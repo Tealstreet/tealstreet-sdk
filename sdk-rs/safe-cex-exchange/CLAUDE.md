@@ -577,6 +577,14 @@ Binance and BingX signature predicates use these conversions instead of rebuildi
 an Error from text. The native order/account witnesses cover resolved envelopes
 and HTTP rejection, and assert that coercion failures never trigger a resend.
 
+The JS REST adapter keeps string error-code UTF-16 units in the existing owned
+callback origin; `RestFailure.code` remains its explicit UTF-8 diagnostic view.
+The shared ExchangeError conversion applies response and context views to both
+retained callback causes and ordinary failures, preserving the complete original
+RestFailure for downcasts. The constructed Aster rejection regression compares
+normal and lone-surrogate codes to the maintained source; the core origin test
+also checks response phase, own undefined, signed zero, keys and request metadata.
+
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
 copied from opaque NetworkFailure. The library network-or-idempotent helper is
@@ -1226,6 +1234,17 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+The shared Promise global is a native constructor with its existing static
+methods. It runs the executor synchronously with resolve/reject functions that
+share a first-call lock, including while adopting a pending value. Resolution
+reads a thenable's `then` synchronously and queues its invocation in the same
+runtime FIFO as Promise reactions;
+self-resolution rejects and original thrown values survive. The native scheduler
+retains the queued job after observer drop. `tests/js_promise_constructor.rs`
+uses NativeRuntime/native HTTP hosting without replacement hosts and compares
+executor/thenable traces with Node; Bitrue's production binding witnesses
+connected candle-request resolution, cache reuse and timeout rejection.
+
 `__configureRateLimit` registers a request interceptor at the source registration point. Axios LIFO ordering therefore waits before the earlier signing interceptor, while later request hooks still run before the wait. Each registration owns its window. The queued nonce regression and installed Axios oracle are `tests/js_runtime.rs::rate_limit_dequeues_before_signing_and_keeps_interceptor_registration_order` and `tests/rate-limit-signing-source.cjs`.
 
 JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
@@ -1311,12 +1330,57 @@ signed native HTTP request, verifying its HMAC and expiry after a 90-second
 server correction. The core virtual-clock regression checks both getters and
 the independent raw Date clock.
 
+Shared JS promises run on a runtime-owned FIFO job queue. Their async bodies
+start synchronously through the first suspension; settled awaits and reactions
+resume in queued jobs. Returned promises receive a separate resolution job.
+Nonempty all/allSettled register each input reaction synchronously, retaining
+input order while observing the first rejection in settlement order.
+
+NativeRuntime drains that queue before and after each host future poll. All
+callbacks within a poll remain one batch; the checkpoint does not split socket
+frames that the host delivers together. Scope timers use the same queue and
+drain reactions before the next timer. Other runtime embedders still control
+their host callback boundaries; the scoped native witnesses cover this native
+checkpoint, timer cancellation and host task discard.
+
+The shared JS Promise sink reports unhandled rejections through the runtime
+exception boundary at a quiescent microtask checkpoint. Registering an await or
+reaction handles its source immediately; an unhandled propagated rejection
+belongs to the derived promise. Reading result() alone does not handle it.
+Checks retain discarded rejection values until their reporting turn, and host
+driver discard releases those pending captures without reporting them.
+
+Bitrue's constructed public socket regression drives malformed raw depth frames
+through the real socket dispatcher. Its discarded async listener promise reports
+the source TypeError exactly once; the next valid snapshot still reaches its
+callback. Native host controls cover catches before rejection, during the same
+microtask checkpoint, and after the first report, plus host-discard cleanup.
+
 String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
 units and honor their position argument after search-string coercion. Positions
 truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+The shared JS facade's async snapshot/order/position methods return rejected
+Promises for preparation errors, including errors before their first await.
+Snapshot privacy/disposal guards precede retry-count coercion. The native
+`js_async_facade` target compares return/catch behavior with the maintained TS
+async field bodies executed by Node, preserving original conversion exceptions.
+
+Emitter callbacks and `BaseExchange::emit`/`emit_args` carry shared `Js` directly.
+Scalar listeners read a missing first argument as Undefined; variadic listeners
+retain the original argument count. Producers use `from_typed` before any JSON
+serialization; already-JSON inputs opt into `from_json` explicitly. Listener
+errors stop dispatch, and once rows are removed before invoking their callback.
+
+`ExchangeError.code` is `Option<Js>`: absent differs from own Undefined, and
+thrown-error roundtrips retain native number bits and object references. Sentry
+formatter results are also `Js`, including own Undefined keys. The runtime's
+exception-report callbacks remain explicit JSON host boundaries. Worker event
+posts use the required native DATA capability; main-thread worker RPC arguments
+and successful results keep their separately scoped JSON ABI.
 
 Adapter config capture/restore reuses the canonical RetainedJsonInput and existing
 native typed codec through two thin value helpers. Shared HTTP adapters retain
@@ -1330,6 +1394,15 @@ Its native record codec preserves absent, own undefined and concrete intervals,
 including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
+
+The JS emitter facade follows the installed tiny-emitter removal algorithm:
+omitted or falsy callbacks clear the event, and callback removal filters every
+matching function or live `_` alias. Alias getters run without a listener borrow;
+a successful removal commits the original filtered snapshot, preserving source
+reentrant removal/addition behavior. Getter errors preserve their original value
+and side effects. Core host listeners share that snapshot, and an in-flight emit
+keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
+production native runtime and BaseExchange facade against installed tiny-emitter.
 
 Singular JS Store order/position/market mutators read the selector's `id` and
 compare it strictly with native string IDs. Non-string IDs and bare primitives
@@ -1488,6 +1561,13 @@ never converts through f64. The Node oracle includes finite values at +/-1e1000
 and +/-1e-1000, which overflow or underflow a Number conversion, as well as
 NaN, both infinities, signed zero, clones and arithmetic results.
 
+
+Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
+shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
+The reporter retains lazy reads, native formatted messages and worker error identity.
+Optional message/extra-data and main-thread exception-host ABIs retain their stated
+UTF-8/JSON profiles; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
+
 Worker/native delivery services live in exchange-core so constructor hosts never
 depend upward on safe-cex-webworker. `delivery_timers` owns the existing timer
 capability; `store_delivery` owns its single leading/trailing Store throttle;
@@ -1510,3 +1590,11 @@ js_number_safe_integer witness compares239 raw-bit inputs and13 argument types
 with Node, including poisonous objects. WOO’s constructed client-ID rule compares
 26 actual maintained-source cases through this shared builtin. Both regressions
 compile and fail when the static binding is absent.
+
+String uppercase/lowercase conversion maps whole valid Unicode runs and preserves
+unpaired UTF-16 units verbatim. Context-sensitive lowercase mappings keep their
+valid-run context. Trim slices the original units using the shared RegExp
+whitespace predicate. `tests/js_string_utf16.rs` compares 4,109 Node cases per
+method through the installed String builtin on NativeRuntime, including every
+surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
+All three regressions compile and fail against the original production bodies.

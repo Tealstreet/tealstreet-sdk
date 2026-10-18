@@ -4,10 +4,15 @@
 //! slices and signer/token requests reach JS through ThreadsafeFunctions.
 // napi registers exports at load time; the unit-test build has no registration.
 #![cfg_attr(test, allow(dead_code))]
-use crate::native_value::JsData;
+use crate::{
+    native_callback::{Callback, Request},
+    native_lifecycle::NativeStartup,
+    native_value::{JsData, check_status},
+};
 use napi::{
     Env, Status,
-    bindgen_prelude::{JsObjectValue, Promise, PromiseRaw, ToNapiValue, Unknown},
+    bindgen_prelude::{FromNapiValue, JsObjectValue, Object, PromiseRaw, ToNapiValue, Unknown},
+    sys,
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use safe_cex_registry::native_account::{
@@ -15,7 +20,6 @@ use safe_cex_registry::native_account::{
     native_account_watch, open_native_account,
 };
 use safe_cex_registry::native_value::NativeValue;
-use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     future::{Future, poll_fn},
@@ -26,9 +30,8 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
-type Request = ThreadsafeFunction<JsData, Promise<JsData>, JsData, Status, false>;
-type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false>;
-type Reply<T> = oneshot::Sender<Result<T, Value>>;
+pub(crate) type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false>;
+type Reply<T> = oneshot::Sender<Result<T, NativeValue>>;
 
 /// A structured options object plus the account's name for remote signing.
 #[napi_derive::napi(object)]
@@ -56,6 +59,7 @@ enum Command {
     SignerAvailable {
         id: u32,
         available: bool,
+        reply: Reply<()>,
     },
     Close {
         id: u32,
@@ -70,6 +74,7 @@ struct Open {
     _sign: Option<Rc<Request>>,
     _proxy_token: Option<Rc<Request>>,
     closed: watch::Sender<bool>,
+    startup: Rc<NativeStartup>,
 }
 
 fn commands() -> &'static mpsc::UnboundedSender<Command> {
@@ -126,28 +131,61 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                     reply,
                 } => {
                     let Some(open) = accounts.get(&id) else {
-                        let _ = reply.send(Err(host_error(&format!("no native account {id}"))));
+                        let error = if id > 0 && id < next {
+                            account_closed_error(id)
+                        } else {
+                            host_error(&format!("no native account {id}"))
+                        };
+                        let _ = reply.send(Err(error));
                         continue;
                     };
                     let account = open.account.clone();
+                    let startup = open.startup.clone();
+                    if method == "dispose" {
+                        startup.cancel(&account);
+                    }
+                    let operation: NativeAccountFuture<JsData> = if method == "start" {
+                        startup.start(account)
+                    } else {
+                        Box::pin(async move {
+                            native_account_call(account, method, args).await.map(JsData)
+                        })
+                    };
                     tokio::task::spawn_local(async move {
-                        let result = native_account_call(account, method, args).await.map(JsData);
-                        let _ = reply.send(result);
+                        let _ = reply.send(operation.await);
                     });
                 }
-                Command::SignerAvailable { id, available } => {
-                    if let Some(open) = accounts.get(&id) {
-                        safe_cex_registry::native_account::native_account_signer_available(
-                            &open.account,
-                            available,
-                        );
-                    }
+                Command::SignerAvailable {
+                    id,
+                    available,
+                    reply,
+                } => {
+                    let Some(open) = accounts.get(&id) else {
+                        let error = if id > 0 && id < next {
+                            account_closed_error(id)
+                        } else {
+                            host_error(&format!("no native account {id}"))
+                        };
+                        let _ = reply.send(Err(error));
+                        continue;
+                    };
+                    safe_cex_registry::native_account::native_account_signer_available(
+                        &open.account,
+                        available,
+                    );
+                    let _ = reply.send(Ok(()));
                 }
                 Command::Close { id, reply } => {
                     let Some(open) = accounts.remove(&id) else {
-                        let _ = reply.send(Err(host_error(&format!("no native account {id}"))));
+                        let result = if id > 0 && id < next {
+                            Ok(())
+                        } else {
+                            Err(host_error(&format!("no native account {id}")))
+                        };
+                        let _ = reply.send(result);
                         continue;
                     };
+                    open.startup.cancel(&open.account);
                     (open.unwatch)();
                     open.closed.send_replace(true);
                     // Acknowledgement means disposal finished; keep its errors visible
@@ -164,8 +202,22 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
     });
 }
 
-fn host_error(message: &str) -> Value {
-    json!({"name":"Error","message":message})
+fn account_closed_error(id: u32) -> NativeValue {
+    NativeValue::object([
+        ("name", NativeValue::string("AccountClosedError")),
+        (
+            "message",
+            NativeValue::string(&format!("native account {id} is closed")),
+        ),
+        ("code", NativeValue::string("ACCOUNT_CLOSED")),
+    ])
+}
+
+fn host_error(message: &str) -> NativeValue {
+    NativeValue::object([
+        ("name", NativeValue::string("Error")),
+        ("message", NativeValue::string(message)),
+    ])
 }
 
 /// A JS callback returning owned structured data on the host thread.
@@ -175,19 +227,18 @@ fn request(
     payload: JsData,
 ) -> NativeAccountFuture<JsData> {
     Box::pin(async move {
-        let closed_error = || json!({"name":"Error","message":"native account callback is closed"});
+        let closed_error = || host_error("native account callback is closed");
         if *closed.borrow() {
             return Err(closed_error());
         }
         let mut operation = pin!(async move {
-            let failed = |message: String| json!({"name":"Error","message":message});
             let callback = callback.upgrade().ok_or_else(closed_error)?;
             let pending = callback
                 .call_async_catch(payload)
                 .await
-                .map_err(|e| failed(e.to_string()))?;
+                .map_err(|error| host_error(&error.reason))?;
             drop(callback);
-            pending.await.map_err(|e| failed(e.to_string()))
+            pending.await
         });
         let mut closing = pin!(closed.changed());
         poll_fn(|context| {
@@ -208,7 +259,7 @@ fn open(
     on_event: Notify,
     on_store: Notify,
     hyperliquid_limiter: Rc<safe_cex_registry::native_host::HyperliquidRateLimiter>,
-) -> Result<Open, Value> {
+) -> Result<Open, NativeValue> {
     let options = init.options.0;
     let sign = sign.map(Rc::new);
     let proxy_token = proxy_token.map(Rc::new);
@@ -239,6 +290,12 @@ fn open(
             }) as NativeAccountFuture<String>
         }) as Rc<dyn Fn() -> NativeAccountFuture<String>>
     });
+    let on_event = Rc::new(on_event);
+    let startup = Rc::new(NativeStartup::new(
+        &init.exchange,
+        init.account_name.clone(),
+        on_event.clone(),
+    ));
     let account = open_native_account(NativeAccountSpec {
         hyperliquid_limiter,
         exchange: init.exchange,
@@ -247,9 +304,16 @@ fn open(
         sign: sign_source,
         proxy_token: proxy_source,
     })?;
+    let event_startup = startup.clone();
+    let watched_account = Rc::downgrade(&account);
     let unwatch = native_account_watch(
         &account,
         Rc::new(move |event: &str, data: &NativeValue| {
+            if event == "deactivate-status"
+                && let Some(account) = watched_account.upgrade()
+            {
+                event_startup.cancel(&account);
+            }
             on_event.call(
                 JsData(NativeValue::object([
                     ("event", NativeValue::string(event)),
@@ -268,30 +332,32 @@ fn open(
         _sign: sign,
         _proxy_token: proxy_token,
         closed,
+        startup,
     })
 }
 
-fn rejected(env: &Env, error: Value) -> napi::Result<napi::Error> {
-    let field = |name| {
-        error
-            .get(name)
-            .and_then(Value::as_str)
-            .ok_or_else(|| napi::Error::from_reason(format!("native error has no string {name}")))
+fn rejected(env: &Env, error: NativeValue) -> napi::Result<napi::Error> {
+    let field = |name| match error.get(name) {
+        Some(value @ NativeValue::String(_)) => Ok(JsData(value.clone())),
+        _ => Err(napi::Error::from_reason(format!(
+            "native error has no string {name}"
+        ))),
     };
-    let mut object = env.create_error(napi::Error::from_reason(field("message")?))?;
+    let message = unsafe { JsData::to_napi_value(env.raw(), field("message")?)? };
+    let mut raw = std::ptr::null_mut();
+    check_status(unsafe {
+        sys::napi_create_error(env.raw(), std::ptr::null_mut(), message, &mut raw)
+    })?;
+    let mut object = unsafe { Object::from_napi_value(env.raw(), raw)? };
     object.set_named_property("name", field("name")?)?;
     if let Some(code) = error.get("code") {
-        object.set_named_property("code", code.clone())?;
-    } else if !object.delete_named_property("code")? {
-        return Err(napi::Error::from_reason(
-            "cannot remove synthetic native error code",
-        ));
+        object.set_named_property("code", JsData(code.clone()))?;
     }
     Ok(napi::Error::from_unknown_without_coercion(
         object.into_unknown(env)?,
     ))
 }
-async fn send<T>(command: impl FnOnce(Reply<T>) -> Command) -> Result<T, Value> {
+async fn send<T>(command: impl FnOnce(Reply<T>) -> Command) -> Result<T, NativeValue> {
     let (reply, settled) = oneshot::channel();
     commands()
         .send(command(reply))
@@ -318,9 +384,15 @@ pub fn native_account_open<'env>(
     init: NativeAccountInit,
     on_event: Notify,
     on_store: Notify,
-    sign: Option<Request>,
-    proxy_token: Option<Request>,
+    sign: Option<Callback<'env>>,
+    proxy_token: Option<Callback<'env>>,
 ) -> napi::Result<PromiseRaw<'env, u32>> {
+    let sign = sign
+        .map(|callback| crate::native_callback::wrap(env, callback))
+        .transpose()?;
+    let proxy_token = proxy_token
+        .map(|callback| crate::native_callback::wrap(env, callback))
+        .transpose()?;
     settle(env, move |reply| Command::Open {
         init,
         sign,
@@ -354,10 +426,16 @@ pub fn native_account_call_method<'env>(
 
 /// ts: RemoteSigner.onAvailabilityChange, pushed from the host's signer session.
 #[napi_derive::napi(js_name = "nativeAccountSignerAvailable")]
-pub fn signer_available(env: &Env, id: u32, available: bool) -> napi::Result<()> {
-    commands()
-        .send(Command::SignerAvailable { id, available })
-        .or_else(|_| Err(rejected(env, host_error("native host thread stopped"))?))
+pub fn signer_available<'env>(
+    env: &'env Env,
+    id: u32,
+    available: bool,
+) -> napi::Result<PromiseRaw<'env, ()>> {
+    settle(env, move |reply| Command::SignerAvailable {
+        id,
+        available,
+        reply,
+    })
 }
 
 /// Stops forwarding and resolves after disposal; disposal errors reject.

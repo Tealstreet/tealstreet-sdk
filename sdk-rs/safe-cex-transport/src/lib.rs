@@ -49,3 +49,5 @@ pub mod ws_relay;
 
 #[cfg(test)]
 mod accepted_frame_shapes;
+
+mod native_data;

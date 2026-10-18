@@ -64,7 +64,9 @@ fn oracle() -> Vec<Value> {
 fn sentinel(role: &str, msg: Option<&Value>) -> Rc<ExchangeError> {
     let mut error = ExchangeError::new(format!("fixture {role}"));
     error.name = "RangeError".into();
-    error.code = Some(json!(format!("{role}-code")));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        format!("{role}-code")
+    )));
     error.response = Some(
         json!({"status":503,"data":msg.map(|value|json!({"msg":value})).unwrap_or(json!({}))}),
     );

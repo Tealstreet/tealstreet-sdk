@@ -184,7 +184,11 @@ impl ReadTransport for Transport {
         if let Some(hook) = self.hook.borrow().as_ref() {
             hook(&request);
         }
-        let body = request.body.as_ref().map(|b| b.untransformed().unwrap());
+        let body_value = request
+            .body
+            .as_ref()
+            .map(|b| b.untransformed().unwrap().clone().into_value().unwrap());
+        let body = body_value.as_ref();
         let args = if request.method == "POST" {
             body.cloned().unwrap()
         } else {
@@ -289,6 +293,7 @@ fn fixture(
     base.on(
         "error",
         Rc::new(move |_, v| {
+            let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
             events.borrow_mut().push(v.as_str().unwrap().into());
             Ok(())
         }),

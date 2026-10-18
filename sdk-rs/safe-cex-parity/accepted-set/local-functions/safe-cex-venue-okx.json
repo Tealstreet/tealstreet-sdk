@@ -1,8 +1,8 @@
 {
   "safe-cex-venue-okx/src/binding/ops.rs::LOCAL_FUNCTION:by_id": {
     "category": "non-decoder",
-    "reason": "Inside map_position host assembly: reads the existing native Store marketsById property using the supplied id coerced to a JS key. It returns the existing Js reference and performs no market construction or schema validation.",
-    "sourceSha256": "4a62fce6345272d6a78167d03e94121955ed689af7320fae16f81edf99cc733a"
+    "reason": "Inside map_position host assembly: reads the existing native Store marketsById property using the supplied id coerced to a JS key. It returns the existing Js reference and performs no market construction or schema validation. Reviewed runtime-aware Promise.all composition in 9b6cf7e01e: eager callback startup and ordered settlement now use the exchange runtime; the nested Store lookup body is unchanged.",
+    "sourceSha256": "5542928cf390ec8789b47bf2072017bd91b88b9ed49fb7cea555a4d0c608dd18"
   },
   "safe-cex-venue-okx/src/binding/typed_members.rs::LOCAL_FUNCTION:read": {
     "category": "non-decoder",

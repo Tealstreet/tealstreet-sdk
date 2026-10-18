@@ -137,7 +137,7 @@ struct Transport {
 impl ReadTransport for Transport {
     fn send(&self, r: safe_cex_transport::RestRequest) -> ExchangeFuture<'_, JsNumberInput> {
         let body = r.body.as_ref().map(|b| match b {
-            safe_cex_transport::RestBody::Untransformed(v) => v.clone(),
+            safe_cex_transport::RestBody::Untransformed(v) => v.clone().into_value().unwrap(),
             _ => panic!("unexpected transformed request"),
         });
         let mut call = json!({"method":r.method,"url":r.url});
@@ -212,6 +212,7 @@ fn fixture(
     base.on(
         "error",
         Rc::new(move |_, v| {
+            let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
             events.borrow_mut().push(v.as_str().unwrap().into());
             Ok(())
         }),

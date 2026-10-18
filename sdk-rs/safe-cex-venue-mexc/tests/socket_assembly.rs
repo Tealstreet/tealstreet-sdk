@@ -383,7 +383,7 @@ fn registered_public_ticker_route_commits_before_original_subscriber_throw() {
     let first = Rc::new(Cell::new(0));
     let later = Rc::new(Cell::new(0));
     let mut original = ExchangeError::new("public subscriber origin");
-    original.code = Some(json!(313));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(313)));
     let failure = original.clone();
     let calls = first.clone();
     let _first = venue.base().store.subscribe(Box::new(move |_, _| {
@@ -404,7 +404,7 @@ fn registered_public_ticker_route_commits_before_original_subscriber_throw() {
     assert_eq!(first.get(), 1, "MEXC public route first subscriber floor");
     assert_eq!(later.get(), 0, "MEXC public route later subscriber cutoff");
     assert_eq!(
-        error.code,
+        observed_error_code(&error.code),
         Some(json!(313)),
         "MEXC public route original native cause code"
     );
@@ -687,4 +687,17 @@ fn registered_private_asset_refresh_swallows_balance_fetch_failure() {
         runtime.errors.borrow()
     );
     venue.dispose().unwrap();
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }
