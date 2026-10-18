@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/hyrotrader.exchange.ts"
-rust_files = ["safe-cex-venue-bybit/src/hyro_configuration.rs",  "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/hyro_capabilities.rs", "safe-cex-venue-bybit/src/hyro_private_reads.rs", "safe-cex-venue-bybit/src/hyro_snapshot.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/hyro.rs", "safe-cex-venue-bybit/src/exchange.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/hyro_configuration.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/hyro_capabilities.rs", "safe-cex-venue-bybit/src/hyro_private_reads.rs", "safe-cex-venue-bybit/src/hyro_snapshot.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/hyro.rs", "safe-cex-venue-bybit/src/exchange.rs" ]
 
 [[symbol]]
 ts = "HyrotraderExchange"
