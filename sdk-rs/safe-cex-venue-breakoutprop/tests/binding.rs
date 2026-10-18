@@ -116,9 +116,51 @@ struct Wire {
     requests: RefCell<Vec<Value>>,
     native_requests: RefCell<Vec<Js>>,
     faults: RefCell<VecDeque<(String, u16, Value)>>,
+    holds: RefCell<Vec<(String, Rc<HttpHold>)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
     candle_response: RefCell<Option<Value>>,
     native_responses: RefCell<VecDeque<(String, Js)>>,
+}
+#[derive(Default)]
+struct HttpHold {
+    released: Cell<bool>,
+    waker: RefCell<Option<Waker>>,
+}
+impl HttpHold {
+    fn release(&self) {
+        self.released.set(true);
+        if let Some(waker) = self.waker.borrow_mut().take() {
+            waker.wake();
+        }
+    }
+}
+impl Wire {
+    fn hold(&self, url: &str) -> Rc<HttpHold> {
+        let hold = Rc::new(HttpHold::default());
+        self.holds.borrow_mut().push((url.into(), hold.clone()));
+        hold
+    }
+    fn reply(&self, url: &str, result: Result<Js, Thrown>) -> JsFuture<'static> {
+        let mut holds = self.holds.borrow_mut();
+        let hold = holds
+            .iter()
+            .position(|(target, _)| target == url)
+            .map(|index| holds.remove(index).1);
+        Box::pin(async move {
+            if let Some(hold) = hold {
+                std::future::poll_fn(move |cx| {
+                    if hold.released.get() {
+                        Poll::Ready(())
+                    } else {
+                        *hold.waker.borrow_mut() = Some(cx.waker().clone());
+                        Poll::Pending
+                    }
+                })
+                .await;
+            }
+            result
+        })
+    }
 }
 fn instrument() -> Value {
     json!({"type":"FOREX","symbol":"BTCUSD","version":1,"description":"Bitcoin","priceIncrement":0.1,"pipSize":0.01,"currency":"USD","lotSize":1,"multiplier":1,"firstCurrency":"BTC"})
@@ -151,7 +193,7 @@ impl JsHttpHost for Wire {
         {
             let (_, error) = self.errors.borrow_mut().pop_front().unwrap();
             error.define("config", config).unwrap();
-            return Box::pin(async move { Err(Thrown::new(error)) });
+            return self.reply(&url, Err(Thrown::new(error)));
         }
         let mut status = 200;
         let data = if self
@@ -193,14 +235,15 @@ impl JsHttpHost for Wire {
         } else {
             from_json(&data)
         };
-        Box::pin(async move {
+        self.reply(
+            &url,
             Ok(Js::object(vec![
                 ("status", Js::Number(status as f64)),
                 ("data", data),
                 ("headers", Js::object(vec![])),
                 ("config", config),
-            ]))
-        })
+            ])),
+        )
     }
 }
 struct Fixture {
@@ -1682,7 +1725,21 @@ fn auth_pipeline_checks_session_after_rate_limit_dequeue() {
     pump_pending(&f, &mut queued);
     f.exchange.invalidate_session();
     let error = f.run(queued).unwrap_err();
-    assert_eq!(error.message, "No session token");
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/auth-factory-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(error.name, source["name"].as_str().unwrap());
+    assert_eq!(error.message, source["message"].as_str().unwrap());
     assert_eq!(
         f.wire
             .requests
@@ -2127,4 +2184,308 @@ fn native_candles_ignore_surrogate_symbol_without_declared_record_validation() {
         1
     );
     f.exchange.dispose().unwrap();
+}
+
+fn async_audit_source() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/async-audit-source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+fn pump_until(f: &Fixture, predicate: impl Fn() -> bool) {
+    for _ in 0..400 {
+        f.runtime.advance(f.runtime.now.get() + 25);
+        if predicate() {
+            return;
+        }
+    }
+    panic!("real binding did not reach the held-I/O observation");
+}
+fn delete_ids(f: &Fixture) -> Vec<String> {
+    f.wire
+        .requests
+        .borrow()
+        .iter()
+        .filter(|row| {
+            row["method"]
+                .as_str()
+                .is_some_and(|method| method.eq_ignore_ascii_case("DELETE"))
+        })
+        .map(|row| {
+            row["url"]
+                .as_str()
+                .unwrap()
+                .rsplit('/')
+                .next()
+                .unwrap()
+                .into()
+        })
+        .collect()
+}
+#[test]
+fn async_audit_discarded_start_retains_store_and_polling_continuations() {
+    let source = async_audit_source();
+    let f = fixture();
+    assert!(
+        f.exchange
+            .socket()
+            .unwrap()
+            .message_handlers
+            .borrow()
+            .is_empty()
+    );
+    let login = f.wire.hold("/login");
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let seen = books.clone();
+    let cleanup = BreakoutpropExchange::listen_order_book(
+        &f.exchange,
+        "BTCUSD".into(),
+        Rc::new(move |book| {
+            seen.borrow_mut().push(book);
+            Ok(())
+        }),
+    )
+    .unwrap();
+    drop(f.exchange.start());
+    pump_until(&f, || f.wire.requests.borrow().len() == 1);
+    assert!(
+        !f.store.loaded().unwrap().markets,
+        "held login precedes Store writes"
+    );
+    assert!(
+        books.borrow().is_empty(),
+        "held login precedes parser delivery"
+    );
+    login.release();
+    pump_until(&f, || !books.borrow().is_empty());
+    let loaded = f.store.loaded().unwrap();
+    assert!(
+        loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders
+    );
+    assert_eq!(
+        f.store.balance().unwrap().total,
+        source["startup"]["balance"].as_f64().unwrap()
+    );
+    assert_eq!(f.store.markets().unwrap().len(), 1);
+    assert_eq!(f.store.tickers().unwrap().len(), 1);
+    assert_eq!(
+        books.borrow().len(),
+        1,
+        "discarded start completes first actual tick"
+    );
+    let requests = f.wire.requests.borrow();
+    let expected = source["startup"]["requests"].as_array().unwrap();
+    assert_eq!(expected.len(), 8, "maintained startup request floor");
+    assert_eq!(
+        requests.len(),
+        expected.len(),
+        "complete native startup request count"
+    );
+    for url in [
+        "/login",
+        "/users/k",
+        "instruments/query",
+        "accounts/default:A/instruments/query",
+        "accounts/default:A/portfolio",
+        "marketdata",
+    ] {
+        let actual = requests.iter().filter(|row| row["url"] == url).count();
+        let expected = expected.iter().filter(|row| row["url"] == url).count();
+        assert_eq!(actual, expected, "actual constructor request count {url}");
+    }
+    drop(requests);
+    pump_until(&f, || books.borrow().len() == 2);
+    assert!(
+        Rc::ptr_eq(&books.borrow()[0], &books.borrow()[1]),
+        "polling retains its book identity"
+    );
+    assert_eq!(books.borrow()[1].borrow().bids[0].price, 99.0);
+    cleanup().unwrap();
+    advance_real_poll(&f);
+    assert_eq!(
+        books.borrow().len(),
+        source["startup"]["callbacks"].as_u64().unwrap() as usize
+    );
+    f.exchange.dispose().unwrap();
+    let requests = f.wire.requests.borrow().len();
+    advance_real_poll(&f);
+    assert_eq!(
+        f.wire.requests.borrow().len(),
+        requests,
+        "dispose stops the live loop"
+    );
+    assert_eq!(books.borrow().len(), 2, "dispose emits no late callback");
+    assert!(f.runtime.exceptions.borrow().is_empty());
+}
+#[test]
+fn async_audit_discarded_cancel_reaches_later_lots_and_refusal_stops_them() {
+    let source = async_audit_source();
+    let cases = source["cancellations"].as_array().unwrap();
+    assert_eq!(
+        cases.len(),
+        3,
+        "success plus both first-settled rejection orders"
+    );
+    for case in cases {
+        let f = fixture();
+        f.fetch_markets();
+        f.wire.requests.borrow_mut().clear();
+        let failure_id = case["failureId"].as_u64().unwrap_or(0);
+        let held_url = format!("accounts/default:A/orders/{failure_id}");
+        let hold = f.wire.hold(&held_url);
+        let sibling_id = if failure_id == 0 { 9 } else { 0 };
+        let sibling_url = format!("accounts/default:A/orders/{sibling_id}");
+        let sibling = (case["reject"] == true).then(|| f.wire.hold(&sibling_url));
+        if case["reject"] == true {
+            for id in [0, 9] {
+                f.wire.errors.borrow_mut().push_back((
+                    format!("accounts/default:A/orders/{id}"),
+                    safe_cex_exchange::js_runtime::value::error_object(
+                        "Error",
+                        &format!("cancel refused {id}"),
+                    ),
+                ));
+            }
+        }
+        let errors = portfolio_error_log(&f);
+        let orders = (0..21)
+            .map(|id| {
+                let mut order = order();
+                order.id = id.to_string();
+                order
+            })
+            .collect();
+        let mut pending = f.exchange.cancel_orders(orders);
+        pump_until(&f, || delete_ids(&f).len() == 10);
+        assert!(
+            pending
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        if case["reject"] == false {
+            drop(pending);
+        } else {
+            hold.release();
+            let error = f.run(pending).unwrap_err();
+            assert!(
+                error.message.ends_with(case["rejection"].as_str().unwrap()),
+                "first settled HTTP rejection {error:?}"
+            );
+        }
+        hold.release();
+        if case["reject"] == false {
+            pump_until(&f, || delete_ids(&f).len() == 21);
+            let expected: Vec<_> = (0..21).map(|id| id.to_string()).collect();
+            assert_eq!(
+                delete_ids(&f),
+                expected,
+                "discarded caller still starts second and third lots"
+            );
+            assert_eq!(
+                case["ids"][20], "mutated",
+                "TS retains live order aliases; typed Order is owned"
+            );
+            assert!(errors.borrow().is_empty());
+        } else {
+            assert_eq!(
+                errors.borrow().len(),
+                1,
+                "held sibling has not reported yet"
+            );
+            sibling.unwrap().release();
+            pump_until(&f, || errors.borrow().len() == 2);
+            advance_real_poll(&f);
+            let expected: Vec<_> = case["ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(
+                delete_ids(&f),
+                expected,
+                "rejection preserves the first lot and prevents later lots"
+            );
+            assert_eq!(
+                errors.borrow().len(),
+                case["errors"].as_array().unwrap().len(),
+                "losing sibling still reports its original refusal"
+            );
+            for (actual, expected) in errors
+                .borrow()
+                .iter()
+                .zip(case["errors"].as_array().unwrap())
+            {
+                let message = String::from_utf16(actual.as_str().unwrap()).unwrap();
+                assert!(
+                    message.contains(expected.as_str().unwrap()),
+                    "source report order and original sibling message: {message}"
+                );
+            }
+        }
+        f.exchange.dispose().unwrap();
+        assert!(f.runtime.exceptions.borrow().is_empty());
+    }
+}
+
+#[test]
+fn async_audit_dispose_during_login_settles_without_late_store_or_callbacks() {
+    let source = async_audit_source();
+    let f = fixture();
+    let login = f.wire.hold("/login");
+    let callbacks = Rc::new(Cell::new(0));
+    let seen = callbacks.clone();
+    let _cleanup = BreakoutpropExchange::listen_order_book(
+        &f.exchange,
+        "BTCUSD".into(),
+        Rc::new(move |_| {
+            seen.set(seen.get() + 1);
+            Ok(())
+        }),
+    )
+    .unwrap();
+    let pending = f.exchange.start();
+    pump_until(&f, || f.wire.requests.borrow().len() == 1);
+    let login_waiter = f.exchange.get_session_token();
+    f.exchange.dispose().unwrap();
+    login.release();
+    let cancelled = f.run(login_waiter).unwrap_err();
+    assert_eq!(cancelled.name, "AbortError");
+    assert_eq!(
+        cancelled.message,
+        "Breakout Prop login cancelled after disposal"
+    );
+    f.run(pending).unwrap();
+    advance_real_poll(&f);
+    assert_eq!(
+        callbacks.get(),
+        source["disposed"]["callbacks"].as_u64().unwrap()
+    );
+    let loaded = f.store.loaded().unwrap();
+    assert!(
+        !loaded.markets
+            && !loaded.tickers
+            && !loaded.balance
+            && !loaded.positions
+            && !loaded.orders
+    );
+    assert!(
+        f.exchange.session_token_request.borrow().is_none(),
+        "startup clears its login finally after disposal"
+    );
+    assert!(
+        f.runtime.tasks.borrow().is_empty(),
+        "dispose drains pending startup and login drivers"
+    );
+    assert!(f.runtime.exceptions.borrow().is_empty());
 }

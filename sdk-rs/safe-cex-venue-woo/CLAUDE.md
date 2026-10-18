@@ -526,3 +526,7 @@ the exact mappings, original subscriber failures and native numeric observations
 The three order tables and mapLimitOrder FIX-audit leads are accepted against the
 constructed exchange, including inherited referent identity and live info aliases.
 See LIVE_ORDER_REVIEW.md; typed own-entry slices do not replace runtime lookup.
+
+History candidates and transaction parsing retain canonical Input through field
+selection and numeric coercion. HISTORY_PARSER_REVIEW.md records the signed native
+regression; strict typed historical output/option boundaries remain separate.

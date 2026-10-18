@@ -23,9 +23,10 @@ The live oracle is mandatory in the Rust workflow types job after the root
 dependency install; the CI wiring audit rejects removal or failure masking.
 Keep registry-data descriptors separate from the parallel `safe-cex-exchange/src` trait.
 
-Malformed no-delimiter keys ending in an astral character are explicitly
-divergent: TS slices UTF-16 and produces a lone surrogate, while Rust strings
-truncate a Unicode scalar. Valid generated colon-bearing keys preserve Unicode.
+Subscription keys split at the last colon. The no-delimiter fallback removes one
+UTF-16 unit, matching source slice(0,-1), then replaces a remaining isolated unit
+with U+FFFD at the approved typed String boundary. Generated provider keys always
+contain a delimiter and retain their complete Unicode symbols.
 
 GatewayChannel explicitly preserves the TS unchecked `auth` cast as a declared
 runtime divergence. GatewayMessage validates the entire frame, unlike the unchecked TS cast: missing
