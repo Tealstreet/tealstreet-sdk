@@ -46,3 +46,9 @@ and pass after exact byte restoration: force Symbol through ToString; remove the
 installed splice member; reread length after coercion/deleted-slot getters. Logs
 are `/tmp/store-correctness-controls.log` and its per-case directory. The source
 methods and test expectations stay unchanged during these controls.
+
+An additional actual-Store upsert profile pins RHS/key-conversion ordering: the
+source reads the current array length before the final assignment-key coercion.
+A key hook appends a row, and the next update exposes the resulting source index
+choice. Native observations compare row IDs, amounts and both hook calls before
+JSON. This preserves the maintained behavior rather than correcting its quirk.

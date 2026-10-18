@@ -2,12 +2,17 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
 
 sdk = Path(__file__).resolve().parents[2]
 logs = Path(os.environ.get('STORE_CORRECTNESS_LOG_DIR', '/tmp/store-correctness-controls'))
 logs.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, CARGO_INCREMENTAL='0')
 faults = [
+    ('early-key', 'src/js_runtime/native_store/graph.rs',
+     'set_id_key(index, &value.get("id")?, self.get(key)?.get("length")?)?;',
+     'let id = id_key(&value.get("id")?)?; set_id_key(index, &id, self.get(key)?.get("length")?)?;',
+     'js_store_symbol_keys', 'indexed_upsert_preserves_source_assignment_coercion_order'),
     ('symbol-key', 'src/js_runtime/native_store/graph.rs',
      'if matches!(primitive, Js::SymbolIterator) {',
      'if false && matches!(primitive, Js::SymbolIterator) {',
@@ -33,7 +38,11 @@ def run(label, target, test, red=False):
         assert result.returncode == 0 and '1 passed; 0 failed' in result.stdout, label
     print(label + (': compiled named RED' if red else ': exact-restored GREEN'), flush=True)
 
+selected = set(sys.argv[1:])
+assert not selected.difference(row[0] for row in faults), "unknown control"
 for label, file, needle, fault, target, test in faults:
+    if selected and label not in selected:
+        continue
     path = sdk / 'safe-cex-exchange' / file
     original = path.read_bytes()
     assert original.decode().count(needle) == 1, label

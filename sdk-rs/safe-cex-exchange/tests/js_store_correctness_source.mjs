@@ -78,5 +78,13 @@ for (const arrayKey of [false,true]) {
  assert.deepEqual(result,{ids:['Symbol(Symbol.iterator)'],contracts:[7,9],conversions:2});
  symbols.push(result);
 }
+// Assignment observes the length RHS before the final key coercion/PutValue.
+const indexed = new DefaultStore();
+indexed.update({orders:[seed('a'),seed('b')]});
+let upsertConversions=0;
+const upsertKey={toString(){if(++upsertConversions===2)indexed.orders.push(seed('filler'));return 'new'}};
+indexed.addOrUpdateOrders([{...seed(upsertKey),amount:7},{...seed('new'),amount:9}]);
+const upsert={rows:indexed.orders.map(row=>({id:typeof row.id==='string'?row.id:'object',amount:row.amount})),conversions:upsertConversions};
+assert.deepEqual(upsert,{rows:[{id:'a',amount:1},{id:'b',amount:1},{id:'new',amount:9},{id:'object',amount:7}],conversions:2});
 process.stdout.write(JSON.stringify({setting:{other:settings.options.other,calls:settingCalls},patch,
- nullLeverage:raw.leverage===null,terminalIds:ids,symbols}));
+ nullLeverage:raw.leverage===null,terminalIds:ids,symbols,upsert}));
