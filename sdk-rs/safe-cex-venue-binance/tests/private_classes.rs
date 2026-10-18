@@ -4769,6 +4769,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             None,
             safe_cex_exchange::native::NativeHttpEvents::default(),
         );
+        let imports = dependencies.imports.clone();
         let owner = ExchangeOwner::new(
             Venue::Futures,
             safe_cex_types::ExchangeName::Binance,
@@ -4777,8 +4778,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             dependencies,
         )
         .unwrap();
-        let request = owner
-            .imports
+        let request = imports
             .request(
                 owner.clients.get("xhr").unwrap().clone(),
                 safe_cex_venue_binance::exchange_classes::HttpMethod::Get,
@@ -4800,10 +4800,21 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             assert_eq!(response["status"], 429);
             assert_eq!(response["data"]["code"], -1003);
         }
-        assert_eq!(owner.paused_until.get(), 1_000.0 + duration);
+        assert_eq!(
+            owner.paused_until.get(),
+            1_000.0 + duration,
+            "native request-weight observer must run on HTTP status {status}"
+        );
         assert!(owner.paused());
-        assert_eq!(requests.lock().unwrap().len(), 1);
-        assert_eq!(requests.lock().unwrap()[0].url, "/fapi/v1/openOrders");
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        let (path, query) = requests[0]
+            .url
+            .split_once('?')
+            .expect("the native signer serializes its query");
+        assert_eq!(path, "/fapi/v1/openOrders");
+        assert!(query.contains("timestamp="));
+        assert!(query.contains("signature="));
         owner.dispose().unwrap();
     }
 }
