@@ -20,6 +20,7 @@ use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
     },
+    eager::start_eager,
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
     js_runtime::base_exchange::ExternalPublicDataFactory,
@@ -55,7 +56,7 @@ pub struct MexcExchange {
     placed: RefCell<BTreeMap<String, f64>>,
     canceled: RefCell<BTreeMap<String, f64>>,
     rejected: RefCell<BTreeMap<String, f64>>,
-    symbol_settings: RefCell<BTreeMap<String, MexcSymbolConfig>>,
+    symbol_settings: Rc<RefCell<BTreeMap<String, MexcSymbolConfig>>>,
     account_position_mode: RefCell<PositionMode>,
     public_socket: RefCell<Option<Rc<crate::ws_public::MexcPublicSocket>>>,
     binding: std::cell::OnceCell<Rc<binding::Host>>,
@@ -431,7 +432,7 @@ impl MexcExchange {
             placed: RefCell::default(),
             canceled: RefCell::default(),
             rejected: RefCell::default(),
-            symbol_settings: RefCell::default(),
+            symbol_settings: Rc::default(),
             account_position_mode: RefCell::new(PositionMode::Hedged),
             public_socket: RefCell::default(),
             binding: std::cell::OnceCell::new(),
@@ -504,7 +505,7 @@ impl MexcExchange {
             crate::api::sign_mexc_ws_login(&self.base.options().secret, &api_key, &req_time)
         });
         let id = remote.as_ref().map(|_| self.base.runtime.unique_id());
-        let mut future = Box::pin(async move {
+        start_eager(&self.base.runtime, async move {
             if let Some(local) = local {
                 return local.map(Some).map_err(ExchangeError::new);
             }
@@ -554,15 +555,7 @@ impl MexcExchange {
                 return Ok(None);
             }
             Ok(response.ws_auth_signature)
-        });
-        use std::future::Future;
-        match future
-            .as_mut()
-            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
-        {
-            std::task::Poll::Ready(value) => Box::pin(async move { value }),
-            std::task::Poll::Pending => future,
-        }
+        })
     }
 
     // ts: MexcExchange.validateAccount
@@ -1420,9 +1413,10 @@ impl MexcExchange {
     }
 
     // ts: MexcExchange.updateSymbolMetadata
-    pub fn update_symbol_metadata(&self, symbol: String) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.fetch_leverage_for_symbol(symbol).await?;
+    pub fn update_symbol_metadata(&self, symbol: String) -> ExchangeFuture<'static, ()> {
+        let fetched = self.fetch_leverage_for_symbol(symbol);
+        start_eager(&self.base.runtime, async move {
+            fetched.await?;
             Ok(())
         })
     }
@@ -1431,8 +1425,11 @@ impl MexcExchange {
     pub fn fetch_leverage_for_symbol(
         &self,
         symbol: String,
-    ) -> ExchangeFuture<'_, Option<FetchedLeverage>> {
-        Box::pin(async move {
+    ) -> ExchangeFuture<'static, Option<FetchedLeverage>> {
+        let base = self.base.clone();
+        let xhr = self.xhr.clone();
+        let settings = self.symbol_settings.clone();
+        let prepared = (|| -> Result<_, ExchangeError> {
             let market = self.base.store.markets_by_symbol().get(&symbol).cloned();
             let config = self.symbol_settings.borrow().get(&symbol).cloned();
             let config = match config {
@@ -1449,7 +1446,12 @@ impl MexcExchange {
                 }
             };
 
-            if let Some(market) = market.filter(|_| !self.base.is_public_data_only(self)) {
+            let private_market = market.filter(|_| !self.base.is_public_data_only(self));
+            Ok((private_market, config))
+        })();
+        start_eager(&self.base.runtime, async move {
+            let (market, config) = prepared?;
+            if let Some(market) = market {
                 let request = RestRequest {
                     method: "get".into(),
                     url: ENDPOINTS["POSITION_LEVERAGE"]
@@ -1459,7 +1461,7 @@ impl MexcExchange {
                     params: Some(json!({"symbol": market.id})),
                     ..Default::default()
                 };
-                match self.xhr.execute(request.clone()).await {
+                match crate::sockets::reaction(xhr.execute(request.clone())).await {
                     Ok(response) => {
                         let result = (|| -> Result<_, ExchangeError> {
                             let data: Value = parse_response_json(&response.body)
@@ -1542,19 +1544,16 @@ impl MexcExchange {
                                     limits.leverage.max = max;
                                     let mut patch = ModelPatch::default();
                                     patch.set_native("limits", limits);
-                                    if let Err(error) =
-                                        self.base.store.update_market(&market.id, &patch)
+                                    if let Err(error) = base.store.update_market(&market.id, &patch)
                                     {
-                                        self.base.log(
+                                        base.log(
                                             &format!(
                                                 "Failed to fetch MEXC leverage cap for {symbol}: {error}"
                                             ),
                                             "warning",
                                         )?;
                                     } else {
-                                        self.symbol_settings
-                                            .borrow_mut()
-                                            .insert(symbol.clone(), next);
+                                        settings.borrow_mut().insert(symbol.clone(), next);
                                         let fetched = FetchedLeverage {
                                             buy_leverage: buy,
                                             sell_leverage: sell,
@@ -1562,13 +1561,15 @@ impl MexcExchange {
                                             position_mode: Some(config.position_mode),
                                             is_fetching: None,
                                         };
-                                        self.update_fetched_leverage(&symbol, fetched.clone())?;
+                                        Self::update_fetched_leverage(
+                                            &base,
+                                            &symbol,
+                                            fetched.clone(),
+                                        )?;
                                         return Ok(Some(fetched));
                                     }
                                 } else {
-                                    self.symbol_settings
-                                        .borrow_mut()
-                                        .insert(symbol.clone(), next);
+                                    settings.borrow_mut().insert(symbol.clone(), next);
                                     let fetched = FetchedLeverage {
                                         buy_leverage: buy,
                                         sell_leverage: sell,
@@ -1576,11 +1577,11 @@ impl MexcExchange {
                                         position_mode: Some(config.position_mode),
                                         is_fetching: None,
                                     };
-                                    self.update_fetched_leverage(&symbol, fetched.clone())?;
+                                    Self::update_fetched_leverage(&base, &symbol, fetched.clone())?;
                                     return Ok(Some(fetched));
                                 }
                             }
-                            Err(error) => self.base.log(
+                            Err(error) => base.log(
                                 &format!(
                                     "Failed to fetch MEXC leverage cap for {symbol}: {}",
                                     error.message
@@ -1589,7 +1590,7 @@ impl MexcExchange {
                             )?,
                         }
                     }
-                    Err(error) => self.base.log(
+                    Err(error) => base.log(
                         &format!(
                             "Failed to fetch MEXC leverage cap for {symbol}: {}",
                             error.message
@@ -1605,19 +1606,19 @@ impl MexcExchange {
                 position_mode: Some(config.position_mode),
                 is_fetching: None,
             };
-            self.update_fetched_leverage(&symbol, fetched.clone())?;
+            Self::update_fetched_leverage(&base, &symbol, fetched.clone())?;
             Ok(Some(fetched))
         })
     }
 
     fn update_fetched_leverage(
-        &self,
+        base: &BaseExchange,
         symbol: &str,
         leverage: FetchedLeverage,
     ) -> Result<(), ExchangeError> {
-        let mut fetched = self.base.store.fetched_leverage().clone();
+        let mut fetched = base.store.fetched_leverage().clone();
         fetched.insert(symbol.to_owned(), leverage);
-        self.base.store.update(
+        base.store.update(
             StoreUpdate {
                 fetched_leverage: Some(fetched),
                 ..Default::default()

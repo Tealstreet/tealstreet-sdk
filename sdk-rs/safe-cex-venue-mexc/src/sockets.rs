@@ -100,7 +100,7 @@ impl PrivateProtocol {
         let owner = parent.clone();
         parent.base().start_owned_operation(async move {
             let result = async {
-                let Some(signature) = reaction(signature).await? else {return Ok(());};
+                let Some(signature) = signature.await? else {return Ok(());};
                 let text = serde_json::to_string(&json!({"method":"login", "param":{"apiKey":api_key,"reqTime":request_time,"signature":signature}})).map_err(|e| ExchangeError::new(e.to_string()))?;
                 socket.send(&text)?;
                 socket.emit_ws_diagnostic_send(&text, &WsDiagnosticSendOptions {format:Some(Rc::new(|message| {
