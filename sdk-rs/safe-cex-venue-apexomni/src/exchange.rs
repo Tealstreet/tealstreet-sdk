@@ -105,33 +105,34 @@ fn nullish_zero(value: &J) -> J {
         value.clone()
     }
 }
+pub(crate) fn retained_info(
+    value: &J,
+) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
+    use safe_cex_types::retained_json::RetainedJsonInput as R;
+    Ok(match value {
+        J::Undefined => R::Undefined,
+        J::Null => R::Null,
+        J::Bool(v) => R::Bool(*v),
+        J::Number(v) => R::Float(*v),
+        J::String(v) => R::Text(v.encode_utf16().collect()),
+        J::Array(v) => R::Array(v.iter().map(retained_info).collect::<Result<_, _>>()?),
+        J::Object(v) => R::Object(
+            v.iter()
+                .map(|(k, v)| Ok((k.encode_utf16().collect(), retained_info(v)?)))
+                .collect::<Result<_, ExchangeError>>()?,
+        ),
+        _ => {
+            return Err(failure(
+                "shared retained JSON refuses this prepared value".into(),
+            ));
+        }
+    })
+}
+
 pub(crate) fn fields(value: &J) -> Result<serde_json::Value, ExchangeError> {
-    fn retained(
-        value: &J,
-    ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
-        use safe_cex_types::retained_json::RetainedJsonInput as R;
-        Ok(match value {
-            J::Null => R::Null,
-            J::Bool(v) => R::Bool(*v),
-            J::Number(v) => R::Float(*v),
-            J::String(v) => R::Text(v.encode_utf16().collect()),
-            J::Array(v) => R::Array(v.iter().map(retained).collect::<Result<_, _>>()?),
-            J::Object(v) => R::Object(
-                v.iter()
-                    .filter(|(_, v)| !matches!(v, J::Undefined))
-                    .map(|(k, v)| Ok((k.encode_utf16().collect(), retained(v)?)))
-                    .collect::<Result<_, ExchangeError>>()?,
-            ),
-            _ => {
-                return Err(failure(
-                    "shared retained JSON refuses this prepared value".into(),
-                ));
-            }
-        })
-    }
-    retained(value)?
+    retained_info(value)?
         .into_value()
-        .map_err(|e| failure(e.to_string()))
+        .map_err(|error| failure(error.to_string()))
 }
 
 impl ApexOmniExchange {
@@ -245,7 +246,7 @@ impl ApexOmniExchange {
             used: float(get(balance, "maintenanceMargin"))?,
             free: numeric(get(balance, "totalEquityValue"))?
                 - numeric(get(balance, "initialMargin"))?,
-            info: Some(fields(balance)?),
+            info: Some(retained_info(balance)?),
             currencies: None,
             coins: None,
         })
@@ -312,11 +313,9 @@ impl ApexOmniExchange {
                     let default = market
                         .info
                         .as_ref()
-                        .and_then(|v| v.get("defaultInitialMarginRate"))
-                        .cloned()
-                        .map(J::from)
-                        .unwrap_or(J::Undefined);
-                    let default = 1.0 / numeric(&default)?;
+                        .and_then(|value| value.get("defaultInitialMarginRate"));
+                    let default = 1.0
+                        / safe_cex_num::js_retained_number(default).map_err(ExchangeError::from)?;
                     if default != 0.0 && !default.is_nan() {
                         default
                     } else {
@@ -338,7 +337,7 @@ impl ApexOmniExchange {
             liquidation_price: float(&or_zero(data::v(row, "liqPrice")?))?,
             position_mode: (Some(PositionMode::Hedged)).into(),
             margin_type: (Some(MarginType::Cross)).into(),
-            info: (Some(fields(row)?)).into(),
+            info: (Some(retained_info(row)?)).into(),
             last_update: (Some(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()))
                 .into(),
             margin_size: (None).into(),
@@ -491,7 +490,7 @@ impl ApexOmniExchange {
             filled,
             remaining,
             reduce_only: reduce_only.into(),
-            info: (Some(fields(row)?)).into(),
+            info: (Some(retained_info(row)?)).into(),
             time_in_force: time_in_force.into(),
             last_update,
             tp_trigger_type: tp_trigger_type.into(),
@@ -741,11 +740,9 @@ impl ApexOmniExchange {
             let margin = market
                 .info
                 .as_ref()
-                .and_then(|v| v.get("initialMarginRate"))
-                .cloned()
-                .map(J::from)
-                .unwrap_or(J::Undefined);
-            let leverage = 1.0 / numeric(&margin)?;
+                .and_then(|value| value.get("initialMarginRate"));
+            let leverage =
+                1.0 / safe_cex_num::js_retained_number(margin).map_err(ExchangeError::from)?;
             let leverage = if leverage == 0.0 || leverage.is_nan() {
                 10.0
             } else {
@@ -868,7 +865,7 @@ impl ApexOmniExchange {
                     is_expiring: Some(false),
                     is_perpetual: None,
                     info: Some(
-                        fields(row)
+                        retained_info(row)
                             .map_err(|cause| failure(format!("info={row:?}: {}", cause.message)))?,
                     ),
                     pretty_symbol: None,

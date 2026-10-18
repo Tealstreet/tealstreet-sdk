@@ -337,7 +337,15 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
     assert_eq!(order.amount, 0.012);
     assert_eq!(order.remaining, 0.009);
     assert_eq!(order.filled.to_bits(), (0.012_f64 - 0.009).to_bits());
-    assert_eq!(order.info.as_ref().unwrap()["market"], "BTC-USD-PERP");
+    assert!(
+        order
+            .info
+            .as_ref()
+            .unwrap()
+            .get("market")
+            .unwrap()
+            .text_equals("BTC-USD-PERP")
+    );
     drop(orders);
     push(
         "orders.ALL",
@@ -677,7 +685,7 @@ fn amendment_precision_keeps_amount_execution_and_trigger_axes_distinct() {
     stop.reduce_only = true.into();
     stop.price = (99.37).into();
     stop.info = (Some(
-        json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}),
+        json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}).into(),
     )).into();
     drive(
         &runtime,
@@ -842,7 +850,12 @@ fn numeric_created_at_survives_constructed_fetch_orders() {
     );
     assert_eq!(orders[0].filled.to_bits(), (0.006f64 - 0.003f64).to_bits());
     assert_eq!(
-        orders[0].info.as_ref().unwrap()["created_at"]
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
             .as_f64()
             .unwrap()
             .to_bits(),
@@ -923,9 +936,35 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
         assert_eq!(orders[index].last_update.to_bits(), expected.to_bits());
     }
     assert!(orders[3].last_update.is_nan());
-    assert!(orders[0].info.as_ref().unwrap()["created_at"].is_null());
-    assert_eq!(orders[1].info.as_ref().unwrap()["created_at"], false);
-    assert_eq!(orders[2].info.as_ref().unwrap()["created_at"], true);
+    assert!(
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
+            .is_null()
+    );
+    assert_eq!(
+        orders[1]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
+            .as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        orders[2]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
+            .as_bool(),
+        Some(true)
+    );
     assert!(orders[3].info.as_ref().unwrap().get("created_at").is_none());
 }
 

@@ -103,7 +103,7 @@ fn position(value: &Position) -> J {
         fields.push(("marginType", s("cross")));
     }
     if let Some(v) = value.info.as_ref() {
-        fields.push(("info", J::from(v.clone())));
+        fields.push(("info", native::retained(v)));
     }
     if let Some(v) = value.last_update.into_value() {
         fields.push(("lastUpdate", source_clock_stamp(v)));
@@ -140,7 +140,7 @@ fn order(value: &Order) -> J {
         ("amount", n(value.amount)),
         ("filled", n(value.filled)),
         ("remaining", n(value.remaining)),
-        ("info", J::from(value.info.clone().unwrap())),
+        ("info", native::retained(value.info.as_ref().unwrap())),
         ("lastUpdate", source_clock_stamp(value.last_update)),
     ];
     match value.reduce_only {
@@ -183,7 +183,7 @@ fn balance(value: &Balance) -> J {
         ("free", n(value.free)),
     ];
     if let Some(v) = &value.info {
-        fields.push(("info", J::from(v.clone())));
+        fields.push(("info", native::retained(v)));
     }
     obj(fields)
 }
@@ -221,7 +221,7 @@ fn market(value: &Market) -> J {
                 ),
             ]),
         ),
-        ("info", J::from(value.info.clone().unwrap())),
+        ("info", native::retained(value.info.as_ref().unwrap())),
     ];
     if let Some(expiring) = value.is_expiring {
         fields.push(("isExpiring", J::Bool(expiring)));

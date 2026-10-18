@@ -1,5 +1,5 @@
 //! TP/SL identifiers, trigger selection and reduce-only cache precedence.
-use safe_cex_num::{JsCoercionError, js_string, js_truthy};
+use safe_cex_num::{JsCoercionError, js_string};
 use safe_cex_types::OrderStopTriggerType;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -40,10 +40,10 @@ pub fn get_tpsl_leg_order_id(
 
 pub fn get_bitunix_trigger_type(
     trigger_type: Option<OrderStopTriggerType>,
-    raw_trigger_type: Option<&Value>,
+    raw_trigger_type: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
 ) -> Result<&'static str, JsCoercionError> {
-    let raw = if js_truthy(raw_trigger_type) {
-        js_string(raw_trigger_type)?
+    let raw = if raw_trigger_type.is_some_and(|value| value.is_truthy()) {
+        safe_cex_num::js_retained_string(raw_trigger_type)?
     } else {
         String::new()
     }

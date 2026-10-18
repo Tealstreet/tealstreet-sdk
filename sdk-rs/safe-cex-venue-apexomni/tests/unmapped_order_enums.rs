@@ -61,7 +61,16 @@ fn check_native_field(order: &Order, field: &str) {
         native.get(field).unwrap(),
         safe_cex_exchange::js_runtime::value::Js::Undefined
     ));
-    assert_eq!(order.info.value().unwrap()[field], "UNMAPPED_NATIVE");
+    assert_eq!(
+        order
+            .info
+            .value()
+            .unwrap()
+            .get(field)
+            .unwrap()
+            .text_equals("UNMAPPED_NATIVE"),
+        true
+    );
 }
 fn unmapped_case(field: &str) {
     let h = fixture();

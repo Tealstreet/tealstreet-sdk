@@ -251,7 +251,7 @@ fn maintained_typescript_response_body_lookup_and_sequential_placement() {
                     return Ok(vec![]);
                 };
                 let mut order:Order=serde_json::from_value(json!({"id":"mapped-order","status":"open","symbol":"BTCUSDT","type":"limit","side":"buy","price":1,"amount":1,"filled":0,"remaining":1,"reduceOnly":false,"lastUpdate":123})).unwrap();
-                order.info = (Some(row.clone())).into();
+                order.info = (Some(row.clone().into())).into();
                 Ok(vec![order])
             };
             match ready(find_order_by_client_order_id(

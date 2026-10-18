@@ -380,7 +380,7 @@ fn ticker_native_fields_and_errors() {
                     }
                     assert!(t.mid_price.is_none(), "TICKER absent midpoint");
                     assert!(t.timestamp.is_none(), "TICKER absent timestamp");
-                    assert_eq!(t.info, Some(json!({})), "TICKER native info");
+                    assert_eq!(t.info, Some(json!({}).into()), "TICKER native info");
                 }
             }
             Err(error) => {

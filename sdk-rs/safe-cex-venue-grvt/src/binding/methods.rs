@@ -139,7 +139,7 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
             )
             .map_err(|e| Thrown::error("Error", &e))?;
             Ok(Js::object(vec![
-                ("ih", Js::str(hash)),
+                ("ih", Js::str(&hash)),
                 ("bd", Js::Number(base)),
                 ("qd", Js::Number(quote)),
             ]))

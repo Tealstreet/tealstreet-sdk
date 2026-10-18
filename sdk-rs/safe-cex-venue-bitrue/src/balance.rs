@@ -127,6 +127,6 @@ pub fn parse_balance<'a>(
             .map(|(key, balance)| (key, balance.into()))
             .collect(),
     );
-    balance.info = Some(data.clone());
+    balance.info = Some(data.clone().into());
     Ok(Cow::Owned(balance))
 }

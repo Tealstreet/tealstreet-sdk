@@ -211,3 +211,55 @@ fn retained_info_patches_use_production_store_without_json_copy() {
         );
     }
 }
+
+#[test]
+fn retained_info_coercions_read_the_native_store_value() {
+    let cases = source()["coercions"].as_array().unwrap();
+    assert_eq!(cases.len(), 20, "native info coercion source floor");
+    for case in cases {
+        let native = Rc::new(DefaultStore::new());
+        let facade = store::facade(native);
+        let market = from_json(&source()["cases"][0]["base"]);
+        market.set("info", input(&case["value"])).unwrap();
+        facade
+            .call_method(
+                "update",
+                vec![Js::object(vec![("markets", Js::array(vec![market]))])],
+            )
+            .unwrap();
+        let value = facade.get("markets").unwrap().array_values().unwrap()[0]
+            .get("info")
+            .unwrap();
+        let retained = to_retained_input(&value).unwrap();
+        observe(&value, &case["value"]);
+        for (name, result) in [
+            ("number", safe_cex_num::js_retained_number(Some(&retained))),
+            (
+                "parseFloat",
+                safe_cex_num::js_retained_parse_float(Some(&retained)),
+            ),
+        ] {
+            if case[name].get("error").is_some() {
+                let error = result.unwrap_err();
+                assert_eq!(error.name, case[name]["error"]["name"]);
+                assert_eq!(error.message, case[name]["error"]["message"]);
+            } else {
+                observe(&Js::Number(result.unwrap()), &case[name]["value"]);
+            }
+        }
+        let text = safe_cex_num::js_retained_string(Some(&retained));
+        if case["string"].get("error").is_some() {
+            let error = text.unwrap_err();
+            assert_eq!(error.name, case["string"]["error"]["name"]);
+            assert_eq!(error.message, case["string"]["error"]["message"]);
+        } else if String::from_utf16(&units(&case["string"]["value"]["units"])).is_ok() {
+            observe(&Js::str(&text.unwrap()), &case["string"]["value"]);
+        } else {
+            assert_eq!(
+                text.unwrap_err().message,
+                "Cannot represent JavaScript UTF-16 string as UTF-8"
+            );
+            observe(&value, &case["value"]);
+        }
+    }
+}

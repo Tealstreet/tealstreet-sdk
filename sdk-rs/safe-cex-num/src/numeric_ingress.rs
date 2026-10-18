@@ -38,7 +38,7 @@ pub fn js_from_str<T: DeserializeOwned + Serialize + JsNumberOutput>(
 pub fn js_from_value<T: DeserializeOwned + Serialize + JsNumberOutput>(
     value: Value,
 ) -> Result<T, Error> {
-    JsNumberInput::from_retained(RetainedJsonInput::from_value(value)?)?.decode()
+    JsNumberInput::from(RetainedJsonInput::from_value(value)?).decode()
 }
 
 /// Decode a borrowed Value, preserving its lexical numbers; output is owned.
@@ -59,16 +59,15 @@ pub fn js_value_as_f64(value: &Value) -> Option<f64> {
 
 // The lower types layer owns capture so shared model info fields and this
 // typed adapter use exactly the same lexeme and native-event visitor.
-impl JsNumberInput {
-    fn from_retained(input: RetainedJsonInput) -> Result<Self, Error> {
-        Ok(Self(input))
+impl From<RetainedJsonInput> for JsNumberInput {
+    fn from(input: RetainedJsonInput) -> Self {
+        Self(input)
     }
 }
 
 impl<'de> Deserialize<'de> for JsNumberInput {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Self::from_retained(RetainedJsonInput::deserialize(deserializer)?)
-            .map_err(de::Error::custom)
+        Ok(Self::from(RetainedJsonInput::deserialize(deserializer)?))
     }
 }
 

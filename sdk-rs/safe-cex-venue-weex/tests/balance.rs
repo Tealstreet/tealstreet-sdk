@@ -15,19 +15,24 @@ fn bits(n: f64) -> String {
     )
 }
 // Inspect the retained native tree directly; never serialize a Balance to witness it.
-fn capture(value: &Value) -> Value {
-    match value {
-        Value::Number(_) => {
-            json!({"type":"number","bits":bits(safe_cex_num::js_number(Some(value)).unwrap())})
+fn capture(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let value = safe_cex_num::numeric_ingress::js_capture_output(value).unwrap();
+    match &value {
+        Input::Float(_) | Input::Lexeme(_) => {
+            json!({"type":"number","bits":bits(value.as_f64().unwrap())})
         }
-        Value::Array(values) => Value::Array(values.iter().map(capture).collect()),
-        Value::Object(values) => Value::Array(
+        Input::Array(values) => Value::Array(values.iter().map(capture).collect()),
+        Input::Object(values) => Value::Array(
             values
                 .iter()
-                .map(|(key, value)| json!([key, capture(value)]))
+                .map(|(key, value)| json!([String::from_utf16(key).unwrap(), capture(value)]))
                 .collect(),
         ),
-        value => value.clone(),
+        Input::Undefined => json!({"undefined":true}),
+        Input::Null => Value::Null,
+        Input::Bool(value) => json!(value),
+        Input::Text(value) => json!(String::from_utf16(value).unwrap()),
     }
 }
 #[test]
@@ -125,7 +130,11 @@ fn balances_match_actual_typescript() {
                         lengths[index],
                         "{label}::native_info_count"
                     );
-                    assert_eq!(info, input.as_value(), "{label}::retained_info_identity");
+                    assert_eq!(
+                        info,
+                        &input.as_value().clone().into(),
+                        "{label}::retained_info_identity"
+                    );
                     assert_eq!(capture(info), case["info"], "{label}::native_info");
                     assert!(
                         value.currencies.is_none() && value.coins.is_none(),

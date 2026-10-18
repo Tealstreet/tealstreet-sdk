@@ -471,8 +471,7 @@ impl ApexOmniExchange {
                     o.info
                         .as_ref()
                         .and_then(|v| v.get("id"))
-                        .and_then(|v| v.as_str())
-                        == Some(base_id)
+                        .is_some_and(|value| value.text_equals(base_id))
                 })
                 .cloned()
                 .ok_or_else(|| failure(format!("Base order {base_id} not found")))?;

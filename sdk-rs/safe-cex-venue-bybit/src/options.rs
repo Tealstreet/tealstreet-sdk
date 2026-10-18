@@ -89,7 +89,7 @@ pub fn map_bybit_option_instrument(raw: &Value) -> Result<Option<Market>, String
         is_spot: None,
         is_perpetual: None,
         is_read_only: None,
-        info: Some(raw.clone()),
+        info: Some(raw.clone().into()),
         taker_fee: None,
         maker_fee: None,
     }))
