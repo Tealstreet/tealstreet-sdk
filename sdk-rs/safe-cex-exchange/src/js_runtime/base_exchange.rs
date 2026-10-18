@@ -286,16 +286,7 @@ pub fn create(
             "emitAndLogError",
             Js::function("emitAndLogError", move |_, a| {
                 let error = arg(&a, 0);
-                let input = match &error {
-                    Js::Undefined => ExchangeErrorInput::Missing,
-                    Js::String(s) => ExchangeErrorInput::Message(String::from_utf16_lossy(s)),
-                    Js::Object(o) if o.class == "Error" || o.class == "AxiosError" => {
-                        ExchangeErrorInput::Error(Box::new(
-                            Thrown::new(error.clone()).to_exchange_error(),
-                        ))
-                    }
-                    other => ExchangeErrorInput::Raw(to_json(other)?),
-                };
+                let input = ExchangeErrorInput::Raw(error);
                 let msg = arg(&a, 1);
                 let msg = if msg.is_undefined() {
                     None

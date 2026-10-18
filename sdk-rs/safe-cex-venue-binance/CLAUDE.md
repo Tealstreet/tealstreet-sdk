@@ -526,3 +526,13 @@ fetch and Store refresh. Raw REST helpers retain their source-owned values.
 Native depth application converts coercion failures through ExchangeError::from,
 retaining the source error name and cause. The production socket regression covers
 all three families, subsequent valid deltas and sequence-gap snapshot recovery.
+
+The constructed ticker census in `private_classes --features native` uses actual
+NativeImports and ExchangeOwner/PublicSocket dispatch for all three families.
+Futures and PM each cover80 field-independent packed frames through market and
+book sockets; Spot covers48. All native numeric fields compare by bits against
+the constructed maintained TS exchanges and DefaultStores after finite resets,
+with distinct good rows surrounding malformed input. The shared control runner
+misroutes the live last-price publication and requires all three family tests
+to compile and fail, then all three pass after exact restoration. Default-feature
+filtered runs cannot execute these native-host witnesses.

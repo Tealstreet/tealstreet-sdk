@@ -6,14 +6,20 @@ import { PositionMode } from '../../types';
 import { markBaseCapabilityFallback } from '../base';
 import { BybitExchange } from './bybit.exchange';
 import { getBybitResponseMeta } from './bybit.response';
-import { ENDPOINTS, HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } from './bybit.types';
+import {
+  ENDPOINTS,
+  HYROTRADER_PROD_URL,
+  HYROTRADER_PROD_WS_URL,
+  HYROTRADER_SIMULATOR_URL,
+  HYROTRADER_SIMULATOR_WS_URL,
+} from './bybit.types';
 import { HyroOrderRecovery, hyroSubmissionKey } from './hyrotrader.order-recovery';
 import { HyroPrivateWebsocket } from './hyrotrader.ws-private';
 
 export class HyrotraderExchange extends BybitExchange {
   // Order recovery re-mints orderLinkId after a reject, so a caller ID could be rewritten.
   protected readonly clientOrderIdRule = undefined;
-  isDemo = true;
+  isDemo = false;
   positionMode = PositionMode.OneWay;
   privateWebsocket = new HyroPrivateWebsocket(this);
   private snapshotVersion = 0;
@@ -404,6 +410,7 @@ export class HyrotraderExchange extends BybitExchange {
 
   constructor(...args: ConstructorParameters<typeof BybitExchange>) {
     super(...args);
+    this.isDemo = this.hyrotraderMode() === 'demo';
     const disposeBybit = this.dispose;
     this.dispose = () => {
       this.orderRecovery.dispose();
@@ -421,29 +428,64 @@ export class HyrotraderExchange extends BybitExchange {
     return ['linear'];
   }
 
+  private hyrotraderMode() {
+    return this.options.extra?.hyrotraderMode === 'demo' ? 'demo' : 'production';
+  }
+
+  private getConfiguredUrls() {
+    const simulator = {
+      label: 'simulator',
+      rest: HYROTRADER_SIMULATOR_URL,
+      ws: HYROTRADER_SIMULATOR_WS_URL,
+    };
+    if (this.hyrotraderMode() === 'demo') return simulator;
+
+    const production = {
+      label: 'production',
+      rest: HYROTRADER_PROD_URL,
+      ws: HYROTRADER_PROD_WS_URL,
+    };
+    if (production.rest.livenet || production.rest.testnet) return production;
+
+    // V1 user-pasted challenge keys are still simulator-backed until Hyro's
+    // production HTTPS/WSS origin is available. Keep the account classified as
+    // production (`isDemo = false`) while routing it to the configured simulator
+    // host; only bundled demo credentials are gated by `hyrotraderDemo`.
+    if (simulator.rest.livenet || simulator.rest.testnet) return simulator;
+
+    return production;
+  }
+
   getBybitRestBaseUrl(network: 'livenet' | 'testnet') {
-    const baseUrl = HYROTRADER_SIMULATOR_URL[network];
+    const config = this.getConfiguredUrls();
+    const baseUrl = config.rest[network];
     if (!baseUrl) {
-      throw new Error('HyroTrader simulator REST URL is not configured');
+      const hint =
+        this.hyrotraderMode() === 'production'
+          ? ' Set NEXT_PUBLIC_HYROTRADER_PROD_REST_URL, or NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL while v1 is simulator-backed.'
+          : '';
+      throw new Error(`HyroTrader ${config.label} REST URL is not configured.${hint}`);
     }
     return baseUrl;
   }
 
   getBybitPublicWsUrl(category: 'linear' | 'inverse', network: 'livenet' | 'testnet') {
     if (category !== 'linear') {
-      throw new Error('HyroTrader simulator only supports linear public WebSocket data');
+      throw new Error('HyroTrader only supports linear public WebSocket data');
     }
-    const wsUrl = HYROTRADER_SIMULATOR_WS_URL.public.linear[network];
+    const config = this.getConfiguredUrls();
+    const wsUrl = config.ws.public.linear[network];
     if (!wsUrl) {
-      throw new Error('HyroTrader simulator public WebSocket URL is not configured');
+      throw new Error(`HyroTrader ${config.label} public WebSocket URL is not configured`);
     }
     return wsUrl;
   }
 
   getBybitPrivateWsUrl(network: 'livenet' | 'testnet') {
-    const wsUrl = HYROTRADER_SIMULATOR_WS_URL.private[network];
+    const config = this.getConfiguredUrls();
+    const wsUrl = config.ws.private[network];
     if (!wsUrl) {
-      throw new Error('HyroTrader simulator private WebSocket URL is not configured');
+      throw new Error(`HyroTrader ${config.label} private WebSocket URL is not configured`);
     }
     return wsUrl;
   }
@@ -463,6 +505,22 @@ export class HyrotraderExchange extends BybitExchange {
   }
 
   protected requiresOrderLinkId() {
+    return true;
+  }
+
+  // HyroTrader rides a simulator-backed private WebSocket for both the shared
+  // `/hyrotrader-demo` key and user-pasted prod challenge keys. The private WS
+  // backpressure/delivery behaviour has not yet been independently verified
+  // against Bybit-mainnet reliability (see the `probe-coverage` close-out in
+  // `.cursor/plans/hyrotrader-audit_757b4e5d.plan.md`), so we keep the local
+  // REST order-lifecycle fallback engaged in both modes. The base class gates
+  // this on `isDemo`, which this subclass now derives from `hyrotraderMode`
+  // for grading/history/UI purposes — but WS reliability is a transport
+  // property of the simulator backend, not of the account mode, so we
+  // override explicitly here. Flip to `super.shouldUseLocalRestOrderLifecycleFallback()`
+  // once the probe confirms the simulator's private WS delivers placement,
+  // cancel, and amend frames immediately after the REST ack.
+  protected shouldUseLocalRestOrderLifecycleFallback(): boolean {
     return true;
   }
 }

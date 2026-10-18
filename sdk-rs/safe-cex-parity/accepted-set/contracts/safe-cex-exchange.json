@@ -20605,67 +20605,6 @@
     "evidence": "safe-cex-exchange/src/client_order_id.rs::with_replacement_client_order_id; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Attaches an unparsed caller identifier to an existing Vec<String>. It performs no syntax admission or decoding and carries no one-use validation token."
   },
-  "safe_cex_exchange::error_reporting::raw_formatted_context": {
-    "category": "non-decoder",
-    "api": {
-      "kind": "function",
-      "name": "raw_formatted_context",
-      "signature": {
-        "inputs": [
-          [
-            "error",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "serde_json::value::Value",
-                    "args": null
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "core::result::Result",
-            "args": {
-              "angle_bracketed": {
-                "args": [
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                        "args": null
-                      }
-                    }
-                  },
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::runtime::ExchangeError",
-                        "args": null
-                      }
-                    }
-                  }
-                ],
-                "constraints": []
-              }
-            }
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "evidence": "safe-cex-exchange/EMITTER_CONTRACT_EVIDENCE.md; actual compiler declaration and scoped native/source emitter/formatter witnesses.",
-    "reason": "Projects already retained error JSON into outbound diagnostic fields and header names. This is the diagnostic formatter, not an input parser or a typed error decoder."
-  },
   "safe_cex_exchange::js_runtime::base_exchange::secondary_options": {
     "category": "non-decoder",
     "api": {

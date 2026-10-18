@@ -680,3 +680,8 @@ their separate `post_payload` capability. Do not serialize native emitter values
 before invoking the required DATA post.
 
 OHLCV fetch and subscription requests decode the shared AnyTimeframe interval. The exact 27 source literals are checked against the live type AST; both real handlers forward every interval, and native listeners must deliver each candle. Monthly, extended and seconds intervals must never disappear at worker decoding.
+
+Constructed AsterDEX private-frame/worker emitter witnesses live in
+`../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
+The venue retains private facade tests without importing the worker crate. Both paths preserve
+variadic event arguments; the real fill bridge retains Infinity and object identity.

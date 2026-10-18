@@ -4,6 +4,7 @@ export const ALLOWED_ORIGINS = [
   'https://v3.tealstreet.io',
   'https://preview.tealstreet.io',
   'https://disrupt.trade',
+  'https://app.disrupt.trade',
   'http://localhost:3000',
   'http://localhost:8123',
 ] as const;
