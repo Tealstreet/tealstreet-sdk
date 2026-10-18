@@ -422,7 +422,7 @@ fn native_market_info_decode_does_not_expand_each_utf16_unit_into_a_value() {
             text.len()
         );
         assert!(
-            allocated < text.len() * 12,
+            allocated < text.len() * 5,
             "retained info expanded into per-unit value nodes: {allocated} allocated bytes for {} input bytes",
             text.len()
         );

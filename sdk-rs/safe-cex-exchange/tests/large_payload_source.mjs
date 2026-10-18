@@ -78,8 +78,11 @@ for (const venue of ['bybit', 'okx', 'paradex']) {
   try {
     markets = await exchange.fetchMarkets();
     const fetchMs=performance.now()-start,fetchCpuMs=cpu()-startCpu;
-    timing={fetchMs,fetchCpuMs,parseMs,parseCpuMs,mapMs:fetchMs-waitMs,mapCpuMs:fetchCpuMs-waitCpuMs,parseCount};
+    // GET intervals include real Axios parsing and transport waits.
+    // The residual includes mapping, source bookkeeping and log construction.
+    timing={fetchMs,fetchCpuMs,parseMs,parseCpuMs,sourceActiveMs:fetchMs-waitMs,sourceActiveCpuMs:fetchCpuMs-waitCpuMs,parseCount};
   } finally { JSON.parse=originalParse; exchange.xhr.get=get; }
+  assert.equal(waiting,0,'all measured requests settled before the source result');
   await exchange.dispose();
   server.closeAllConnections(); await new Promise(r=>server.close(r));
   assert.deepEqual(failures, []);
@@ -88,8 +91,8 @@ for (const venue of ['bybit', 'okx', 'paradex']) {
   assert.equal(markets.length, {bybit:8110,okx:509,paradex:66}[venue], 'complete recorded market census');
   if (venue==='bybit') assert.deepEqual(native(markets),native(bybit),'complete captured Bybit output');
   writeFileSync(`${output}/${venue}.markets.json`,JSON.stringify(native(markets)));
-  profiles.push({name:venue,count:markets.length,marketsFile:`${output}/${venue}.markets.json`,rawFiles});
-  console.log('SOURCE_PAYLOAD_RESULT',JSON.stringify({venue,markets:markets.length,...timing,parseMapMs:timing.parseMs+timing.mapMs,parseMapCpuMs:timing.parseCpuMs+timing.mapCpuMs,requests}));
+  profiles.push({name:venue,count:markets.length,marketsFile:`${output}/${venue}.markets.json`,rawFiles,sourceCpuMs:timing.parseCpuMs+timing.sourceActiveCpuMs,sourceWallMs:timing.parseMs+timing.sourceActiveMs});
+  console.log('SOURCE_PAYLOAD_RESULT',JSON.stringify({venue,markets:markets.length,...timing,parseMapMs:timing.parseMs+timing.sourceActiveMs,parseMapCpuMs:timing.parseCpuMs+timing.sourceActiveCpuMs,requests}));
 }
 writeFileSync(`${output}/manifest.json`,JSON.stringify(profiles,null,2));
 console.log({bybit:bybit.length,manifest:`${output}/manifest.json`});

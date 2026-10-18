@@ -15,6 +15,8 @@ struct Profile {
     count: usize,
     markets_file: String,
     raw_files: Vec<String>,
+    source_cpu_ms: f64,
+    source_wall_ms: f64,
 }
 
 fn decode(value: Input) -> Input {
@@ -130,7 +132,10 @@ pub(super) fn recorded() {
     let manifest = std::env::var("LARGE_PAYLOAD_MANIFEST").expect("recorded fixture manifest");
     let output = std::env::var("LARGE_PAYLOAD_OUTPUT").expect("observation output prefix");
     let profiles: Vec<Profile> = serde_json::from_slice(&std::fs::read(manifest).unwrap()).unwrap();
+    let mut over_budget = Vec::new();
     for profile in profiles {
+        assert!(profile.source_cpu_ms.is_finite() && profile.source_cpu_ms > 0.0);
+        assert!(profile.source_wall_ms.is_finite() && profile.source_wall_ms > 0.0);
         let raw: Vec<Vec<u16>> = profile
             .raw_files
             .iter()
@@ -185,6 +190,13 @@ pub(super) fn recorded() {
             .json_stringify()
             .unwrap()
             .unwrap();
+        let decomposed = encode(to_retained_input(&from_typed(&decoded).unwrap()).unwrap())
+            .json_stringify()
+            .unwrap()
+            .unwrap();
+        assert_eq!(decomposed, observation, "complete decomposed native output");
+        let cpu_ratio = (parse_cpu_ms + decode_cpu_ms) / profile.source_cpu_ms;
+        let wall_ratio = (parse_ms + decode_ms) / profile.source_wall_ms;
         std::fs::write(
             format!("{output}.{}.native.json", profile.name),
             observation,
@@ -192,7 +204,14 @@ pub(super) fn recorded() {
         .unwrap();
         eprintln!(
             "PAYLOAD_RESULT {}",
-            serde_json::json!({"venue":profile.name,"count":markets.len(),"rawBytes":profile.raw_files.iter().map(|p|std::fs::metadata(p).unwrap().len()).sum::<u64>(),"parseMs":parse_ms,"decodeMs":decode_ms,"parseCpuMs":parse_cpu_ms,"decodeCpuMs":decode_cpu_ms,"captureMs":capture_ms,"captureCpuMs":capture_cpu_ms,"nativeDecodeMs":native_decode_ms,"nativeDecodeCpuMs":native_decode_cpu_ms,"rawHash":format!("{raw_hash:016x}")})
+            serde_json::json!({"venue":profile.name,"count":markets.len(),"rawBytes":profile.raw_files.iter().map(|p|std::fs::metadata(p).unwrap().len()).sum::<u64>(),"parseMs":parse_ms,"decodeMs":decode_ms,"parseCpuMs":parse_cpu_ms,"decodeCpuMs":decode_cpu_ms,"captureMs":capture_ms,"captureCpuMs":capture_cpu_ms,"nativeDecodeMs":native_decode_ms,"nativeDecodeCpuMs":native_decode_cpu_ms,"sourceCpuMs":profile.source_cpu_ms,"sourceWallMs":profile.source_wall_ms,"cpuRatio":cpu_ratio,"wallRatio":wall_ratio,"debugAssertions":cfg!(debug_assertions),"rawHash":format!("{raw_hash:016x}")})
         );
+        if !cfg!(debug_assertions) && cpu_ratio > 2.0 {
+            over_budget.push(format!("{}: {cpu_ratio:.3}x source CPU", profile.name));
+        }
     }
+    assert!(
+        over_budget.is_empty(),
+        "release payload boundary exceeds source budget: {over_budget:?}"
+    );
 }
