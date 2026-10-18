@@ -973,7 +973,7 @@ diagnostics are compared directly rather than normalized to a custom string.
 The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
-DIVERGENCE_FIX_AUDIT.md records 20 reconciled rows and the remaining 17-row module split.
+DIVERGENCE_FIX_AUDIT.md records 27 reconciled rows and ten remaining delegated rows.
 
 Delegated history audit rows 6/16: keep the order-history mapper synchronous and
 raw/source-equal. At the final live historical-fills result, shared strict-output
@@ -999,3 +999,9 @@ getter failures reject the original Promise. Position-mode mapping binds the
 mapper once and uses native Array.map with row/index/original-array arguments.
 Run the receiver tests, execution_guards source target and
 `scripts/position-index-controls.py`; the latter restores every compiled fault.
+
+The retained FIX-audit receiver batch covers Spot startup warnings and market
+metadata plus primary/Spot ticker parsing without a whole-input JSON projection.
+`retained_audit_*` observes held startup, original cache/lookup identity, UTF-16,
+nonfinite bits and visible cache rejection. Placement extension refusal stays
+strictly input-only; malformed market strings remain row-only decision3 refusals.

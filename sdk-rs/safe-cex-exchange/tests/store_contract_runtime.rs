@@ -17,7 +17,11 @@ fn snapshot_health_flags_and_leverage_keep_native_identity() {
         }
         let update: StoreUpdate=serde_json::from_value(json!({"socketHealth":health,"fetchedLeverage":{"identity":{"buyLeverage":11,"sellLeverage":23}}})).unwrap();
         Store::update(&real, update, false).unwrap();
-        let actual = Store::socket_health(&real).unwrap().unwrap();
+        let actual = Store::socket_health(&real)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .unwrap();
         for flag in flags {
             assert_eq!(
                 actual[flag],
@@ -35,4 +39,84 @@ fn snapshot_health_flags_and_leverage_keep_native_identity() {
             "STORE-NATIVE leverage side identity"
         );
     }
+}
+
+#[test]
+fn socket_health_retains_undefined_through_typed_notifications_and_payloads() {
+    use safe_cex_exchange::{native_store::DefaultStore, store_payload::sanitize_for_post_message};
+    use safe_cex_types::retained_json::RetainedJsonInput as Native;
+    use std::{cell::RefCell, rc::Rc};
+    let store = DefaultStore::new();
+    let delivered = Rc::new(RefCell::new(Vec::new()));
+    let capture = delivered.clone();
+    let _subscription = Store::subscribe(
+        &store,
+        Box::new(move |data, _| {
+            capture
+                .borrow_mut()
+                .push(data.socket_health.clone().unwrap());
+            Ok(())
+        }),
+    );
+    let field = |name: &str, value| (name.encode_utf16().collect(), value);
+    Store::update_socket_health(
+        &store,
+        &Native::Object(vec![
+            field("kept", Native::Bool(true)),
+            field("privateCloseCode", Native::Float(1006.0)),
+        ]),
+    )
+    .unwrap();
+    Store::update_socket_health(
+        &store,
+        &Native::Object(vec![
+            field("privateCloseCode", Native::Undefined),
+            field("privateLastMessage", Native::Undefined),
+            field("publicCloseCode", Native::Undefined),
+        ]),
+    )
+    .unwrap();
+    let snapshot = Store::serialize(&store).unwrap();
+    let health = snapshot.socket_health.as_ref().unwrap();
+    assert_eq!(health.get("kept"), Some(&Native::Bool(true)));
+    for key in ["privateCloseCode", "privateLastMessage", "publicCloseCode"] {
+        assert_eq!(
+            health.get(key),
+            Some(&Native::Undefined),
+            "snapshot owns {key}"
+        );
+    }
+    assert_eq!(delivered.borrow().last(), Some(health));
+    assert_eq!(
+        sanitize_for_post_message(&snapshot, false, false)
+            .socket_health
+            .as_ref(),
+        Some(health)
+    );
+    assert_eq!(
+        serde_json::to_value(health).unwrap(),
+        json!({
+            "publicHealthy":false,"privateHealthy":false,
+            "publicInitialized":false,"privateInitialized":false,"kept":true
+        })
+    );
+    let names: Vec<_> = health
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, _)| String::from_utf16(name).unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "publicHealthy",
+            "privateHealthy",
+            "publicInitialized",
+            "privateInitialized",
+            "kept",
+            "privateCloseCode",
+            "privateLastMessage",
+            "publicCloseCode"
+        ]
+    );
 }

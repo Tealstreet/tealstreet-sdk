@@ -239,7 +239,7 @@ pub struct StoreData {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "socketHealth")]
-    pub socket_health: Option<Value>,
+    pub socket_health: Option<crate::retained_json::RetainedJsonInput>,
 }
 
 // Private wire companions keep serde metadata without exposing permissive decoders.
@@ -860,7 +860,7 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         #[serde(rename = "socketHealth")]
-        socket_health: Option<Value>,
+        socket_health: Option<crate::retained_json::RetainedJsonInput>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::StoreData {
