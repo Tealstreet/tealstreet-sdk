@@ -54563,6 +54563,141 @@
         "api": {
           "kind": "trait",
           "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_identifier",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior. The same direct native method now additionally observes short ASCII, boundary-length, long, Unicode and lone-unit keys; bool dispatch controls remain unchanged.",
+        "call": "if $value.is_boolean(){struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}else{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=Vec<u16>;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native field identifier\")}fn visit_str<E:serde::de::Error>(self,text:&str)->Result<Self::Value,E>{Ok(text.encode_utf16().collect())}fn visit_string<E:serde::de::Error>(self,text:String)->Result<Self::Value,E>{self.visit_str(&text)}}let units:Vec<u16>=serde_json::from_value($value.clone()).unwrap();let native=$type(super::Input::Text(units),super::NativeMode::Key);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(units)=>serde_json::json!({\"ok\":true,\"units\":units}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {"input": [65], "output": {"ok": true, "units": [65]}},
+          {"input": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120], "output": {"ok": true, "units": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]}},
+          {"input": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120], "output": {"ok": true, "units": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]}},
+          {"input": [233], "output": {"ok": true, "units": [233]}},
+          {"input": [55296], "output": {"ok": true, "units": [65533]}}
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
           "name": "deserialize_bool",
           "signature": {
             "inputs": [
@@ -56710,150 +56845,6 @@
               "flag": false
             }
           }
-        ]
-      },
-      {
-        "api": {
-          "kind": "trait",
-          "trait": "serde_core::de::Deserializer",
-          "name": "deserialize_identifier",
-          "signature": {
-            "inputs": [
-              [
-                "self",
-                {
-                  "generic": "Self"
-                }
-              ],
-              [
-                "visitor",
-                {
-                  "generic": "V"
-                }
-              ]
-            ],
-            "output": {
-              "resolved_path": {
-                "path": "core::result::Result",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Value",
-                            "args": null,
-                            "self_type": {
-                              "generic": "V"
-                            },
-                            "trait": {
-                              "path": "",
-                              "args": null
-                            }
-                          }
-                        }
-                      },
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Error",
-                            "args": null,
-                            "self_type": {
-                              "generic": "Self"
-                            },
-                            "trait": {
-                              "path": "serde_core::de::Deserializer",
-                              "args": {
-                                "angle_bracketed": {
-                                  "args": [
-                                    {
-                                      "lifetime": "'de"
-                                    }
-                                  ],
-                                  "constraints": []
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
-                  }
-                }
-              }
-            },
-            "is_c_variadic": false
-          },
-          "generics": {
-            "params": [
-              {
-                "name": "V",
-                "kind": {
-                  "type": {
-                    "bounds": [],
-                    "default": null,
-                    "is_synthetic": false
-                  }
-                }
-              }
-            ],
-            "where_predicates": [
-              {
-                "bound_predicate": {
-                  "type": {
-                    "generic": "V"
-                  },
-                  "bounds": [
-                    {
-                      "trait_bound": {
-                        "trait": {
-                          "path": "serde_core::de::Visitor",
-                          "args": {
-                            "angle_bracketed": {
-                              "args": [
-                                {
-                                  "lifetime": "'de"
-                                }
-                              ],
-                              "constraints": []
-                            }
-                          }
-                        },
-                        "generic_params": [],
-                        "modifier": "none"
-                      }
-                    }
-                  ],
-                  "generic_params": []
-                }
-              }
-            ]
-          }
-        },
-        "input": "observed",
-        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior. The same direct native method now additionally observes short ASCII, boundary-length, long, Unicode and lone-unit keys; bool dispatch controls remain unchanged.",
-        "call": "{if $value.is_boolean(){struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}else{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=Vec<u16>;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native field identifier\")}fn visit_str<E:serde::de::Error>(self,text:&str)->Result<Self::Value,E>{Ok(text.encode_utf16().collect())}fn visit_string<E:serde::de::Error>(self,text:String)->Result<Self::Value,E>{self.visit_str(&text)}}let units:Vec<u16>=serde_json::from_value($value.clone()).unwrap();let native=$type(super::Input::Text(units),super::NativeMode::Key);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(units)=>serde_json::json!({\"ok\":true,\"units\":units}),Err(_)=>serde_json::json!({\"ok\":false})}}}",
-        "cases": [
-          {
-            "input": true,
-            "output": {
-              "ok": true,
-              "flag": true
-            }
-          },
-          {
-            "input": false,
-            "output": {
-              "ok": true,
-              "flag": false
-            }
-          },
-          {"input": [65], "output": {"ok": true, "units": [65]}},
-          {"input": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120], "output": {"ok": true, "units": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]}},
-          {"input": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120], "output": {"ok": true, "units": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]}},
-          {"input": [233], "output": {"ok": true, "units": [233]}},
-          {"input": [55296], "output": {"ok": true, "units": [65533]}}
         ]
       },
       {
