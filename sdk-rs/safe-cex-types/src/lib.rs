@@ -1682,7 +1682,11 @@ pub struct ExchangeAccountConfig {
     pub proxy_region: Option<String>,
     /// @ts-mutable
     #[serde(rename = "hyrotraderDemo")]
-    #[serde(default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub hyrotrader_demo: Option<bool>,
     /// @ts-mutable
     #[serde(rename = "useExtensionDirect")]
@@ -3124,16 +3128,16 @@ mod strict_codecs {
         ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
         ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
         ExchangeOptionsExternalPublicDataVariant1Type, ExchangeOptionsExtra,
-        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode, ExchangeOptionsExtraKucoinBroker,
-        ExchangeOptionsExtraLighterBuilderFeeMode, ExchangeOptionsHyperliquidBuilder,
-        ExchangeOptionsTuning, ExecutionPositionSide, IncomeCategory, MarginType, MarketLimits,
-        MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, ModelField,
-        OptionGreeks, OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, Order,
-        OrderBookOrders, OrderExtra, OrderRejectReason, OrderSide, OrderStatus,
-        OrderStopTriggerType, OrderTimeInForce, OrderType, PayloadSignerCapability, PositionExtra,
-        PositionMode, PositionOption, PositionSide, PublicDataSourceCapability,
-        RemoteSignerCapability, Timeframe, TransportCapability, True, UpdateOrderOptsUpdate,
-        deserialize_present,
+        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode,
+        ExchangeOptionsExtraKucoinBroker, ExchangeOptionsExtraLighterBuilderFeeMode,
+        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, ExecutionPositionSide,
+        IncomeCategory, MarginType, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage,
+        MarketLimitsPrice, MarketPrecision, ModelField, OptionGreeks, OptionRight, OptionTerms,
+        OptionTermsSettlement, OptionTermsStyle, Order, OrderBookOrders, OrderExtra,
+        OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
+        OrderType, PayloadSignerCapability, PositionExtra, PositionMode, PositionOption,
+        PositionSide, PublicDataSourceCapability, RemoteSignerCapability, Timeframe,
+        TransportCapability, True, UpdateOrderOptsUpdate, deserialize_present,
     };
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::OrderStatus")]
@@ -5092,7 +5096,11 @@ mod strict_codecs {
         )]
         proxy_region: Option<String>,
         #[serde(rename = "hyrotraderDemo")]
-        #[serde(default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
         hyrotrader_demo: Option<bool>,
         #[serde(rename = "useExtensionDirect")]
         #[serde(
