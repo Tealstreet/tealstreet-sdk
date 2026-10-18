@@ -594,7 +594,7 @@ fn actual_typescript_mapper_batch() {
     let mut raw = base();
     let order = map_order(raw.as_object().unwrap(), |ms| ms).unwrap();
     raw["extra"]["marker"] = json!("changed-after-map");
-    assert_eq!(
+    assert!(
         order
             .info
             .as_ref()
@@ -604,7 +604,6 @@ fn actual_typescript_mapper_batch() {
             .get("marker")
             .unwrap()
             .text_equals("raw-extra"),
-        true,
         "order_native_owned_info"
     );
     assert_eq!(

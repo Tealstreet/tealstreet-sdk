@@ -265,7 +265,7 @@ pub struct StoreData {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "zkLinkConfig")]
-    pub zk_link_config: Option<Value>,
+    pub zk_link_config: Option<crate::retained_json::RetainedJsonInput>,
     #[serde(
         default,
         deserialize_with = "crate::deserialize_present",
@@ -878,7 +878,7 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         #[serde(rename = "zkLinkConfig")]
-        zk_link_config: Option<Value>,
+        zk_link_config: Option<crate::retained_json::RetainedJsonInput>,
         #[serde(
             default,
             deserialize_with = "crate::deserialize_present",

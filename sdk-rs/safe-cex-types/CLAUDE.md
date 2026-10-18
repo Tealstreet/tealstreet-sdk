@@ -219,3 +219,10 @@ non-booleans. The real native/Store presence target covers 48 actual-source
 upsert/patch combinations. BingX's real amendment witness compares the complete
 signed request against actual source execution and requires undefined reduceOnly
 to be omitted from the wire and HMAC preimage.
+
+Shared model `info` uses canonical `RetainedJsonInput`: Option retains absence on
+Market/Balance/Ticker, and ModelField retains presence on Order/Position. Capture
+native numbers, undefined and UTF16 before serialization; `into_value` is a real
+JSON boundary, never an intermediate model conversion. The native Serde marker
+and InfoRecord codecs preserve own undefined without exposing marker objects in
+wire JSON. The single retained JSON writer lives below Num in this crate.

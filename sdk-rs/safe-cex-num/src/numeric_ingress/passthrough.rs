@@ -34,21 +34,6 @@ impl JsNumberPassthrough for safe_cex_types::ModelField<Value> {
     fn check_number_passthrough(&self) {}
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn native_nan_passthrough_is_refused_before_json_construction() {
-        let error = safe_cex_types::retained_json::RetainedJsonInput::Float(f64::NAN)
-            .into_value()
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("numeric passthrough refuses NaN JSON")
-        );
-    }
-}
-
 impl private::Sealed for safe_cex_types::retained_json::RetainedJsonInput {}
 impl private::Sealed for Option<safe_cex_types::retained_json::RetainedJsonInput> {}
 impl private::Sealed
@@ -65,4 +50,19 @@ impl JsNumberPassthrough
     for safe_cex_types::ModelField<safe_cex_types::retained_json::RetainedJsonInput>
 {
     fn check_number_passthrough(&self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn native_nan_passthrough_is_refused_before_json_construction() {
+        let error = safe_cex_types::retained_json::RetainedJsonInput::Float(f64::NAN)
+            .into_value()
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("numeric passthrough refuses NaN JSON")
+        );
+    }
 }

@@ -263,3 +263,25 @@ fn retained_info_coercions_read_the_native_store_value() {
         }
     }
 }
+
+#[test]
+fn retained_config_uses_the_production_store_update_without_json_copy() {
+    let cases = source()["configurations"].as_array().unwrap();
+    assert_eq!(cases.len(), 13, "native opaque config source floor");
+    for case in cases {
+        let native = Rc::new(DefaultStore::new());
+        let facade = store::facade(native.clone());
+        facade
+            .call_method(
+                "update",
+                vec![Js::object(vec![("zkLinkConfig", input(&case["input"]))])],
+            )
+            .unwrap();
+        let config = native.zk_link_config().expect("native config committed");
+        observe(&from_typed(&*config).unwrap(), &case["stored"]);
+        assert!(
+            native.serialize().zk_link_config.is_none(),
+            "source snapshot omits config"
+        );
+    }
+}

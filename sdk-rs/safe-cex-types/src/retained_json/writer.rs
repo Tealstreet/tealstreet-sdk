@@ -1,7 +1,8 @@
+use super::RetainedJsonInput;
 use crate::js_coercion::{JsCoercionError, js_number_string};
 use std::collections::HashMap;
 
-impl super::RetainedJsonInput {
+impl RetainedJsonInput {
     pub fn json_stringify(&self) -> Result<Option<String>, JsCoercionError> {
         if matches!(self, Self::Undefined) {
             return Ok(None);

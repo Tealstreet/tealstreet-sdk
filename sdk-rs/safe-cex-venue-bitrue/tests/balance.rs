@@ -85,7 +85,7 @@ fn balance_matches_actual_typescript() {
         let input = js_from_str::<OpaqueValue>(row["raw"].as_str().unwrap()).unwrap();
         assert_eq!(row["result"]["type"], "balance");
         let mut warnings = Vec::new();
-        let balance = parse_balance(Some(&input.value.clone().into()), &stored, |warning| {
+        let balance = parse_balance(Some(&input.value), &stored, |warning| {
             warnings.push(warning.to_owned())
         })
         .unwrap();
