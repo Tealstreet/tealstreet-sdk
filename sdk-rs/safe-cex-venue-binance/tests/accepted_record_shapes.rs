@@ -6,6 +6,61 @@ use safe_cex_venue_binance::{binance_types as futures, binancepm_types as pm};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+#[test]
+fn futures_risk_vector_alias_preserves_native_rows() {
+    let raw = r#"[{"symbol":"BTCUSDT","positionAmt":"2","entryPrice":"3","markPrice":"4","unRealizedProfit":"5","liquidationPrice":"6","leverage":"7","maxNotionalValue":"8","marginType":"cross","isolatedMargin":"10","isAutoAddMargin":"false","positionSide":"LONG","notional":"13","isolatedWallet":"14","updateTime":-0,"isolated":false,"adl":-0,"adlQuantile":18.5,"initialMargin":"19","positionInitialMargin":"20","openOrderInitialMargin":"21"},{"symbol":"ADAUSDT","positionAmt":"-22","entryPrice":"23","markPrice":"24","unRealizedProfit":"25","liquidationPrice":"26","isolatedMargin":"30","positionSide":"SHORT","notional":"33","isolatedWallet":"34","updateTime":2}]"#;
+    let rows = serde_json::from_str::<futures::GetPositionRiskResponse>(raw)
+        .expect("actual Futures vector alias decodes source rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!((&*rows[0].symbol, &*rows[1].symbol), ("BTCUSDT", "ADAUSDT"));
+    assert_eq!(
+        (&*rows[0].position_amt, &*rows[1].position_amt),
+        ("2", "-22")
+    );
+    assert_eq!(
+        (&*rows[0].position_side, &*rows[1].position_side),
+        ("LONG", "SHORT")
+    );
+    assert_eq!(rows[0].update_time.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(rows[0].adl.unwrap().to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(rows[0].leverage.as_deref(), Some("7"));
+    assert_eq!(rows[1].leverage, None);
+    assert_eq!(rows[1].adl, None);
+    assert!(
+        serde_json::from_str::<futures::GetPositionRiskResponse>("[]")
+            .unwrap()
+            .is_empty()
+    );
+    for forbidden in ["{}", "null", "[{}]", "[null]", "[[]]"] {
+        assert!(serde_json::from_str::<futures::GetPositionRiskResponse>(forbidden).is_err());
+    }
+}
+
+#[test]
+fn pm_risk_vector_alias_preserves_native_rows() {
+    let raw = r#"[{"symbol":"ETHUSDT","positionAmt":"22","entryPrice":"23","markPrice":"24","unRealizedProfit":"25","liquidationPrice":"26","leverage":"27","maxNotionalValue":"28","marginType":"isolated","isolatedMargin":"30","isAutoAddMargin":"true","positionSide":"SHORT","notional":"33","isolatedWallet":"34","updateTime":-0,"isolated":true,"adlQuantile":-0},{"symbol":"BNBUSDT","positionAmt":"42","entryPrice":"43","markPrice":"44","unRealizedProfit":"45","liquidationPrice":"46","leverage":"47","maxNotionalValue":"48","marginType":"cross","isolatedMargin":"50","isAutoAddMargin":"false","positionSide":"LONG","notional":"53","isolatedWallet":"54","updateTime":7,"isolated":false,"adlQuantile":8}]"#;
+    let rows = serde_json::from_str::<pm::GetPositionRiskResponse>(raw)
+        .expect("actual PM vector alias decodes source rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!((&*rows[0].symbol, &*rows[1].symbol), ("ETHUSDT", "BNBUSDT"));
+    assert_eq!(
+        (&*rows[0].position_amt, &*rows[1].position_amt),
+        ("22", "42")
+    );
+    assert_eq!((&*rows[0].leverage, &*rows[1].leverage), ("27", "47"));
+    assert_eq!(rows[0].update_time.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(rows[0].adl_quantile.to_bits(), (-0.0_f64).to_bits());
+    assert!(!rows[1].isolated);
+    assert!(
+        serde_json::from_str::<pm::GetPositionRiskResponse>("[]")
+            .unwrap()
+            .is_empty()
+    );
+    for forbidden in ["{}", "null", "[{}]", "[null]", "[[]]"] {
+        assert!(serde_json::from_str::<pm::GetPositionRiskResponse>(forbidden).is_err());
+    }
+}
+
 fn decode<T: DeserializeOwned + Serialize + JsNumberOutput>(
     raw: &str,
     route: usize,
