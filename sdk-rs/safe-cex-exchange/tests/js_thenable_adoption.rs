@@ -202,10 +202,11 @@ async fn matrix(scope: Scope<()>, route: &'static str) {
             let observed = Rc::new(RefCell::new(None));
             let sink = observed.clone();
             let value = input.clone();
+            let await_runtime = runtime.clone();
             let driver = Promise::spawn(
                 &runtime,
                 Box::pin(async move {
-                    *sink.borrow_mut() = Some(await_js(value).await);
+                    *sink.borrow_mut() = Some(await_js(&await_runtime, value).await);
                     Ok(Js::Undefined)
                 }),
             );
@@ -372,26 +373,10 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                         })
                     }),
                 ]);
-                let iterable = Js::object(vec![]);
-                let seen = trace.clone();
-                scope
-                    .global("Object")
-                    .unwrap()
-                    .call_method(
-                        "defineProperty",
-                        vec![
-                            iterable.clone(),
-                            Js::SymbolIterator,
-                            Js::object(vec![(
-                                "value",
-                                Js::function("iterator", move |_, _| {
-                                    seen.borrow_mut().push("iterator".into());
-                                    Ok(iterator.clone())
-                                }),
-                            )]),
-                        ],
-                    )
-                    .unwrap();
+                let iterable = Js::array(vec![]).iterator().unwrap();
+                for name in ["next", "return"] {
+                    iterable.define(name, iterator.get(name).unwrap()).unwrap();
+                }
                 let Js::Promise(promise) = scope
                     .global("Promise")
                     .unwrap()
@@ -431,11 +416,12 @@ fn scalar_and_native_promise_await_keep_one_fifo_boundary() {
                     .call_method("resolve", vec![Js::Number(-0.)])
                     .unwrap()
             };
+            let await_runtime = runtime.clone();
             let body = Promise::spawn(
                 &runtime,
                 Box::pin(async move {
                     seen.borrow_mut().push("body".into());
-                    await_js(value).await?;
+                    await_js(&await_runtime, value).await?;
                     seen.borrow_mut().push("resumed".into());
                     Ok(Js::Undefined)
                 }),
@@ -496,12 +482,13 @@ fn await_and_async_return_preserve_engine_job_turns() {
                     }
                 };
                 let seen = trace.clone();
+                let await_runtime = runtime.clone();
                 let body = Promise::spawn(
                     &runtime,
                     Box::pin(async move {
                         seen.borrow_mut().push("body".into());
                         if route == "await" {
-                            await_js(value).await?;
+                            await_js(&await_runtime, value).await?;
                             seen.borrow_mut().push("resumed".into());
                             Ok(Js::Undefined)
                         } else {

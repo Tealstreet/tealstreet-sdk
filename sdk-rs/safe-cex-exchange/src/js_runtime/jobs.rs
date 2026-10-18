@@ -330,18 +330,3 @@ pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
     }
 }
 
-pub(super) async fn yield_current() {
-    let jobs = with_current(|current| current.borrow().clone());
-    if let Some((jobs, _)) = jobs {
-        let mut queued = false;
-        std::future::poll_fn(|cx| {
-            if queued {
-                return Poll::Ready(());
-            }
-            queued = true;
-            jobs.wake(cx.waker().clone());
-            Poll::Pending
-        })
-        .await;
-    }
-}

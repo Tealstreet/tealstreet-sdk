@@ -66,7 +66,8 @@
   for (const method of ['all', 'allSettled']) for (const abrupt of ['none', 'next', 'done', 'value', 'then']) {
     const trace = [], token = {unit:'\ud800'};
     let index = 0;
-    const iterable = { [Symbol.iterator]() { trace.push('iterator'); return {
+    const iterable = [][Symbol.iterator]();
+    Object.assign(iterable, {
       next() {
         const i = index++; trace.push(`next:${i}`);
         if (i === 1 && abrupt === 'next') throw token;
@@ -79,7 +80,7 @@
           }
         };
       }, return() {trace.push('return');return {};}
-    };}};
+    });
     const promise = Promise[method](iterable); trace.push('returned');
     let same = false;
     try { await promise; } catch(e) { same = e === token; }
