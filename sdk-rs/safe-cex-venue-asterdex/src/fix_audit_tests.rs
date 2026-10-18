@@ -363,6 +363,11 @@ fn lifecycle_probes_execute_the_maintained_whole_typescript_classes() {
         json!({"settled":true,"slot":false,"offset":0})
     );
     assert_eq!(value["delays"], json!([1_800_000, 300_000, 1000, 10_000]));
+    assert_eq!(value["interest"], json!(7));
+    assert_eq!(
+        value["repair"],
+        json!({"queued":true,"sent":1,"before":true,"after":false,"positions":0,"loaded":false})
+    );
     assert_eq!(
         value["signature"],
         json!({"name":"TypeError","sourceLeaksKey":true})
