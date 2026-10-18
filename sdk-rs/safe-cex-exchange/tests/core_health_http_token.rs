@@ -122,6 +122,42 @@ fn run<F: Future>(future: F) -> F::Output {
 }
 #[cfg(feature = "health")]
 #[test]
+fn health_spaced_api_key_and_hyro_auth_patterns_match_source() {
+    for (exchange, message, expected) in [
+        ("unknown", "API key is invalid.", ErrorCategory::AuthInvalid),
+        (
+            "hyrotrader",
+            "api\tkey is invalid",
+            ErrorCategory::AuthInvalid,
+        ),
+        ("hyrotrader", "retCode: 10003", ErrorCategory::AuthInvalid),
+        ("unknown", "retCode: 10003", ErrorCategory::Unknown),
+        ("hyrotrader", "order price 10003.5", ErrorCategory::Unknown),
+    ] {
+        let monitor = ExchangeHealthMonitor::new(
+            exchange,
+            ExchangeHealthMonitorOptions::default(),
+            Rc::new(Runtime::default()),
+        );
+        assert_eq!(
+            monitor.process_message(message, true),
+            Some(expected),
+            "{exchange}: {message}"
+        );
+        if expected == ErrorCategory::AuthInvalid {
+            assert!(monitor.has_auth_error());
+            assert_eq!(monitor.get_state().status, HealthStatus::Error);
+            assert_eq!(
+                monitor.get_state().last_error.unwrap().severity,
+                ErrorSeverity::Critical
+            );
+        } else {
+            assert!(!monitor.has_auth_error());
+        }
+    }
+}
+#[cfg(feature = "health")]
+#[test]
 fn health_order_severity_timer_and_latched_counts() {
     let runtime = Rc::new(Runtime::default());
     runtime.tick(100000.);
