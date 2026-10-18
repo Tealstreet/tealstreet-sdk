@@ -129,6 +129,6 @@ test('the actual 30-second startup deadline logs visibly and resolves false', { 
 });
 
 test('cancelled native startup writes the suppression warning', { timeout: 10000 }, async () => {
-  const { stdout, stderr } = await promisify(execFile)(process.execPath, ['--test', '--test-name-pattern=^(dispose|close) settles', new URL(import.meta.url).pathname]);
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, ['--test', '--test-name-pattern=^(dispose|close) settles', new URL(import.meta.url).pathname], { env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'NODE_TEST_CONTEXT')) });
   assert.match(stdout + stderr, /Error starting exchange \(disposed, suppressing\): binance/);
 });
