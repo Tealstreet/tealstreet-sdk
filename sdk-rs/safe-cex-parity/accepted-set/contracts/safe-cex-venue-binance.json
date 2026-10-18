@@ -25573,5 +25573,516 @@
     },
     "reason": "This exact alias is an owned pinned HTTP continuation producing the typed listen-key outcome or original request failure. It is a suspended computation, not an input parser; this classification does not classify its payload or other futures.",
     "evidence": "tests/private_classes.rs::private_action_key_binding::private_pin_key_retains_native_value_and_request_rejection_after_suspension invokes the real ExchangeState PrivateParent::post_key using native_dependencies for Futures and PM. It holds each POST, observes Pending before release, then reads negative-zero bits, NaN and own-undefined from the actual native listenKey referent. Genuine RestFailure rejection retains the original HTTP error message and response detail, with one request and no resend. An independent production control replaces the actual data.listenKey read with undefined, requires the compiled named native witness to fail, then exact source restoration passes. Trait classification is separate from executing these real request continuations."
+  },
+  "safe_cex_venue_binance::orderbook::load_binance_order_book_snapshot": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "load_binance_order_book_snapshot",
+      "signature": {
+        "inputs": [
+          [
+            "order_book",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::OrderBook",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "bids",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::vec::Vec",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "asks",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::vec::Vec",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "last_update_id",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "state",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::orderbook::BinanceOrderBookSyncState",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Mutates the real native book and sequence state from typed string rows and a native ID. The 36 live source cases read every level price/amount/total and both sequence IDs as binary64 before JSON; duplicate rows, missing cells, nonfinite values and signed zero remain visible. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::snapshot($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"bids":[],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[[]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[[]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[[]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[[]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[[]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[[]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["1"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["1"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["1"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["1"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["3ff0000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["1"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["3ff0000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["1"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["3ff0000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["2","-0"],["1","1e400"],["2","NaN"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["2","-0"],["1","1e400"],["2","NaN"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["2","-0"],["1","1e400"],["2","NaN"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["2","-0"],["1","1e400"],["2","NaN"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["2","-0"],["1","1e400"],["2","NaN"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["2","-0"],["1","1e400"],["2","NaN"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["0x10","12tail","unused"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["0000000000000000","4028000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["0x10","12tail","unused"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["0000000000000000","4028000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["0x10","12tail","unused"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["0000000000000000","4028000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["0x10","12tail","unused"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["0000000000000000","4028000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["0x10","12tail","unused"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["0000000000000000","4028000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["0x10","12tail","unused"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["0000000000000000","4028000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["\ud83d\ude001","-Infinity"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","fff0000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["\ud83d\ude001","-Infinity"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","fff0000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["\ud83d\ude001","-Infinity"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","fff0000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["\ud83d\ude001","-Infinity"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","fff0000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["\ud83d\ude001","-Infinity"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","fff0000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["\ud83d\ude001","-Infinity"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","fff0000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}}
+    ]
+  },
+  "safe_cex_venue_binance::orderbook::get_buffered_binance_depth_updates": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_buffered_binance_depth_updates",
+      "signature": {
+        "inputs": [
+          [
+            "updates",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_binance::orderbook::BinanceDepthUpdate",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "snapshot_last_update_id",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_venue_binance::orderbook::BinanceDepthUpdate",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the actual borrowed-record selector. The 25 live source cases read original record identity/order and native u values, with exact Number coercion failure names, missing/null/bool/array/object cells, overflowing JSON exponents and finite/nonfinite snapshot IDs. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::buffered($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"raw":"[]","snapshot":"10"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"-0"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"10"},"output":{"ok":true,"indices":[0,2,3],"values":[["number","4026000000000000"],["number","4028000000000000"],["number","4026000000000000"]]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"-0"},"output":{"ok":true,"indices":[0,1,2,3],"values":[["number","4026000000000000"],["number","4024000000000000"],["number","4028000000000000"],["number","4026000000000000"]]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[0,1,2,3],"values":[["number","4026000000000000"],["number","4024000000000000"],["number","4028000000000000"],["number","4026000000000000"]]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"10"},"output":{"ok":true,"indices":[0,3],"values":[["number","7ff0000000000000"],["string",[73,110,102,105,110,105,116,121]]]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"-0"},"output":{"ok":true,"indices":[0,3],"values":[["number","7ff0000000000000"],["string",[73,110,102,105,110,105,116,121]]]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[0,2,3],"values":[["number","7ff0000000000000"],["number","8000000000000000"],["string",[73,110,102,105,110,105,116,121]]]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"10"},"output":{"ok":true,"indices":[5],"values":[["array",[["number","4028000000000000"]]]]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"-0"},"output":{"ok":true,"indices":[3,5],"values":[["bool",true],["array",[["number","4028000000000000"]]]]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[1,2,3,4,5],"values":[["null"],["bool",false],["bool",true],["array",[]],["array",[["number","4028000000000000"]]]]}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"10"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"-0"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"NaN"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"Infinity"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"-Infinity"},"output":{"ok":false,"name":"TypeError"}}
+    ]
+  },
+  "safe_cex_venue_binance::orderbook::apply_binance_depth_update": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "apply_binance_depth_update",
+      "signature": {
+        "inputs": [
+          [
+            "order_book",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::OrderBook",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "update",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::orderbook::BinanceDepthUpdate",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "state",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::orderbook::BinanceOrderBookSyncState",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "require_previous_final_update_id",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::protocol_types::BinanceOrderBookApplyResult",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the actual live update algorithm. The 36 live source cases read the native result variant, both sequence IDs and every resulting level before JSON, including nonfinite sequence guards, previous-ID policy, skipped updates, partial mutation before TypeError, array-like levels and numeric coercion. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::apply($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":10,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"ignored"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":10,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"ignored"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":13,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":13,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":\"NaN\",\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":\"NaN\",\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":{\"toString\":null},\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":{\"toString\":null},\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"-0\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"-0\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"NaN\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","7ff8000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"NaN\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","7ff8000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[11,\"Infinity\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","7ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[11,\"Infinity\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","7ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,2],null],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,2],null],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":{\"0\":[9,2],\"1\":[8,3],\"length\":2},\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"],["4020000000000000","4008000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":{\"0\":[9,2],\"1\":[8,3],\"length\":2},\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"],["4020000000000000","4008000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"12\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"],["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"12\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"],["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"\ud83d\ude001\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"\ud83d\ude001\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[{\"toString\":null},1]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[{\"toString\":null},1]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[12,3],[11,{\"toString\":null}]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","4008000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[12,3],[11,{\"toString\":null}]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","4008000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":-1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":-1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":-1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":-1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}}
+    ]
+  },
+  "safe_cex_venue_binance::orderbook::depth_index": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "depth_index",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "index",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the private indexed-cell reader used only by apply_binance_depth_update. The 26 source cases evaluate unchanged actual TS o[0]/o[1]/bids[i] expressions: raw cells retain type, native number bits and whole-string UTF16 units. Four split-surrogate string-index cases observe the real immediate String/parseFloat consumer result (NaN), not raw lone-unit identity; the private Rust UTF8 replacement is not asserted equivalent as a standalone string. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::index($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"raw":"[]","index":0},"output":["undefined"]},
+      {"input":{"raw":"[]","index":1},"output":["undefined"]},
+      {"input":{"raw":"[\"1\",\"-0\"]","index":0},"output":["string",[49]]},
+      {"input":{"raw":"[\"1\",\"-0\"]","index":1},"output":["string",[45,48]]},
+      {"input":{"raw":"[1e400,-0]","index":0},"output":["number","7ff0000000000000"]},
+      {"input":{"raw":"[1e400,-0]","index":1},"output":["number","8000000000000000"]},
+      {"input":{"raw":"[null,true]","index":0},"output":["null"]},
+      {"input":{"raw":"[null,true]","index":1},"output":["bool",true]},
+      {"input":{"raw":"[{\"n\":1e400,\"z\":-0},[\"\ud83d\ude00\",\"-0\"]]","index":0},"output":["object",[[[110],["number","7ff0000000000000"]],[[122],["number","8000000000000000"]]]]},
+      {"input":{"raw":"[{\"n\":1e400,\"z\":-0},[\"\ud83d\ude00\",\"-0\"]]","index":1},"output":["array",[["string",[55357,56832]],["string",[45,48]]]]},
+      {"input":{"raw":"{\"0\":\"12tail\",\"1\":false}","index":0},"output":["string",[49,50,116,97,105,108]]},
+      {"input":{"raw":"{\"0\":\"12tail\",\"1\":false}","index":1},"output":["bool",false]},
+      {"input":{"raw":"\"12\"","index":0},"output":["string",[49]]},
+      {"input":{"raw":"\"12\"","index":1},"output":["string",[50]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":0,"role":"levels"},"output":["array",[["string",[49]],["string",[50]]]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":1,"role":"levels"},"output":["array",[["string",[51]],["string",[52]]]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":2,"role":"levels"},"output":["array",[["string",[53]],["string",[54]]]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":3,"role":"levels"},"output":["undefined"]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":0,"role":"levels"},"output":["array",[["number","3ff0000000000000"],["number","4000000000000000"]]]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":1,"role":"levels"},"output":["undefined"]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":2,"role":"levels"},"output":["array",[["number","4014000000000000"],["number","4018000000000000"]]]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":3,"role":"levels"},"output":["undefined"]},
+      {"input":{"raw":"\"\ud83d\ude001\"","index":0,"consumer":"parseFloat"},"output":{"consumerBits":"7ff8000000000000"}},
+      {"input":{"raw":"\"\ud83d\ude001\"","index":1,"consumer":"parseFloat"},"output":{"consumerBits":"7ff8000000000000"}},
+      {"input":{"raw":"\"1\ud83d\ude00\"","index":0,"consumer":"parseFloat"},"output":{"consumerBits":"3ff0000000000000"}},
+      {"input":{"raw":"\"1\ud83d\ude00\"","index":1,"consumer":"parseFloat"},"output":{"consumerBits":"7ff8000000000000"}}
+    ]
   }
 }

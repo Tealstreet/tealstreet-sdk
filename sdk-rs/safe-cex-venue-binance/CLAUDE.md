@@ -870,3 +870,13 @@ Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+The four orderbook function contracts execute the real snapshot, borrowed update
+selector, apply algorithm and private indexed-cell reader. Native number bits,
+sequence state, borrowed record identity and partial mutation are observed before
+JSON output. `scripts/orderbook-function-source.cjs` derives 123 cases from the
+maintained TypeScript functions; the ordinary `orderbook_function_contracts` target
+keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell's
+immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
+requires four independent compiled faults to fail actual constructed native
+socket/HTTP tests, with exact source restoration and a passing rerun after each.
