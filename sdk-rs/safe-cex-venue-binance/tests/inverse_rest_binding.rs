@@ -112,6 +112,55 @@ fn signed_response_error_keeps_native_utf16_message_and_response() {
     assert!(error.value.get("__binanceEmitted").unwrap().truthy());
     assert_eq!(h.http.calls("/dapi/v1/openOrders").len(), 1);
 }
+
+#[test]
+fn ohlcv_uses_source_regex_interval_and_preserves_missing_volume_nan() {
+    let h = harness(options(), |wire| {
+        wire.ok(
+            "GET",
+            "/dapi/v1/klines",
+            json!([[1_700_000_000_000_u64, "1", "3", "0", "2"]]),
+        )
+    });
+    let rows = call(
+        &h,
+        "fetchOHLCV",
+        vec![from_json(&json!({
+            "symbol":"BTCUSD_PERP","interval":"15m","limit":2,"to":1_700_000_000_000_u64,
+        }))],
+    );
+    assert_eq!(rows.get("length").unwrap().as_f64(), Some(1.0));
+    let candle = rows.get("0").unwrap();
+    for (key, expected) in [
+        ("timestamp", 1_700_000_000.0_f64),
+        ("open", 1.0),
+        ("high", 3.0),
+        ("low", 0.0),
+        ("close", 2.0),
+    ] {
+        assert_eq!(
+            candle.get(key).unwrap().as_f64().unwrap().to_bits(),
+            expected.to_bits(),
+            "native {key}"
+        );
+    }
+    assert!(candle.get("volume").unwrap().as_f64().unwrap().is_nan());
+    let requests = h.http.calls("/dapi/v1/klines");
+    assert_eq!(requests.len(), 1);
+    for pair in [
+        "interval=15m",
+        "limit=2",
+        "startTime=1699998200000",
+        "endTime=1700000000000",
+    ] {
+        assert!(
+            requests[0].url.contains(pair),
+            "actual public candle query: {pair}"
+        );
+    }
+    assert!(!requests[0].url.contains("signature="));
+    assert!(!requests[0].headers.contains_key("X-MBX-APIKEY"));
+}
 #[test]
 fn markets_use_coin_m_endpoints_filters_and_signed_account_brackets() {
     let h = harness(options(), |wire| {

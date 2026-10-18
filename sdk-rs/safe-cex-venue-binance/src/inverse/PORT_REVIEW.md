@@ -37,6 +37,10 @@ The following are measured receipts, not completeness claims:
   Using the installed native Error constructor restores the exact source code
   unit and retains name, code, response and the emission marker. The complete
   maintained source oracle independently asserts those Error fields.
+- The actual OHLCV witness compiled RED on an absent global RegExp. The source
+  uses a regex literal, so the binding now creates that literal with the existing
+  shared regex primitive. Native/source witnesses pin the15m time window,
+  unsigned public query, each native candle number and missing-volume NaN.
 - The order witness replays25 maintained-source cases for split/attached orders,
   batch IDs/errors, cancellation grouping/partial progress, amendment ordering,
   leverage clamps and confirmed mode/margin transitions. Five compiled mutations

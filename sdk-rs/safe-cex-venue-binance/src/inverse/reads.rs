@@ -759,7 +759,10 @@ fn fetch_ohlcv(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
                 Js::Number(1500.0),
             ],
         )?;
-        let regex = global(&rt, "RegExp", vec![Js::str("(\\d+)")])?;
+        let regex = safe_cex_exchange::js_runtime::regexp::regexp(
+            &"(\\d+)".encode_utf16().collect::<Vec<_>>(),
+            &[],
+        )?;
         let parts = interval.call_method("split", vec![regex])?;
         let end = if opts.get("to")?.truthy() {
             global(&rt, "dayjs", vec![opts.get("to")?])?

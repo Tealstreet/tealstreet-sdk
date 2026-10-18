@@ -48,6 +48,16 @@ const routes = new Map([
     assert.equal(rejected.code, -2011);
     assert.equal(rejected.__binanceEmitted, true);
     assert.equal(calls.length, 5);
+    routes.set('/dapi/v1/klines', [[1_700_000_000_000,'1','3','0','2']]);
+    const candles = await venue.fetchOHLCV({symbol:'BTCUSD_PERP',interval:'15m',limit:2,to:1_700_000_000_000});
+    assert.equal(candles.length, 1);
+    assert.equal(candles[0].timestamp, 1_700_000_000);
+    assert.equal(candles[0].close, 2);
+    assert(Number.isNaN(candles[0].volume));
+    assert.deepEqual(calls[5].params, {symbol:'BTCUSD_PERP',interval:'15m',startTime:1_699_998_200_000,endTime:1_700_000_000_000,limit:2});
+    assert.equal(calls[5].skip, true);
+    assert.equal(calls[5].headers['X-MBX-APIKEY'], undefined);
+    assert.equal(calls.length, 6);
     process.stdout.write(JSON.stringify({markets,positions,ids,order:{quantity:calls[3].params.quantity,positionSide:calls[3].params.positionSide,price:calls[3].params.price}}));
   } finally { venue.dispose(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
