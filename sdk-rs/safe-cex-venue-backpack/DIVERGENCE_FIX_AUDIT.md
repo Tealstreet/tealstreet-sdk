@@ -68,3 +68,12 @@ Verification: all eleven independent production controls compiled and failed the
 named assertion, then passed after exact restoration. Fourteen new binding/source
 checks, all four existing disposal checks and eight startup/recovery checks pass.
 Existing authored source corpora and all identity/alias guards are retained.
+
+The post-Store refresh normally merges master through 107601cdf7. Production
+market reads propagate the canonical Store Result while retaining the same eager
+operation. Binding probes assert successful reads explicitly; the shared teardown
+proof constructs the canonical native Store. All eleven compiled production
+controls were replayed after the Store migration, and the subsequent master merge
+leaves those exercised production bodies unchanged. The eleven inherited stale
+surrogate expectations in ten older targets remain owned by the test-only #1092;
+no source corpus or identity assertion is changed here.
