@@ -2,26 +2,26 @@
   "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Market": {
     "category": "delegated",
     "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Market decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver.",
-    "itemSha256": "c6555d5ca5c9e0475ab8bef2652c26e75cae35e5842c0390d5e017641c4fed74"
+    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Market decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver. Info fields use canonical retained Input before legacy JSON field decoding; native Store patch regressions preserve field presence, UTF-16 and number bits while candidate publication stays atomic.",
+    "itemSha256": "adaa09713c87a76cabd338bdc59e1da13e60056db5aa27fc7dd4bb5b8e340ea3"
   },
   "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Order": {
     "category": "delegated",
     "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Order decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver. The reviewed reduceOnly arm uses ModelField<bool>, retaining own undefined; the undefined allow-list admits that field. Public PlaceOrderOpts remains strict, and the delegated Store probes cover patch presence.",
+    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Order decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver. The reviewed reduceOnly arm uses ModelField<bool>, retaining own undefined; the undefined allow-list admits that field. Public PlaceOrderOpts remains strict, and the delegated Store probes cover patch presence. Info fields use canonical retained Input before legacy JSON field decoding; native Store patch regressions preserve field presence, UTF-16 and number bits while candidate publication stays atomic.",
     "itemSha256": "818ab875c138fc76173f6b5d66a32c24136380f137e7d37d3ad2168272775f75"
   },
   "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Position": {
     "category": "delegated",
     "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Position decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver.",
+    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Position decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver. Info fields use canonical retained Input before legacy JSON field decoding; native Store patch regressions preserve field presence, UTF-16 and number bits while candidate publication stays atomic.",
     "itemSha256": "85f6b9e4c8360f7078edcd8883d06d24ce91aea1880108f17a5a57b0c3cb45ea"
   },
   "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Ticker": {
     "category": "delegated",
     "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Ticker decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver.",
-    "itemSha256": "2f18a148ffa8700ac5d1ca9d632075ae9f4ba9c2723a92530a722ca36a7fcb3b"
+    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Ticker decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver. Info fields use canonical retained Input before legacy JSON field decoding; native Store patch regressions preserve field presence, UTF-16 and number bits while candidate publication stays atomic.",
+    "itemSha256": "90b87d78a241080d8fd29d18e13eccb67c6ddd7e86523e61192406d5f721e05e"
   },
   "safe_cex_store::model_patch::PatchSource::visit for serde_json::map::Map<alloc::string::String, serde_json::value::Value>": {
     "category": "non-decoder",

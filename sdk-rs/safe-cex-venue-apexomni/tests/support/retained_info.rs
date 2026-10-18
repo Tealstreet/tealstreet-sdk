@@ -1,4 +1,104 @@
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
+
+#[test]
+fn maintained_private_frame_info_capture() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/retained-private-info.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows,
+        json!([
+            {"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true},
+            {"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true}
+        ])
+    );
+}
+
+#[test]
+fn private_frame_info_keeps_opaque_utf16_and_wire_numbers() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let h = fixture();
+    // Start with an existing REST position so the source's partial
+    // updatePositions operation has a matching row to update.
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/v3/account");
+    h.http.ok("GET", "/v3/account", json!({"id":"16909060","l2key":"fixture-l2","positions":[{"symbol":"BTC-USDC","side":"LONG","size":"1","entryPrice":"100","customImr":"0.1"}],"contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"}}));
+    let private = started_private(&h);
+    let mut order = raw_order();
+    order["id"] = json!("private-retained-order");
+    order["opaque"] = json!("OPAQUE_WIRE_VALUE");
+    let raw = json!({"topic":"ws_zk_accounts_v3","contents":{
+        "orders":[order],
+        "positions":[{"symbol":"BTC-USDC","side":"LONG","size":"4","entryPrice":"123","customImr":"0.1","opaque":"OPAQUE_WIRE_VALUE"}]
+    }}).to_string().replace("\"OPAQUE_WIRE_VALUE\"",r#"{"text":"\ud800","\udc00":"opaque-key-value","overflow":1e400,"negativeZero":-0}"#);
+    private
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(raw)));
+    h.runtime.pump();
+    let check = |row: &Input| {
+        let opaque = row.get("opaque").unwrap();
+        assert_eq!(
+            opaque.get("text").unwrap().as_text(),
+            Some([0xd800].as_slice())
+        );
+        assert!(
+            opaque
+                .as_object()
+                .unwrap()
+                .iter()
+                .any(|(key, value)| key == &[0xdc00] && value.text_equals("opaque-key-value"))
+        );
+        assert_eq!(
+            opaque.get("overflow").unwrap().as_f64(),
+            Some(f64::INFINITY)
+        );
+        assert_eq!(
+            opaque
+                .get("negativeZero")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+    };
+    {
+        let orders = h.store.orders();
+        let order = orders
+            .iter()
+            .find(|o| o.id == "private-retained-order")
+            .expect("private order with opaque metadata must reach actual Store");
+        check(order.info.value().unwrap());
+    }
+    {
+        let positions = h.store.positions();
+        let position = positions
+            .iter()
+            .find(|p| p.contracts == 4.0)
+            .unwrap_or_else(|| panic!("private position with opaque metadata must reach actual Store: reports={:?}, console={:?}", h.runtime.reports.borrow(),h.runtime.console.borrow()));
+        check(position.info.value().unwrap());
+    }
+    done(&h);
+}
 fn opaque_info() -> safe_cex_exchange::js_runtime::value::Js {
     use safe_cex_exchange::js_runtime::value::Js;
     let opaque = Js::object(vec![

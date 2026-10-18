@@ -56956,5 +56956,75 @@
         ]
       }
     ]
+  },
+  "safe_cex_types::strict_codecs::AvailableLockedBalance": {
+    "shape": "union",
+    "evidence": "Private derived two-number companion used only after CurrencyBalance enforces its public object front. The helper itself accepts an object or declaration-order sequence; both native fields are observed here. Public CurrencyBalance separately rejects that sequence and retains the declared/available-locked selection priority.",
+    "positive": [
+      {
+        "available": 9,
+        "locked": 6
+      },
+      [
+        9,
+        6
+      ]
+    ],
+    "negative": [
+      null,
+      "x",
+      [],
+      [
+        9
+      ],
+      {
+        "available": 9
+      }
+    ],
+    "observation": {
+      "call": "match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok(value) => serde_json::json!({\"ok\":true,\"availableBits\":format!(\"{:016x}\",value.available.to_bits()),\"lockedBits\":format!(\"{:016x}\",value.locked.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) }",
+      "nativeFields": [
+        "availableBits",
+        "lockedBits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "available": 9,
+            "locked": 6
+          },
+          "output": {
+            "ok": true,
+            "availableBits": "4022000000000000",
+            "lockedBits": "4018000000000000"
+          }
+        },
+        {
+          "input": [
+            1,
+            2
+          ],
+          "output": {
+            "ok": true,
+            "availableBits": "3ff0000000000000",
+            "lockedBits": "4000000000000000"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "available": 1
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }

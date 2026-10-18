@@ -393,10 +393,6 @@ does not suppress quantity, while NaN, Infinity, empty text and signed zero keep
 their source branches. Six maintained-source cases drive real cancel and submit
 requests, including a numeric prefix followed by an unpaired UTF-16 unit.
 
-Market fetches retain configured response data through tradability filtering and
-normalization; raw info never takes a JSON projection. The constructed fetch/Store
-regression observes opaque UTF-16, nonfinite bits, signed zero and own Undefined.
-
 The cross-layer MEXC/worker proof lives in parity tooling. The venue has no
 worker dependency, including dev-dependencies; architectural layer checks include
 test-only edges. All six browser-post and UI-clone cases remain mandatory in the
@@ -408,3 +404,7 @@ The MEXC unit target retains the six throwing-listener observations and primitiv
 reporting helpers. `venue-oracle:mexc` runs both targets; worker dependencies never
 belong in this venue. Browser Error/structuredClone proof remains in the tooling
 example and Node runner documented above.
+
+Market fetches retain configured response data through tradability filtering and
+normalization; raw info never takes a JSON projection. The constructed fetch/Store
+regression observes opaque UTF-16, nonfinite bits, signed zero and own Undefined.

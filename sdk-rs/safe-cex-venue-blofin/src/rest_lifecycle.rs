@@ -499,10 +499,12 @@ pub trait LifecycleHost {
     fn connect_public(&self) -> Result<(), ServiceError<Self::Error>>;
     fn connect_private(&self) -> Result<(), ServiceError<Self::Error>>;
     fn fetch_markets(&self) -> LifecycleFuture<'_, Vec<Market>, Self::Error>;
-    fn fetch_tickers_raw(&self) -> LifecycleFuture<'_, Option<UtilityInput>, Self::Error>;
+    fn fetch_tickers_raw(
+        &self,
+    ) -> LifecycleFuture<'_, Option<crate::tickers::TickerInput>, Self::Error>;
     fn format_tickers(
         &self,
-        raw: Option<UtilityInput>,
+        raw: Option<crate::tickers::TickerInput>,
     ) -> Result<Vec<Ticker>, ServiceError<Self::Error>>;
     fn refetch_margin_type(&self) -> LifecycleFuture<'_, (), Self::Error>;
     fn refetch_position_mode(&self) -> LifecycleFuture<'_, (), Self::Error>;
