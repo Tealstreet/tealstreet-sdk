@@ -961,3 +961,10 @@ keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell'
 immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
 requires four independent compiled faults to fail actual constructed native
 socket/HTTP tests, with exact source restoration and a passing rerun after each.
+
+`inherited_refusal_binding --features native -- --include-ignored` executes the
+three actual native classes and compares 16 genuine inherited refusal profiles
+with the full maintained TS constructors. `INHERITED_REFUSAL_REVIEW.md` records
+its finite scope; `scripts/inherited-refusal-controls.py` requires eight compiled
+method-specific failures and exact-restoration passes. Keep these execution
+witnesses separate from decoder classification and constant-output permission.
