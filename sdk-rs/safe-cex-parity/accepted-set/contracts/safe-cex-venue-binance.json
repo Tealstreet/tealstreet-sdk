@@ -15222,5 +15222,201 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::spot_protocol::build_binance_spot_user_data_signature_payload": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "build_binance_spot_user_data_signature_payload",
+      "signature": {
+        "inputs": [
+          [
+            "api_key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "timestamp",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "recv_window",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binancespot.api.ts::buildBinanceSpotUserDataSignaturePayload; src/spot_protocol.rs; tests/spot_protocol.rs executes the actual maintained-source 9450-case payload corpus.",
+    "reason": "This exact function is a wire-payload encoder: it concatenates an already typed API-key string and formats typed timestamp/optional recvWindow numbers. It does not parse a representation, validate a record schema or construct a decoded DTO. The concrete api_factory caller uses its returned signing bytes. Native String/Number input domain only; no claim for arbitrary JS objects or lone UTF-16 units."
+  },
+  "safe_cex_venue_binance::spot_valuation::get_asset_usd_price": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_asset_usd_price",
+      "signature": {
+        "inputs": [
+          [
+            "asset",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "ticker_last",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::option::Option",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "primitive": "f64"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "f64"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&str) -> Option<f64>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "primitive": "f64"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binancespot.exchange.ts::getAssetUsdPrice; src/spot_valuation.rs; tests/state.rs executes maintained-source valuation/reconciliation inputs, including 5832 valuation cases and exact lookup order.",
+    "reason": "This exact function selects an already typed price from a caller-owned lookup: USD/USDT/USDC return one, otherwise USDT/USDC/USD are visited in order and zero/NaN are skipped. It returns an existing f64 or zero, without parsing source strings, admitting records or constructing a DTO. The concrete Exchange implementation supplies typed Store ticker.last values. Callback input profile is Option<f64>, not arbitrary JS member values."
   }
 }
