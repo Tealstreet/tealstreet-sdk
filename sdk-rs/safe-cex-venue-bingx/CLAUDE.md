@@ -277,3 +277,12 @@ share this retained carrier; only consumed typed fields perform native coercion.
 The real NativeRuntime WebSocket regression compares the stored raw order with
 maintained TypeScript using numeric bits and UTF-16 units. Per-row asset/leverage
 admission and visible refusal remain unchanged.
+
+`public_stream::HandlerList` owns live callback registrations, not a raw decoder.
+`scripts/handler-list-contracts.mjs` measures its actual compiler alias through
+the maintained accepted inventory. The constructed production socket witness
+`native_callback_registry_keeps_live_lists_and_original_errors` observes append
+to a captured list, next-frame registry replacement, original parsed payload and
+callback error/code referents. `tests/handler-list-controls.py` replaces the live
+list capture with a copied list; the named native dispatch assertion must fail
+before exact source restoration passes. No probe-family relaxation is used.
