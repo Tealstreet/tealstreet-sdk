@@ -222,4 +222,11 @@ for(const packed of [false,true]){
  store.update({positions});assert.equal(store.positions[1],replacement);
  ordering.push({case:'audit-reached-row-order',replacement:true});
 }
+{
+ const store=new DefaultStore(),cause={opaque:'\uD800'};let idReads=0,contractsReads=0,notices=0;
+ const row={get id(){if(++idReads===2)throw cause;return 'negative'},get contracts(){contractsReads++;return -1}};
+ store.subscribe(()=>{notices++});let error;try{store.update({positions:[row]})}catch(e){error=e}
+ assert.equal(error,cause);assert.equal(idReads,2);assert.equal(contractsReads,1);assert.equal(notices,0);assert.equal(store.updateIds.positions,0);
+ ordering.push({case:'audit-log-expression-order',idReads,contractsReads,notices,revision:store.updateIds.positions,sameCause:error===cause});
+}
 process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances,ordering}));

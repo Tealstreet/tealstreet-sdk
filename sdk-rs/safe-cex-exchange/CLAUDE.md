@@ -21,6 +21,9 @@ separate boundary. Retained config reads keep absence distinct from an own
 undefined or null value. Source `for` loops recheck live input lengths, while
 `forEach`, `map`, `filter` and `findIndex` keep their captured iteration lengths.
 Object literal spreads finish before evaluating the following explicit fields.
+Position audits read each reached row after earlier id getters and evaluate
+diagnostic arguments before the terminal sink, preserving prethrow writes and
+skipping later revision/notification statements on failure.
 `Object.seal` and `Object.freeze` share the canonical descriptor integrity
 operation; sealing preserves existing writable bits and both retain accessors.
 

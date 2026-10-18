@@ -737,3 +737,539 @@ fn position_audit_reads_each_row_after_the_preceding_id_getter() {
             .same_reference(&replacement)
     );
 }
+
+struct NativeCase {
+    facade: Js,
+    map: Js,
+    row: Js,
+    other: Js,
+    state: Js,
+    key: String,
+    field: &'static str,
+    changed: Js,
+    market: bool,
+}
+impl NativeCase {
+    fn new(name: &str) -> Self {
+        let (_, facade) = fixture();
+        let market = name.starts_with("markets");
+        let key = if name.ends_with("BySymbol") {
+            "BTCUSD"
+        } else if market {
+            "m"
+        } else {
+            "t"
+        }
+        .to_string();
+        let map = facade.get(name).unwrap();
+        let row = map.get(&key).unwrap();
+        let other = facade
+            .get(match (market, name.ends_with("ById")) {
+                (true, true) => "marketsBySymbol",
+                (true, false) => "marketsById",
+                (false, true) => "tickersBySymbol",
+                (false, false) => "tickersById",
+            })
+            .unwrap();
+        let state = facade
+            .get(if market { "markets" } else { "tickers" })
+            .unwrap();
+        Self {
+            facade,
+            map,
+            row,
+            other,
+            state,
+            key,
+            field: if market { "active" } else { "bid" },
+            changed: if market {
+                Js::Bool(false)
+            } else {
+                Js::Number(7.0)
+            },
+            market,
+        }
+    }
+    fn write(&self, changes: Option<Js>) -> Result<Js, Thrown> {
+        self.facade.call_method(
+            if self.market {
+                "updateMarket"
+            } else {
+                "updateTicker"
+            },
+            vec![
+                Js::object(vec![("id", Js::str(if self.market { "m" } else { "t" }))]),
+                changes.unwrap_or_else(|| Js::object(vec![(self.field, self.changed.clone())])),
+            ],
+        )
+    }
+    fn domain(&self, object: &Js) -> Value {
+        let descriptor = object
+            .call_method(
+                "getOwnPropertyDescriptor",
+                vec![self.map.clone(), Js::str(&self.key)],
+            )
+            .unwrap();
+        let descriptor = if descriptor.is_undefined() {
+            Value::Null
+        } else {
+            json!({
+                "enumerable":descriptor.get("enumerable").unwrap().truthy(),
+                "writable":descriptor.get("writable").unwrap().truthy(),
+                "configurable":descriptor.get("configurable").unwrap().truthy(),
+            })
+        };
+        json!({"own":self.map.has_own(&self.key),
+            "keys":self.map.own_keys().iter().map(|key|String::from_utf16(key).unwrap()).collect::<Vec<_>>(),
+            "descriptor":descriptor,
+            "json":String::from_utf16(&globals::stringify_json(&self.map).unwrap().unwrap()).unwrap(),
+        })
+    }
+}
+fn object_builtin() -> Js {
+    let global = Js::object(vec![]);
+    globals::install_builtins::<()>(&global, Weak::new());
+    global.get("Object").unwrap()
+}
+
+#[test]
+fn deleted_dictionary_entries_follow_source_reindexing_without_resurrecting_old_generations() {
+    let expected = source();
+    let object = object_builtin();
+    for case in expected["deletion"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let f = NativeCase::new(name);
+        f.map
+            .delete(&f.key.encode_utf16().collect::<Vec<_>>())
+            .unwrap();
+        assert_eq!(f.domain(&object), case["before"]);
+        assert!(f.facade.get(name).unwrap().same_reference(&f.map));
+        assert!(
+            f.other
+                .get(if name.ends_with("ById") {
+                    "BTCUSD"
+                } else if f.market {
+                    "m"
+                } else {
+                    "t"
+                })
+                .unwrap()
+                .same_reference(&f.row)
+        );
+        assert!(f.state.get("0").unwrap().same_reference(&f.row));
+        f.write(None).unwrap();
+        assert_eq!(f.domain(&object), case["after"]);
+        assert!(
+            f.row
+                .get(f.field)
+                .unwrap()
+                .strict_equals(&from_json(&case["rowValue"]))
+        );
+    }
+}
+
+#[test]
+fn assigned_and_hidden_dictionary_overrides_retain_source_target_relationships() {
+    let expected = source();
+    let object = object_builtin();
+    for case in expected["overlays"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let f = NativeCase::new(name);
+        let replacement = f.row.spread_object().unwrap();
+        replacement
+            .set(
+                f.field,
+                if f.market {
+                    Js::Bool(false)
+                } else {
+                    Js::Number(19.0)
+                },
+            )
+            .unwrap();
+        if case["how"] == "assign" {
+            f.map.set(&f.key, replacement.clone()).unwrap();
+        } else {
+            object
+                .call_method(
+                    "defineProperty",
+                    vec![
+                        f.map.clone(),
+                        Js::str(&f.key),
+                        Js::object(vec![
+                            ("value", replacement.clone()),
+                            ("writable", Js::Bool(true)),
+                            ("configurable", Js::Bool(true)),
+                            ("enumerable", Js::Bool(false)),
+                        ]),
+                    ],
+                )
+                .unwrap();
+        }
+        assert_eq!(f.domain(&object), case["before"]);
+        assert!(
+            f.facade
+                .get(name)
+                .unwrap()
+                .get(&f.key)
+                .unwrap()
+                .same_reference(&replacement)
+        );
+        assert!(f.state.get("0").unwrap().same_reference(&f.row));
+        f.write(None).unwrap();
+        let survives = case["replacementSurvives"].as_bool().unwrap();
+        assert!(f.map.get(&f.key).unwrap().same_reference(if survives {
+            &replacement
+        } else {
+            &f.row
+        }));
+        assert!(
+            f.state
+                .get("0")
+                .unwrap()
+                .get(f.field)
+                .unwrap()
+                .strict_equals(&from_json(&case["stateValue"]))
+        );
+        let other_key = if name.ends_with("ById") {
+            "BTCUSD"
+        } else if f.market {
+            "m"
+        } else {
+            "t"
+        };
+        assert!(f.other.get(other_key).unwrap().same_reference(if survives {
+            &replacement
+        } else {
+            &f.row
+        }));
+        assert_eq!(f.domain(&object), case["after"]);
+    }
+}
+
+#[test]
+fn readonly_row_failure_retains_prior_writes_and_suppresses_notification() {
+    let expected = source();
+    let object = object_builtin();
+    for case in expected["partialWrites"].as_array().unwrap() {
+        let f = NativeCase::new(case["name"].as_str().unwrap());
+        let last = if f.market { "quote" } else { "ask" };
+        let saved = f.row.get(last).unwrap();
+        object
+            .call_method(
+                "defineProperty",
+                vec![
+                    f.row.clone(),
+                    Js::str(last),
+                    Js::object(vec![("writable", Js::Bool(false))]),
+                ],
+            )
+            .unwrap();
+        let notices = Rc::new(Cell::new(0));
+        let observed = notices.clone();
+        f.facade
+            .call_method(
+                "subscribe",
+                vec![Js::function("notice", move |_, _| {
+                    observed.set(observed.get() + 1);
+                    Ok(Js::Undefined)
+                })],
+            )
+            .unwrap();
+        let error = f
+            .write(Some(Js::object(vec![
+                (f.field, f.changed.clone()),
+                (
+                    last,
+                    if f.market {
+                        Js::str("CHANGED")
+                    } else {
+                        Js::Number(9.0)
+                    },
+                ),
+            ])))
+            .unwrap_err();
+        assert_eq!(
+            error.value.get("name").unwrap().to_display(),
+            case["error"].as_str().unwrap()
+        );
+        assert!(
+            f.row
+                .get(f.field)
+                .unwrap()
+                .strict_equals(&from_json(&case["firstValue"]))
+        );
+        assert!(f.row.get(last).unwrap().strict_equals(&saved));
+        assert_eq!(notices.get(), case["notices"].as_u64().unwrap());
+        assert!(f.state.get("0").unwrap().same_reference(&f.row));
+    }
+}
+
+#[test]
+fn replacement_reset_unicode_and_numeric_bits_keep_the_actual_native_referents() {
+    let expected = source();
+    for case in expected["generations"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let f = NativeCase::new(name);
+        let (_, fresh) = fixture();
+        let field = if f.market { "markets" } else { "tickers" };
+        f.facade
+            .call_method(
+                "update",
+                vec![Js::object(vec![(field, fresh.get(field).unwrap())])],
+            )
+            .unwrap();
+        let map = f.facade.get(name).unwrap();
+        let row = map.get(&f.key).unwrap();
+        assert!(!map.same_reference(&f.map));
+        assert!(!row.same_reference(&f.row));
+        f.write(None).unwrap();
+        assert!(
+            f.row
+                .get(f.field)
+                .unwrap()
+                .strict_equals(&from_json(&case["oldValue"]))
+        );
+        assert!(
+            row.get(f.field)
+                .unwrap()
+                .strict_equals(&from_json(&case["newValue"]))
+        );
+        f.facade.call_method("reset", vec![]).unwrap();
+        assert!(!f.facade.get(name).unwrap().same_reference(&map));
+        assert!(f.facade.get(name).unwrap().own_keys().is_empty());
+        assert!(map.get(&f.key).unwrap().same_reference(&row));
+        assert!(f.map.get(&f.key).unwrap().same_reference(&f.row));
+    }
+    for case in expected["unicode"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let f = NativeCase::new(name);
+        let key = case["keyUnits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|unit| unit.as_u64().unwrap() as u16)
+            .collect::<Vec<_>>();
+        f.map.set_key(&key, f.row.clone()).unwrap();
+        assert!(
+            f.facade
+                .get(name)
+                .unwrap()
+                .get_key(&key)
+                .unwrap()
+                .same_reference(&f.row)
+        );
+        assert!(
+            f.map
+                .own_keys()
+                .iter()
+                .any(|own| own.as_ref() == key.as_slice())
+        );
+        f.map.delete(&key).unwrap();
+        assert!(f.map.get_key(&key).unwrap().is_undefined());
+    }
+    for value in [-0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let f = NativeCase::new("tickersById");
+        f.write(Some(Js::object(vec![("bid", Js::Number(value))])))
+            .unwrap();
+        assert_eq!(
+            f.row.get("bid").unwrap().as_f64().unwrap().to_bits(),
+            value.to_bits()
+        );
+        assert!(f.map.get("t").unwrap().same_reference(&f.row));
+    }
+}
+
+#[test]
+fn reentrant_selector_setter_and_id_getter_publish_maps_at_the_source_expression_sites() {
+    let expected = source();
+    for case in expected["reentry"].as_array().unwrap() {
+        let f = NativeCase::new("tickersById");
+        let replacement = f.row.spread_object().unwrap();
+        replacement.set("bid", Js::Number(99.0)).unwrap();
+        // Keep the source callback alive during the operation without adding
+        // a native reference-count cycle through the captured Store graph.
+        let facade = Rc::new(f.facade.clone());
+        let weak = Rc::downgrade(&facade);
+        let name = case["case"].as_str().unwrap();
+        if name == "base-before-selector-getter" {
+            let selector = Js::object(vec![]);
+            selector
+                .define_accessor(
+                    "id",
+                    Some(Rc::new(move |_| {
+                        weak.upgrade().unwrap().call_method(
+                            "update",
+                            vec![Js::object(vec![(
+                                "tickers",
+                                Js::array(vec![replacement.clone()]),
+                            )])],
+                        )?;
+                        Ok(Js::str("t"))
+                    })),
+                    None,
+                )
+                .unwrap();
+            facade
+                .call_method(
+                    "updateTicker",
+                    vec![selector, Js::object(vec![("bid", Js::Number(7.0))])],
+                )
+                .unwrap();
+        } else if name == "setter-republishes-before-map-statements" {
+            let bid = Rc::new(Cell::new(1.0));
+            let get = bid.clone();
+            let set = bid.clone();
+            f.row
+                .define_accessor(
+                    "bid",
+                    Some(Rc::new(move |_| Ok(Js::Number(get.get())))),
+                    Some(Rc::new(move |_, value| {
+                        set.set(value.to_number()?);
+                        weak.upgrade().unwrap().call_method(
+                            "update",
+                            vec![Js::object(vec![(
+                                "tickers",
+                                Js::array(vec![replacement.clone()]),
+                            )])],
+                        )?;
+                        Ok(())
+                    })),
+                )
+                .unwrap();
+            f.write(None).unwrap();
+        } else {
+            assert_eq!(name, "assignment-base-before-id-getter");
+            f.row
+                .define_accessor(
+                    "id",
+                    Some(Rc::new(move |_| {
+                        weak.upgrade().unwrap().call_method(
+                            "update",
+                            vec![Js::object(vec![(
+                                "tickers",
+                                Js::array(vec![replacement.clone()]),
+                            )])],
+                        )?;
+                        Ok(Js::str("t"))
+                    })),
+                    None,
+                )
+                .unwrap();
+            f.write(None).unwrap();
+        }
+        assert_eq!(f.row.get("bid").unwrap().as_f64(), case["oldBid"].as_f64());
+        assert_eq!(
+            facade
+                .get("tickers")
+                .unwrap()
+                .get("0")
+                .unwrap()
+                .get("bid")
+                .unwrap()
+                .as_f64(),
+            case["stateBid"].as_f64()
+        );
+        let current_id = facade.get("tickersById").unwrap().get("t").unwrap();
+        let current_symbol = facade
+            .get("tickersBySymbol")
+            .unwrap()
+            .get("BTCUSD")
+            .unwrap();
+        if name == "assignment-base-before-id-getter" {
+            assert!(!current_id.same_reference(&f.row));
+            assert_eq!(current_id.get("bid").unwrap().as_f64(), Some(99.0));
+            assert!(current_symbol.same_reference(&f.row));
+        } else {
+            assert!(current_id.same_reference(&f.row));
+            if name == "setter-republishes-before-map-statements" {
+                assert!(current_symbol.same_reference(&f.row));
+            }
+        }
+        assert!(f.map.get("t").unwrap().same_reference(&f.row));
+    }
+}
+
+#[test]
+fn audit_diagnostic_property_failure_stops_before_revision_and_notification() {
+    let expected = source();
+    let case = expected["ordering"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["case"] == "audit-log-expression-order")
+        .unwrap();
+    let (_, facade) = fixture();
+    let row = Js::object(vec![]);
+    let cause = Js::object(vec![("opaque", Js::utf16(&[0xd800]))]);
+    let id_reads = Rc::new(Cell::new(0));
+    let contracts_reads = Rc::new(Cell::new(0));
+    let notices = Rc::new(Cell::new(0));
+    let reads = id_reads.clone();
+    let thrown = cause.clone();
+    row.define_accessor(
+        "id",
+        Some(Rc::new(move |_| {
+            reads.set(reads.get() + 1);
+            if reads.get() == 2 {
+                Err(Thrown::new(thrown.clone()))
+            } else {
+                Ok(Js::str("negative"))
+            }
+        })),
+        None,
+    )
+    .unwrap();
+    let reads = contracts_reads.clone();
+    row.define_accessor(
+        "contracts",
+        Some(Rc::new(move |_| {
+            reads.set(reads.get() + 1);
+            Ok(Js::Number(-1.0))
+        })),
+        None,
+    )
+    .unwrap();
+    let observed = notices.clone();
+    facade
+        .call_method(
+            "subscribe",
+            vec![Js::function("notice", move |_, _| {
+                observed.set(observed.get() + 1);
+                Ok(Js::Undefined)
+            })],
+        )
+        .unwrap();
+    let error = facade
+        .call_method(
+            "update",
+            vec![Js::object(vec![(
+                "positions",
+                Js::array(vec![row.clone()]),
+            )])],
+        )
+        .expect_err("source evaluates the diagnostic row before completing the update");
+    assert!(error.value.same_reference(&cause));
+    assert_eq!(id_reads.get(), case["idReads"].as_u64().unwrap());
+    assert_eq!(
+        contracts_reads.get(),
+        case["contractsReads"].as_u64().unwrap()
+    );
+    assert_eq!(notices.get(), case["notices"].as_u64().unwrap());
+    assert_eq!(
+        facade
+            .get("updateIds")
+            .unwrap()
+            .get("positions")
+            .unwrap()
+            .as_f64(),
+        case["revision"].as_f64()
+    );
+    assert!(
+        facade
+            .get("positions")
+            .unwrap()
+            .get("0")
+            .unwrap()
+            .same_reference(&row)
+    );
+}

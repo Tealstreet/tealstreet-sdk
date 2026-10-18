@@ -938,13 +938,30 @@ impl Graph {
                 self.set("positions", unique.clone())?;
             }
         }
-        let mut negative = false;
-        for at in 0..length(&unique)? {
-            if ops::less_than(&row(&unique, at)?.get("contracts")?, &Js::Number(0.0))? {
-                negative = true;
-            }
-        }
-        if negative {
+        let negative = unique.call_method(
+            "filter",
+            vec![Js::function("negativeContracts", |_, args| {
+                Ok(Js::Bool(ops::less_than(
+                    &arg(&args, 0).get("contracts")?,
+                    &Js::Number(0.0),
+                )?))
+            })],
+        )?;
+        if length(&negative)? > 0 {
+            // Evaluate the source diagnostic argument before the terminal sink;
+            // these getters can throw or reenter even when stderr is the host.
+            let _diagnostic = negative.call_method(
+                "map",
+                vec![Js::function("negativePositionDiagnostic", |_, args| {
+                    let item = arg(&args, 0);
+                    Ok(Js::object(vec![
+                        ("id", item.get("id")?),
+                        ("symbol", item.get("symbol")?),
+                        ("side", item.get("side")?),
+                        ("contracts", item.get("contracts")?),
+                    ]))
+                })],
+            )?;
             eprintln!("Negative contracts detected");
         }
         Ok(())
