@@ -204,6 +204,7 @@ setTimeout(()=>{trace.push(['result',f.flush()]);console.log(JSON.stringify(trac
         String::from_utf8_lossy(&output.stderr)
     );
     let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let expected = to_json(&from_json(&expected)).unwrap();
     let create =
         |shared: &ScopeShared<()>, trace: Rc<RefCell<Vec<Value>>>, notify: Rc<dyn Fn()>| {
             shared
