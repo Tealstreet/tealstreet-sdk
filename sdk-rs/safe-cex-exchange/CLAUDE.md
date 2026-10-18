@@ -1856,6 +1856,15 @@ then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
 Serialization errors stay visible; `native_console_default` checks both paths
 against Node and verifies that reporting leaves the retained input unchanged.
 
+The production REST host can carry the native PayloadSigner alongside its hosted
+RemoteSigner. `rest_http_host_with_signers` retains executable callbacks outside
+serialized options; shared BaseExchange assembly binds the same payload provider
+to its core and JS options before venue initialization. One PayloadScheme union
+covers HMAC hex/base64 and Stark felt-pair requests, using the existing runtime-owned
+Promise machinery for completion and errors. The Paradex native binding witness
+uses real NativeRuntime/reqwest and a loopback config/auth origin; maintained Node
+SDK code independently builds and signs Order, ModifyOrder and JWT preimages.
+
 Array.join retains UTF16 units through both separator and element coercion;
 UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 `native_array_join_preserves_utf16_elements_separators_and_coercions` compares
