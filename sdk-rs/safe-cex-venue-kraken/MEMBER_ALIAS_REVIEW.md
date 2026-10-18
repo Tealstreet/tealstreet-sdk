@@ -52,3 +52,12 @@ Discovery stays in the separate accepted-inventory target. Full parity index,
 extractor check, all-features cancellation/override, and both touched crates'
 fmt --check plus all-target Clippy are separate readiness gates. Other Kraken
 aliases and owners remain independent obligations.
+
+The selected canonical replay reports three explicit classifications, zero failed
+owners and zero decoder runtime results. All three real constructed-Scope tests
+pass; all three semantic controls compile, fail their named runtime witnesses,
+and pass after exact source restoration. The full inventory clears BodyFuture
+and its two member profiles, then reaches the pre-existing
+`binding/members.rs::UNSUPPORTED_MACRO_IMPORT_SCOPE` from dispatch's wildcard
+import. Ten original aliases remain independently unclassified. Neither clean
+full discovery nor whole-Kraken accepted behavior is claimed by this cohort.
