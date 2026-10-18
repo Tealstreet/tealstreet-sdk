@@ -510,7 +510,13 @@ impl WsHost for Host {
     }
 }
 impl ReportHost for Host {
-    fn ticker_patch_refusal(&self, _: &E, _: &[u16], _: &[(&str, V)]) -> Result<Option<String>, E> {
+    fn ticker_row_refusal(
+        &self,
+        _: &V,
+        _: &V,
+        _: &[u16],
+        _: &[(&str, V)],
+    ) -> Result<Option<String>, E> {
         Ok(None)
     }
     fn ticker_refusal_error(&self, _: Vec<String>) -> E {

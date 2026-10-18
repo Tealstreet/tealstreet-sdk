@@ -1,5 +1,8 @@
 {
   "tests": {
+    "accepted-string-key-observer-native.test.mjs": [
+      "generated JsJsonValue observer compiles and observes native String object keys"
+    ],
     "accepted-glob-exports.test.mjs": [
       "dependency glob providers require the active binding compiler artifact and feature set",
       "dependency glob names include public reexports and macros and refuse incomplete inventories",
@@ -281,6 +284,7 @@
     ]
   },
   "mutations": [
+    "native String-key observer corruption",
     "numeric dependency export missing origin",
     "numeric dependency export opaque operand",
     "workspace dependency glob macro shadow",

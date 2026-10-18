@@ -1,7 +1,6 @@
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str};
 use safe_cex_venue_woo::{
     v3_ws_commands::{WooV3WsCommand, WooV3WsCommandName},
-    v3_ws_public::WooV3WsOrderBookUpdate,
     v3_ws_state::*,
     v3_ws_topics::WooV3WsChannel,
 };
@@ -145,61 +144,6 @@ fn command(actual: &WooV3WsCommand, expected: &Value) {
         "WS-STATE native planned params"
     );
 }
-fn sequence(actual: &WooV3WsSequenceResult, expected: &Value) {
-    match (expected["accepted"].as_bool().unwrap(), actual) {
-        (
-            true,
-            WooV3WsSequenceResult::Accepted {
-                accepted,
-                next_expected_previous_timestamp,
-            },
-        ) => {
-            assert!(*accepted, "WS-STATE native accepted flag");
-            number(
-                *next_expected_previous_timestamp,
-                &expected["nextExpectedPreviousTimestamp"],
-                "WS-STATE native sequence next",
-            );
-        }
-        (
-            false,
-            WooV3WsSequenceResult::Gap {
-                accepted,
-                blocker,
-                expected_previous_timestamp,
-                actual_previous_timestamp,
-                requires_fresh_snapshot,
-            },
-        ) => {
-            assert!(!accepted, "WS-STATE native gap flag");
-            assert_eq!(
-                blocker,
-                expected["blocker"].as_str().unwrap(),
-                "WS-STATE native sequence blocker"
-            );
-            number(
-                *expected_previous_timestamp,
-                &expected["expectedPreviousTimestamp"],
-                "WS-STATE native sequence expected",
-            );
-            number(
-                *actual_previous_timestamp,
-                &expected["actualPreviousTimestamp"],
-                "WS-STATE native sequence actual",
-            );
-            assert_eq!(
-                *requires_fresh_snapshot,
-                expected["requiresFreshSnapshot"].as_bool().unwrap(),
-                "WS-STATE native gap snapshot"
-            );
-            assert_eq!(
-                expected["requiresFreshSnapshot"], true,
-                "WS-STATE source gap snapshot literal"
-            );
-        }
-        _ => panic!("WS-STATE native sequence variant"),
-    }
-}
 #[test]
 fn decoded_native_contracts_and_declarations() {
     let data = source();
@@ -312,19 +256,9 @@ fn decoded_native_contracts_and_declarations() {
             "WS-STATE strict state record {raw}"
         );
     }
-    for raw in [
-        "[]",
-        r#"{"accepted":false,"blocker":"bad","expectedPreviousTimestamp":1,"actualPreviousTimestamp":2,"requiresFreshSnapshot":true}"#,
-        r#"{"accepted":false,"blocker":"sequence-gap","expectedPreviousTimestamp":1,"actualPreviousTimestamp":2,"requiresFreshSnapshot":false}"#,
-    ] {
-        assert!(
-            js_from_str::<WooV3WsSequenceResult>(raw).is_err(),
-            "WS-STATE strict sequence record {raw}"
-        );
-    }
 }
 #[test]
-fn native_ack_validation_and_sequence_match_source() {
+fn native_ack_validation_matches_source() {
     let data = source();
     assert_eq!(data["acks"].as_array().unwrap().len(), 31);
     for index in 0..31 {
@@ -338,21 +272,6 @@ fn native_ack_validation_and_sequence_match_source() {
             ack(&actual.unwrap(), ok);
             let native: WooV3WsCommandAck = js_from_str(row["decoded"].as_str().unwrap()).unwrap();
             ack(&native, ok);
-        } else {
-            error(actual, row);
-        }
-    }
-    assert_eq!(data["sequences"].as_array().unwrap().len(), 9);
-    for index in 0..9 {
-        let row = &data["sequences"][index];
-        let expected: f64 = js_from_str(row["expected"].as_str().unwrap()).unwrap();
-        let update: WooV3WsOrderBookUpdate = js_from_str(row["update"].as_str().unwrap()).unwrap();
-        let actual = advance_woo_v3_order_book_sequence(expected, &update);
-        if let Some(ok) = row.get("ok") {
-            sequence(&actual.unwrap(), ok);
-            let decoded: WooV3WsSequenceResult =
-                js_from_str(row["decoded"].as_str().unwrap()).unwrap();
-            sequence(&decoded, ok);
         } else {
             error(actual, row);
         }

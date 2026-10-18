@@ -319,3 +319,10 @@ the binary's name/use collectors and Bindings visitor inspect parsed syntax.
 Their specific non-decoder rows do not waive macro-effect, provenance, import
 shadowing or missing-classification checks. Refresh these reviewed file pins
 alongside changes to either source file.
+
+The `JsJsonValue::from(Value)` native observer uses that enum's actual `String`
+object keys directly; retained-input UTF-16 key adapters belong to their separate
+owners. `node --test safe-cex-parity/scripts/accepted-string-key-observer-native.test.mjs`
+(from `sdk-rs`) runs the canonical compiler inventory and generated production
+probe, including nested Unicode/NUL/empty keys and a compiled wrong-key output
+control. No classification receipt can replace the executed conversion witness.
