@@ -1,6 +1,7 @@
 use safe_cex_num::numeric_ingress::{
     JsNumberOutput, js_from_str, js_from_value, js_from_value_ref,
 };
+use safe_cex_types::retained_json::RetainedJsonInput;
 use safe_cex_venue_bingx::types::*;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -103,14 +104,81 @@ fn verify<T: DeserializeOwned + Serialize + JsNumberOutput + Observe>(case: &Val
             case["wire"].as_str().unwrap().contains("\\ud"),
             "TypeScript retains surrogate {name}/{label}"
         );
+        let (path, _) = label
+            .strip_prefix("utf8_boundary:")
+            .unwrap()
+            .split_once(':')
+            .unwrap();
+        let units: Vec<u16> = case["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|unit| u16::try_from(unit.as_u64().unwrap()).unwrap())
+            .collect();
+        for (route, retained) in [
+            (
+                "canonical",
+                RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap(),
+            ),
+            (
+                "raw_capture",
+                serde_json::from_str::<RetainedJsonInput>(raw).unwrap(),
+            ),
+        ] {
+            let mut selected = &retained;
+            for key in path.split('/') {
+                selected = if let Some(rows) = selected.as_array() {
+                    &rows[key.parse::<usize>().unwrap()]
+                } else {
+                    selected.get(key).unwrap()
+                };
+            }
+            assert_eq!(
+                selected.as_text().unwrap(),
+                units,
+                "retained UTF-16 units {name}/{label}/{route}"
+            );
+            assert_eq!(
+                retained.json_stringify().unwrap().unwrap(),
+                case["wire"].as_str().unwrap(),
+                "retained wire identity {name}/{label}/{route}"
+            );
+        }
+        // The source changes exactly one String in its distinct-field fixture.
+        // Keep every other native member observation, including numeric bits.
+        let mut expected = oracle()["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|baseline| baseline["name"] == name && baseline["label"] == "distinct_fields")
+            .unwrap()["native"]
+            .clone();
+        let typed = String::from_utf16_lossy(&units);
         assert!(
-            js_from_str::<T>(raw).is_err(),
-            "utf8 refusal shared {name}/{label}"
+            typed.contains('\u{fffd}'),
+            "typed replacement {name}/{label}"
         );
-        assert!(
-            serde_json::from_str::<T>(raw).is_err(),
-            "utf8 refusal bare {name}/{label}"
-        );
+        *expected.pointer_mut(&format!("/{path}")).unwrap() = json!(typed);
+        for (route, decoded) in [
+            (
+                "shared_raw",
+                js_from_str::<T>(raw).map_err(|error| error.to_string()),
+            ),
+            (
+                "bare_raw",
+                serde_json::from_str::<T>(raw).map_err(|error| error.to_string()),
+            ),
+        ] {
+            let decoded = decoded.unwrap_or_else(|error| {
+                panic!("typed UTF-8 decode {name}/{label}/{route}: {error}")
+            });
+            let native = decoded.observe();
+            assert_native_cardinality(&native, &expected, &format!("{name}/{label}/{route}"));
+            assert_eq!(
+                native, expected,
+                "typed UTF-8 native fields {name}/{label}/{route}"
+            );
+        }
         return 2;
     }
     if case["valid"] == true
