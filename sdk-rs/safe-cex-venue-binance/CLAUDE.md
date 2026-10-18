@@ -671,6 +671,15 @@ compares five signed request outcomes, including mixed-case weight/retry headers
 against actual maintained TS guards with installed Axios. Its only request stub
 is the terminal RestAdapter; the factories, signer and response guards are live.
 
+The request-weight `Failure` and `HeaderGetter` aliases retain native error and
+bound header-reader capabilities. Their compiler receipts classify the actual
+alias traits; they do not execute a decoder or the callback. The existing native
+`production_native_request_weight_callbacks_observe_success_and_rejection` test
+constructs the real parent and compares five signed HTTP outcomes to TS/Axios.
+`scripts/header-alias-controls.py` independently corrupts the production header
+argument and rejection-response forwarding, requires compiled named failures,
+and restores exact source bytes before requiring a pass.
+
 The twenty history/API/lifecycle capabilities have individual source-role records
 and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
 Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls
@@ -790,6 +799,17 @@ the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
 
+The private `Action` and `PinKey` aliases have individual non-decoder capability
+reviews. The actual native private-clone witness retains the captured receiver
+and invokes its reconnect arrow; the held listen-key witness exercises Futures
+and PM through native_dependencies, observes suspension/native value bits and
+rethrows the original rejected HTTP error with its response intact.
+`scripts/private-action-key-controls.py` independently corrupts the production
+captured call and listenKey forwarding, requires named compiled native failures,
+then restores exact source bytes and requires GREEN. The finite compiler runner
+authenticates these two real aliases; it does not execute replacement callbacks
+or classify the returned payload, other futures or the whole package.
+
 Private REST shape checks, field aliases and diagnostics consume the canonical
 native graph directly. Never restore the recursive `json_data` projection.
 Existing borrowed-JSON array validators delegate to the same native guard.
@@ -814,6 +834,19 @@ Use `private_classes --features native` for actual native private frame/Store,
 public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
+
+### Canonical private socket construction
+
+ExchangeOwner constructs PrivateSocket directly for Futures, PM and Spot. The
+three former Rust socket facades contained only new/Deref and had no Rust caller;
+the live TypeScript classes remain mapped to the canonical constructor and state.
+`private_owner_binding` in the native `private_classes` target observes the actual
+parent Rc, family/default bits, order-frame Store effects and Spot authentication
+at terminal socket send. `scripts/private-owner-controls.py` separately corrupts
+family selection and HMAC payload forwarding, requires named compiled failures,
+then restores exact production bytes and requires passes. These execution proofs
+do not classify the remaining Auth/PrivateState raw APIs or erase the documented
+UTF-8 frame boundary.
 
 The standalone `delegated_methods` extraction layer has no production caller and
 is retired with its options alias and mock-only oracle. Keep the six TypeScript

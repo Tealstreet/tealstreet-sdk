@@ -11,7 +11,7 @@ use safe_cex_exchange::{
         promise::await_js,
         scope::scope_of,
         sockets,
-        value::{Js, Thrown, arg, from_typed, to_json},
+        value::{Js, Thrown, arg, from_typed, to_retained_input},
     },
     websocket::BaseWebSocket,
 };
@@ -338,7 +338,7 @@ impl Listener {
             .collect();
         let len = values.len();
         if delete_empty && len == 0 {
-            handlers.delete(&self.handler.encode_utf16().collect::<Vec<_>>());
+            handlers.delete(&self.handler.encode_utf16().collect::<Vec<_>>())?;
         } else {
             handlers.set(&self.handler, Js::array(values))?;
         }
@@ -411,7 +411,7 @@ fn candles(rt: &Rt, options: Js, callback: Js) -> Result<Js, Thrown> {
         if next > 0. {
             topics.set_key(&listener.topic.to_js_string()?, Js::Number(next))?;
         } else {
-            topics.delete(&listener.topic.to_js_string()?);
+            topics.delete(&listener.topic.to_js_string()?)?;
         }
         if flag(&rt, "isConnected")? && left == 0 {
             rt.call_path(
@@ -456,7 +456,11 @@ impl Depth {
         Ok(())
     }
     fn apply(&self, update: &Js) -> Result<BinanceOrderBookApplyResult, Thrown> {
-        let value = to_json(update)?;
+        // Preserve JSON.parse Number semantics at the shared depth input.
+        // Retain overflowing values through the canonical data bridge.
+        let value = to_retained_input(update)?
+            .into_value()
+            .map_err(|error| Thrown::type_error(&error.to_string()))?;
         let value = value
             .as_object()
             .ok_or_else(|| Thrown::type_error("depth update must be an object"))?;
@@ -527,7 +531,9 @@ impl Depth {
                 let updates: Vec<_> = buffered
                     .iter()
                     .map(|v| {
-                        to_json(v)?
+                        to_retained_input(v)?
+                            .into_value()
+                            .map_err(|error| Thrown::type_error(&error.to_string()))?
                             .as_object()
                             .cloned()
                             .ok_or_else(|| Thrown::type_error("depth update must be object"))
@@ -640,7 +646,7 @@ fn book(rt: &Rt, symbol: Js, callback: Js) -> Result<Js, Thrown> {
         let count = topics.get_property(&listener.topic)?;
         if !count.is_undefined() {
             if count.to_number()? <= 1. {
-                topics.delete(&listener.topic.to_js_string()?);
+                topics.delete(&listener.topic.to_js_string()?)?;
             } else {
                 topics.set_key(
                     &listener.topic.to_js_string()?,

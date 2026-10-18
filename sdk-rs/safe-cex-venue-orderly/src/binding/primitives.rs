@@ -96,7 +96,7 @@ impl crate::api::ApiHost for Host {
         Ok(v(value.spread_object()?))
     }
     fn delete(&self, value: V, key: &str) -> R<()> {
-        value.delete(&key.encode_utf16().collect::<Vec<_>>());
+        value.delete(&key.encode_utf16().collect::<Vec<_>>())?;
         Ok(())
     }
     fn uppercase_optional(&self, value: V) -> R<V> {
@@ -569,7 +569,7 @@ impl crate::public_feeds::FeedHost for Host {
         a.strict_equals(b)
     }
     fn delete(&self, object: V, key: &[u16]) -> R<()> {
-        object.delete(key);
+        object.delete(key)?;
         Ok(())
     }
     fn for_each(&self, rows: V, mut body: impl FnMut(V) -> R<()>) -> R<()> {

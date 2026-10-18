@@ -911,7 +911,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             let payload = req_object.spread_object()?;
             if idx > 0 {
                 for key in ["stopLoss", "takeProfit", "slTriggerBy", "tpTriggerBy"] {
-                    payload.delete(&crate::binding::value::utf16(key));
+                    payload.delete(&crate::binding::value::utf16(key))?;
                 }
             }
             payload.set("qty", num(lot_size))?;

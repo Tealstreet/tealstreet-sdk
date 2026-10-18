@@ -39,7 +39,7 @@ pub(crate) fn ops(realm: &Realm) -> IngressOps<Js, Thrown> {
         set: Rc::new(|o, k, v| o.set(k, v)),
         set_index: Rc::new(|o, k, v| o.set_key(&k.to_js_string()?, v)),
         delete: Rc::new(|o, k| {
-            o.delete(&k.to_js_string()?);
+            o.delete(&k.to_js_string()?)?;
             Ok(true)
         }),
         global: Rc::new(move |name| global_realm.global(name)),

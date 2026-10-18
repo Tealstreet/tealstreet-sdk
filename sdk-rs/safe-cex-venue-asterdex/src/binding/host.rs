@@ -52,7 +52,9 @@ impl RuntimeHost for Host {
         value(object.define(key, item))
     }
     fn delete(&self, object: &Js, key: &str) -> ResultValue<Js, ()> {
-        object.delete(&key.encode_utf16().collect::<Vec<_>>());
+        object
+            .delete(&key.encode_utf16().collect::<Vec<_>>())
+            .map_err(|error| error.value)?;
         Ok(())
     }
     fn call(&self, function: Js, receiver: Js, args: Vec<Js>) -> ResultValue<Js> {

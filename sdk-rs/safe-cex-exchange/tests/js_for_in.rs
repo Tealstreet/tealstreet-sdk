@@ -114,7 +114,7 @@ fn for_in_record_observes_deletion_before_visitation_and_keeps_undefined_presenc
     let mut keys = vec![];
     while let Some(key) = record.next_key().unwrap() {
         if key.as_ref() == utf16("first").as_ref() {
-            o.delete(&utf16("later"));
+            o.delete(&utf16("later")).unwrap();
         }
         keys.push(String::from_utf16(&key).unwrap());
     }
@@ -196,8 +196,8 @@ fn function_metadata_uses_ordinary_definition_deletion_and_readonly_assignment()
         .call_method("setPrototypeOf", vec![f.clone(), p])
         .unwrap();
     let refused = f.set("name", Js::str("replacement")).is_err();
-    f.delete(&utf16("name"));
-    f.delete(&utf16("length"));
+    f.delete(&utf16("name")).unwrap();
+    f.delete(&utf16("length")).unwrap();
     let mut record = ForInRecord::get(&f);
     let mut keys = vec![];
     while let Some(key) = record.next_key().unwrap() {
@@ -271,7 +271,7 @@ fn for_in_record_retains_surrogate_keys_and_omits_actual_array_holes() {
     let o = Js::object(vec![]);
     o.define_key(&[0xd800], Js::Undefined).unwrap();
     let a = Js::array(vec![Js::Undefined, Js::Number(-0.)]);
-    a.delete(&utf16("0"));
+    a.delete(&utf16("0")).unwrap();
     let mut actual = vec![];
     for value in [o, a] {
         let mut record = ForInRecord::get(&value);
@@ -338,7 +338,7 @@ fn bound_metadata_observes_own_length_before_name_and_preserves_utf16() {
         actual, expected,
         "FOR_IN_METADATA bound descriptors follow source getter order and native bits"
     );
-    bound.delete(&utf16("name"));
+    bound.delete(&utf16("name")).unwrap();
     assert!(!bound.has_own("name"));
 }
 

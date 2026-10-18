@@ -160,7 +160,7 @@ async fn observe(shared: &Rc<ScopeShared<()>>, method: &str, label: &str) -> Val
             args[2].set("length", Js::Number(1.0))?;
         }
         if scenario == "delete" && index == 0 {
-            args[2].delete(&"1".encode_utf16().collect::<Vec<_>>());
+            args[2].delete(&"1".encode_utf16().collect::<Vec<_>>())?;
         }
         if scenario == "callback-rejects" {
             return Ok(Js::Promise(Promise::settled(
@@ -301,7 +301,8 @@ fn series_module_roots_survive_export_removal_and_release_with_scope() {
             drop(module);
             shared
                 .globals
-                .delete(&"p-iteration".encode_utf16().collect::<Vec<_>>());
+                .delete(&"p-iteration".encode_utf16().collect::<Vec<_>>())
+                .unwrap();
             assert!(!shared.globals.has_own("p-iteration"));
             let expected = weak_module.clone();
             let callback = Js::function("callback", move |this, _| {

@@ -1546,33 +1546,72 @@ impl Js {
         descriptor.set_prototype(Js::Null)?;
         self.define_property(&utf16(key), &descriptor)
     }
-    pub fn delete(&self, key: &[u16]) {
+    pub fn delete(&self, key: &[u16]) -> Result<(), Thrown> {
+        if self.delete_property(key)? {
+            Ok(())
+        } else {
+            Err(Thrown::type_error(
+                "Cannot delete a non-configurable property",
+            ))
+        }
+    }
+    pub fn reflect_delete(&self, key: &[u16]) -> Result<bool, Thrown> {
+        if !self.is_object() {
+            return Err(Thrown::type_error(
+                "Reflect.deleteProperty requires an object",
+            ));
+        }
+        self.delete_property(key)
+    }
+    fn delete_property(&self, key: &[u16]) -> Result<bool, Thrown> {
+        if self.is_nullish() {
+            return Err(Thrown::type_error(
+                "Cannot convert undefined or null to object",
+            ));
+        }
+        if let Some(props) = self.own_props() {
+            if matches!(
+                props.borrow().get(key),
+                Some(
+                    Prop::DataDescriptor {
+                        configurable: false,
+                        ..
+                    } | Prop::Accessor {
+                        configurable: false,
+                        ..
+                    }
+                )
+            ) {
+                return Ok(false);
+            }
+            let removed = props.borrow_mut().shift_remove(key);
+            drop(removed);
+            return Ok(true);
+        }
         match self {
             Js::Array(items) => {
-                if let Some(i) = array_index(key)
-                    && let Some(slot) = items.borrow_mut().get_mut(i)
-                {
-                    *slot = None;
+                if key == utf16("length").as_ref() {
+                    return Ok(false);
                 }
-            }
-            _ => {
-                if let Some(props) = self.own_props() {
-                    if !matches!(
-                        props.borrow().get(key),
-                        Some(
-                            Prop::DataDescriptor {
-                                configurable: false,
-                                ..
-                            } | Prop::Accessor {
-                                configurable: false,
-                                ..
-                            }
-                        )
-                    ) {
-                        props.borrow_mut().shift_remove(key);
-                    }
+                if let Some(i) = array_index(key) {
+                    let removed = items.borrow_mut().get_mut(i).and_then(Option::take);
+                    drop(removed);
                 }
+                Ok(true)
             }
+            Js::String(units) => Ok(key != utf16("length").as_ref()
+                && !array_index(key).is_some_and(|index| index < units.len())),
+            Js::Builtin(reference)
+                if reference
+                    .own_properties()
+                    .iter()
+                    .any(|(name, _)| name.encode_utf16().eq(key.iter().copied())) =>
+            {
+                Err(Thrown::type_error(
+                    "Intrinsic property deletion is unsupported",
+                ))
+            }
+            _ => Ok(true),
         }
     }
     /// Enumerable own string keys in OrdinaryOwnPropertyKeys order.

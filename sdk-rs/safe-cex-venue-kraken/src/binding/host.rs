@@ -1107,7 +1107,7 @@ mod form_tests {
         assert_eq!(cases.len(), 6, "replay input inventory");
         for case in cases {
             let parsed = qs_parse_form(&Js::str(case["input"].as_str().unwrap())).unwrap();
-            parsed.delete(&units("nonce"));
+            parsed.delete(&units("nonce")).unwrap();
             parsed.define("nonce", Js::str("next")).unwrap();
             assert_eq!(
                 qs_stringify(&parsed, false, false).unwrap(),
