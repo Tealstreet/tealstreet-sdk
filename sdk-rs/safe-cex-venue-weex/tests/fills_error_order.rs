@@ -328,8 +328,28 @@ fn fills_preserve_native_strings_and_refuse_whole_utf16_records() {
         r#"{"symbol":"\ud800","side":"BUY","price":3,"qty":5,"time":1700000000123,"orderId":"ordinary"}"#,
         r#"{"symbol":"B/Q","side":"BUY","price":3,"qty":5,"time":1700000000123,"orderId":"\ud800"}"#,
     ] {
-        assert!(serde_json::from_str::<WeexUtilityInput>(raw).is_err());
-        assert!(js_from_str::<WeexUtilityInput>(raw).is_err());
+        for input in [
+            serde_json::from_str::<WeexUtilityInput>(raw).unwrap(),
+            js_from_str::<WeexUtilityInput>(raw).unwrap(),
+        ] {
+            let field = if raw.contains("ordinary") {
+                "symbol"
+            } else {
+                "orderId"
+            };
+            assert_eq!(
+                input.as_value().get(field).unwrap().as_text(),
+                Some([0xd800].as_slice())
+            );
+            assert!(
+                normalize_execution(&input, None, |v| v).is_err(),
+                "closed execution String field {field}"
+            );
+            assert!(
+                normalize_historical_trade(&input, None, |v| v).is_err(),
+                "closed historical String field {field}"
+            );
+        }
     }
     for (profile, field) in [
         ("weex-execution-unit", "symbol"),
@@ -375,16 +395,43 @@ fn retained_whole_record_costs_are_explicit() {
     let mut deep = record();
     deep["ignored"] = (0..150).fold(Value::Null, |value, _| json!([value]));
     let mut refused = 0;
+    let mut retained_routes = 0;
     for (id, text) in [
         ("depth", deep.to_string()),
         ("unit", r#"{"symbol":"B/Q","side":"BUY","price":3,"qty":5,"time":1700000000123,"orderId":"order-b","ignored":"\ud800"}"#.to_owned()),
         ("cold-unit", r#"{"symbol":"","side":"BUY","price":3,"qty":5,"time":1700000000123,"orderId":"order-b","ignored":"\ud800"}"#.to_owned()),
     ] {
-        assert!(serde_json::from_str::<WeexUtilityInput>(&text).is_err(), "WEEX whole-record serde refusal {id}");
-        assert!(js_from_str::<WeexUtilityInput>(&text).is_err(), "WEEX whole-record numeric refusal {id}");
-        refused += 2;
+        let routes = [serde_json::from_str::<WeexUtilityInput>(&text), js_from_str::<WeexUtilityInput>(&text)];
+        for route in routes {
+            if id == "depth" {
+                assert!(route.is_err(), "WEEX retained depth refusal");
+                refused += 1;
+                continue;
+            }
+            let input = route.unwrap();
+            assert_eq!(input.as_value().get("ignored").unwrap().as_text(), Some([0xd800].as_slice()));
+            let execution = normalize_execution(&input, None, |v| v).unwrap();
+            let trade = normalize_historical_trade(&input, None, |v| v).unwrap();
+            if id == "cold-unit" {
+                assert!(execution.is_none() && trade.is_none(), "cold guard precedes ignored field");
+            } else {
+                let execution = execution.unwrap();
+                let trade = trade.unwrap();
+                assert_eq!(execution.symbol, "B/Q");
+                assert_eq!(execution.order_id.as_deref(), Some("order-b"));
+                assert_eq!(execution.price.to_bits(), 3.0_f64.to_bits());
+                assert_eq!(trade.symbol, "B/Q");
+                assert_eq!(trade.order_id, "order-b");
+                assert_eq!(trade.price.to_bits(), 3.0_f64.to_bits());
+            }
+            retained_routes += 1;
+        }
     }
-    assert_eq!(refused, 6, "WEEX whole-record refusal route floor");
+    assert_eq!(refused, 2, "WEEX depth refusal route floor");
+    assert_eq!(
+        retained_routes, 4,
+        "WEEX ignored UTF16 admission route floor"
+    );
     source_profile(
         "tests/fills-order-oracle.cjs",
         "bounds",

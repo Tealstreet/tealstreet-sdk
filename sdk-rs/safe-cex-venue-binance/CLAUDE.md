@@ -664,6 +664,13 @@ passes. `scripts/snapshot-call-alias-contracts.mjs` authenticates fresh compiler
 metadata and checks only the selected alias classification; it does not replace
 the native callback execution witnesses or classify the continuation aliases.
 
+The public ticker handlers consume canonical native EventArray values from the
+constructed public classes. The old PublicEvent/PublicEvents JSON adapter and its
+oracle-only test/control tail are removed; they had no production caller.
+The actual native ticker census in private_classes retains source comparisons for
+all three families; its production field-routing control requires three compiled
+failures and exact-restored passes.
+
 Keep production imports explicit. The canonical accepted-set scanner must prove
 macro provenance across each source scope; wildcard imports can hide that proof
 even when the current business logic compiles. Import changes also require review
