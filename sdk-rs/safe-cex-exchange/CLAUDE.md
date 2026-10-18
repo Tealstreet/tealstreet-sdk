@@ -1562,6 +1562,12 @@ across six bound arithmetic and six comparison methods, and five min/max argumen
 sets against the actual npm dependency. Positive finite precision stays decimal;
 the public shared model types are unchanged.
 
+The BigNumber import supplies both native call and construct bodies. OKX's
+source placement formatter uses `new BigNumber(amount)`; a callable-only import
+refuses before any order reaches HTTP. The installed-package constructor witness
+compares both forms and constructed clones for all 22 scalar profiles, while the
+real OKX placement binding tests retain batch payload and attached-error checks.
+
 Error prototype thread-local storage stays inside its sole private accessor.
 Module-level item macros are rejected by the parity indexer. The focused
 `safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
