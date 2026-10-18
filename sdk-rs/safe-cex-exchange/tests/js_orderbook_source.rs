@@ -204,7 +204,9 @@ fn orderbook_totals_match_source_side_reads_live_rows_and_raw_addition() {
                     for (i, level) in items.into_iter().enumerate() {
                         if let Some(level) = level {
                             let amount = level.get("amount").unwrap();
-                            level.delete(&"amount".encode_utf16().collect::<Vec<_>>());
+                            level
+                                .delete(&"amount".encode_utf16().collect::<Vec<_>>())
+                                .unwrap();
                             let log = trace.clone();
                             let array = levels.clone();
                             let replace = spec["replaceRow"] == true;

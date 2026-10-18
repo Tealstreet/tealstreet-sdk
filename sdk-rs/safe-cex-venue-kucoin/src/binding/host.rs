@@ -151,7 +151,7 @@ pub(crate) fn intrinsic(name: &str, a: Vec<Js>) -> Result<Js, Thrown> {
             x(2)
         }
         "delete-index" => {
-            x(0).delete(&key(1)?);
+            x(0).delete(&key(1)?)?;
             Js::Bool(true)
         }
         "define-field" => {
