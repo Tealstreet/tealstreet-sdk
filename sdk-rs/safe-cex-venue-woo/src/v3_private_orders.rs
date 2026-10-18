@@ -1,5 +1,11 @@
 //! Inert private regular/algo orders and transactions. No live adapter or store mutation.
-use crate::v3_private::*;
+use crate::v3_private::{
+    WooV3AccountPositionMode, WooV3PaginatedRows, WooV3PositionSide,
+    assert_position_side_matches_mode, decimal_to_number, decode_paginated_rows,
+    normalize_perpetual_symbol, optional_decimal_string, require_array, require_boolean,
+    require_decimal_string, require_enum, require_finite_number, require_integer, require_record,
+    require_string,
+};
 use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_types::{
     BothPositionSide, Execution, ExecutionPositionSide, HistoricalTrade, OrderSide, OrderStatus,
@@ -23,12 +29,29 @@ fn maker_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     }
 }
 // ts: WooV3OrderSide
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3OrderSide {
     #[serde(rename = "BUY")]
     Buy,
     #[serde(rename = "SELL")]
     Sell,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3OrderSide")]
+enum AcceptedWooV3OrderSideWire {
+    #[serde(rename = "BUY")]
+    Buy,
+    #[serde(rename = "SELL")]
+    Sell,
+}
+impl<'de> Deserialize<'de> for WooV3OrderSide {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3OrderSideWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3OrderSide {
     fn check_number_output(&self) {
@@ -36,7 +59,7 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3OrderSide {
     }
 }
 // ts: WooV3OrderStatus
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3OrderStatus {
     #[serde(rename = "NEW")]
     New,
@@ -49,13 +72,36 @@ pub enum WooV3OrderStatus {
     #[serde(rename = "REJECTED")]
     Rejected,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3OrderStatus")]
+enum AcceptedWooV3OrderStatusWire {
+    #[serde(rename = "NEW")]
+    New,
+    #[serde(rename = "CANCELLED")]
+    Cancelled,
+    #[serde(rename = "PARTIAL_FILLED")]
+    PartialFilled,
+    #[serde(rename = "FILLED")]
+    Filled,
+    #[serde(rename = "REJECTED")]
+    Rejected,
+}
+impl<'de> Deserialize<'de> for WooV3OrderStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3OrderStatusWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3OrderStatus {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{New,Cancelled,PartialFilled,Filled,Rejected});
     }
 }
 // ts: WooV3RegularOrderType
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3RegularOrderType {
     #[serde(rename = "LIMIT")]
     Limit,
@@ -82,13 +128,50 @@ pub enum WooV3RegularOrderType {
     #[serde(rename = "ADL")]
     Adl,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3RegularOrderType")]
+enum AcceptedWooV3RegularOrderTypeWire {
+    #[serde(rename = "LIMIT")]
+    Limit,
+    #[serde(rename = "MARKET")]
+    Market,
+    #[serde(rename = "IOC")]
+    Ioc,
+    #[serde(rename = "POST_ONLY")]
+    PostOnly,
+    #[serde(rename = "AC")]
+    Ac,
+    #[serde(rename = "FOK")]
+    Fok,
+    #[serde(rename = "LIQUIDATE")]
+    Liquidate,
+    #[serde(rename = "BID")]
+    Bid,
+    #[serde(rename = "ASK")]
+    Ask,
+    #[serde(rename = "RPI")]
+    Rpi,
+    #[serde(rename = "LIQUIDATE_BLP")]
+    LiquidateBlp,
+    #[serde(rename = "ADL")]
+    Adl,
+}
+impl<'de> Deserialize<'de> for WooV3RegularOrderType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3RegularOrderTypeWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3RegularOrderType {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{Limit,Market,Ioc,PostOnly,Ac,Fok,Liquidate,Bid,Ask,Rpi,LiquidateBlp,Adl});
     }
 }
 // ts: WooV3AlgoType
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AlgoType {
     #[serde(rename = "STOP")]
     Stop,
@@ -109,13 +192,44 @@ pub enum WooV3AlgoType {
     #[serde(rename = "STOP_LOSS")]
     StopLoss,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3AlgoType")]
+enum AcceptedWooV3AlgoTypeWire {
+    #[serde(rename = "STOP")]
+    Stop,
+    #[serde(rename = "OCO")]
+    Oco,
+    #[serde(rename = "TRAILING_STOP")]
+    TrailingStop,
+    #[serde(rename = "POSITIONAL_TP_SL")]
+    PositionalTpSl,
+    #[serde(rename = "TP_SL")]
+    TpSl,
+    #[serde(rename = "BRACKET")]
+    Bracket,
+    #[serde(rename = "STOP_BRACKET")]
+    StopBracket,
+    #[serde(rename = "TAKE_PROFIT")]
+    TakeProfit,
+    #[serde(rename = "STOP_LOSS")]
+    StopLoss,
+}
+impl<'de> Deserialize<'de> for WooV3AlgoType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3AlgoTypeWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AlgoType {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{Stop,Oco,TrailingStop,PositionalTpSl,TpSl,Bracket,StopBracket,TakeProfit,StopLoss});
     }
 }
 // ts: WooV3TriggerPriceType
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3TriggerPriceType {
     #[serde(rename = "MARKET_PRICE")]
     MarketPrice,
@@ -124,13 +238,34 @@ pub enum WooV3TriggerPriceType {
     #[serde(rename = "LAST_PRICE")]
     LastPrice,
 }
+
+// Remote variants must retain the public enum names.
+#[allow(clippy::enum_variant_names)]
+#[derive(Deserialize)]
+#[serde(remote = "WooV3TriggerPriceType")]
+enum AcceptedWooV3TriggerPriceTypeWire {
+    #[serde(rename = "MARKET_PRICE")]
+    MarketPrice,
+    #[serde(rename = "INDEX_PRICE")]
+    IndexPrice,
+    #[serde(rename = "LAST_PRICE")]
+    LastPrice,
+}
+impl<'de> Deserialize<'de> for WooV3TriggerPriceType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3TriggerPriceTypeWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3TriggerPriceType {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{MarketPrice,IndexPrice,LastPrice});
     }
 }
 // ts: WooV3TriggerStatus
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3TriggerStatus {
     #[serde(rename = "USELESS")]
     Useless,
@@ -141,18 +276,56 @@ pub enum WooV3TriggerStatus {
     #[serde(rename = "SUCCESS")]
     Success,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3TriggerStatus")]
+enum AcceptedWooV3TriggerStatusWire {
+    #[serde(rename = "USELESS")]
+    Useless,
+    #[serde(rename = "TRIGGERED")]
+    Triggered,
+    #[serde(rename = "CANCELLED")]
+    Cancelled,
+    #[serde(rename = "SUCCESS")]
+    Success,
+}
+impl<'de> Deserialize<'de> for WooV3TriggerStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3TriggerStatusWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3TriggerStatus {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{Useless,Triggered,Cancelled,Success});
     }
 }
 // ts: WooV3MarginMode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3MarginMode {
     #[serde(rename = "ISOLATED")]
     Isolated,
     #[serde(rename = "CROSSED")]
     Crossed,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3MarginMode")]
+enum AcceptedWooV3MarginModeWire {
+    #[serde(rename = "ISOLATED")]
+    Isolated,
+    #[serde(rename = "CROSSED")]
+    Crossed,
+}
+impl<'de> Deserialize<'de> for WooV3MarginMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3MarginModeWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3MarginMode {
     fn check_number_output(&self) {

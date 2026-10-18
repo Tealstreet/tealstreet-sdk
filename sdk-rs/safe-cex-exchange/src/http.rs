@@ -1,5 +1,5 @@
 //! HTTP interceptor behavior from packages/safe-cex/src/safeCexAxiosCreate.ts.
-use crate::runtime::ExchangeRuntime;
+use crate::runtime::{ExchangeError, ExchangeRuntime};
 use safe_cex_store::Store;
 use safe_cex_transport::query::{
     query_identity_eq, query_json_projection, query_truthy, render_query,
@@ -13,7 +13,9 @@ use safe_cex_transport::{
     RestRequest, RestResponse, RestTransportContext, TransportError, TransportProvider,
     TransportRegistry,
 };
-use safe_cex_types::{ExchangeName, ExchangeOptions, RequestOutcome};
+use safe_cex_types::{
+    ExchangeName, ExchangeOptions, RequestOutcome, retained_json::RetainedJsonInput as Input,
+};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -221,10 +223,48 @@ fn restore_codec_config(current: &mut RestRequest, wire: &RestRequest, retry: Re
     } {
         current.query_params = retry.query_params;
     }
-    if current.body == wire.body {
+    if body_identity_eq(current.body.as_ref(), wire.body.as_ref()) {
         current.body = retry.body;
     }
 }
+fn body_identity_eq(
+    left: Option<&safe_cex_transport::RestBody>,
+    right: Option<&safe_cex_transport::RestBody>,
+) -> bool {
+    use safe_cex_transport::RestBody;
+    fn same(left: &Input, right: &Input) -> bool {
+        match (left, right) {
+            (Input::Float(left), Input::Float(right)) => left.to_bits() == right.to_bits(),
+            (Input::Array(left), Input::Array(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| same(left, right))
+            }
+            (Input::Object(left), Input::Object(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|((lk, lv), (rk, rv))| lk == rk && same(lv, rv))
+            }
+            _ => left == right,
+        }
+    }
+    match (left, right) {
+        (None, None) => true,
+        (Some(RestBody::Encoded(left)), Some(RestBody::Encoded(right))) => left == right,
+        (Some(RestBody::Untransformed(left)), Some(RestBody::Untransformed(right))) => {
+            same(left, right)
+        }
+        (Some(RestBody::Transformed(left)), Some(RestBody::Transformed(right))) => {
+            same(left.value(), right.value())
+        }
+        _ => false,
+    }
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 fn with_params_serializer(
     inner: Arc<dyn RestAdapter>,
@@ -505,10 +545,17 @@ impl HttpClient {
                 safe_cex_transport::RestBody::Untransformed(value) => value.clone(),
                 safe_cex_transport::RestBody::Transformed(data) => data.value().clone(),
                 safe_cex_transport::RestBody::Encoded(bytes) => {
-                    Value::String(String::from_utf8_lossy(bytes).into_owned())
+                    Input::Text(String::from_utf8_lossy(bytes).encode_utf16().collect())
                 }
             });
-            let summary = json!({"method":request.method.to_uppercase(),"url":request.url,"body":body,"params":request.query_params.as_ref().and_then(query_json_projection).or_else(|| request.params.clone())});
+            let mut summary = Input::from_value(json!({"method":request.method.to_uppercase(),"url":request.url,"params":request.query_params.as_ref().and_then(query_json_projection).or_else(|| request.params.clone())})).map_err(|e| HttpFailure::pre_transmit(e.to_string(),request.clone()))?;
+            let Input::Object(fields) = &mut summary else {
+                unreachable!("request summary")
+            };
+            if let Some(body) = body {
+                fields.push(("body".encode_utf16().collect(), body));
+            }
+            let summary = native_json_text(&summary);
             let _ = self.host.emit(
                 "grafana-http-request",
                 &format!(
@@ -552,8 +599,14 @@ impl HttpClient {
                     self.host.note_success(&self.exchange, response);
                 }
                 if !self.no_proxy && self.should_log(&request.url, true) {
-                    let body = body_value(&response.body);
-                    let summary = json!({"status":response.status,"body":body});
+                    let body = response.body.clone().into_data();
+                    let summary = native_json_text(&Input::Object(vec![
+                        (
+                            "status".encode_utf16().collect(),
+                            Input::Float(response.status as f64),
+                        ),
+                        ("body".encode_utf16().collect(), body),
+                    ]));
                     let _ = self.host.emit(
                         "grafana-http-response",
                         &format!(
@@ -617,9 +670,20 @@ impl HttpClient {
                 && let Some(status) = status
                 && let Some(response) = &error.response
             {
-                let body = body_value(&response.body);
+                // Physical bytes have not reached the native venue transform yet.
+                // Use the shared Axios view only for this diagnostic; native data
+                // keeps its existing value and the failure retains its raw body.
+                let body = match &response.body {
+                    safe_cex_transport::RestResponseBody::Encoded(_) => response
+                        .body
+                        .clone()
+                        .transform_axios_response()
+                        .expect("default response transform parses or preserves text")
+                        .into_data(),
+                    _ => response.body.clone().into_data(),
+                };
                 let source = if matches!(status, 401 | 403) {
-                    Some(if is_tealstreet_proxy_auth_failure_body(&body) {
+                    Some(if native_proxy_auth_failure_body(&body) {
                         "Tealstreet proxy auth failed"
                     } else {
                         "Upstream exchange auth failed via proxy"
@@ -633,10 +697,15 @@ impl HttpClient {
                     let message = format!(
                         "[{}] {source} ({status}): {}",
                         exchange_label(&self.exchange),
-                        stringify_response_body(&body)
+                        native_response_text(&body)
                     );
                     self.runtime.console("error", &message);
-                    let _ = self.host.emit("error", &message);
+                    if let Err(error) = self.host.emit("error", &message) {
+                        self.runtime.report_exception(
+                            &ExchangeError::new(error),
+                            &json!({"event":"error"}),
+                        );
+                    }
                 }
             }
             if self.host.is_main_window() {
@@ -648,7 +717,19 @@ impl HttpClient {
                 let status = status
                     .map(|s| format!("HTTP {s}"))
                     .unwrap_or_else(|| "Error".into());
-                let summary = json!({"message":error.message,"context":error.context,"responseBody":error.response.as_ref().map(|r|body_value(&r.body))});
+                let mut summary =
+                    Input::from_value(json!({"message":error.message,"context":error.context}))
+                        .expect("bounded error log metadata");
+                let Input::Object(fields) = &mut summary else {
+                    unreachable!("error log object")
+                };
+                if let Some(response) = &error.response {
+                    fields.push((
+                        "responseBody".encode_utf16().collect(),
+                        response.body.clone().into_data(),
+                    ));
+                }
+                let summary = native_json_text(&summary);
                 let _ = self.host.emit(
                     "grafana-error",
                     &format!(
@@ -690,10 +771,29 @@ impl HttpClient {
         should
     }
 }
-fn body_value(body: &safe_cex_transport::RestResponseBody) -> Value {
-    body.json_value()
-        .unwrap_or_else(|_| body.clone().into_data())
+fn native_json_text(value: &Input) -> String {
+    safe_cex_num::js_retained_json_stringify(value)
+        .expect("retained log tree")
+        .unwrap_or_else(|| "undefined".into())
 }
+fn native_response_text(value: &Input) -> String {
+    match value {
+        Input::Text(units) => String::from_utf16_lossy(units),
+        _ => native_json_text(value),
+    }
+}
+fn native_proxy_auth_failure_body(value: &Input) -> bool {
+    let value = match value {
+        Input::Object(fields) => fields
+            .iter()
+            .rev()
+            .find(|(key, _)| key.iter().copied().eq("message".encode_utf16()))
+            .map(|(_, value)| value),
+        value => Some(value),
+    };
+    matches!(value, Some(Input::Text(units)) if ["Authorization header is missing","Invalid JWT"].iter().any(|text| units.iter().copied().eq(text.encode_utf16())))
+}
+
 fn exchange_label(exchange: &ExchangeName) -> String {
     serde_json::to_value(exchange)
         .expect("exchange")

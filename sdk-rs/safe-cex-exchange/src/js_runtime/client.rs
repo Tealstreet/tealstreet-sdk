@@ -2,7 +2,7 @@
 //! interceptors (FIFO), axios-retry and axios-rate-limit spacing.
 use super::{
     promise::{JsFuture, Promise, await_js},
-    value::{Js, Thrown, arg, from_json, to_json},
+    value::{Js, Thrown, arg, from_json, from_retained_input, to_json, to_retained_input},
 };
 use crate::runtime::ExchangeRuntime;
 use safe_cex_transport::{
@@ -42,8 +42,7 @@ struct ClientState {
     requests: Vec<Interceptor>,
     responses: Vec<Interceptor>,
     retry_options: Option<Js>,
-    /// axios-rate-limit windows `(maxRequests, perMilliseconds, sent)`; a chained
-    /// limiter adds a window and a request waits until every window has room.
+    /// Each rate-limit registration owns one window and one request interceptor.
     windows: Vec<(f64, f64, Vec<f64>)>,
 }
 
@@ -140,6 +139,7 @@ pub fn create(host: Host, defaults: Js) -> Js {
         }),
     );
     let limit_state = state;
+    let limit_host = host.clone();
     let _ = client.define(
         "__configureRateLimit",
         Js::function("__configureRateLimit", move |_, a| {
@@ -153,10 +153,31 @@ pub fn create(host: Host, defaults: Js) -> Js {
             } else {
                 (rps.to_number()?, 1000.0)
             };
+            let index = limit_state.borrow().windows.len();
             limit_state
                 .borrow_mut()
                 .windows
                 .push((window.0, window.1, vec![]));
+            let weak = Rc::downgrade(&limit_state);
+            let host = limit_host.clone();
+            let interceptor = Js::function("axiosRateLimit", move |_, a| {
+                let config = arg(&a, 0);
+                let state = weak.upgrade().expect("active client rate-limit state");
+                let host = host.clone();
+                let runtime = host.runtime();
+                Ok(Js::Promise(Promise::spawn(
+                    &runtime,
+                    Box::pin(async move {
+                        throttle(&host, &state, index).await?;
+                        Ok(config)
+                    }),
+                )))
+            });
+            // Axios executes request interceptors in reverse registration order.
+            limit_state
+                .borrow_mut()
+                .requests
+                .push((interceptor, Js::Undefined));
             Ok(Js::Undefined)
         }),
     );
@@ -465,7 +486,7 @@ async fn send_once(
         current = chain_step(interceptor, current).await;
     }
     current = match current {
-        Ok(config) => dispatch_request(host, state, config).await,
+        Ok(config) => dispatch_request(host, config).await,
         Err(error) => Err(error),
     };
     let responses: Vec<Interceptor> = state.borrow().responses.clone();
@@ -475,14 +496,10 @@ async fn send_once(
     current
 }
 
-async fn dispatch_request(
-    host: &Host,
-    state: &Rc<RefCell<ClientState>>,
-    config: Js,
-) -> Result<Js, Thrown> {
-    throttle(host, state).await?;
+async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
     let adapter = config.get("adapter")?;
-    let response = if adapter.is_callable() {
+    let custom_adapter = adapter.is_callable();
+    let response = if custom_adapter {
         await_js(adapter.call(Js::Undefined, vec![config.clone()])?).await?
     } else {
         host.send(config.clone()).await?
@@ -490,36 +507,58 @@ async fn dispatch_request(
     if !response.get("config")?.is_object() {
         response.define("config", config.clone())?;
     }
-    let status = response.get("status")?.to_number().unwrap_or(200.0);
-    if !(200.0..300.0).contains(&status) {
-        return Err(axios_error(&response, &config)?);
+    transform_response(&response, &config)?;
+    // Axios custom adapters settle their own responses. HOW deliberately
+    // fulfills every HTTP status; only the default HTTP host settles here.
+    if !custom_adapter {
+        let status = response.get("status")?.to_number().unwrap_or(200.0);
+        if !(200.0..300.0).contains(&status) {
+            return Err(axios_error(&response, &config)?);
+        }
     }
     Ok(response)
 }
 
-async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) -> Result<(), Thrown> {
+fn transform_response(response: &Js, config: &Js) -> Result<(), Thrown> {
+    let transforms = config.get("transformResponse")?;
+    if transforms.is_nullish() {
+        return Ok(());
+    }
+    let transforms = transforms
+        .array_values()
+        .unwrap_or_else(|| vec![transforms]);
+    let mut data = response.get("data")?;
+    for transform in transforms {
+        data = transform.call(
+            config.clone(),
+            vec![data, response.get("headers")?, response.get("status")?],
+        )?;
+    }
+    response.set("data", data)
+}
+
+async fn throttle(
+    host: &Host,
+    state: &Rc<RefCell<ClientState>>,
+    index: usize,
+) -> Result<(), Thrown> {
     loop {
         let runtime = host.runtime();
         let now = runtime.monotonic_now_ms();
         let wait = {
-            let mut s = state.borrow_mut();
-            let mut wait: Option<f64> = None;
-            for (max, per, sent) in s.windows.iter_mut() {
-                if *max <= 0.0 {
-                    continue;
-                }
-                sent.retain(|t| now - t < *per);
+            let mut state = state.borrow_mut();
+            let (max, per, sent) = &mut state.windows[index];
+            if *max <= 0.0 {
+                None
+            } else {
+                sent.retain(|time| now - time < *per);
                 if sent.len() as f64 >= *max {
-                    let ms = *per - (now - sent[0]);
-                    wait = Some(wait.map_or(ms, |w| w.max(ms)));
-                }
-            }
-            if wait.is_none() {
-                for (_, _, sent) in s.windows.iter_mut() {
+                    Some(*per - (now - sent[0]))
+                } else {
                     sent.push(now);
+                    None
                 }
             }
-            wait
         };
         match wait {
             None => return Ok(()),
@@ -543,7 +582,7 @@ fn rest_response(response: &Js) -> Result<RestResponse, Thrown> {
         status: if status.is_finite() { status as u16 } else { 0 },
         reason: None,
         headers: Default::default(),
-        body: RestResponseBody::Untransformed(to_json(&response.get("data")?)?),
+        body: RestResponseBody::Untransformed(to_retained_input(&response.get("data")?)?),
     })
 }
 
@@ -563,27 +602,28 @@ impl JsRestAdapter {
         }
     }
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
-        let config = Js::object(
-            request
-                .params
-                .iter()
-                .map(|params| ("params", from_json(params)))
-                .collect(),
-        );
+        let config = Js::object(vec![]);
+        for (name, value) in &request.config_extensions {
+            config.define(name, from_retained_input(value.clone()))?;
+        }
+        // Typed parameters remain authoritative over an extension of that name.
+        if let Some(params) = &request.params {
+            config.define("params", from_json(params))?;
+        }
         let url = Js::str(&request.url);
         // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
         let method = request.method.to_lowercase();
         let pending = if method == "post" {
             let data = match &request.body {
-                Some(body) => {
-                    let bytes = body
-                        .wire_bytes()
-                        .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-                    let text = String::from_utf8_lossy(&bytes);
-                    from_json(
-                        &serde_json::from_str(&text)
-                            .unwrap_or(serde_json::Value::String(text.into_owned())),
+                Some(RestBody::Untransformed(value)) => from_retained_input(value.clone()),
+                Some(RestBody::Transformed(data)) => from_retained_input(data.value().clone()),
+                Some(RestBody::Encoded(bytes)) => {
+                    let text = String::from_utf8_lossy(bytes);
+                    safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                        &text.encode_utf16().collect::<Vec<_>>(),
                     )
+                    .map(from_retained_input)
+                    .unwrap_or_else(|_| Js::str(&text))
                 }
                 None => Js::Undefined,
             };
@@ -619,14 +659,37 @@ impl RestAdapter for JsRestAdapter {
                         .ok()
                         .filter(|r| !r.is_nullish())
                         .and_then(|r| rest_response(&r).ok());
-                    let code = optional(&thrown.value, "code")
-                        .ok()
-                        .filter(Js::is_string)
-                        .map(|c| String::from_utf16_lossy(&c.to_js_string().unwrap_or_default()));
+                    let code = optional(&thrown.value, "code").ok().and_then(|value| {
+                        if let Js::String(units) = value {
+                            Some(units)
+                        } else {
+                            None
+                        }
+                    });
+                    let message = thrown.message();
+                    // RestFailure.code is the existing UTF-8 diagnostic view.
+                    // The owned cause is authoritative for the native string.
+                    let mut fields = vec![(
+                        "message",
+                        super::value::owned::OwnedJsValue::string(&message),
+                    )];
+                    if let Some(code) = &code {
+                        fields.push((
+                            "code",
+                            super::value::owned::OwnedJsValue::String(code.to_vec()),
+                        ));
+                    }
+                    let cause = super::value::owned::OwnedCallbackError::new(
+                        super::value::owned::OwnedJsValue::object(fields),
+                    );
                     let failure = RestFailure {
-                        code,
-                        message: thrown.message(),
-                        transport_error: None,
+                        code: code.as_ref().map(|units| String::from_utf16_lossy(units)),
+                        message,
+                        transport_error: Some(Box::new(
+                            safe_cex_transport::TransportError::Rejected(
+                                safe_cex_transport::provider::TransportErrorOrigin::new(cause),
+                            ),
+                        )),
                         response: response.map(Box::new),
                         request: Box::new(request),
                         context: None,
@@ -678,6 +741,15 @@ impl safe_cex_transport::signing::RemoteSigner for TransportSigner {
     ) -> safe_cex_transport::TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse>
     {
         self.0.sign(request)
+    }
+    fn sign_query(
+        &self,
+        request: safe_cex_transport::query_signing::HttpSigningRequest,
+    ) -> safe_cex_transport::TransportFuture<
+        '_,
+        safe_cex_transport::query_signing::HttpSigningResponse,
+    > {
+        self.0.sign_query(request)
     }
 }
 
@@ -743,6 +815,14 @@ fn hosted_params_serializer(config: &Js) -> Result<Option<crate::http::ParamsSer
 }
 
 fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Thrown> {
+    rest_request_data(config, serialize_query, false)
+}
+
+fn rest_request_data(
+    config: &Js,
+    serialize_query: bool,
+    before_signing: bool,
+) -> Result<RestRequest, Thrown> {
     let mut headers = indexmap::IndexMap::new();
     let config_headers = config.get("headers")?;
     if !config_headers.is_nullish() {
@@ -758,18 +838,35 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
     let data = config.get("data")?;
     let body = match &data {
         Js::Undefined | Js::Null => None,
+        // A JS string is still typed adapter data at hosted-signing ingress.
+        // Only the direct terminal path has finished with that provenance.
+        Js::String(_) if before_signing => Some(RestBody::Untransformed(
+            super::value::to_retained_input(&data)?,
+        )),
         Js::String(text) => Some(RestBody::Encoded(
             String::from_utf16_lossy(text).into_bytes(),
         )),
-        other => Some(RestBody::Untransformed(to_json(other)?)),
+        other => Some(RestBody::Untransformed(super::value::to_retained_input(
+            other,
+        )?)),
     };
     let mut url = optional_text(config, "url")?.unwrap_or_default();
     let mut params = config.get("params")?;
     // Axios: a configured paramsSerializer (function or `{ serialize }`) owns the query.
     let serialize = js_params_serializer(config)?;
-    if serialize_query && serialize.is_callable() && !params.is_nullish() {
-        let query = serialize.call(Js::Undefined, vec![params])?;
-        let query = String::from_utf16_lossy(&query.to_js_string()?);
+    if serialize_query && !params.is_nullish() {
+        let query = if serialize.is_callable() {
+            let query = serialize.call(Js::Undefined, vec![params])?;
+            String::from_utf16_lossy(&query.to_js_string()?)
+        } else {
+            safe_cex_transport::query::axios_default_query(&super::value::to_js_json(&params)?)
+                .map_err(|error| match error {
+                    safe_cex_transport::TransportError::JavaScript(error) => {
+                        Thrown::error(error.name, error.message)
+                    }
+                    error => Thrown::error("AxiosError", &error.to_string()),
+                })?
+        };
         if !query.is_empty() {
             if let Some(hash) = url.find('#') {
                 url.truncate(hash);
@@ -778,6 +875,32 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
             url.push_str(&query);
         }
         params = Js::Undefined;
+    }
+    // Keep adapter-owned data properties without serializing executable Axios
+    // capabilities. The source config itself stays live for response hooks.
+    let mut config_extensions = indexmap::IndexMap::new();
+    for (key, value) in config.own_entries()? {
+        let key = String::from_utf16(&key)
+            .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?;
+        if matches!(
+            key.as_str(),
+            "method"
+                | "url"
+                | "baseURL"
+                | "headers"
+                | "data"
+                | "params"
+                | "timeout"
+                | "adapter"
+                | "paramsSerializer"
+                | "transformRequest"
+                | "transformResponse"
+                | "safeCexSkipRemoteSigning"
+        ) || value.is_callable()
+        {
+            continue;
+        }
+        config_extensions.insert(key, to_retained_input(&value)?);
     }
     let timeout = config.get("timeout")?;
     // ts: markSkipRemoteSigning tags a public request a hosted signer need not see.
@@ -800,6 +923,7 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
             Some(to_json(&params)?)
         },
         skip_remote_signing,
+        config_extensions,
         ..Default::default()
     })
 }
@@ -809,16 +933,23 @@ fn response_data(body: RestResponseBody) -> Js {
     match body {
         RestResponseBody::Encoded(bytes) => {
             let text = String::from_utf8_lossy(&bytes).into_owned();
-            serde_json::from_str(&text).map_or_else(|_| Js::str(&text), |v| from_json(&v))
+            safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                &text.encode_utf16().collect::<Vec<_>>(),
+            )
+            .map(super::value::from_retained_input)
+            .unwrap_or_else(|_| Js::str(&text))
         }
         RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-            from_json(&value)
+            super::value::from_retained_input(value)
         }
     }
 }
 
 fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     let result = config.spread_object()?;
+    for (name, value) in &request.config_extensions {
+        result.set(name, from_retained_input(value.clone()))?;
+    }
     result.set("method", Js::str(&request.method))?;
     result.set("url", Js::str(&request.url))?;
     result.set(
@@ -836,8 +967,10 @@ fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     )?;
     let data = match request.body {
         None => Js::Undefined,
-        Some(RestBody::Untransformed(value)) => from_json(&value),
-        Some(RestBody::Transformed(value)) => from_json(value.value()),
+        Some(RestBody::Untransformed(value)) => super::value::from_retained_input(value),
+        Some(RestBody::Transformed(value)) => {
+            super::value::from_retained_input(value.value().clone())
+        }
         Some(RestBody::Encoded(bytes)) => Js::str(&String::from_utf8_lossy(&bytes)),
     };
     result.set("data", data)?;
@@ -855,7 +988,10 @@ fn js_response(response: RestResponse, config: Js) -> Js {
         RestResponseBody::Encoded(bytes)
             if config
                 .get("responseType")
-                .is_ok_and(|value| value.to_display() == "text") =>
+                .is_ok_and(|value| value.to_display() == "text")
+                || config
+                    .get("transformResponse")
+                    .is_ok_and(|value| !value.is_undefined()) =>
         {
             Js::str(&String::from_utf8_lossy(&bytes))
         }
@@ -913,7 +1049,11 @@ impl JsHttpHost for RestHttpHost {
             } else {
                 adapter
             };
-            let request = rest_request(&config, remote.is_none() && adapter.query_in_url())?;
+            let request = rest_request_data(
+                &config,
+                remote.is_none() && adapter.query_in_url(),
+                remote.is_some(),
+            )?;
             match adapter.execute_with_receipt(request).await {
                 Ok(execution) => {
                     let config = if remote.is_some() {
@@ -937,6 +1077,14 @@ impl JsHttpHost for RestHttpHost {
                     Ok(js_response(*response, config))
                 }
                 Err(failure) => {
+                    if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+                        failure.transport_error.as_deref()
+                        && let Some(cause) = origin
+                            .error()
+                            .downcast_ref::<super::value::owned::OwnedCallbackError>()
+                    {
+                        return Err(Thrown::new(cause.value().to_js()));
+                    }
                     let config = if remote.is_some() {
                         effective_config(&config, *failure.request)?
                     } else {

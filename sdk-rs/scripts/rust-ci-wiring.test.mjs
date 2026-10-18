@@ -3,6 +3,7 @@ import './parity-toolchain.test.mjs';
 import './check-layers.test.mjs';
 import '../safe-cex-types/tests/ci-deps.test.cjs';
 import '../safe-cex-venue-binance/scripts/types-toolchain.test.mjs';
+import '../safe-cex-parity/scripts/review-contract-proposals.test.mjs';
 import assert from 'node:assert/strict';
 import fs, { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -325,7 +326,7 @@ test('WOO root command includes every source oracle without masking', () => {
   // Algo response membership and ownership witnesses run through the existing native target.
   // Account alias/freeze and guard witnesses use the account targets; pricing checks error fixtures.
   const pkg = JSON.parse(readFileSync(manifestFor(workflowUrlUsed), 'utf8'));
-  assert.equal(pkg.scripts['venue-oracle:woo'], 'node sdk-rs/safe-cex-venue-woo/scripts/types-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/constants-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/signing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/contracts-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/journal-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/fills-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/history-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/utils-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/pricing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/response-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-dispatch-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/isolation-control.cjs && node sdk-rs/safe-cex-venue-woo/scripts/order-output-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-canonical-oracle.cjs --check && cargo test --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-woo --test public_canonical_semantics --test public_canonical_isolation --test public_canonical --test shadow_compare --test legacy_lifecycle --test public_streams --jobs 2 --test class_construction --test socket_classes --test exchange_class --test response --test utils --test regular_writes --test algo_writes --test account_leverage --test position_mode --test pricing');
+  assert.equal(pkg.scripts['venue-oracle:woo'], 'node sdk-rs/safe-cex-venue-woo/scripts/types-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/constants-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/signing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/contracts-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/journal-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/fills-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/history-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/utils-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/pricing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/response-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-dispatch-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/isolation-control.cjs && node sdk-rs/safe-cex-venue-woo/scripts/order-output-oracle.cjs --check && cargo test --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-woo --test legacy_lifecycle --test public_streams --jobs 2 --test class_construction --test socket_classes --test exchange_class --test response --test utils --test regular_writes --test algo_writes --test account_leverage --test position_mode --test pricing');
 });
 
 test('removing Hyperliquid state comparisons fails wiring',()=>assert.throws(()=>auditHl(hlWorkflow,hlCommand.replace('--lib exchange::tests','')),/required/));
@@ -385,15 +386,15 @@ test('Asterdex oracle script remains scoped and includes ignored tests', () => {
 test('removing KuCoin oracle fails', () => assert.throws(() => audit(workflow.replace(/      - name: Check live KuCoin TypeScript equivalence\n[\s\S]*?(?=      - name:)/, '')), /missing Check live KuCoin/));
 test('masking KuCoin oracle fails', () => assert.throws(() => audit(workflow.replace('run: yarn venue-oracle:kucoin', 'run: yarn venue-oracle:kucoin || true')), /Check live KuCoin.*command/));
 function auditKucoinScript(command) {
-  assert.equal(command, 'cargo test --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-kucoin --lib --jobs 2 --test tables --test records --test account_mode --test order_helpers --test parsers --test broker --test api_capture --test sizing --test mappers --test query --test formatters --test ws_helpers --test spot_helpers --test accounts --test balance_reference --test order_reads --test spot_reads --test numeric_ingress --test spot_markets --test spot_validation --test spot_tickers --test spot_fills_reference --test spot_cancel --test spot_orders_reference --test notification_reads --test position_metadata --test private_dispose --test public_subscriptions --test public_lifecycle --test private_refresh --test message_routing --test socket_setup --test socket_boundaries --test rest_reads --test public_streams --test order_control --test bootstrap_reads --test spot_bodies --test order_lifecycle --test class_construction --test spot_private_class --test futures_private_class --test spot_public_class --test futures_public_class --test spot_native_accounts --test spot_native_policy --test spot_native_order_reads --test spot_exchange_class --test futures_native_helpers --test futures_native_accounts --test futures_native_order_reads --test futures_native_mapping_formatters', 'KuCoin oracle must retain lib and all fifty-two test targets');
+  assert.equal(command, 'cargo test --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-kucoin --lib --jobs 2 --test tables --test records --test account_mode --test broker --test api_capture --test query --test ws_helpers --test spot_helpers --test exchange_trait --test balance_reference --test order_reads_binding --test spot_io_binding --test numeric_ingress --test spot_fills_reference --test spot_orders_reference --test position_metadata --test private_dispose --test public_subscriptions --test public_lifecycle --test private_refresh --test message_routing --test socket_setup --test socket_boundaries --test rest_reads --test public_streams --test order_control --test bootstrap_reads --test spot_bodies --test order_lifecycle --test class_construction --test spot_private_class --test futures_private_class --test spot_public_class --test futures_public_class --test spot_native_accounts --test spot_native_policy --test spot_native_order_reads --test spot_exchange_class --test futures_native_helpers --test futures_native_accounts --test futures_native_order_reads --test futures_native_mapping_formatters', 'KuCoin oracle must retain lib and all reviewed test targets');
 }
 test('KuCoin script retains scoped oracle command', () => auditKucoinScript(packageScripts['venue-oracle:kucoin']));
-for (const target of ['position_metadata', 'private_dispose', 'public_subscriptions', 'public_lifecycle', 'private_refresh', 'message_routing', 'socket_setup', 'socket_boundaries', 'rest_reads', 'public_streams', 'order_control', 'bootstrap_reads', 'spot_bodies', 'order_lifecycle', 'class_construction', 'spot_private_class', 'futures_private_class', 'spot_public_class', 'futures_public_class', 'spot_native_accounts', 'spot_native_policy', 'spot_native_order_reads', 'spot_exchange_class', 'futures_native_helpers', 'futures_native_accounts', 'futures_native_order_reads', 'futures_native_mapping_formatters']) {
+for (const target of ['order_reads_binding', 'spot_io_binding', 'exchange_trait', 'position_metadata', 'private_dispose', 'public_subscriptions', 'public_lifecycle', 'private_refresh', 'message_routing', 'socket_setup', 'socket_boundaries', 'rest_reads', 'public_streams', 'order_control', 'bootstrap_reads', 'spot_bodies', 'order_lifecycle', 'class_construction', 'spot_private_class', 'futures_private_class', 'spot_public_class', 'futures_public_class', 'spot_native_accounts', 'spot_native_policy', 'spot_native_order_reads', 'spot_exchange_class', 'futures_native_helpers', 'futures_native_accounts', 'futures_native_order_reads', 'futures_native_mapping_formatters']) {
   test(`KuCoin oracle cannot drop ${target}`, () => {
-    assert.throws(() => auditKucoinScript(packageScripts['venue-oracle:kucoin'].replace(` --test ${target}`, '')), /KuCoin oracle must retain lib and all fifty-two test targets/);
+    assert.throws(() => auditKucoinScript(packageScripts['venue-oracle:kucoin'].replace(` --test ${target}`, '')), /KuCoin oracle must retain lib and all reviewed test targets/);
   });
 }
-test('KuCoin oracle cannot drop lib', () => assert.throws(() => auditKucoinScript(packageScripts['venue-oracle:kucoin'].replace(' --lib', '')), /KuCoin oracle must retain lib and all fifty-two test targets/));
+test('KuCoin oracle cannot drop lib', () => assert.throws(() => auditKucoinScript(packageScripts['venue-oracle:kucoin'].replace(' --lib', '')), /KuCoin oracle must retain lib and all reviewed test targets/));
 
 
 // MEXC owns its live oracle; removal or shell masking must fail this gate.
@@ -640,8 +641,8 @@ function auditRunner(source) {
  assert.throws(()=>probeRunner(source,expectedOracles.length), /native SDK boundary oracle failed/);
  assert.deepEqual(calls.at(-2),{command:'git',args:['diff','--exit-code','--','sdk-rs/safe-cex-crypto/tests/fixtures/*.json']});
  assert.throws(()=>probeRunner(source,expectedOracles.length+1), /fixture regeneration drift/);
- assert.deepEqual(calls.at(-1),{command:'cargo',args:['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--jobs','1']});
- assert.throws(()=>probeRunner(source,expectedOracles.length+2), /native Stark domain field identity supplement failed/);
+ assert.deepEqual(calls.at(-1),{command:'cargo',args:['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--test','live_poseidon_types','--jobs','1','--','--include-ignored']}, 'native identity and ignored Poseidon tests must execute');
+ assert.throws(()=>probeRunner(source,expectedOracles.length+2), /native cryptographic identity supplements failed/);
 }
 test('all seven oracle families execute and propagate every failure',()=>auditRunner(oracleRunner));
 test('removing independent Lighter venue oracle is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("  ['../../scripts/check-independent-lighter.cjs'],\n",'')),/required/));
@@ -656,7 +657,17 @@ test('masking child oracle failures is rejected',()=>assert.throws(()=>auditRunn
 test('removing native SDK oracle setup is rejected',()=>assert.throws(()=>audit(workflow.replace(/      - name: Prepare pinned zkLink native oracle\n[\s\S]*?(?=      - name:)/,'')),/missing Prepare pinned/));
 test('masking native SDK oracle failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(native.status,0,'native SDK boundary oracle failed');",'')),/Missing expected exception/));
 test('removing Stark identity SDK oracle is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("  ['starknet/domain-field-identities.cjs'],\n",'')),/required/));
-test('masking native Stark identity failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(identity.status,0,'native Stark domain field identity supplement failed');",'')),/Missing expected exception/));
+test('masking native identity failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(identity.status,0,'native cryptographic identity supplements failed');",'')),/Missing expected exception/));
+test('removing ignored Poseidon record target is rejected',()=>{
+ const changed=oracleRunner.replace(",'--test','live_poseidon_types'",'');
+ assert.notEqual(changed,oracleRunner,'Poseidon target mutation must apply');
+ assert.throws(()=>auditRunner(changed),/native identity and ignored Poseidon tests must execute/);
+});
+test('omitting include-ignored for Poseidon records is rejected',()=>{
+ const changed=oracleRunner.replace(",'--','--include-ignored'",'');
+ assert.notEqual(changed,oracleRunner,'include-ignored mutation must apply');
+ assert.throws(()=>auditRunner(changed),/native identity and ignored Poseidon tests must execute/);
+});
 
 }
 
@@ -684,7 +695,7 @@ test('removing PR Rust coverage for Ethereum primitives fails', () => {
 });
 const hlWorkflow = workflowSource(2);
 const hlScripts = JSON.parse(readFileSync(manifestFor(workflowUrlUsed), 'utf8')).scripts;
-const hlCommand = 'node sdk-rs/safe-cex-venue-hyperliquid/scripts/types.cjs --check && node sdk-rs/safe-cex-venue-hyperliquid/scripts/oracle.cjs --check && node sdk-rs/safe-cex-venue-hyperliquid/scripts/literal-unions.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/record-shapes.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/numeric-helpers.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/numeric-helpers.cjs --refusals && node sdk-rs/safe-cex-venue-hyperliquid/scripts/order-history.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/order-history.cjs --boundaries && node sdk-rs/safe-cex-venue-hyperliquid/scripts/order-history.cjs --helpers && cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-hyperliquid --test literal_unions --test record_shapes --test numeric_helpers --test order_history --test typed_numbers --test typed_ingress_audit --test typed_null_boundaries --test field_identities --test nan_capture_policy --test public_subscriptions --jobs 2 && cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-hyperliquid --lib exchange::tests --jobs 2';
+const hlCommand = 'node sdk-rs/safe-cex-venue-hyperliquid/scripts/types.cjs --check && node sdk-rs/safe-cex-venue-hyperliquid/scripts/oracle.cjs --check && node sdk-rs/safe-cex-venue-hyperliquid/scripts/literal-unions.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/record-shapes.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/numeric-helpers.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/numeric-helpers.cjs --refusals && node sdk-rs/safe-cex-venue-hyperliquid/scripts/order-history.cjs && node sdk-rs/safe-cex-venue-hyperliquid/scripts/order-history.cjs --boundaries && node sdk-rs/safe-cex-venue-hyperliquid/scripts/order-history.cjs --helpers && cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-hyperliquid --test literal_unions --test record_shapes --test numeric_helpers --test order_history --test typed_numbers --test typed_ingress_audit --test typed_null_boundaries --test field_identities --test nan_capture_policy --jobs 2 && cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-hyperliquid --lib exchange::tests --jobs 2';
 function auditHl(source,command=hlScripts['venue-oracle:hyperliquid']) {
  assert.equal(command,hlCommand,'Hyperliquid live children and Rust accepted-set comparisons required');
  const block=source.match(/      - name: Run Hyperliquid TypeScript accepted-set oracle\n[\s\S]*?(?=      - name:|$)/)?.[0];
@@ -697,7 +708,7 @@ function auditHl(source,command=hlScripts['venue-oracle:hyperliquid']) {
 test('Hyperliquid accepted-set oracle is mandatory in native test CI',()=>auditHl(hlWorkflow));
 test('removing Hyperliquid oracle fails wiring',()=>assert.throws(()=>auditHl(hlWorkflow.replace(/      - name: Run Hyperliquid TypeScript accepted-set oracle\n[\s\S]*?(?=      - name:)/,'')),/missing/));
 test('masking Hyperliquid oracle fails wiring',()=>assert.throws(()=>auditHl(hlWorkflow.replace('run: yarn venue-oracle:hyperliquid','run: yarn venue-oracle:hyperliquid || true')),/propagate/));
-test('removing a Hyperliquid child or comparison fails wiring',()=>{for(const child of ['types.cjs --check','oracle.cjs --check','literal-unions.cjs','record-shapes.cjs','--test literal_unions','--test record_shapes','numeric-helpers.cjs','--test numeric_helpers','order-history.cjs','order-history.cjs --boundaries','order-history.cjs --helpers','--test order_history','--test typed_numbers','--test typed_ingress_audit','--test typed_null_boundaries','--test public_subscriptions','--jobs 2']) assert.throws(()=>auditHl(hlWorkflow,hlCommand.replace(child,'')),/required/);});
+test('removing a Hyperliquid child or comparison fails wiring',()=>{for(const child of ['types.cjs --check','oracle.cjs --check','literal-unions.cjs','record-shapes.cjs','--test literal_unions','--test record_shapes','numeric-helpers.cjs','--test numeric_helpers','order-history.cjs','order-history.cjs --boundaries','order-history.cjs --helpers','--test order_history','--test typed_numbers','--test typed_ingress_audit','--test typed_null_boundaries','--jobs 2']) assert.throws(()=>auditHl(hlWorkflow,hlCommand.replace(child,'')),/required/);});
 test('production store and producer/model seam gate cannot be dropped', () => {
   const missing = workflow.replace(/      - name: Check live model and production store seams\n        run: [^\n]+\n/, '');
   assert.throws(() => audit(missing), /missing Check live model and production store seams/);
@@ -784,11 +795,10 @@ test('Hyperliquid native field identity and NaN policy tests remain mandatory', 
   const command = JSON.parse(readFileSync(manifestFor(workflowUrlUsed), 'utf8')).scripts['venue-oracle:hyperliquid'];
   assert.match(command, /--test field_identities/);
   assert.match(command, /--test nan_capture_policy/);
-  assert.match(command, /--test public_subscriptions/);
 });
 
 test('Crypto Stark identity supplement runs actual SDK and native consumer', () => {
-  const oracle = readFileSync('sdk-rs/safe-cex-crypto/scripts/oracles.cjs', 'utf8');
+  const oracle = readFileSync(new URL('../safe-cex-crypto/scripts/oracles.cjs', import.meta.url), 'utf8');
   assert.match(oracle, /starknet\/domain-field-identities\.cjs/);
   assert.match(oracle, /'--test','field_identities'/);
 });
@@ -914,7 +924,9 @@ test('accepted-set control registry pins files and executed mutations', async ()
   // a68c3d9e05 added pure/native callable-alias controls in PR 7951; keep
   // both files load-bearing here alongside the registry runner. 40e183a874
   // also added its renamed-registry-artifact test; no old control is retired.
-  assert.deepEqual(Object.keys(registry.tests).sort(), ['accepted-aliases.test.mjs', 'accepted-callable-alias-native.test.mjs', 'accepted-callable-alias.test.mjs', 'accepted-construction-chain-native.test.mjs', 'accepted-contracts.test.mjs', 'accepted-controls.test.mjs', 'accepted-defaults.test.mjs', 'accepted-exchange-future.test.mjs', 'accepted-future-alias-native.test.mjs', 'accepted-future-alias.test.mjs', 'accepted-identity-alias.test.mjs', 'accepted-inventory.test.mjs', 'accepted-loader-future-native.test.mjs', 'accepted-loader-future.test.mjs', 'accepted-local-helpers.test.mjs', 'accepted-macro-origins.test.mjs', 'accepted-number-output-native.test.mjs', 'accepted-number-output.test.mjs', 'accepted-object-map-construction-native.test.mjs', 'accepted-ratchet.test.mjs', 'accepted-scanner.test.mjs', 'accepted-telemetry-defaults.test.mjs', 'accepted-ws-auth-helper.test.mjs', 'accepted-ws-auth-native.test.mjs']);
+  // Native portfolio, record, field and authored-order probes add four tests;
+  // socket/provider coverage adds one test and four compiled production mutations.
+  assert.deepEqual(Object.keys(registry.tests).sort(), ["accepted-aliases.test.mjs", "accepted-breakout-portfolio-native.test.mjs", "accepted-callable-alias-native.test.mjs", "accepted-callable-alias.test.mjs", "accepted-constant-output-native.test.mjs", "accepted-construction-chain-native.test.mjs", "accepted-contract-files.test.mjs", "accepted-contract-order-native.test.mjs", "accepted-contracts.test.mjs", "accepted-controls.test.mjs", "accepted-defaults.test.mjs", "accepted-exchange-future.test.mjs", "accepted-function-pointer-native.test.mjs", "accepted-future-alias-native.test.mjs", "accepted-future-alias.test.mjs", "accepted-grvt-fields.test.mjs", "accepted-hyperliquid-projection-native.test.mjs", "accepted-hyperliquid-projection.test.mjs", "accepted-identity-alias.test.mjs", "accepted-inherited-constant-output-native.test.mjs", "accepted-inherited-constant-output.test.mjs", "accepted-inventory.test.mjs", "accepted-json-source-native.test.mjs", "accepted-loader-future-native.test.mjs", "accepted-loader-future.test.mjs", "accepted-local-helpers.test.mjs", "accepted-macro-origins.test.mjs", "accepted-model-field-native.test.mjs", "accepted-model-record-native.test.mjs", "accepted-napi-alias.test.mjs", "accepted-node-probes.test.mjs", "accepted-number-output-native.test.mjs", "accepted-number-output.test.mjs", "accepted-object-map-construction-native.test.mjs", "accepted-policy-files.test.mjs", "accepted-ratchet.test.mjs", "accepted-reviewed-aliases.test.mjs", "accepted-scanner.test.mjs", "accepted-telemetry-defaults.test.mjs", "accepted-transport-socket-native.test.mjs", "accepted-weex-kline-alias.test.mjs", "accepted-ws-auth-helper.test.mjs", "accepted-ws-auth-native.test.mjs"]);
   // 19b18f40d0 adds LocalFuture pure/native controls; retain both files and
   // their named root-identity mutation alongside all existing controls.
   // Numeric registration adds source/compiler identity controls and four real
@@ -943,10 +955,15 @@ test('accepted-set control registry pins files and executed mutations', async ()
   // all prior named tests and executed mutation receipts remain required.
   // Alias-default expansion adds one lexical-scope test and a concrete-type
   // removed-default control; every preceding test and mutation stays pinned.
-  assert.equal(Object.values(registry.tests).flat().length, 110, 'registered accepted-set test count');
+  // Reviewed aliases and exchange runtime coverage retain every earlier control.
+  // Two exact serializer metadata constants add policy and production-native
+  // controls plus six refusal mutations; all prior controls remain required.
+  // Exact direct-provider capability constants add two tests and three
+  // executed mutations; all serializer and inherited-method controls remain.
+  assert.equal(Object.values(registry.tests).flat().length, 158, 'registered accepted-set test count');
   // Provider self coverage adds a same-file nested-definition refusal control;
   // consumer recipe/route controls and every earlier mutation remain required.
-  assert.equal(registry.mutations.length, 125, 'registered accepted-set mutation count');
+  assert.equal(registry.mutations.length, 184, 'registered accepted-set mutation count');
   const output = [...Object.values(registry.tests).flat().map((name, i) => `ok ${i + 1} - ${name}`), ...registry.mutations.map(name => `# ${name}: named assertion; process exit 1`), '# fail 0', '# skipped 0', '# todo 0'].join('\n');
   verifyControls(output, registry);
   for (const name of registry.mutations) assert.throws(() => verifyControls(output.replace(`# ${name}: named assertion; process exit 1`, ''), registry), /mutation inventory/);

@@ -403,6 +403,47 @@ fn cancel_orders_routes_triggers_to_the_advanced_endpoint() {
     );
 }
 
+// ts: cryptocom.exchange.ts cancelSymbolOrders / cancelAllOrders post the venue cancel-all,
+// so orders the store has not mapped yet are cancelled too.
+#[test]
+fn cancel_symbol_and_all_orders_post_the_venue_cancel_all() {
+    let h = venue(|http| http.ok("POST", "/private/cancel-all-orders", ok(json!({}))));
+    loaded(&h);
+    h.drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect("cancelSymbolOrders");
+    assert_eq!(
+        only(&h, "/private/cancel-all-orders"),
+        json!({"instrument_name": SYMBOL})
+    );
+    h.drive(h.venue().cancel_all_orders())
+        .expect("cancelAllOrders");
+    let calls = h.http.calls("/private/cancel-all-orders");
+    assert_eq!(calls.len(), 2, "cancelAllOrders posts once");
+    assert_eq!(envelope(&calls[1])["params"], json!({}));
+    assert!(h.http.calls("/private/cancel-order").is_empty());
+}
+
+#[test]
+fn cancel_all_orders_rethrows_a_venue_rejection() {
+    let h = venue(|http| {
+        http.route(
+            "POST",
+            "/private/cancel-all-orders",
+            400.0,
+            json!({"code": 40003, "message": "BAD_REQUEST"}),
+        )
+    });
+    loaded(&h);
+    let symbol = h
+        .drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect_err("cancelSymbolOrders rethrows");
+    let all = h
+        .drive(h.venue().cancel_all_orders())
+        .expect_err("cancelAllOrders rethrows");
+    assert_eq!(symbol.message, all.message);
+    assert!(symbol.message.contains("BAD_REQUEST"), "{}", symbol.message);
+}
+
 #[test]
 fn set_leverage_posts_the_account_leverage() {
     let h = venue(|http| http.ok("POST", "/private/change-account-leverage", ok(json!({}))));
@@ -523,6 +564,168 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
         "Store preserves exact currency field names"
     );
     drop(balance);
+    h.venue().dispose().expect("dispose");
+}
+
+fn started(script: impl FnOnce(&support::Http)) -> Harness {
+    let h = venue(|http| {
+        http.ok("POST", "/private/get-open-orders", open_orders());
+        http.ok(
+            "POST",
+            "/private/advanced/get-open-orders",
+            advanced_orders(),
+        );
+        http.ok("POST", "/private/get-positions", positions());
+        http.ok("POST", "/private/user-balance", balance());
+        script(http);
+    });
+    h.drive(h.venue().start()).expect("start");
+    h
+}
+
+fn market_socket(h: &Harness) -> std::rc::Rc<support::Socket> {
+    h.runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/market"))
+        .expect("public market socket")
+        .1
+        .clone()
+}
+
+fn public_frame(h: &Harness, result: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    market_socket(h)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"id": -1, "method": "subscribe", "code": 0, "result": result}).to_string(),
+        )));
+    for _ in 0..4 {
+        h.runtime.advance(50.0);
+    }
+}
+
+fn sent_channels(h: &Harness, method: &str) -> Vec<Value> {
+    market_socket(h)
+        .sent
+        .borrow()
+        .iter()
+        .filter_map(|m| serde_json::from_str::<Value>(m).ok())
+        .filter(|m| m["method"] == method)
+        .flat_map(|m| {
+            m["params"]["channels"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+// ts: cryptocom.exchange.ts fetchOHLCV posts public/get-candlestick and maps each row.
+#[test]
+fn fetch_ohlcv_reads_venue_candlesticks() {
+    let h = venue(|http| {
+        http.ok(
+            "GET",
+            "/public/get-candlestick",
+            ok(json!({"data": [
+                {"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}
+            ]})),
+        )
+    });
+    loaded(&h);
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let candles = h.drive(h.venue().fetch_ohlcv(opts)).expect("fetchOHLCV");
+    assert_eq!(candles.len(), 1, "venue candles are returned");
+    assert_eq!(candles[0].timestamp, 1_700_000_000_000.0);
+    assert_eq!(
+        (
+            candles[0].open,
+            candles[0].high,
+            candles[0].low,
+            candles[0].close,
+            candles[0].volume
+        ),
+        (1.0, 2.0, 0.5, 1.5, 10.0)
+    );
+    let call = &h.http.calls("/public/get-candlestick")[0];
+    assert_eq!(call.method, "GET", "public reads go out as GET");
+    assert_eq!(
+        call.params,
+        json!({"instrument_name": SYMBOL, "timeframe": "1h"})
+    );
+}
+
+// ts: cryptocom.ws-public.ts listenOrderBook subscribes book.<symbol>.50 and replaces both sides.
+#[test]
+fn listen_order_book_subscribes_and_delivers_snapshots() {
+    let h = started(|_| {});
+    let books = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = books.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            std::rc::Rc::new(move |b| sink.borrow_mut().push(b)),
+        )
+        .expect("listenOrderBook");
+    h.runtime.advance(50.0);
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "book subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "book", "subscription": format!("book.{SYMBOL}.50"),
+               "instrument_name": SYMBOL,
+               "data": [{"bids": [["30000", "1", "1"]], "asks": [["30001", "2", "1"]], "t": 1}]}),
+    );
+    let books = books.borrow();
+    assert!(!books.is_empty(), "order book callback fired");
+    let last = books.last().unwrap();
+    assert_eq!((last.bids[0].price, last.bids[0].amount), (30000.0, 1.0));
+    assert_eq!((last.asks[0].price, last.asks[0].amount), (30001.0, 2.0));
+    drop(books);
+    cleanup().expect("cleanup");
+    assert!(
+        sent_channels(&h, "unsubscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "last listener unsubscribes"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+// ts: cryptocom.ws-public.ts listenOHLCV subscribes candlestick.<interval>.<symbol>.
+#[test]
+fn listen_ohlcv_subscribes_and_delivers_candles() {
+    let h = started(|_| {});
+    let candles = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = candles.clone();
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let _cleanup = h
+        .venue()
+        .listen_ohlcv(opts, std::rc::Rc::new(move |c| sink.borrow_mut().push(c)))
+        .expect("listenOHLCV");
+    h.runtime.advance(50.0);
+    let channel = format!("candlestick.1h.{SYMBOL}");
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(channel)),
+        "candlestick subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "candlestick", "subscription": channel, "instrument_name": SYMBOL,
+               "interval": "1h",
+               "data": [{"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}]}),
+    );
+    let candles = candles.borrow();
+    assert_eq!(candles.len(), 1, "candle callback fired once");
+    assert_eq!(candles[0].close, 1.5);
+    drop(candles);
     h.venue().dispose().expect("dispose");
 }
 
@@ -710,10 +913,610 @@ fn dispose_sets_source_flag_without_removing_inherited_listeners() {
         h.venue().base().is_disposed(),
         "source assignment reaches shared state"
     );
-    h.venue().base().emit("update", json!({})).unwrap();
+    h.venue()
+        .base()
+        .emit(
+            "update",
+            safe_cex_exchange::js_runtime::value::from_json(&json!({})),
+        )
+        .unwrap();
     assert_eq!(
         observed.get(),
         1,
         "source override does not invoke base listener cleanup"
     );
+}
+
+// ts: cryptocom.api.ts createAPI through safeCexAxiosCreate (provider baseURL and proxy
+// authorization) and, under tealstreetTunnel, installTransportAdapter.
+#[test]
+#[expect(clippy::arc_with_non_send_sync)]
+fn create_api_routes_through_the_provider_and_tunnel_adapter() {
+    use safe_cex_transport::{
+        DirectTransport, PrivateProxy, ResolvedRouting, RestAdapter, RestAdapterContext,
+        RestAdapterVariant, RestAuthorizer, RestFuture, RestRequest, RestResponse,
+        RestResponseBody, RestTransport, RestTransportContext, RoutingOptions, TransportError,
+        TransportFuture, TransportProvider, WsConnection,
+    };
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
+    const PROXIED: &str = "https://private-proxy/https://api.crypto.com/exchange/v1";
+    struct Authorize;
+    impl RestAuthorizer for Authorize {
+        fn authorize<'a>(&'a self, request: &'a mut RestRequest) -> TransportFuture<'a, ()> {
+            Box::pin(async move {
+                let Some(safe_cex_transport::RestBody::Encoded(body)) = &request.body else {
+                    panic!("ROUTING encoded body: {:?}", request.body)
+                };
+                let body: Value = serde_json::from_slice(body).unwrap();
+                assert!(
+                    body["sig"].as_str().is_some_and(|s| s.len() == 64),
+                    "ROUTING venue signs before proxy authorization"
+                );
+                request
+                    .headers
+                    .insert("Authorization".into(), "Bearer proxy-token".into());
+                Ok(())
+            })
+        }
+    }
+    struct Terminal(Rc<RefCell<Vec<RestRequest>>>);
+    impl RestAdapter for Terminal {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.borrow_mut().push(request);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(balance())
+                            .unwrap(),
+                    ),
+                })
+            })
+        }
+    }
+    struct Provider {
+        variants: Rc<RefCell<Vec<RestAdapterVariant>>>,
+        sent: Rc<RefCell<Vec<RestRequest>>>,
+    }
+    impl TransportProvider for Provider {
+        fn name(&self) -> &str {
+            "cryptocom-routing"
+        }
+        fn rest(&self, c: RestTransportContext<'_>) -> Result<RestTransport, TransportError> {
+            assert_eq!(c.exchange, &ExchangeName::Cryptocom, "ROUTING exchange");
+            assert_eq!(
+                c.config.base_url.as_deref(),
+                Some("https://api.crypto.com/exchange/v1"),
+                "ROUTING original base"
+            );
+            Ok(RestTransport {
+                base_url: Some(PROXIED.into()),
+                proxied: true,
+                authorize: Some(Arc::new(Authorize)),
+            })
+        }
+        fn rest_adapter(&self, c: RestAdapterContext<'_>) -> Option<Arc<dyn RestAdapter>> {
+            self.variants.borrow_mut().push(c.variant);
+            Some(Arc::new(Terminal(self.sent.clone())))
+        }
+        fn proxy_prefix(&self, _: RestTransportContext<'_>) -> String {
+            String::new()
+        }
+        fn public_cors_proxy(&self) -> Option<String> {
+            None
+        }
+        fn private_proxy(&self, _: &ExchangeName) -> Option<Arc<dyn PrivateProxy>> {
+            None
+        }
+        fn require_proxy(&self, options: ExchangeOptions) -> ExchangeOptions {
+            options
+        }
+        fn server_proxy_url(&self, _: &ExchangeName) -> Option<String> {
+            None
+        }
+        fn ws_routing(&self, name: &ExchangeName, options: &RoutingOptions) -> ResolvedRouting {
+            DirectTransport.ws_routing(name, options)
+        }
+        fn ws_connection(&self, _: &str) -> Option<WsConnection> {
+            None
+        }
+    }
+    for tunnel in [false, true] {
+        let runtime = Rc::new(support::Runtime::default());
+        let variants = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        *runtime.provider.borrow_mut() = Some(Arc::new(Provider {
+            variants: variants.clone(),
+            sent: sent.clone(),
+        }));
+        let options = serde_json::from_value(json!({
+            "key": "fixture-key", "secret": "fixture-secret",
+            "tealstreetProxy": true, "tealstreetTunnel": tunnel
+        }))
+        .unwrap();
+        let h = support::harness_on(runtime, options, |http| {
+            http.ok("POST", "/private/user-balance", balance())
+        });
+        let result = h
+            .drive(h.venue().validate_account())
+            .expect("validateAccount");
+        assert_eq!(serde_json::to_value(&result.error).unwrap(), json!(""));
+        if tunnel {
+            assert_eq!(
+                *variants.borrow(),
+                [RestAdapterVariant::Default],
+                "ROUTING tunnel installs the default adapter once"
+            );
+            assert!(
+                h.http.requests.borrow().is_empty(),
+                "ROUTING adapter replaces host"
+            );
+            let requests = sent.borrow();
+            assert_eq!(
+                requests.len(),
+                2,
+                "ROUTING source validation then fetchBalance"
+            );
+            assert_eq!(requests[0].base_url.as_deref(), Some(PROXIED));
+            assert_eq!(
+                requests[0].headers.get("Authorization").map(String::as_str),
+                Some("Bearer proxy-token")
+            );
+        } else {
+            assert!(
+                variants.borrow().is_empty(),
+                "ROUTING no adapter without tunnel"
+            );
+            let calls = h.http.calls("/private/user-balance");
+            assert_eq!(
+                calls.len(),
+                2,
+                "ROUTING source validation then fetchBalance"
+            );
+            let call = &calls[0];
+            assert_eq!(call.base_url, PROXIED, "ROUTING provider base");
+            assert_eq!(call.headers["Authorization"], "Bearer proxy-token");
+        }
+    }
+}
+
+fn private_socket(h: &Harness) -> std::rc::Rc<support::Socket> {
+    h.runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/user"))
+        .expect("private user socket")
+        .1
+        .clone()
+}
+
+fn private_frame(h: &Harness, frame: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    private_socket(h)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+    for _ in 0..4 {
+        h.runtime.advance(50.0);
+    }
+}
+
+fn authenticated_private_venue() -> Harness {
+    let h = started(|_| {});
+    h.runtime.advance(1000.0);
+    private_frame(&h, json!({"method":"public/auth","code":0}));
+    assert!(
+        private_socket(&h).sent.borrow().iter().any(|text| {
+            let f: Value = serde_json::from_str(text).expect("sent JSON");
+            f["method"] == "subscribe"
+                && f["params"]["channels"]
+                    == json!([
+                        "user.order",
+                        "user.advance.order",
+                        "user.positions",
+                        "user.balance"
+                    ])
+        }),
+        "private subscription reaches transport after auth"
+    );
+    h
+}
+
+fn live_order(id: &str, status: &str, filled: &str) -> Value {
+    json!({"order_id":id,"instrument_name":SYMBOL,"quantity":"4",
+        "cumulative_quantity":filled,"limit_price":"29001.5","order_type":"LIMIT",
+        "side":"BUY","status":status,"update_time":77,"create_time":22,
+        "time_in_force":"GOOD_TILL_CANCEL","exec_inst":["REDUCE_ONLY"]})
+}
+
+fn stored_order(h: &Harness, id: &str) -> Order {
+    safe_cex_store::Store::orders(h.store.as_ref())
+        .iter()
+        .find(|o| o.id == id)
+        .unwrap_or_else(|| panic!("private order {id} reached Store"))
+        .clone()
+}
+
+// Source onMessage processes result/channel even when the frame also has code:0.
+#[test]
+fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
+    let h = authenticated_private_venue();
+    let fills = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    let mut unknown = live_order("unknown", "ACTIVE", "0");
+    unknown["instrument_name"] = json!("UNKNOWN-PERP");
+    let advanced = json!({"order_id":"ws-advanced","instrument_name":SYMBOL,
+        "quantity":"2","cumulative_quantity":"0","ref_price":"25000.5",
+        "limit_price":"24000","order_type":"STOP_LOSS","side":"SELL",
+        "order_status":"ACTIVE","time_created":10,"time_updated":66,
+        "time_in_force":"IMMEDIATE_OR_CANCEL"});
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.order","data":[unknown,live_order("ws-order","ACTIVE","0")]}}),
+    );
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.advance.order","data":[advanced]}}),
+    );
+    let order = stored_order(&h, "ws-order");
+    assert_eq!(
+        (order.amount, order.filled, order.remaining),
+        (4.0, 0.0, 4.0)
+    );
+    assert_eq!(
+        (
+            order.status.unwrap(),
+            order.side.unwrap(),
+            order.r#type.unwrap()
+        ),
+        (OrderStatus::Open, OrderSide::Buy, OrderType::Limit)
+    );
+    assert_eq!(order.price, 29001.5);
+    assert_eq!(order.last_update, 77.0);
+    assert_eq!(order.reduce_only, true);
+    let advanced = stored_order(&h, "ws-advanced");
+    assert_eq!(
+        (advanced.r#type.unwrap(), advanced.side.unwrap()),
+        (OrderType::StopLoss, OrderSide::Sell)
+    );
+    assert_eq!(
+        (advanced.price.to_number(), advanced.last_update),
+        (25000.5, 66.0)
+    );
+    assert!(
+        !safe_cex_store::Store::orders(h.store.as_ref())
+            .iter()
+            .any(|o| o.id == "unknown")
+    );
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.order","data":[
+        live_order("ws-order","ACTIVE","1.5")]}}),
+    );
+    let partial = stored_order(&h, "ws-order");
+    assert_eq!(
+        (partial.status.unwrap(), partial.filled, partial.remaining),
+        (OrderStatus::Open, 1.5, 2.5)
+    );
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.order","data":[
+        live_order("ws-order","FILLED","4"), live_order("O1","CANCELED","1.5")]}}),
+    );
+    let filled = stored_order(&h, "ws-order");
+    assert_eq!(
+        (filled.status.unwrap(), filled.filled, filled.remaining),
+        (OrderStatus::Closed, 4.0, 0.0)
+    );
+    assert_eq!(stored_order(&h, "O1").status, OrderStatus::Canceled);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    assert_eq!(
+        fills.get(),
+        0,
+        "source Crypto.com order/fill state updates emit no fill event"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn private_position_frames_update_hedged_sides_and_remove_zero_quantity() {
+    let h = authenticated_private_venue();
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.positions","data":[
+            {"instrument_name":"UNKNOWN-PERP","quantity":"9"},
+            {"instrument_name":SYMBOL,"quantity":"-2","cost":"-60000",
+             "target_leverage":"7","liquidation_price":"40000.5","mark_price":"30001",
+             "open_position_pnl":"-3.5","isolation_type":"ISOLATED_MARGIN",
+             "isolation_id":"isolation-1","update_timestamp_ms":88},
+            {"instrument_name":SYMBOL,"quantity":"1","cost":"28000",
+             "leverage":"4","open_position_pnl":"5","isolation_type":"CROSS_MARGIN",
+             "update_timestamp_ms":89}
+        ]}}),
+    );
+    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    assert_eq!(
+        positions.len(),
+        2,
+        "both rows delivered without unknown market"
+    );
+    let short = positions
+        .iter()
+        .find(|p| p.side == PositionSide::Short)
+        .expect("short");
+    assert_eq!(
+        (short.contracts, short.entry_price, short.notional),
+        (2.0, -30000.0, 60000.0)
+    );
+    assert_eq!((short.leverage, short.liquidation_price), (7.0, 40000.5));
+    assert_eq!(short.unrealized_pnl, -3.5);
+    assert_eq!(
+        short.margin_type,
+        Some(safe_cex_types::MarginType::Isolated)
+    );
+    assert_eq!(
+        short.position_mode,
+        Some(safe_cex_types::PositionMode::Hedged)
+    );
+    assert_eq!(short.last_update, Some(88.0));
+    let serialized = serde_json::to_value(short).expect("position JSON");
+    assert_eq!(
+        serialized["info"],
+        json!({"markPrice":30001.0,"isolationId":"isolation-1"})
+    );
+    let long = positions
+        .iter()
+        .find(|p| p.side == PositionSide::Long)
+        .expect("long");
+    assert_eq!(
+        (long.contracts, long.entry_price, long.leverage),
+        (1.0, 28000.0, 4.0)
+    );
+    assert_ne!(short.id, long.id, "hedged sides keep distinct identities");
+    drop(positions);
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.positions","data":[
+        {"instrument_name":SYMBOL,"quantity":"0","cost":"0"}]}}),
+    );
+    assert!(
+        safe_cex_store::Store::positions(h.store.as_ref()).is_empty(),
+        "flat frame removes both sides"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates() {
+    let h = authenticated_private_venue();
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.balance","data":[{
+            "total_margin_balance":"200","total_available_balance":"140",
+            "total_initial_margin":"60","total_session_unrealized_pnl":"-6",
+            "position_balances":[
+                {"instrument_name":"USD","quantity":"20","max_withdrawal_balance":"12"},
+                {"instrument_name":"BTC","quantity":"2","max_withdrawal_balance":"3"}
+            ]
+        }]}}),
+    );
+    let balance = safe_cex_store::Store::balance(h.store.as_ref());
+    assert_eq!(
+        (balance.total, balance.free, balance.used, balance.upnl),
+        (200.0, 140.0, 60.0, -6.0)
+    );
+    assert_eq!(
+        serde_json::to_value(&balance.currencies).unwrap(),
+        json!({
+            "USD":{"total":20.0,"free":12.0,"used":8.0,"upnl":0.0},
+            "BTC":{"total":2.0,"free":3.0,"used":0.0,"upnl":0.0}
+        }),
+        "WS currency shape follows source, replacing REST available/locked"
+    );
+    let before = serde_json::to_value(&*balance).unwrap();
+    drop(balance);
+    assert!(safe_cex_store::Store::loaded(h.store.as_ref()).balance);
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.balance","data":[]}}),
+    );
+    assert_eq!(
+        serde_json::to_value(&*safe_cex_store::Store::balance(h.store.as_ref())).unwrap(),
+        before
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn releasing_shared_http_gate_resumes_both_native_market_reads() {
+    use std::task::{Context, Poll, Waker};
+    let h = venue(|_| {});
+    let released = h.http.hold("/public/get-instruments");
+    let mut first = h.venue().fetch_markets();
+    let mut second = h.venue().fetch_markets();
+    for _ in 0..64 {
+        for future in [&mut first, &mut second] {
+            assert!(matches!(
+                future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop())),
+                Poll::Pending
+            ));
+        }
+        h.runtime.advance(50.0);
+        if h.http.calls("/public/get-instruments").len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(h.http.calls("/public/get-instruments").len(), 2);
+    h.runtime.pump();
+    released.set(true);
+    let first = h.drive(first).expect("first native market read resumes");
+    let second = h.drive(second).expect("second native market read resumes");
+    for rows in [first, second] {
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].symbol, SYMBOL);
+    }
+}
+
+#[test]
+fn order_book_rows_require_iterable_pairs_through_real_socket() {
+    use std::{cell::RefCell, rc::Rc};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/book-pair-oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "actual source book parser: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.as_array().unwrap().len(), 2);
+    for case in cases.as_array().unwrap() {
+        assert_eq!(case["error"]["name"], "TypeError");
+        let h = started(|_| {});
+        let books = Rc::new(RefCell::new(vec![]));
+        let sink = books.clone();
+        let errors = Rc::new(RefCell::new(vec![]));
+        let failures = errors.clone();
+        base(&h).on(
+            "error",
+            Rc::new(move |_, error| {
+                failures.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        let cleanup = h
+            .venue()
+            .listen_order_book(
+                SYMBOL.into(),
+                Rc::new(move |book| {
+                    sink.borrow_mut().push(book);
+                }),
+            )
+            .unwrap();
+        h.runtime.advance(50.0);
+        let mut frame = case["update"].clone();
+        frame["channel"] = json!("book");
+        frame["subscription"] = json!(format!("book.{SYMBOL}.50"));
+        public_frame(&h, frame);
+        assert_eq!(
+            books.borrow().len(),
+            case["callbacks"].as_u64().unwrap() as usize,
+            "Crypto.com {} plain numeric-key row must throw before book callback, matching source",
+            case["side"]
+        );
+        assert!(
+            errors.borrow().iter().any(|e| {
+                e.as_str()
+                    .is_some_and(|text| String::from_utf16_lossy(text).contains("TypeError"))
+            }),
+            "pair refusal must retain a visible TypeError cause: {:?}",
+            errors.borrow()
+        );
+        public_frame(
+            &h,
+            json!({"channel":"book", "subscription":format!("book.{SYMBOL}.50"),
+            "instrument_name":SYMBOL,"data":[{"bids":[["30000","1"]],"asks":[["30001","2"]],"t":2}]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "valid array pair still reaches listener after refusal"
+        );
+        cleanup().unwrap();
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("cryptocom");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 96);
+    let mut opts = serde_json::to_value(options()).unwrap();
+    opts["publicDataOnly"] = json!(true);
+    let h = harness(serde_json::from_value(opts).unwrap(), |http| {
+        http.ok("GET", "/public/get-instruments", instruments());
+        http.ok("GET", "/public/get-tickers", tickers());
+    });
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let template = h.store.markets()[0].clone();
+    let markets = ticker_coercion::seed("cryptocom")
+        .into_iter()
+        .map(|ticker| {
+            let mut market = template.clone();
+            market.info = Some(json!({"underlyingSymbol": ticker.id.split('-').next().unwrap()}));
+            market.id = ticker.id;
+            market.symbol = ticker.symbol;
+            market
+        })
+        .collect();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let socket = market_socket(&h);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("cryptocom")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            h.runtime.now.set(h.runtime.now.get() + 1_100.0);
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
 }

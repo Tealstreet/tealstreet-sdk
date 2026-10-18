@@ -203,7 +203,7 @@ impl CoinbaseOrderHost for Host {
     }
     fn resolve_caller_client_order_id(
         &mut self,
-        opts: &PlaceOrderOpts,
+        opts: &safe_cex_types::PreparedOrderOpts,
     ) -> Result<Option<String>, CoinbaseOrderFailure> {
         self.resolves += 1;
         self.record(Event::Resolve(self.resolves));
@@ -528,7 +528,10 @@ fn cases(family: &str, expected: usize) -> Vec<(Value, Value)> {
 fn native_create_payload_matches_live_source() {
     for (input, e) in cases("format", 42) {
         let mut h = Host::new(&input);
-        let a = format_create_order(&mut h, &options(&input["opts"]));
+        let a = format_create_order(
+            &mut h,
+            &safe_cex_types::PreparedOrderOpts::from(&options(&input["opts"])),
+        );
         let label = input["label"].as_str().unwrap();
         outcome(&a, &e, label);
         if let Ok(a) = a {

@@ -4,12 +4,29 @@ use safe_cex_types::{PositionMode, PositionSide, object_map::JsObjectMap};
 use serde::{Deserialize, Serialize};
 type Record = JsObjectMap<JsNumberInput>;
 // ts: WooV3AccountMode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AccountMode {
     #[serde(rename = "MARGIN")]
     Margin,
     #[serde(rename = "SPOT")]
     Spot,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3AccountMode")]
+enum AcceptedWooV3AccountModeWire {
+    #[serde(rename = "MARGIN")]
+    Margin,
+    #[serde(rename = "SPOT")]
+    Spot,
+}
+impl<'de> Deserialize<'de> for WooV3AccountMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3AccountModeWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountMode {
     fn check_number_output(&self) {
@@ -17,12 +34,29 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountMode {
     }
 }
 // ts: WooV3AccountPositionMode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AccountPositionMode {
     #[serde(rename = "ONE_WAY")]
     OneWay,
     #[serde(rename = "HEDGE_MODE")]
     HedgeMode,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3AccountPositionMode")]
+enum AcceptedWooV3AccountPositionModeWire {
+    #[serde(rename = "ONE_WAY")]
+    OneWay,
+    #[serde(rename = "HEDGE_MODE")]
+    HedgeMode,
+}
+impl<'de> Deserialize<'de> for WooV3AccountPositionMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3AccountPositionModeWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountPositionMode {
     fn check_number_output(&self) {
@@ -30,7 +64,7 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountPositionMode 
     }
 }
 // ts: WooV3PositionSide
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3PositionSide {
     #[serde(rename = "BOTH")]
     Both,
@@ -38,6 +72,25 @@ pub enum WooV3PositionSide {
     Long,
     #[serde(rename = "SHORT")]
     Short,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3PositionSide")]
+enum AcceptedWooV3PositionSideWire {
+    #[serde(rename = "BOTH")]
+    Both,
+    #[serde(rename = "LONG")]
+    Long,
+    #[serde(rename = "SHORT")]
+    Short,
+}
+impl<'de> Deserialize<'de> for WooV3PositionSide {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3PositionSideWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3PositionSide {
     fn check_number_output(&self) {

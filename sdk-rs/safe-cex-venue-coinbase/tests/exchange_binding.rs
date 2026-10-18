@@ -558,6 +558,102 @@ fn public_stream_listeners_use_real_parser_and_shared_book_operations() {
     h.venue().dispose().unwrap();
 }
 #[test]
+fn public_book_copyback_preserves_duplicate_price_levels() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{
+        cell::RefCell,
+        io::Write,
+        process::{Command, Stdio},
+        rc::Rc,
+    };
+    let frames = json!([
+        {"channel":"l2_data","events":[{"type":"snapshot","product_id":"BTC-USD","updates":[
+            {"side":"bid","price_level":"42","new_quantity":"2"},
+            {"side":"bid","price_level":"42","new_quantity":"3"},
+            {"side":"bid","price_level":"40","new_quantity":"7"},
+            {"side":"offer","price_level":"43","new_quantity":"4"},
+            {"side":"offer","price_level":"43","new_quantity":"5"}]}]},
+        {"channel":"l2_data","events":[{"type":"update","product_id":"BTC-USD","updates":[
+            {"side":"bid","price_level":"42","new_quantity":"8"},
+            {"side":"offer","price_level":"43","new_quantity":"0"}]}]},
+        {"channel":"l2_data","events":[{"type":"update","product_id":"BTC-USD","updates":[
+            {"side":"bid","price_level":"41","new_quantity":"6"},
+            {"side":"offer","price_level":"44","new_quantity":"9"}]}]}
+    ]);
+    let mut source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/book-copyback-binding.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    source
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(frames.to_string().as_bytes())
+        .unwrap();
+    let source = source.wait_with_output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected[0]["bids"][0]["amount"], 2);
+    assert_eq!(expected[0]["bids"][1]["amount"], 3);
+    assert_eq!(expected[0]["bids"][1]["total"], 5);
+    let expected_books: Vec<OrderBook> = serde_json::from_value(expected).unwrap();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let captures = Rc::new(RefCell::new(Vec::new()));
+        let observed = captures.clone();
+        let cleanup = h
+            .venue()
+            .listen_order_book(
+                "BTC-USDC".into(),
+                Rc::new(move |book| {
+                    observed.borrow_mut().push(book);
+                }),
+            )
+            .unwrap();
+        let public = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
+            .unwrap()
+            .1
+            .clone();
+        for frame in frames.as_array().unwrap() {
+            public
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+            h.runtime.pump();
+        }
+        assert_eq!(
+            captures.borrow().len(),
+            3,
+            "every real public frame reaches the listener"
+        );
+        assert_eq!(
+            &*captures.borrow(),
+            &expected_books,
+            "real book copyback must retain each source level and running total"
+        );
+        cleanup().unwrap();
+        h.venue().dispose().unwrap();
+    }
+}
+#[test]
 fn startup_publication_keeps_store_subscriber_cause_after_commit() {
     use std::{cell::Cell, error::Error, rc::Rc};
     let h = harness(ExchangeName::Coinbase, options(), script);
@@ -673,4 +769,328 @@ fn cached_balance_fallback_keeps_native_optional_fields_and_nested_currencies() 
             .info,
         Some(json!({"nested":true}))
     );
+}
+
+#[test]
+fn portfolios_do_not_require_unobserved_name_or_deleted_fields() {
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        for extra in [
+            json!({}),
+            json!({"name":null}),
+            json!({"deleted":"unobserved"}),
+            json!({"name":[],"deleted":{}}),
+        ] {
+            let h = harness(name.clone(), options(), |http| {
+                script(http);
+                http.routes
+                    .borrow_mut()
+                    .retain(|(_, path, _)| path != "/api/v3/brokerage/portfolios");
+                let mut portfolio = json!({"uuid":"portfolio-synthetic","type":"DEFAULT"});
+                portfolio
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                http.ok(
+                    "GET",
+                    "/api/v3/brokerage/portfolios",
+                    json!({"portfolios":[portfolio]}),
+                );
+            });
+            let account = h
+                .drive(h.venue().get_account())
+                .expect("unused portfolio metadata must not reject selection");
+            assert_eq!(account.user_id, "portfolio-synthetic");
+            let balance = h.drive(h.exchange.fetch_balance()).unwrap();
+            let usdc = balance.currencies.as_ref().unwrap()["USDC"]
+                .as_balance()
+                .unwrap();
+            assert_eq!(
+                (usdc.free, usdc.used),
+                (13.25, 4.25),
+                "real breakdown must load after selecting the sparse portfolio"
+            );
+            h.venue().dispose().unwrap();
+        }
+    }
+}
+
+fn source_uuid_profile() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/uuid-binding.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+fn uuid_entropy(h: &binding_harness::Harness) {
+    // nanoid's raw21 starts with both removable separators, then19 'M'.
+    h.runtime
+        .random_values
+        .borrow_mut()
+        .extend([8.0 / 64.0, 44.0 / 64.0]);
+}
+fn load_uuid_market(h: &binding_harness::Harness) {
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+}
+#[test]
+fn uuid_binding_mints_source_client_ids() {
+    let expected = source_uuid_profile();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        load_uuid_market(&h);
+        uuid_entropy(&h);
+        let before = h.runtime.random_calls.get();
+        assert_eq!(
+            h.venue().base().mint_client_order_id(place()).unwrap(),
+            expected["minted"].as_str().unwrap()
+        );
+        assert_eq!(h.runtime.random_calls.get() - before, 21);
+        assert!(h.runtime.random_values.borrow().is_empty());
+    }
+}
+#[test]
+fn uuid_binding_generated_order_ids_reach_actual_http() {
+    let expected = source_uuid_profile();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), |http| {
+            script(http);
+            http.ok("POST", "/api/v3/brokerage/orders", json!({"success":true,"success_response":{"order_id":"uuid-order","product_id":"BTC-USDC","side":"BUY"}}));
+        });
+        load_uuid_market(&h);
+        uuid_entropy(&h);
+        let mut opts = place();
+        opts.client_order_id = None;
+        let ids = h
+            .drive(Box::pin(
+                h.exchange.base().place_order(h.exchange.as_ref(), opts),
+            ))
+            .unwrap();
+        assert_eq!(ids, ["uuid-order"]);
+        let calls = h.http.calls("/api/v3/brokerage/orders");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].data["client_order_id"], expected["minted"]);
+        assert!(h.runtime.random_values.borrow().is_empty());
+        assert_eq!(
+            h.store.orders()[0].parent_id.as_deref(),
+            expected["minted"].as_str()
+        );
+    }
+}
+#[test]
+fn uuid_binding_jwt_nonce_reaches_actual_signed_http() {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    let expected = source_uuid_profile();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        uuid_entropy(&h);
+        h.drive(h.venue().get_account()).unwrap();
+        let calls = h.http.calls("/api/v3/brokerage/portfolios");
+        assert_eq!(calls.len(), 1);
+        let headers = calls[0].headers.as_object().unwrap();
+        let token = headers
+            .iter()
+            .find(|(k, _)| k.ends_with("Authorization"))
+            .unwrap()
+            .1
+            .as_str()
+            .unwrap()
+            .strip_prefix("Bearer ")
+            .unwrap();
+        let header: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(token.split('.').next().unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(header["nonce"], expected["nonce"]);
+        assert_eq!(header["alg"], "EdDSA");
+        let (payload, signature) = token.rsplit_once('.').unwrap();
+        let public_key: Vec<u8> = serde_json::from_value(expected["publicKey"].clone()).unwrap();
+        assert!(
+            safe_cex_crypto::ed25519::verify(
+                payload.as_bytes(),
+                &public_key,
+                &URL_SAFE_NO_PAD.decode(signature).unwrap()
+            )
+            .unwrap(),
+            "actual JWT is verifiably signed"
+        );
+        assert!(h.runtime.random_values.borrow().is_empty());
+    }
+}
+
+fn source_credential_admission() -> Vec<Value> {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/credential-binding.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+#[test]
+fn credential_binding_ws_auth_matches_source_organization_admission() {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    let source = source_credential_admission();
+    assert_eq!(source.len(), 8);
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        for (index, (id, key)) in [
+            ("valid", "organizations/org/apiKeys/id".to_owned()),
+            ("org-slash", "organizations/org/child/apiKeys/id".to_owned()),
+            (
+                "org-double-slash",
+                "organizations/org//child/apiKeys/id".to_owned(),
+            ),
+            ("key-slash", "organizations/org/apiKeys/id/child".to_owned()),
+            ("empty-org", "organizations//apiKeys/id".to_owned()),
+            ("unicode", "organizations/雪/apiKeys/clé".to_owned()),
+            ("org-space", "organizations/org child/apiKeys/id".to_owned()),
+            (
+                "json-org-slash",
+                json!({"name":"organizations/org/child/apiKeys/id"}).to_string(),
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(source[index]["id"], id);
+            assert_eq!(source[index]["key"], key);
+            let mut opts = options();
+            opts.key = key;
+            let h = harness(name.clone(), opts, |_| {});
+            let request =
+                serde_json::from_value(json!({"id":id,"wsAuth":{"outputFormat":"coinbase-jwt"}}))
+                    .unwrap();
+            let response = h.drive(h.venue().sign_ws_auth(&request)).unwrap();
+            assert_eq!(response.id, Some(json!(id)));
+            if let Some(error) = source[index]["error"].as_str() {
+                assert_eq!(
+                    response.error.as_deref(),
+                    Some(error),
+                    "{name:?}/{id}: source preflight refusal"
+                );
+                assert!(
+                    response.ws_auth_signature.is_none(),
+                    "{id}: rejected credentials cannot mint a token"
+                );
+            } else {
+                assert!(response.error.is_none(), "{id}");
+                let token = response.ws_auth_signature.unwrap();
+                let header: Value = serde_json::from_slice(
+                    &URL_SAFE_NO_PAD
+                        .decode(token.split('.').next().unwrap())
+                        .unwrap(),
+                )
+                .unwrap();
+                assert_eq!(header["kid"], source[index]["keyName"], "{id}");
+            }
+            assert!(h.http.requests.borrow().is_empty(), "WS signing is local");
+        }
+    }
+}
+#[test]
+fn credential_binding_refuses_organization_slash_before_http() {
+    let source = source_credential_admission();
+    assert!(
+        source[1]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Coinbase API key")
+    );
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let mut opts = options();
+        opts.key = "organizations/org/child/apiKeys/id".into();
+        let h = harness(name, opts, script);
+        let _ = h.drive(h.venue().get_account());
+        assert!(
+            h.http.requests.borrow().is_empty(),
+            "source credential validation runs before any actual HTTP request: {:?}",
+            h.http.requests.borrow()
+        );
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("coinbase");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 56);
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let socket = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
+            .expect("constructed public socket")
+            .1
+            .clone();
+        for case in source["cases"].as_array().unwrap() {
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(ticker_coercion::seed("coinbase")),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .events
+                    .borrow_mut()
+                    .push_back(WsEvent::Message(SocketFrame::Text(
+                        frame.as_str().unwrap().into(),
+                    )));
+                h.runtime.pump();
+            }
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+        }
+        assert_eq!(
+            h.runtime
+                .console
+                .borrow()
+                .iter()
+                .filter(|(level, message)| level == "error"
+                    && message == "No handler for channel ticker_batch")
+                .count(),
+            56,
+            "native ticker unsupported channel must be reported"
+        );
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
+    }
 }

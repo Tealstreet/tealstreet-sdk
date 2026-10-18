@@ -172,6 +172,7 @@ impl AssemblyHost for Host {
             name,
             options,
             store,
+            |_| Ok(()),
         ))?;
         let _ = rt.shared.base.set(base);
         let _ = rt.shared.extra.owner.set(this.clone());

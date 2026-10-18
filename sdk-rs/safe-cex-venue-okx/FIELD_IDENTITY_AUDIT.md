@@ -4,6 +4,19 @@ Baseline at 146c51139c: 35 ported / 16 divergent / 115 pending. Captured on
 darwin arm64, Node v24.20.0. This is a new supplement, not a retroactive claim
 that the original fixtures independently proved field identity.
 
+## Mirror test scope
+
+The archive-loader capture below is historical service evidence. Its replay
+loader and five CSV archives live under `mobile-services/candle-server`, outside
+this filtered SDK mirror. The removed `original_archive_loader_has_direct_column_identity`
+test executed only that service loader; it exercised no SDK Rust implementation.
+Its standalone archive oracle has also been removed. There is no presence skip
+or replacement loader/fixture claiming to validate the absent production code.
+
+The SDK field-identity tests remain: native decoded record/enum fields and the
+maintained-source mapper supplement still run with `--include-ignored`. The
+historical archive counts below are not current SDK gate results.
+
 ## Candidate census and limits
 
 Executed all eleven original OKX oracle generators and recursively inspected
@@ -85,7 +98,7 @@ not a claim that every possible pair/CPU/input has been mutation-tested.
 
 Confirmed original false green: swapping ClosedPnlEntry time and closed_time in compiling production code passed the original 1220-case mapper oracle at exit0 (ordinary closed uTime is zero, so both fields become open_time). The SAME mutation failed the new distinct-time supplement at101 on native closed open time identity. This is one confirmed corpus hole repaired by a separate supplement; old bytes and historical green meaning remain unchanged. The other five compiling swap controls prove supplemented field identities, not a claim they all survived the old gate. Symmetric serde-name corruption separately passed the explicit roundtrip check and failed native ticker id identity.
 
-Archive supplement also executes the ACTUAL replay-day load declaration over all 87845 original records and directly checks all six native JS fields against the CSV columns (527070 comparisons). A compiled TypeScript column-name swap fails at1 on archive loader field identity open; restore passes. This closes the shared-loader identity question separately from engine equality, without rewriting any archive. The compiling Rust KV consumer swap remains its separate downstream control.
+Historical archive supplement executed the ACTUAL replay-day load declaration over all 87845 original records and directly checks all six native JS fields against the CSV columns (527070 comparisons). A compiled TypeScript column-name swap fails at1 on archive loader field identity open; restore passes. This closes the shared-loader identity question separately from engine equality, without rewriting any archive. The compiling Rust KV consumer swap remains its separate downstream control.
 
 ## Precision selector audit
 

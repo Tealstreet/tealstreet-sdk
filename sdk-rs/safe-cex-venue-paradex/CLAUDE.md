@@ -99,6 +99,17 @@ The balance oracle reuses scalarRaw from utilities_oracle.cjs byte-for-byte,
 executes one Node process, and holds GET settlement while draining cross-realm
 initialization promise adoption. Native fields and completed counts are pinned.
 
+Production `ParadexExchange` now overrides its stream and history trait hooks;
+the constructed member dispatcher calls the existing account REST bodies instead
+of leaving their allocated arrows unbound. Its fills/income/order capabilities
+are branded, and the existing state-operation journal delegate uses the canonical
+shared journal reader with symbol-scoped fills. The native adapter retains wrapped
+income failures as native causes; it does not duplicate reconstruction arithmetic.
+Socket registrations, REST candle polling and cleanup reuse their existing source
+bodies. Book registration and cleanup are split to retain the captured Set safely
+across the native callback lifetime, with no leaked host or second listener state.
+Real regressions are the `real_trait_` cases in `tests/exchange_trait.rs`.
+
 `history_reads.rs` maps fetchIncomeHistoryRange through one fallible callback and
 await. Missing and empty incomeType bypass filtering. Shared owned records do not
 represent JavaScript array/object aliases or own-undefined property reflection.
@@ -142,8 +153,14 @@ separate pending rows.
 Value construction; preserve unknown raw info keys and numeric ingress. The
 shared owned info copy differs from the source alias, and None differs from its
 own undefined timeInForce property. Observe both boundaries in the oracle.
-Required non-string fields and unsupported side/prototype enum values fail
-visibly. Preserve boolean reduce_only priority over flags, trigger display-price
+Required non-string identity fields and inherited prototype enum values fail
+visibly. Ordinary unmapped side keys retain ModelField::Undefined, using shared
+source property-key coercion before lookup. No enum is widened. Size and remaining_size use the shared String/parseFloat coercion,
+including numeric inputs and NaN from missing or nonnumeric values. created_at
+retains Date conversion: null/false become +0, true becomes 1, missing becomes
+NaN, Numbers use TimeClip, and other JSON data is string-converted then parsed.
+String dates retain the existing parser and timezone capability.
+The constructed REST regression checks startup and Store order loading. Preserve boolean reduce_only priority over flags, trigger display-price
 selection, unclamped filled subtraction and created_at dates. Shared js_date_parse
 requires the host's local-to-UTC capability; the mapper corpus pins UTC only.
 `public_ws_helpers.rs` maps channel naming independently of websocket lifecycle.
@@ -169,3 +186,65 @@ signer routing and felt-pair formatting. Its host retains original JavaScript
 method receivers, map/species behavior, coercions and promise settlement. Native
 bindings use `safe-cex-crypto` hashing/signing; inherited typed-data encoder
 refusals remain explicit in the manifest rather than claiming SDK-wide parity.
+
+
+`native_exchange::ParadexExchange::new` now composes the body ports on the shared
+`js_runtime`. Runtime, per-options HTTP factory and external public-data factory
+are explicit constructor dependencies. See [BINDING_GATES.md](BINDING_GATES.md)
+for constructed trait coverage, actual SDK signatures and compiled controls.
+Preserve source fetchPositions balance writes and exchange disposal without base
+cleanup. The required `local_wall_time_to_utc` dependency reaches both exchange
+order-mapper callers. Embeddings supply their host timezone policy; the native
+registry explicitly chooses UTC. The constructed UTC-7 regression compares REST
+and stored dates with Node Date, checks explicit-Z/date-only bypass, and keeps
+private order updates on their separate raw Date.now clock.
+Only constructed private onOpen uses the approved shared authentication
+recovery contract; direct authenticate keeps the original catch and log behavior.
+
+Native `cancel_all_orders` and `cancel_symbol_orders` call the venue receiver
+methods, whose DELETE /orders behavior also covers orders absent from Store.
+Keep the symbol in the original params.market config so the shared HTTP adapter
+owns query serialization. Both methods preserve the existing catch/log/rethrow
+path; an empty Store must not turn a rejected venue cancellation into success.
+
+The actual SDK quantum binding calls BigNumber.isFinite before the separate NaN
+and sign checks, matching the source. Infinity/-Infinity are rejected before
+signing or order POST; finite arbitrary-precision overflow remains accepted.
+The constructed RequestSigner witness executes eight original source profiles
+plus two finite1e400 supplements, and the public placement regression observes
+zero order POSTs for infinite price. It uses the shared BigNumber facade and the
+actual SDK constructor rather than the standalone injected signing callbacks.
+
+The constructed undefined-side regression retains eight missing/unknown/null/
+boolean/number/object/empty-array profiles in both returned and stored Orders,
+plus BUY/SELL and an array key coercing to BUY. Native own-undefined presence is
+checked directly; later Date errors still propagate. The 152-case pure source
+corpus is unchanged. Its two historical unknown-side refusal labels now have
+positive native ModelField assertions and all-field comparisons, with explicit
+115 mapped / 37 refused / 2 recovered-side floors; prototype refusals remain.
+
+Constructed REST order reads apply the final strict-field policy to id/market:
+finish source numeric/Date work, report the offending field and value, refuse only
+that row and retain good rows. All-refused pages return empty. Source failures
+still reject through the original catch/log path. The binding uses the existing
+generic mapper with optional results; its normalizer and public utility share one
+pipeline, with unchanged identity-only refusal messages. Twelve mixed-page native
+profiles plus all-refused/Date-error regressions execute the real Exchange. A
+separate maintained-method probe pins TS retaining the raw malformed fields;
+this per-row loss is intentional and does not widen shared IDs or assets.
+
+The constructed ticker corpus in `tests/exchange_trait.rs` observes 264 cases / 504 summary, BBO, book and trade frames, including numeric aliases and all book level forms
+through the production socket protocol and DefaultStore. Independent null,
+string, NaN-producing, object, overflow, signed-zero and false fields accompany
+distinct good rows. The maintained TS constructor and actual DefaultStore provide
+native numeric-bit expectations. Fresh TS receivers and advancing native clocks
+isolate numeric mapping from throttle timing. `ticker-native-controls.py paradex paradex-book`
+compiles a live publication fault, requires a native assertion failure, then
+restores exact source bytes and requires the named test to pass.
+
+The constructed candle poll dispatches `maybeRecoverOhlcvTradeStream` to the
+existing ingress helper. Its raw Date.now read and live per-key trade/recovery
+caches preserve the stale guard, cooldown, warning-before-forced-subscribe order.
+The real Exchange candle regression compares resubscription counts and warnings
+at initial, three-second and thirty-second polls with the maintained TS method,
+then verifies cleanup still cancels REST polling and callback delivery.

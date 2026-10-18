@@ -2750,3 +2750,62 @@ pairs and the root reports. Its MERGE is limited to this signing implementation,
 annotation and evidence, not unrelated integration changes or universal SDK
 parity. A separate doc-only review approved the portable rendering of historical
 tool paths; it ran no Cargo and did not reinterpret historical invocations.
+
+## Numeric REST order creation times
+
+`map_order` now passes retained numeric `created_at` values directly through the
+shared `js_time_clip`; strings retain the existing date parser/timezone hook.
+This matches the actual `new Date(o.created_at).getTime()` source expression.
+The former numeric-date refusal fixture is now an admitted native-field case.
+Twelve additional independently specified raw numeric inputs cover epoch
+milliseconds, fractions, signed zero, both TimeClip edges and overflow.
+
+Before repair, the actual-source mapper target failed
+`order_native_boundary_refusal 115`, and
+`numeric_created_at_survives_constructed_fetch_orders` failed during startup with
+`Paradex order field created_at must be a string`. Both pass after repair. The
+mapper target checks 128 source cases: 89 native Orders and the remaining 39
+explicit representation refusals; every native date bit and retained info value
+is checked. The constructed regression also verifies the loaded Store order and
+subsequent REST read, rather than calling only the standalone mapper.
+
+Scoped mapper and constructed REST regressions, strict host all-target/all-feature
+and Wasm library all-feature Clippy, crate formatting and parity checks pass
+(7,459 rows, 17,214 public Rust items). No shared decoder/type/signing changes are
+included. The separately audited Infinity-signing claim did not reproduce on the
+actual native binding and is excluded from this repair.
+
+## Raw REST order date and size coercion
+
+The maintained `ParadexExchange.mapOrder` calls `new Date(o.created_at)` and
+`parseFloat` on size/remaining_size. The native mapper now uses the existing
+shared JSON String/parseFloat conversion for quantities. Date conversion keeps
+missing as NaN, null/false as positive zero, true as 1, Numbers through TimeClip,
+and other JSON data through String and the existing date parser.
+
+The independent actual-source/native mapper corpus grows from 128 to 152 cases:
+113 native Orders and the same 39 explicit enum/identifier representation
+refusals. The additional cases cover missing/null/boolean dates, JSON arrays and
+objects, numeric/signed-zero/null/boolean/container quantities, and missing size
+or remaining_size. Those 39 existing refusals never represented the new date or
+quantity cases; they remain separate shared-model boundaries.
+
+The five-order production `&dyn Exchange` regression drives start, fetchOrders
+and native Store loading with null/false/true/missing dates, numeric quantities
+and a valid dated sibling. It checks lastUpdate 0/0/1/NaN plus the valid UTC date,
+amount/remaining/filled bits, raw info presence and all five committed rows.
+The old production mapper compiles and fails startup on numeric size. Keeping
+that size fix but reverting only Date conversion compiles and fails startup on
+created_at instead. The independent mapper corpus also compiles and fails at
+its new null-date case on the old production mapper.
+
+The shared host-timezone capability is deferred by the overseer: the native
+server runs in UTC. Both production mapper callers retain their UTC-host
+assumption; no venue-specific offset or new runtime hook is added. The actual
+source UTC/Los_Angeles difference for an offset-less date is recorded in the
+shared known-residuals audit. The existing generic parser callback is retained.
+
+After exact restoration, all 13 constructed exchange tests and the complete
+152-case actual-source/native mapper comparison pass again. The mixed batch
+checks both the returned native Orders and committed Store fields, including
+NaN and the missing created_at info property.

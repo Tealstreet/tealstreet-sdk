@@ -15,6 +15,7 @@ fn type_error(message: impl Into<String>) -> ExchangeError {
     error.name = "TypeError".into();
     error
 }
+
 fn text(value: Option<&Value>) -> Result<String, ExchangeError> {
     safe_cex_types::js_coercion::js_string(value).map_err(|cause| type_error(cause.message))
 }
@@ -116,7 +117,7 @@ pub fn fetch_ohlcv<'a, F: Future<Output = Result<Value, ExchangeError>> + 'a>(
             )?;
             return Ok(None);
         }
-        let timeframe = serde_json::to_value(opts.interval).expect("closed timeframe");
+        let timeframe = serde_json::to_value(&opts.interval).expect("closed timeframe");
         let TableHit::Mapped(interval) =
             crate::order_semantics::convert_interval(timeframe.as_str().expect("timeframe string"))
         else {
@@ -717,6 +718,23 @@ pub fn set_leverage<
                 )?;
                 Err(cause)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod accepted_contract_tests {
+    #[test]
+    fn accepted_data_read_error_factory() {
+        for message in ["", "protocol denied", "café\n\0💠"] {
+            let actual = super::type_error(message);
+            assert_eq!(actual.name, "TypeError", "native diagnostic name");
+            assert_eq!(actual.message, message, "native diagnostic text");
+            assert_eq!(
+                actual.metadata.as_ref(),
+                &safe_cex_exchange::runtime::ExchangeErrorMetadata::default(),
+                "fresh native metadata"
+            );
         }
     }
 }

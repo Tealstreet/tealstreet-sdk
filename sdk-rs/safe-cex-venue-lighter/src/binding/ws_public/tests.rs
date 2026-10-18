@@ -16,7 +16,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::Store;
+use safe_cex_store::{Store, virtual_clock::VIRTUAL_CLOCK};
 use safe_cex_transport::{
     TransportProvider, TransportRegistry,
     socket::{SocketFrame, TunnelHost},
@@ -30,8 +30,10 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
+
+use super::super::test_time::{SleepWakers, WakeSignal};
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
@@ -69,6 +71,7 @@ impl WsSocket for Io {
 struct Runtime {
     now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
+    sleepers: SleepWakers,
     sockets: RefCell<Vec<Rc<Io>>>,
     dials: RefCell<Vec<String>>,
 }
@@ -80,12 +83,14 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     fn pump(&self) {
+        let signal = Arc::new(WakeSignal::default());
+        let waker = signal.waker();
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -101,13 +106,15 @@ impl Runtime {
             }
             let spawned = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !spawned {
+            self.sleepers.wake_due(self.now.get());
+            if !progressed && !spawned && !signal.take() {
                 return;
             }
         }
     }
     fn advance(&self, ms: f64) {
         self.now.set(self.now.get() + ms);
+        self.sleepers.wake_due(self.now.get());
         self.pump();
     }
     fn socket(&self) -> Rc<Io> {
@@ -128,10 +135,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleep_waker = self.sleepers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleep_waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -141,7 +150,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -151,7 +160,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.25
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {}
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
     fn report_exception(&self, error: &ExchangeError, context: &Value) {
         panic!("unexpected exception {context}: {}", error.message);
     }
@@ -551,7 +560,9 @@ fn unhydrated_tickers_fall_back_to_rest_polling() {
 #[test]
 fn open_subscribes_topics_primes_tickers_and_pings() {
     let f = fixture();
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
     f.open();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
     let dial = f.runtime.dials.borrow()[0].clone();
     assert!(
         dial.starts_with("wss://lighter.test/stream?requestId="),
@@ -567,9 +578,18 @@ fn open_subscribes_topics_primes_tickers_and_pings() {
         frames.contains(&json!({"type": "subscribe", "channel": "ticker/1"})),
         "subscribe bbo ticker: {frames:?}"
     );
+    let pings: Vec<_> = frames.iter().filter(|f| f["type"] == "ping").collect();
+    assert_eq!(pings.len(), 1, "one ping on open");
+    let timestamp = pings[0]["timestamp"]
+        .as_f64()
+        .expect("native ping timestamp");
     assert!(
-        frames.contains(&json!({"type": "ping", "timestamp": 1_000_000})),
-        "ping frame: {frames:?}"
+        timestamp >= before && timestamp <= after,
+        "ping uses the synced virtual clock"
+    );
+    assert_eq!(
+        *pings[0],
+        json!({"type":"ping", "timestamp":timestamp as u64})
     );
     assert_eq!(f.field("topics")["bbo_ticker_1"], json!("ticker/1"));
     assert_eq!(f.field("pingAt"), json!(1_000_000.0), "performance.now");
@@ -798,4 +818,249 @@ fn dispose_clears_the_ticker_watchdog_timeout() {
     assert_eq!(f.field("tickerRestFallbackWatchdog"), Value::Null);
     f.runtime.advance(60_000.0);
     assert_eq!(f.rest.borrow().len(), 1, "cleared watchdog never fires");
+}
+
+#[test]
+fn public_callback_iterator_closes_and_retains_original_throw() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/public-iterator-oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "actual source public iterator: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let mut observations = vec![];
+    for fails_close in [false, true] {
+        let f = fixture();
+        let original = Js::object(vec![("tag", Js::str("callback"))]);
+        let failure = original.clone();
+        let callbacks = Js::new_set();
+        callbacks
+            .call_method(
+                "add",
+                vec![Js::function("callback", move |_, _| {
+                    Err(Thrown::new(failure.clone()))
+                })],
+            )
+            .unwrap();
+        let iterator = callbacks.call_method("values", vec![]).unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let counter = closes.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |_, _| {
+                    counter.set(counter.get() + 1);
+                    if fails_close {
+                        Err(Thrown::type_error("close"))
+                    } else {
+                        Ok(Js::object(vec![("done", Js::Bool(true))]))
+                    }
+                }),
+            )
+            .unwrap();
+        f.socket
+            .get("messageHandlers")
+            .unwrap()
+            .define("order_book:1", iterator)
+            .unwrap();
+        let result = f
+            .socket
+            .call_method(
+                "onMessage",
+                vec![Js::object(vec![(
+                    "data",
+                    Js::str("{\"channel\":\"order_book:1\"}"),
+                )])],
+            )
+            .unwrap_err();
+        observations.push(json!({"failsClose":fails_close,"closes":closes.get(),"original":result.value.same_reference(&original)}));
+    }
+    assert_eq!(
+        json!(observations),
+        source,
+        "Lighter public callback IteratorClose runs once and original throw wins over close failure"
+    );
+}
+
+#[test]
+fn public_ingress_pair_uses_iterator_and_closes_after_two_values() {
+    for invalid_return in [false, true] {
+        let f = fixture();
+        let ops = crate::binding::ingress::ops(&f.realm);
+        let values = Js::new_set();
+        for value in [Js::str("topic"), Js::Number(23.0), Js::str("unused")] {
+            values.call_method("add", vec![value]).unwrap();
+        }
+        let iterator = values.call_method("values", vec![]).unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let counter = closes.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |_, _| {
+                    counter.set(counter.get() + 1);
+                    Ok(if invalid_return {
+                        Js::Number(0.0)
+                    } else {
+                        Js::object(vec![])
+                    })
+                }),
+            )
+            .unwrap();
+        let result = (ops.tuple_two)(&iterator);
+        if invalid_return {
+            assert!(
+                result.is_err(),
+                "pair IteratorClose refuses primitive return"
+            );
+        } else {
+            let (first, second) = result.unwrap();
+            assert!(
+                first.strict_equals(&Js::str("topic")),
+                "public pair consumes the iterator's first value"
+            );
+            assert!(
+                second.strict_equals(&Js::Number(23.0)),
+                "public pair consumes the iterator's second value"
+            );
+        }
+        assert_eq!(
+            closes.get(),
+            1,
+            "pair closes before exhausting its unused tail"
+        );
+    }
+}
+
+#[test]
+fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/public-payloads-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained public payload parser arrows");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected["native"].as_array().unwrap().len(), 2);
+    assert_eq!(expected["reads"].as_array().unwrap().len(), 2);
+    let f = fixture();
+    let mut native = vec![];
+    for kind in ["array", "object"] {
+        let row = Js::object(vec![
+            ("price", Js::Number(f64::NAN)),
+            ("amount", Js::Number(f64::INFINITY)),
+            ("zero", Js::Number(-0.)),
+            ("label", Js::utf16(&[0xd800])),
+            ("missing", Js::Undefined),
+        ]);
+        row.set("cycle", row.clone()).unwrap();
+        let bids = Js::holey_array(vec![None, Some(row.clone()), Some(Js::Undefined)]);
+        let asks = Js::array(vec![]);
+        let tickers = if kind == "array" {
+            bids.clone()
+        } else {
+            Js::object(vec![("2", row.clone()), ("1", Js::Undefined)])
+        };
+        let payload = Js::object(vec![
+            (
+                "order_book",
+                Js::object(vec![("bids", bids.clone()), ("asks", asks.clone())]),
+            ),
+            ("order_book_stats", tickers.clone()),
+        ]);
+        let book = f
+            .socket
+            .call_method("parseRestOrderBookLevels", vec![payload.clone()]);
+        let items = f.socket.call_method("parseRestTickerItems", vec![payload]);
+        let (book, items) = match (book, items) {
+            (Ok(book), Ok(items)) => (book, items),
+            (book, items) => {
+                native.push(json!({"kind":kind,
+                    "bookError":book.err().map(|error| error.message()),
+                    "tickerError":items.err().map(|error| error.message()),
+                }));
+                row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+                continue;
+            }
+        };
+        let entries = items.array_items().unwrap();
+        let observed = entries
+            .iter()
+            .flatten()
+            .find(|v| !v.is_undefined())
+            .unwrap();
+        let tags: Vec<_> = entries
+            .iter()
+            .map(|v| match v {
+                None => "hole",
+                Some(v) if v.same_reference(&row) => "row",
+                Some(v) if v.is_undefined() => "undefined",
+                _ => "other",
+            })
+            .collect();
+        native.push(json!({"kind":kind,
+            "bidsIdentity":book.get("bids").unwrap().same_reference(&bids),
+            "asksIdentity":book.get("asks").unwrap().same_reference(&asks),
+            "tickerIdentity":items.same_reference(&tickers),
+            "bidHole":book.get("bids").unwrap().array_items().unwrap()[0].is_none(),
+            "tags":tags,
+            "rowIdentity":entries.iter().flatten().filter(|v| !v.is_undefined()).all(|v| v.same_reference(&row)),
+            "nan":observed.get("price").unwrap().to_number().unwrap().is_nan(),
+            "infinity":observed.get("amount").unwrap().to_number().unwrap() == f64::INFINITY,
+            "zero":observed.get("zero").unwrap().to_number().unwrap().to_bits() == (-0_f64).to_bits(),
+            "units":observed.get("label").unwrap().to_js_string().unwrap().as_ref(),
+            "ownUndefined":observed.own_keys().contains(&"missing".encode_utf16().collect()) && observed.get("missing").unwrap().is_undefined(),
+            "cycle":observed.get("cycle").unwrap().same_reference(&row),
+        }));
+        row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+    }
+    let mut reads = vec![];
+    for method in ["parseRestOrderBookLevels", "parseRestTickerItems"] {
+        let trace = Rc::new(RefCell::new(vec![]));
+        let row = Js::object(vec![]);
+        let bids = Js::array(vec![row.clone()]);
+        let book = Js::object(vec![]);
+        for (name, value) in [("bids", bids), ("asks", Js::array(vec![]))] {
+            let trace = trace.clone();
+            book.define_accessor(
+                name,
+                Some(Rc::new(move |_| {
+                    trace.borrow_mut().push(name);
+                    Ok(value.clone())
+                })),
+                None,
+            );
+        }
+        let payload = Js::object(vec![
+            ("order_book", book),
+            ("order_book_stats", Js::array(vec![row])),
+        ]);
+        for name in ["data", "result"] {
+            let trace = trace.clone();
+            payload.define_accessor(
+                name,
+                Some(Rc::new(move |_| {
+                    trace.borrow_mut().push(name);
+                    Ok(Js::object(vec![]))
+                })),
+                None,
+            );
+        }
+        f.call(method, vec![payload]);
+        reads.push(json!({"method":method,"trace":*trace.borrow()}));
+    }
+    assert_eq!(json!({"native":native,"reads":reads}), expected);
 }

@@ -285,7 +285,7 @@ impl StoreState {
         let mut changed = false;
         for order in &mut self.orders {
             if ids.contains(&order.id.as_str()) {
-                order.status = status;
+                order.status = (status).into();
                 changed = true;
             }
         }
@@ -474,21 +474,63 @@ fn empty_request_counts() -> RequestOutcomeCounts {
         other: 0.0,
     }
 }
-fn terminal(status: OrderStatus) -> bool {
-    matches!(status, OrderStatus::Closed | OrderStatus::Canceled)
+fn terminal(status: impl Into<safe_cex_types::ModelField<OrderStatus>>) -> bool {
+    let status = status.into();
+    matches!(
+        status,
+        safe_cex_types::ModelField::Value(OrderStatus::Closed | OrderStatus::Canceled)
+    )
 }
 fn merge_order(target: &mut Order, incoming: Order) {
     let old = std::mem::replace(target, incoming);
-    target.parent_id = target.parent_id.take().or(old.parent_id);
-    target.close = target.close.take().or(old.close);
-    target.info = target.info.take().or(old.info);
-    target.time_in_force = target.time_in_force.take().or(old.time_in_force);
-    target.trigger_type = target.trigger_type.take().or(old.trigger_type);
-    target.tp_trigger_type = target.tp_trigger_type.take().or(old.tp_trigger_type);
-    target.sl_trigger_type = target.sl_trigger_type.take().or(old.sl_trigger_type);
-    target.take_profit = target.take_profit.take().or(old.take_profit);
-    target.stop_loss = target.stop_loss.take().or(old.stop_loss);
-    target.extra = target.extra.take().or(old.extra);
+    if target.parent_id.is_absent() {
+        target.parent_id = old.parent_id;
+    }
+    if target.status.is_absent() {
+        target.status = old.status;
+    }
+    if target.r#type.is_absent() {
+        target.r#type = old.r#type;
+    }
+    if target.side.is_absent() {
+        target.side = old.side;
+    }
+    if target.price.is_absent() {
+        target.price = old.price;
+    }
+    if target.reduce_only.is_absent() {
+        target.reduce_only = old.reduce_only;
+    }
+    if target.close.is_absent() {
+        target.close = old.close;
+    }
+    if target.info.is_absent() {
+        target.info = old.info;
+    }
+    if target.client_order_id.is_absent() {
+        target.client_order_id = old.client_order_id;
+    }
+    if target.time_in_force.is_absent() {
+        target.time_in_force = old.time_in_force;
+    }
+    if target.trigger_type.is_absent() {
+        target.trigger_type = old.trigger_type;
+    }
+    if target.tp_trigger_type.is_absent() {
+        target.tp_trigger_type = old.tp_trigger_type;
+    }
+    if target.sl_trigger_type.is_absent() {
+        target.sl_trigger_type = old.sl_trigger_type;
+    }
+    if target.take_profit.is_absent() {
+        target.take_profit = old.take_profit;
+    }
+    if target.stop_loss.is_absent() {
+        target.stop_loss = old.stop_loss;
+    }
+    if target.extra.is_absent() {
+        target.extra = old.extra;
+    }
 }
 
 impl StoreState {
@@ -619,20 +661,50 @@ impl StoreState {
     }
     fn patch_ticker_in_place(target: &mut Ticker, source: &Ticker) -> bool {
         let mut changed = false;
-        macro_rules! patch { ($($field:ident),*) => { $(if target.$field != source.$field {target.$field=source.$field;changed=true;})* }; }
-        patch!(
-            bid,
-            ask,
-            last,
-            mark,
-            index,
-            percentage,
-            open_interest,
-            funding_rate,
-            funding_time,
-            volume,
-            quote_volume
-        );
+        if target.bid != source.bid {
+            target.bid = source.bid;
+            changed = true;
+        }
+        if target.ask != source.ask {
+            target.ask = source.ask;
+            changed = true;
+        }
+        if target.last != source.last {
+            target.last = source.last;
+            changed = true;
+        }
+        if target.mark != source.mark {
+            target.mark = source.mark;
+            changed = true;
+        }
+        if target.index != source.index {
+            target.index = source.index;
+            changed = true;
+        }
+        if target.percentage != source.percentage {
+            target.percentage = source.percentage;
+            changed = true;
+        }
+        if target.open_interest != source.open_interest {
+            target.open_interest = source.open_interest;
+            changed = true;
+        }
+        if target.funding_rate != source.funding_rate {
+            target.funding_rate = source.funding_rate;
+            changed = true;
+        }
+        if target.funding_time != source.funding_time {
+            target.funding_time = source.funding_time;
+            changed = true;
+        }
+        if target.volume != source.volume {
+            target.volume = source.volume;
+            changed = true;
+        }
+        if target.quote_volume != source.quote_volume {
+            target.quote_volume = source.quote_volume;
+            changed = true;
+        }
         changed
     }
     fn patch_worker_tickers_in_place(&mut self, tickers: &[Ticker]) -> Option<bool> {
@@ -781,7 +853,7 @@ impl StoreState {
     }
     fn update_order_status(&mut self, id: &str, status: OrderStatus) {
         if let Some(index) = self.orders.iter().position(|o| o.id == id) {
-            self.orders[index].status = status;
+            self.orders[index].status = (status).into();
             self.order_update_id += 1.0;
             self.data.update_ids.orders = self.order_update_id;
             self.notify(false);
@@ -820,7 +892,7 @@ impl StoreState {
     }
     fn update_positions(
         &mut self,
-        updates: &[(String, ModelPatch)],
+        updates: &[(Option<String>, ModelPatch)],
     ) -> Result<(), StorePatchError> {
         if updates.is_empty() || self.data.positions.is_empty() {
             return Ok(());
@@ -831,11 +903,13 @@ impl StoreState {
             .iter()
             .map(|(id, patch)| {
                 (
-                    Self::find_index_by_id(
-                        self.data.positions.iter().map(|p| p.id.clone()),
-                        id,
-                        index.as_ref(),
-                    ),
+                    id.as_ref().and_then(|id| {
+                        Self::find_index_by_id(
+                            self.data.positions.iter().map(|p| p.id.clone()),
+                            id,
+                            index.as_ref(),
+                        )
+                    }),
                     patch,
                 )
             })
@@ -887,9 +961,9 @@ impl StoreState {
         position.unrealized_pnl = 0.0;
         position.contracts = 0.0;
         position.liquidation_price = 0.0;
-        position.margin_size = Some(0.0);
-        position.info = None;
-        position.extra = None;
+        position.margin_size = (Some(0.0)).into();
+        position.info = (None).into();
+        position.extra = (None).into();
         position
     }
     fn add_or_update_positions_full(&mut self, positions: Vec<Position>) {
@@ -1199,25 +1273,45 @@ impl StoreState {
             self.retained_balance = Arc::new(balance.clone());
             self.data.balance = balance;
         }
-        macro_rules! apply { ($($field:ident),*) => {$(if let Some(value)=changes.$field {self.data.$field=value;})*}; }
-        apply!(
-            latency,
-            displayed_positions,
-            orders_risk,
-            active_chasers,
-            active_twaps,
-            loaded,
-            options,
-            fetched_leverage
-        );
-        macro_rules! optional { ($($field:ident),*) => {$(if let Some(value)=changes.$field {self.data.$field=Some(value);})*}; }
-        optional!(
-            displayed_margin,
-            message_handler_stats,
-            stark_config,
-            zk_link_config,
-            user_data
-        );
+        if let Some(value) = changes.latency {
+            self.data.latency = value;
+        }
+        if let Some(value) = changes.displayed_positions {
+            self.data.displayed_positions = value;
+        }
+        if let Some(value) = changes.orders_risk {
+            self.data.orders_risk = value;
+        }
+        if let Some(value) = changes.active_chasers {
+            self.data.active_chasers = value;
+        }
+        if let Some(value) = changes.active_twaps {
+            self.data.active_twaps = value;
+        }
+        if let Some(value) = changes.loaded {
+            self.data.loaded = value;
+        }
+        if let Some(value) = changes.options {
+            self.data.options = value;
+        }
+        if let Some(value) = changes.fetched_leverage {
+            self.data.fetched_leverage = value;
+        }
+        if let Some(value) = changes.displayed_margin {
+            self.data.displayed_margin = Some(value);
+        }
+        if let Some(value) = changes.message_handler_stats {
+            self.data.message_handler_stats = Some(value);
+        }
+        if let Some(value) = changes.stark_config {
+            self.data.stark_config = Some(value);
+        }
+        if let Some(value) = changes.zk_link_config {
+            self.data.zk_link_config = Some(value);
+        }
+        if let Some(value) = changes.user_data {
+            self.data.user_data = Some(value);
+        }
         if let Some(stats) = changes.request_stats {
             self.request_stats = Some(stats);
         }
@@ -1611,7 +1705,7 @@ impl DefaultStore {
     }
     pub fn update_positions(
         &self,
-        updates: &[(String, ModelPatch)],
+        updates: &[(Option<String>, ModelPatch)],
     ) -> Result<(), StoreMutationError> {
         self.mutate(|state| state.update_positions(updates))?
             .map_err(StoreMutationError::from)
@@ -1768,7 +1862,10 @@ impl Store for DefaultStore {
         self.mutate(|s| s.update_position(id, changes))?
             .map_err(StoreMutationError::from)
     }
-    fn update_positions(&self, updates: &[(String, ModelPatch)]) -> Result<(), StoreMutationError> {
+    fn update_positions(
+        &self,
+        updates: &[(Option<String>, ModelPatch)],
+    ) -> Result<(), StoreMutationError> {
         self.mutate(|s| s.update_positions(updates))?
             .map_err(StoreMutationError::from)
     }

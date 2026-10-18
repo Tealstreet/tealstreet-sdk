@@ -177,13 +177,23 @@ fn gateway_whole_frame_validation_divergence_is_explicit() {
         json!({"type":"data","exchangeId":"bybit","channel":"funding"}),
         json!({"type":"data","exchangeId":"bybit","interval":"7m"}),
         json!({"type":"data","exchangeId":"bybit","symbol":1}),
-        json!({"type":"data","exchangeId":"bybit","channel":"tickers","interval":"1M","data":[]}),
+        json!({"type":"data","exchangeId":"bybit","channel":"tickers","interval":"7M","data":[]}),
     ] {
         assert!(
             serde_json::from_value::<GatewayMessage>(frame.clone()).is_err(),
             "{frame}"
         );
     }
+    let monthly =
+        json!({"type":"data","exchangeId":"bybit","channel":"tickers","interval":"1M","data":[]});
+    let decoded: GatewayMessage = serde_json::from_value(monthly.clone()).unwrap();
+    assert!(matches!(
+        decoded.interval,
+        Some(safe_cex_types::AnyTimeframe::Variant2(
+            safe_cex_types::ExtendedTimeframe::MN1
+        ))
+    ));
+    round_trip::<GatewayMessage>(monthly);
     round_trip::<GatewayMessage>(json!({"type":"data","exchangeId":"bybit","data":null}));
 }
 

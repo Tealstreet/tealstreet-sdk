@@ -8,11 +8,25 @@ from real options, a Store, HTTP and WebSocket runtime dependencies. The Exchang
 trait forwards the supported methods and reproduces inherited source rejections
 for `fetchSymbolMaxLeverage`, `scheduleCancel` and `fetchPublicTrades`;
 `fetchHistoricalFills` returns the source's empty list. Registry wiring belongs
-to the registry lane. Tunnel installation currently rejects explicitly.
+to the registry lane. `safeCexAxiosCreate` goes through the shared
+`client::factory::create` with the runtime's transport provider, so a proxied
+account takes the provider's private-proxy baseURL and proxy authorization after
+venue signing. `installTransportAdapter` installs the provider's default adapter.
+`create_api_routes_through_the_provider_and_tunnel_adapter` covers both, and two
+`scripts/binding-controls.py` controls disconnect each.
 
-Disposal must close the typed BaseExchange before source socket teardown:
-the shared facade's `isDisposed` accessor has no setter. Assigning the source
-flag alone leaves pending startup continuations active. `tests/exchange_binding.rs`
+Private data coverage in `tests/exchange_binding.rs` drives code-zero frames
+through the authenticated production `/user` socket: batched regular/advanced
+orders, partial/full fills and cancellations, hedged positions and zero-quantity
+closure, and balance/currency replacement plus empty-update handling. Expected
+values follow `cryptocom.ws-private.ts`; the order handler updates Store orders.
+`scripts/private-frame-controls.py` disconnects each production topic handler,
+requires its named test to fail at runtime, then restores exact bytes and requires
+a pass. Run these controls alone because they temporarily edit production source.
+
+Disposal follows the source flag write and public/private socket teardown.
+The shared writable `isDisposed` accessor updates the typed base flag without
+calling full BaseExchange.dispose, preserving the source's inherited listeners. `tests/exchange_binding.rs`
 holds an HTTP response across disposal and checks that no market update, ticker
 request or socket construction follows. It also checks read purity, public-only
 startup and private subscription ordering across failed/successful auth acks.
@@ -23,6 +37,14 @@ loop surrounds the complete response chain, while axios-retry runs before the
 venue's rejection formatter. Delaying rejection formatting preserves the HTTP
 response/config used to identify a signature rejection. Removing the wrapper
 must fail the non-2xx signature-resend E2E test until the shared ordering is fixed.
+
+`cancelSymbolOrders` and `cancelAllOrders` forward to the source bodies, which post
+the venue `private/cancel-all-orders`; the base store-only sweep would miss
+orders the Store has not mapped. Both rethrow a venue rejection.
+
+`fetchOHLCV`, `listenOHLCV` and `listenOrderBook` forward to the source bodies
+(GET `public/get-candlestick`, `candlestick.<interval>.<symbol>`, `book.<symbol>.50`);
+the base defaults returned `[]` and never subscribed.
 
 Source REST `fetchBalance` returns currency records with `available`/`locked`
 under an `as any` cast. The binding uses shared `CurrencyBalance::AvailableLocked`
@@ -236,14 +258,14 @@ run `tests/process_count.py signing` to measure this corpus's one Node invocatio
 No new collection decoder or precision formatter is introduced by this utility.
 
 
-Signature/auth follow-on uses `safe-cex-crypto::sign_payload` with no remote
-signer, shared JavaScript Number-to-String and shared VirtualClock. Borrowed
-request fields retain the caller's params object identity; this slice does not
-claim Axios/JSON serialization. The shared signer is async, so execution begins
-when polled, unlike the source synchronous functions. Clock reads precede signing;
-explicit nonces (including zero and NaN) avoid the second read. Source TypeError
-name/message are preserved in ExchangeError. See the signing execution boundary
-in MANIFEST-SPEC; HTTP and socket dispatch remain pending.
+Signature/auth helpers use the shared local `safe-cex-crypto::hmac_sha256`
+backend synchronously at invocation, matching the source, with shared JavaScript
+Number-to-String and VirtualClock. Requests retain the caller's captured
+SigningValue params identity; this slice does not claim Axios/JSON serialization.
+Clock reads precede signing; explicit nonces (including zero and NaN) avoid the
+second read. Source TypeError name/message are preserved in ExchangeError. See
+the current signing execution boundary in MANIFEST-SPEC; HTTP and socket
+dispatch remain separate obligations.
 
 The auth witness runs the actual source and real create-hmac package in one Node
 invocation, with an injected clock sequence and pre-serialization number bits.
@@ -310,3 +332,105 @@ call is needed. This preserves the source's inherited event listeners while
 disposing public then private sockets. The binding lifecycle regression checks
 the flag and retained update listener; shared js_runtime's live-source disposal
 oracle checks ordering and abrupt completion.
+
+The accepted-contract string slice reviews seven concrete wire enums already
+using String admission and private Serde remote companions. Direct native
+variant/serialization tests, seven compiling tagged-map mutation controls and a
+closed fresh-rustdoc production probe selector accompany the per-crate shard.
+See STRING_CONTRACT_REVIEW.md and scripts/string-contracts.mjs. Scope is these
+seven original native/default census owners; the other owners, aliases,
+construction records, locals, features and target execution remain separate
+obligations. No decoder behavior or manifest classification is changed.
+
+Native/default accepted-contract review for six concrete scalar wire records and
+five finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
+The closed selector is scripts/record-carrier-contracts.mjs; native field/variant
+observations and mutation controls run independently of compiler shape discovery.
+This is eleven original census owners and six specific Clone reviews; other
+owners, aliases, construction entries, locals, features and WASM execution remain
+separate obligations.
+
+The nested wire accepted-contract slice covers seven remaining concrete wire
+records and two private presence decoders. See NESTED_WIRE_CONTRACT_REVIEW.md and
+scripts/nested-wire-contracts.mjs for scope, native observations, exact selected
+construction reviews and compiling mutation controls. Other owners, aliases,
+locals, features and WASM contract execution remain separate obligations.
+
+Eight runtime helpers have individual accepted-set role reviews accompanied by
+direct private-function witnesses and compiling corruption controls. See
+RUNTIME_HELPER_CONTRACT_REVIEW.md and scripts/runtime-helper-contracts.mjs. These
+forwarding, dispatch and outbound rendering/state-write roles do not waive any
+downstream decoder, alias, construction, local or target-matrix obligation.
+
+
+Accepted signing roles: five individually reviewed native/default functions
+serialize existing data or construct outbound signatures/request fields.
+SIGNING_ROLE_CONTRACT_REVIEW.md separates fresh compiler classification receipts
+from the actual live native signing/auth targets and per-body mutation controls.
+SigningValue admission, other owners and the existing domain boundaries remain
+independent obligations; no production behavior or manifest status is changed.
+
+
+The websocket accepted-contract slice separately reviews seventeen captured
+native field carriers and the private field guard/borrow helper. See
+WS_RECORD_CONTRACT_REVIEW.md and scripts/ws-record-contracts.mjs for independent
+field/presence/bit/cardinality cases and mutation controls. This is the declared
+static projection boundary, with no JSON/property binding or live alias claim.
+Other owners, aliases, construction and full discovery/matrix remain owed.
+
+The seventeen-owner helper batch reviews three enum-returning mapping decoders and
+fourteen specific comparison/rendering/dispatch/state roles. Every owner has a
+direct native witness and individual compiling body control; compiler
+classification receipts remain separate from executed evidence. See
+HELPER_BATCH_CONTRACT_REVIEW.md and scripts/helper-batch-contracts.mjs. Supplied
+host parsers, generic Clone behavior, downstream decoders, aliases and the full
+discovery/feature/target matrix remain independent obligations.
+
+Fifteen control-flow/property/adapter owners have individual accepted-contract
+role reviews backed by three direct native witnesses and twelve helpers reached
+through unchanged actual-source native caller tests. All fifteen body corruptions
+and the retained counted fixture walks require compiled named failures and restored
+passes. See CONTROL_FLOW_CONTRACT_REVIEW.md and scripts/control-flow-contracts.mjs.
+The fifteen compiler classification receipts remain separate from behavioral
+proof; downstream admission, parser grammar, generic hosts, aliases, construction
+and full discovery/matrix obligations remain independent.
+
+The test-only account_admin, account_envelopes, private_lifecycle and
+public_lifecycle modules and their fixtures/oracles were removed after the
+wave2-vacuous-tests audit found no production callers. Their accepted-contract
+entries and selectors were removed with them; manifest rows now point at the
+production class and socket bodies. Retained historical logs are archives, not
+coverage claims. Production lifecycle and admin coverage lives in
+`tests/exchange_binding.rs`; streams/history and private data frames are separate
+follow-up obligations.
+
+The binding’s REST and private WebSocket auth helpers read the shared synchronized
+VirtualClock directly. Do not reconstruct a clock from one raw runtime reading.
+The isolated native_clock target syncs the actual singleton, checks emitted IDs,
+nonces and HMACs, authenticates the private socket and maps a private order frame
+whose missing update timestamp falls back to the same synchronized clock.
+
+The concrete binding's spread and IteratorRecord slots consume the shared native
+GetIterator protocol. Spread keeps astral code points and lone UTF-16 units;
+for-of caches next once and pulls between source body calls. Body throws perform
+IteratorClose without replacing their original cause; next/done/value errors do
+not close. Pair destructuring closes early and validates the return result.
+`binding::exchange::iterable_tests` reuses the real constructor/transport harness
+and connected public socket; it checks callback identity, emitted subscription
+channels, native string units, pull ordering and cleanup. These iterator-valued
+inputs exercise latent language contracts; maintained wire inputs remain arrays.
+
+The SocketOps pair reader used by book listeners now reuses the existing
+IteratorRecord helpers. Numeric-key objects from real JSON frames are refused
+before the book callback, matching source array destructuring; the error remains
+visible and a later valid array frame still reaches the listener.
+
+The constructed ticker census in `tests/exchange_binding.rs` drives 96 cases
+through 288 real ticker, book and valuation frames, comparing every native
+Ticker number with the constructed TS exchange and DefaultStore. Source uses
+fresh exchanges per frame to isolate numeric mapping from throttle timing;
+native frames advance the terminal clock beyond the throttle window. Index
+fixtures retain the actual underlyingSymbol lookup. No throttle timing parity
+is claimed. The finite oracle exits after flushing captured output because the
+maintained disposal does not release all timer handles. A live last/bid mutation
+must compile and fail, then pass after exact source restoration.

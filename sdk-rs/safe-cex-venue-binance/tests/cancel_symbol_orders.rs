@@ -64,7 +64,9 @@ fn oracle() -> Vec<Value> {
 fn sentinel(role: &str, msg: Option<&Value>) -> Rc<ExchangeError> {
     let mut error = ExchangeError::new(format!("fixture {role}"));
     error.name = "RangeError".into();
-    error.code = Some(json!(format!("{role}-code")));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        format!("{role}-code")
+    )));
     error.response = Some(
         json!({"status":503,"data":msg.map(|value|json!({"msg":value})).unwrap_or(json!({}))}),
     );
@@ -90,7 +92,7 @@ fn patch(store: &DefaultStore, handles: &[CancelOrderHandle], id: &str, changes:
                 row.symbol = value.as_str().unwrap().into();
             }
             if changes.get("type").is_some() {
-                row.r#type = OrderType::StopLoss;
+                row.r#type = safe_cex_types::ModelField::Value(OrderType::StopLoss);
             }
         }
     }
@@ -152,7 +154,7 @@ fn expected(
             }
             "change-before-resolve" => {
                 rows[0].symbol = "ETHUSDT".into();
-                rows[0].r#type = OrderType::StopLoss;
+                rows[0].r#type = safe_cex_types::ModelField::Value(OrderType::StopLoss);
                 request_notifications = 1;
             }
             _ => {}
@@ -215,7 +217,7 @@ fn expected(
         let mut changed = false;
         for row in &mut rows {
             if ids.contains(&row.id) {
-                row.status = OrderStatus::Canceled;
+                row.status = safe_cex_types::ModelField::Value(OrderStatus::Canceled);
                 changed = true;
             }
         }
@@ -430,7 +432,7 @@ fn compare(variant: &str, count: usize) {
                 "CANCEL {variant} case {index} row {row} native status"
             );
             assert_eq!(
-                actual.price.to_bits(),
+                actual.price.to_number().to_bits(),
                 12.3f64.to_bits(),
                 "CANCEL native unchanged price"
             );

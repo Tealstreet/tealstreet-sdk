@@ -1,7 +1,11 @@
 use crate::{
-    provider::*,
+    provider::{
+        PrivateProxy, RestAdapter, RestAdapterContext, RestAdapterRegion, RestAdapterVariant,
+        RestAuthorizer, RestRequest, RestTransport, RestTransportContext, TransportError,
+        TransportFuture, TransportProvider, WsConnection,
+    },
     routing::{ResolvedRouting, RoutingOptions, resolve_exchange_routing},
-    transport_resolution::*,
+    transport_resolution::{PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP, get_public_cors_proxy},
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use std::{collections::BTreeMap, sync::Arc};

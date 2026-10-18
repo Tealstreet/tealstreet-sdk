@@ -814,3 +814,113 @@ pub fn fetch_balance<H: ReadHost>(h: Rc<H>) -> impl Future<Output = Result<H::Va
         }
     }
 }
+
+#[cfg(test)]
+mod accepted_control_flow {
+    use super::*;
+    use crate::native_bindings::BoundHost;
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    use std::cell::RefCell;
+
+    #[test]
+    fn parsed_native_contract() {
+        let cases = [
+            (None, -0.0),
+            (None, f64::INFINITY),
+            (None, f64::NAN),
+            (Some("global"), 17.0),
+            (Some("field"), 17.0),
+            (Some("call"), 17.0),
+            (Some("numeric"), 17.0),
+        ];
+        let mut executed = 0;
+        for (failure, output) in cases {
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let globals = Js::object(vec![]);
+            let owner = Js::object(vec![]);
+            let input = Js::object(vec![]);
+            let error = Js::object(vec![]);
+            let (expected, t, e) = (input.clone(), events.clone(), error.clone());
+            let parser = Js::function("supplied parser", move |this, args| {
+                t.borrow_mut().push("call");
+                assert!(matches!(this, Js::Undefined), "parsed native receiver");
+                assert_eq!(args.len(), 1, "parsed native argument count");
+                assert!(
+                    args[0].same_reference(&expected),
+                    "parsed native input identity"
+                );
+                if failure == Some("call") {
+                    Err(Thrown::new(e.clone()))
+                } else {
+                    Ok(Js::Number(output))
+                }
+            });
+            let (t, e) = (events.clone(), error.clone());
+            globals.define_accessor(
+                "parseFloat",
+                Some(Rc::new(move |_| {
+                    t.borrow_mut().push("global");
+                    if failure == Some("global") {
+                        Err(Thrown::new(e.clone()))
+                    } else {
+                        Ok(parser.clone())
+                    }
+                })),
+                None,
+            );
+            let (expected, t, e) = (owner.clone(), events.clone(), error.clone());
+            owner.define_accessor(
+                "quantity",
+                Some(Rc::new(move |this| {
+                    t.borrow_mut().push("field");
+                    assert!(
+                        this.same_reference(&expected),
+                        "parsed native field receiver"
+                    );
+                    if failure == Some("field") {
+                        Err(Thrown::new(e.clone()))
+                    } else {
+                        Ok(input.clone())
+                    }
+                })),
+                None,
+            );
+            let mut ops = crate::accepted_test_support::binding(globals);
+            let (t, e) = (events.clone(), error.clone());
+            Rc::get_mut(&mut ops.value).unwrap().numeric = Rc::new(move |value| {
+                t.borrow_mut().push("numeric");
+                if failure == Some("numeric") {
+                    return Err(Thrown::new(e.clone()));
+                }
+                match value {
+                    Js::Number(number) => Ok(*number),
+                    _ => panic!("parsed native numeric carrier"),
+                }
+            });
+            let host = BoundHost {
+                ops: Rc::new(ops),
+                receiver: Js::object(vec![]),
+            };
+            match (parsed(&host, &owner, "quantity"), failure) {
+                (Ok(actual), None) => assert!(
+                    actual.is_nan() && output.is_nan() || actual.to_bits() == output.to_bits(),
+                    "parsed native result bits"
+                ),
+                (Err(actual), Some(_)) => assert!(
+                    actual.value.same_reference(&error),
+                    "parsed native original error"
+                ),
+                _ => panic!("parsed native completion"),
+            }
+            let expected = match failure {
+                Some("global") => vec!["global"],
+                Some("field") => vec!["global", "field"],
+                Some("call") => vec!["global", "field", "call"],
+                _ => vec!["global", "field", "call", "numeric"],
+            };
+            assert_eq!(*events.borrow(), expected, "parsed native evaluation order");
+            executed += 1;
+        }
+        assert_eq!(executed, 7, "parsed native executed cases");
+    }
+}

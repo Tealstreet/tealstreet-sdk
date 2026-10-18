@@ -7,20 +7,41 @@ macro_rules! call {
         $h.apply(selected, $args)?
     }};
 }
+/// Closed set of lexical callbacks created by this module and selected by the native host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callback {
+    SnapshotCurrent,
+    SnapshotPnl,
+    MarketUsdt,
+    MarketEntry,
+}
+impl Callback {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "snapshot-current" => Some(Self::SnapshotCurrent),
+            "snapshot-pnl" => Some(Self::SnapshotPnl),
+            "market-usdt" => Some(Self::MarketUsdt),
+            "market-entry" => Some(Self::MarketEntry),
+            _ => None,
+        }
+    }
+}
+
 pub fn dispatch<H: AccountRefreshHost>(
     h: &H,
-    code: &str,
+    code: Callback,
     args: Vec<H::Value>,
 ) -> Result<H::Value, H::Error> {
     match code {
-        "snapshot-current" => Ok(h.boolean(true)),
-        "snapshot-pnl" => h.intrinsic(
+        Callback::SnapshotCurrent => Ok(h.boolean(true)),
+        Callback::SnapshotPnl => h.intrinsic(
             "addition",
             vec![args[0].clone(), h.get(&args[1], "unrealizedPnl")?],
         ),
-        "market-usdt" => Ok(h.boolean(h.equal(&h.get(&args[0], "quote")?, &h.literal("USDT")))),
-        "market-entry" => Ok(h.array(vec![h.get(&args[0], "symbol")?, args[0].clone()])),
-        _ => h.intrinsic("unknown callback", vec![h.literal(code)]),
+        Callback::MarketUsdt => {
+            Ok(h.boolean(h.equal(&h.get(&args[0], "quote")?, &h.literal("USDT"))))
+        }
+        Callback::MarketEntry => Ok(h.array(vec![h.get(&args[0], "symbol")?, args[0].clone()])),
     }
 }
 pub fn reconcile_private_state<H: AccountRefreshHost>(
@@ -204,60 +225,67 @@ pub fn fetch_markets<H: AccountRefreshHost>(
         h.intrinsic("iterable spread", vec![values])
     })
 }
-fn configured<H: AccountRefreshHost>(
+pub fn get_bybit_rest_base_url<H: AccountRefreshHost>(
     h: &H,
-    value: H::Value,
-    message: &str,
+    owner: H::Value,
+    network: H::Value,
 ) -> Result<H::Value, H::Error> {
+    let config = call!(h, owner.clone(), "getConfiguredUrls", vec![]);
+    let value = h.intrinsic("computed property", vec![h.get(&config, "rest")?, network])?;
     if !h.truthy(&value) {
-        return Err(h.error(h.literal(message))?);
+        let mode = call!(h, owner, "hyrotraderMode", vec![]);
+        let hint = if h.equal(&mode, &h.literal("production")) {
+            " Set NEXT_PUBLIC_HYROTRADER_PROD_REST_URL, or NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL while v1 is simulator-backed."
+        } else {
+            ""
+        };
+        let mut message = h.units(&h.literal("HyroTrader "))?;
+        message.extend(h.units(&h.get(&config, "label")?)?);
+        message.extend(h.units(&h.literal(&format!(" REST URL is not configured.{hint}")))?);
+        return Err(h.error(h.text(message))?);
     }
     Ok(value)
 }
-pub fn get_bybit_rest_base_url<H: AccountRefreshHost>(
-    h: &H,
-    network: H::Value,
-) -> Result<H::Value, H::Error> {
-    let value = h.intrinsic(
-        "computed property",
-        vec![h.get(&h.global(), "HYROTRADER_SIMULATOR_URL")?, network],
-    )?;
-    configured(h, value, "HyroTrader simulator REST URL is not configured")
-}
 pub fn get_bybit_public_ws_url<H: AccountRefreshHost>(
     h: &H,
+    owner: H::Value,
     category: H::Value,
     network: H::Value,
 ) -> Result<H::Value, H::Error> {
     if !h.equal(&category, &h.literal("linear")) {
-        return Err(h.error(
-            h.literal("HyroTrader simulator only supports linear public WebSocket data"),
-        )?);
+        return Err(h.error(h.literal("HyroTrader only supports linear public WebSocket data"))?);
     }
-    let table = h.get(
-        &h.get(
-            &h.get(&h.global(), "HYROTRADER_SIMULATOR_WS_URL")?,
-            "public",
-        )?,
-        "linear",
-    )?;
-    configured(
-        h,
-        h.intrinsic("computed property", vec![table, network])?,
-        "HyroTrader simulator public WebSocket URL is not configured",
-    )
+    let config = call!(h, owner, "getConfiguredUrls", vec![]);
+    let table = h.get(&h.get(&h.get(&config, "ws")?, "public")?, "linear")?;
+    let value = h.intrinsic("computed property", vec![table, network])?;
+    configured_ws(h, value, &config, " public WebSocket URL is not configured")
 }
 pub fn get_bybit_private_ws_url<H: AccountRefreshHost>(
     h: &H,
+    owner: H::Value,
     network: H::Value,
 ) -> Result<H::Value, H::Error> {
-    let table = h.get(
-        &h.get(&h.global(), "HYROTRADER_SIMULATOR_WS_URL")?,
-        "private",
-    )?;
-    configured(
+    let config = call!(h, owner, "getConfiguredUrls", vec![]);
+    let table = h.get(&h.get(&config, "ws")?, "private")?;
+    let value = h.intrinsic("computed property", vec![table, network])?;
+    configured_ws(
         h,
-        h.intrinsic("computed property", vec![table, network])?,
-        "HyroTrader simulator private WebSocket URL is not configured",
+        value,
+        &config,
+        " private WebSocket URL is not configured",
     )
+}
+fn configured_ws<H: AccountRefreshHost>(
+    h: &H,
+    value: H::Value,
+    config: &H::Value,
+    suffix: &str,
+) -> Result<H::Value, H::Error> {
+    if !h.truthy(&value) {
+        let mut message = h.units(&h.literal("HyroTrader "))?;
+        message.extend(h.units(&h.get(config, "label")?)?);
+        message.extend(h.units(&h.literal(suffix))?);
+        return Err(h.error(h.text(message))?);
+    }
+    Ok(value)
 }

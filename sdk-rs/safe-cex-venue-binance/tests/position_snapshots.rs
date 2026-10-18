@@ -4,6 +4,9 @@
 // `}if` straight after a guard `return`, and there is no else to add.
 #![allow(clippy::if_same_then_else, clippy::possible_missing_else)]
 //! Every family's native assertions precede its actual TypeScript comparisons.
+#[path = "support/canonical_value.rs"]
+mod canonical_value;
+use canonical_value::category;
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_types::{MarginType, PositionMode, PositionSide};
 use safe_cex_venue_binance::{
@@ -24,7 +27,7 @@ fn ev(v: Value) -> EventValue {
     EventValue::from_json(v)
 }
 fn array(v: Vec<EventValue>) -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(v)))
+    EventValue::array(v)
 }
 fn prop(v: &EventValue, k: &str) -> EventValue {
     v.get(k).unwrap()
@@ -43,7 +46,7 @@ fn wire(v: &EventValue) -> Value {
         EventValue::Undefined => json!({"$undefined":true}),
         EventValue::Null => Value::Null,
         EventValue::Bool(x) => json!(x),
-        EventValue::String(x) => json!(x),
+        EventValue::String(x) => json!(String::from_utf16(x).unwrap()),
         EventValue::Number(x) => {
             if x.is_nan() {
                 json!({"$nan":true})
@@ -55,8 +58,6 @@ fn wire(v: &EventValue) -> Value {
                 json!(x)
             }
         }
-        EventValue::Enum(x) => x.wire(),
-        EventValue::Inherited(x) => json!({"$function":x.js_string()}),
         EventValue::Builtin(reference) => {
             if reference.is_callable() {
                 json!({"$function":reference.js_string()})
@@ -68,13 +69,13 @@ fn wire(v: &EventValue) -> Value {
                     .collect()
             }
         }
-        EventValue::Array(a) => a.borrow().iter().map(wire).collect(),
-        EventValue::Object(o) => o
-            .borrow()
-            .fields
+        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
+        _ => panic!("fixture projection requires decoded data"),
     }
 }
 fn num(v: EventValue, w: f64, label: &str) {
@@ -99,7 +100,9 @@ fn cases(f: &str) -> Vec<String> {
 fn error() -> Failure {
     let mut e = ExchangeError::new("position snapshot fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!(-1000));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        -1000
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"position venue detail"}}));
     Rc::new(e)
 }
@@ -169,9 +172,11 @@ impl Host {
                     let EventValue::Array(a) = &configs else {
                         unreachable!()
                     };
-                    a.borrow_mut().push(ev(
-                        json!({"symbol":"BTC","leverage":"2.5","marginType":"CROSSED"}),
-                    ))
+                    EventValue::Array(a.clone())
+                        .push(ev(
+                            json!({"symbol":"BTC","leverage":"2.5","marginType":"CROSSED"}),
+                        ))
+                        .unwrap()
                 }
                 "zero-leverage" => {
                     prop(&configs, "0").assign("leverage", string("0"));
@@ -186,7 +191,9 @@ impl Host {
                     let EventValue::Object(o) = &p else {
                         unreachable!()
                     };
-                    o.borrow_mut().fields.remove("isolatedMargin");
+                    o.props.borrow_mut().shift_remove(
+                        safe_cex_exchange::js_runtime::value::utf16("isolatedMargin").as_ref(),
+                    );
                     p.assign("isolated_margin", string("3.6"));
                 }
                 "empty" => risk = array(vec![]),
@@ -204,7 +211,7 @@ impl Host {
                 _ => {}
             }
         } else {
-            match name{"direct"|"btc-route"|"usdc-route"|"usdt-zero"=>{path(&account,&["assets","1"]).assign("asset",string("ABC"));let EventValue::Array(a)=&markets else{unreachable!()};*a.borrow_mut()=if name=="direct"{vec![ev(json!({"symbol":"ABCUSDC","base":"ABC","quote":"USDC"})),ev(json!({"symbol":"ABCUSDT","base":"ABC","quote":"USDT"}))]}else{vec![ev(json!({"symbol":"ABCBTC","base":"ABC","quote":"BTC"}))]};for(s,last)in[("ABCUSDC",2.125),("ABCUSDT",9.1),("ABCBTC",2.5),("BTCUSDT",4.2),("BTCUSDC",3.6)]{tickers.assign(s,ev(json!({"last":last})));}for s in["BTCUSDT","BTCUSDC"]{prop(&tickers,s).assign("symbol",string(s));}if name=="usdc-route"{let EventValue::Object(o)=&tickers else{unreachable!()};o.borrow_mut().fields.remove("BTCUSDT");}if name=="usdt-zero"{prop(&tickers,"BTCUSDT").assign("last",number(0.0));}},"negative-stable"|"negative-nonstable"=>account.assign("assets",ev(json!([{"asset":if name=="negative-stable"{"USDT"}else{"NO"},"walletBalance":"-3.6","availableBalance":"0","initialMargin":"0","unrealizedProfit":"0"}]))),"upnl-only"=>account.assign("assets",ev(json!([{"asset":"BTC","walletBalance":"0","availableBalance":"0","initialMargin":"0","unrealizedProfit":"3.6"}]))),"zero"=>account.assign("assets",array(vec![])),"nan"=>path(&account,&["assets","0"]).assign("walletBalance",string("bad")),"error-log-mutates"|"error-log-error"|"bad-assets"=>account.assign("assets",EventValue::Bool(true)),"null"=>account=EventValue::Null,_=>{}}
+            match name{"direct"|"btc-route"|"usdc-route"|"usdt-zero"=>{path(&account,&["assets","1"]).assign("asset",string("ABC"));let EventValue::Array(a)=&markets else{unreachable!()};*a.borrow_mut()=if name=="direct"{vec![Some(ev(json!({"symbol":"ABCUSDC","base":"ABC","quote":"USDC"}))),Some(ev(json!({"symbol":"ABCUSDT","base":"ABC","quote":"USDT"})))]}else{vec![Some(ev(json!({"symbol":"ABCBTC","base":"ABC","quote":"BTC"})))]};for(s,last)in[("ABCUSDC",2.125),("ABCUSDT",9.1),("ABCBTC",2.5),("BTCUSDT",4.2),("BTCUSDC",3.6)]{tickers.assign(s,ev(json!({"last":last})));}for s in["BTCUSDT","BTCUSDC"]{prop(&tickers,s).assign("symbol",string(s));}if name=="usdc-route"{let EventValue::Object(o)=&tickers else{unreachable!()};o.props.borrow_mut().shift_remove(safe_cex_exchange::js_runtime::value::utf16("BTCUSDT").as_ref());}if name=="usdt-zero"{prop(&tickers,"BTCUSDT").assign("last",number(0.0));}},"negative-stable"|"negative-nonstable"=>account.assign("assets",ev(json!([{"asset":if name=="negative-stable"{"USDT"}else{"NO"},"walletBalance":"-3.6","availableBalance":"0","initialMargin":"0","unrealizedProfit":"0"}]))),"upnl-only"=>account.assign("assets",ev(json!([{"asset":"BTC","walletBalance":"0","availableBalance":"0","initialMargin":"0","unrealizedProfit":"3.6"}]))),"zero"=>account.assign("assets",array(vec![])),"nan"=>path(&account,&["assets","0"]).assign("walletBalance",string("bad")),"error-log-mutates"|"error-log-error"|"bad-assets"=>account.assign("assets",EventValue::Bool(true)),"null"=>account=EventValue::Null,_=>{}}
         }
         let cached = ev(json!([{"id":"cached","contracts":4.2}]));
         let mut secondary = ExchangeError::new("config first");
@@ -325,7 +332,7 @@ impl PositionSnapshotBindings for Bindings {
             let EventValue::Array(a) = prop(&self.account, "assets") else {
                 unreachable!()
             };
-            a.borrow_mut().push(ev(json!({"asset":"USDC","walletBalance":"1.2","availableBalance":"0.5","initialMargin":"0.1","unrealizedProfit":"0.2"})));
+            EventValue::Array(a.clone()).push(ev(json!({"asset":"USDC","walletBalance":"1.2","availableBalance":"0.5","initialMargin":"0.1","unrealizedProfit":"0.2"}))).unwrap();
         }
         Ok(self.tickers.clone())
     }
@@ -346,7 +353,7 @@ impl PositionSnapshotBindings for Bindings {
         }
         if self.name == "id-mutates-config" && n == 1 {
             if let EventValue::Array(a) = &self.configs {
-                if let Some(c) = a.borrow().first() {
+                if let Some(Some(c)) = a.borrow().first() {
                     c.assign("leverage", string("2.5"));
                     c.assign("marginType", string("CROSSED"));
                 }
@@ -356,11 +363,11 @@ impl PositionSnapshotBindings for Bindings {
             let EventValue::Array(a) = &self.markets else {
                 unreachable!()
             };
-            a.borrow_mut().push(ev(json!({"symbol":"DOGE"})));
+            EventValue::Array(a.clone())
+                .push(ev(json!({"symbol":"DOGE"})))
+                .unwrap();
         }
-        let EventValue::Enum(PrivateEnum::PositionSide(side)) = side else {
-            panic!("authored native side enum")
-        };
+        let side = category::<PositionSide>(&side);
         Ok(safe_cex_types::model_utils::create_position_id(
             &s,
             Some(side),
@@ -482,7 +489,7 @@ fn native(k: Kind, name: &str) -> Value {
         assert!(Rc::ptr_eq(e, &h.primary), "native original Error Rc");
         assert_eq!(e.name, "RangeError");
         assert_eq!(e.message, "position snapshot fixture");
-        assert_eq!(e.code, Some(json!(-1000)));
+        assert_eq!(observed_error_code(&e.code), Some(json!(-1000)));
         assert_eq!(
             e.response,
             Some(json!({"status":503,"data":{"msg":"position venue detail"}}))
@@ -495,16 +502,16 @@ fn native(k: Kind, name: &str) -> Value {
         check_balance(&h, &value, name);
     }
     let input = if let EventValue::Array(a) = &h.risk {
-        a.borrow().clone()
+        array_values(a)
     } else {
         vec![]
     };
     let rows = if let EventValue::Array(a) = &value {
-        a.borrow().clone()
+        array_values(a)
     } else {
         vec![]
     };
-    json!({"name":name,"gets":h.gets.borrow().iter().map(|(c,e)|json!([if *c==SnapshotClient::Papi{"papi"}else{"private"},e])).collect::<Vec<_>>(),"ops":*h.ops.borrow(),"ids":h.ids.borrow().iter().map(|(s,side,m)|json!([s,wire(side),serde_json::to_value(m).unwrap()])).collect::<Vec<_>>(),"emits":h.emits.borrow().iter().map(wire).collect::<Vec<_>>(),"logs":h.logs.borrow().iter().map(|(m,s)|json!({"message":m,"severity":s.as_str()})).collect::<Vec<_>>(),"logged":h.logged.get(),"value":wire(&value),"failure":r.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&h.primary),"name":e.name,"message":e.message,"code":e.code,"response":e.response})),"refs":{"fallback":value.same(&h.cached),"balance":path(&value,&["balance"]).same(&h.balance),"positions":path(&value,&["positions"]).same(&h.current.borrow()),"originalInfo":rows.iter().filter(|p|input.iter().any(|i|prop(p,"info").same(i))).count(),"assets":path(&value,&["balance","info","assets"]).same(&path(&h.account,&["assets"])),"rest":!path(&value,&["balance","info"]).same(&h.account)},"marketCount":if let EventValue::Array(a)=&h.markets{a.borrow().len()}else{0}})
+    json!({"name":name,"gets":h.gets.borrow().iter().map(|(c,e)|json!([if *c==SnapshotClient::Papi{"papi"}else{"private"},e])).collect::<Vec<_>>(),"ops":*h.ops.borrow(),"ids":h.ids.borrow().iter().map(|(s,side,m)|json!([s,wire(side),serde_json::to_value(m).unwrap()])).collect::<Vec<_>>(),"emits":h.emits.borrow().iter().map(wire).collect::<Vec<_>>(),"logs":h.logs.borrow().iter().map(|(m,s)|json!({"message":m,"severity":s.as_str()})).collect::<Vec<_>>(),"logged":h.logged.get(),"value":wire(&value),"failure":r.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&h.primary),"name":e.name,"message":e.message,"code":observed_error_code(&e.code),"response":e.response})),"refs":{"fallback":value.same(&h.cached),"balance":path(&value,&["balance"]).same(&h.balance),"positions":path(&value,&["positions"]).same(&h.current.borrow()),"originalInfo":rows.iter().filter(|p|input.iter().any(|i|prop(p,"info").same(i))).count(),"assets":path(&value,&["balance","info","assets"]).same(&path(&h.account,&["assets"])),"rest":!path(&value,&["balance","info"]).same(&h.account)},"marketCount":if let EventValue::Array(a)=&h.markets{a.borrow().len()}else{0}})
 }
 fn check_positions(h: &Host, v: &EventValue, name: &str) {
     let fallback = h.rejecting()
@@ -567,7 +574,7 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
         if name == "empty" { 4 } else { 7 },
         "native independent ID count incl discarded duplicates"
     );
-    let rows = a.borrow();
+    let rows = array_values(&a);
     let first = &rows[0];
     let real = name != "empty";
     let one = name == "oneway";
@@ -577,13 +584,13 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
         PositionMode::Hedged
     };
     assert!(
-        matches!(prop(first,"positionMode"),EventValue::Enum(PrivateEnum::PositionMode(m))if m==mode),
+        matches!(category::<safe_cex_types::PositionMode>(&(prop(first,"positionMode"))), m if m==mode),
         "native position mode enum"
     );
     assert!(
         matches!(
-            prop(first, "side"),
-            EventValue::Enum(PrivateEnum::PositionSide(PositionSide::Long))
+            category::<safe_cex_types::PositionSide>(&(prop(first, "side"))),
+            PositionSide::Long
         ),
         "native first position side Long"
     );
@@ -669,7 +676,9 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
                 unreachable!()
             };
             assert!(
-                o.borrow().fields.contains_key("marginSize"),
+                o.props.borrow().contains_key(
+                    safe_cex_exchange::js_runtime::value::utf16("marginSize").as_ref()
+                ),
                 "native OWN undefined marginSize"
             );
         }
@@ -680,7 +689,7 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
             MarginType::Isolated
         };
         assert!(
-            matches!(prop(first,"marginType"),EventValue::Enum(PrivateEnum::Margin(m))if m==margin),
+            matches!(category::<safe_cex_types::MarginType>(&(prop(first,"marginType"))), m if m==margin),
             "native real margin enum"
         );
     }
@@ -723,11 +732,11 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
             "native independent row {i} ID/order {name}"
         );
         assert!(
-            matches!(prop(row,"side"),EventValue::Enum(PrivateEnum::PositionSide(v))if v==expected_side),
+            matches!(category::<safe_cex_types::PositionSide>(&(prop(row,"side"))), v if v==expected_side),
             "native EVERY row {i} typed side {name}"
         );
         assert!(
-            matches!(prop(row,"positionMode"),EventValue::Enum(PrivateEnum::PositionMode(v))if v==mode),
+            matches!(category::<safe_cex_types::PositionMode>(&(prop(row,"positionMode"))), v if v==mode),
             "native EVERY row {i} typed mode {name}"
         );
         let expected_margin = if h.kind == Kind::PM
@@ -741,7 +750,7 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
             MarginType::Isolated
         };
         assert!(
-            matches!(prop(row,"marginType"),EventValue::Enum(PrivateEnum::Margin(v))if v==expected_margin),
+            matches!(category::<safe_cex_types::MarginType>(&(prop(row,"marginType"))), v if v==expected_margin),
             "native EVERY row {i} typed margin {name}"
         );
         if i < real_count {
@@ -780,7 +789,9 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
                     let EventValue::Object(o) = row else {
                         unreachable!()
                     };
-                    assert!(o.borrow().fields.contains_key("marginSize"));
+                    assert!(o.props.borrow().contains_key(
+                        safe_cex_exchange::js_runtime::value::utf16("marginSize").as_ref()
+                    ));
                 }
             }
         } else {
@@ -808,8 +819,12 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
             };
             if h.kind == Kind::PM {
                 assert!(
-                    !o.borrow().fields.contains_key("marginSize")
-                        && !o.borrow().fields.contains_key("info")
+                    !o.props.borrow().contains_key(
+                        safe_cex_exchange::js_runtime::value::utf16("marginSize").as_ref()
+                    ) && !o
+                        .props
+                        .borrow()
+                        .contains_key(safe_cex_exchange::js_runtime::value::utf16("info").as_ref())
                 );
             } else {
                 num(prop(row, "marginSize"), 0.0, "native EACH synthetic margin");
@@ -850,8 +865,12 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
     };
     if h.kind == Kind::PM {
         assert!(
-            !o.borrow().fields.contains_key("info")
-                && !o.borrow().fields.contains_key("marginSize"),
+            !o.props
+                .borrow()
+                .contains_key(safe_cex_exchange::js_runtime::value::utf16("info").as_ref())
+                && !o.props.borrow().contains_key(
+                    safe_cex_exchange::js_runtime::value::utf16("marginSize").as_ref()
+                ),
             "native PM synthetic missing fields"
         );
     } else {
@@ -964,7 +983,9 @@ fn check_balance(h: &Host, v: &EventValue, name: &str) {
         unreachable!()
     };
     assert!(
-        !o.borrow().fields.contains_key("positions"),
+        !o.props
+            .borrow()
+            .contains_key(safe_cex_exchange::js_runtime::value::utf16("positions").as_ref()),
         "native info omits compact positions"
     );
     let (t, f, u, p) = match name {
@@ -1152,4 +1173,17 @@ fn pm_positions() {
 #[test]
 fn futures_balance() {
     compare(Kind::Balance)
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

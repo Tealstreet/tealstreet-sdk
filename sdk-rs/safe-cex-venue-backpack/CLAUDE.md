@@ -293,6 +293,13 @@ scripted transport. TS backpack overrides neither `fetchSymbolMaxLeverage`,
 `scheduleCancel` nor `fetchPublicTrades`, so their Rust overrides return the
 inherited `base.ts` 'Not implemented' rejection; do not invent venue bodies.
 
+The SDK market projection retains `limits.price.min` from the source price
+filters, so the portable `assertMinimumPrice` guard can refuse prices below the
+venue minimum. Only `isSpot` is present in the source SDK flags; CCXT's separate
+`swap`, `future` and `inverse` fields do not create SDK `isPerpetual`, `isExpiring`
+or `isInverse` fields. `tests/market_projection.rs` drives the real HTTP binding
+and executes the actual TypeScript price guard on its serialized market output.
+
 The adapter's `native_value::Value` is an alias of the shared `js_runtime::Js`,
 so HTTP/socket frames and runtime callers share the same object/array references.
 `NativeValue` retains the existing prepared-data/checked UTF-8 projection profile;
@@ -300,3 +307,68 @@ it does not own a second value enum. Shared native numbers and UTF-16 strings st
 intact until that explicit projection. The constructed throttle regression in
 `tests/adapter_classes.rs` checks deferred reads of runtime-mutated aliases, native
 numeric bits, nested spread identity, holes and lone-surrogate projection refusal.
+
+Concrete disposal adapters follow their source overrides rather than invoking
+superclass disposal. The exchange sets the shared disposed flag before public
+then private cleanup. Public disposal clears subscriptions, book state/fetchers
+and depth throttles; private disposal clears subscriptions and the orders timer.
+Other handlers, ticker throttles, position/balance state, Store subscriptions and
+source-uncancelled work remain live. `BaseWebSocket::close_current_websocket`
+forwards only the current transport close. Three native regressions prove-fail
+against the old adapters and pass against the actual source disposal arrows;
+`tests/disposal_binding.rs` also checks flag timing and close ordering.
+
+Native `native_inputs_signed` shares the account’s hosted HTTP signing capability
+through the common HttpClient bridge and retains public-request bypass. The
+registry also exposes that capability to typed canSign. Private WebSocket auth
+uses the local Ed25519 secret exactly as the source: a missing secret logs the
+original RangeError and sends no subscription, even when HTTP is hosted. See
+[the hosted signer evidence](HOSTED_SIGNER_EVIDENCE.md); no hosted WS path is added.
+
+The API factory carries the complete shared ExchangeOptions through native
+construction and adapter installation, including proxy flags, region, overrides
+and public-only state. Requests inherit the shared HTTP factory's routed base
+URL and 20-second timeout. The native_routing regressions run native_inputs,
+the production Exchange binding and actual Direct/Tealstreet providers to check
+direct-transport refusal, override routing, JA routing/authorization and timeout.
+
+Private reconnects use the inherited orders-only snapshot refresh. They must not
+call `tick`, which schedules another recurring account/position/balance poll.
+`tests/private_reopen.rs` drives the real socket lifecycle and authentication,
+checks that reconnect refreshes orders, and advances the runtime clock to verify
+that the original polling chain remains the only one.
+The same socket-event fixture covers private order and position Store commits,
+fill emission, and the real REST balance refresh triggered by an order-fill frame.
+
+The constructed native HTTP client acquires its rate slot before invoking the signing interceptor, including network retry attempts. `tests/rate_limit_signing.rs` fills the real ten-request window and verifies the queued request reads its timestamp after dequeue.
+
+
+The assembled HTTP client now selects its separately constructed secondary client
+for GET reads. Each key keeps its own signing interceptors and resolved route;
+write methods retain the primary client and its ten-request budget. Secondary
+reads have no rate wrapper. The HTTP builder is reusable so each client receives
+fresh shared factory state. Secondary options preserve absent versus empty
+credentials and replace the primary proxy override with the source's secondary
+proxy or provider public CORS default. Native routing regressions exercise the
+real binding/factory, verify the secondary signature against an RFC8032 public
+key, and distinguish the separate rate budgets.
+
+Native REST and private subscription signatures read the synchronized shared
+virtual clock. REST ticker IDs and position timestamps use that same source
+clock. Rate limiting, heartbeat timing and private refresh throttles retain their
+source monotonic or Date.now clocks. The native routing and private reopen
+regressions distinguish synced time from an unrelated host clock.
+
+The constructed ticker corpus in `tests/exchange_trait.rs` observes 72 cases / 216 ticker, trade, bookTicker and depth frames
+through the production socket protocol and DefaultStore. Independent null,
+string, NaN-producing, object, overflow, signed-zero and false fields accompany
+distinct good rows. The maintained TS constructor and actual DefaultStore provide
+native numeric-bit expectations. Fresh TS receivers and advancing native clocks
+isolate numeric mapping from throttle timing. `ticker-native-controls.py backpack`
+compiles a live publication fault, requires a native assertion failure, then
+restores exact source bytes and requires the named test to pass.
+
+The concrete leverage catch emits the helper-created native Error value rather
+than its message string. The constructed Exchange regression drives a successful
+account PATCH followed by a malformed position refresh, checks the committed
+leverage and single refresh, and inspects Error name/message before projection.

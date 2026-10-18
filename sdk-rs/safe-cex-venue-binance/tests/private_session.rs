@@ -1,4 +1,7 @@
 //! All native assertions for a family run before its actual TypeScript comparison.
+#[path = "support/canonical_value.rs"]
+mod canonical_value;
+use canonical_value::category;
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_types::{PositionMode, PositionSide};
 use safe_cex_venue_binance::{private_event_value::*, private_session::*, request_weight::Failure};
@@ -13,7 +16,7 @@ fn ev(v: Value) -> EventValue {
     EventValue::from_json(v)
 }
 fn arr(v: Vec<EventValue>) -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(v)))
+    EventValue::array(v)
 }
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/private-session.json")).unwrap()
@@ -40,12 +43,10 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::Bool(x) => json!(x),
-        EventValue::String(x) => json!(x),
-        EventValue::Enum(x) => x.wire(),
-        EventValue::Array(a) => a.borrow().iter().map(wire).collect(),
-        EventValue::Object(o) => o
-            .borrow()
-            .fields
+        EventValue::String(x) => json!(String::from_utf16(x).unwrap()),
+        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
@@ -61,7 +62,9 @@ fn number_is(v: EventValue, n: f64, label: &str) {
 fn error() -> Failure {
     let mut e = ExchangeError::new("session fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!(-1000));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        -1000
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"session detail"}}));
     Rc::new(e)
 }
@@ -71,7 +74,7 @@ fn assert_error(r: &Result<(), Failure>, wanted: bool, e: &Failure, label: &str)
         assert!(Rc::ptr_eq(x, e), "{label}: original native error identity");
         assert_eq!(x.name, "RangeError");
         assert_eq!(x.message, "session fixture");
-        assert_eq!(x.code, Some(json!(-1000)));
+        assert_eq!(observed_error_code(&x.code), Some(json!(-1000)));
         assert_eq!(
             x.response,
             Some(json!({"status":503,"data":{"msg":"session detail"}})),
@@ -249,7 +252,7 @@ impl ConstructorBindings for Ctor {
         self.stage(s)?;
         if self.case == "tuple-mutates" && k == Factory::PublicAPI {
             if let EventValue::Array(a) = &self.split {
-                a.borrow_mut()[1] = self.clients[2].clone();
+                a.borrow_mut()[1] = Some(self.clients[2].clone());
             }
         }
         Ok(self.clients[i].clone())
@@ -264,7 +267,7 @@ impl ConstructorBindings for Ctor {
     fn guards(&self, owner: EventValue, clients: EventValue) -> Result<(), Failure> {
         assert!(owner.same(&self.owner));
         if let EventValue::Array(a) = clients {
-            *self.guards.borrow_mut() = a.borrow().clone()
+            *self.guards.borrow_mut() = array_values(&a)
         } else {
             panic!("native constructor guard array")
         };
@@ -382,7 +385,7 @@ fn ctor_case(v: Venue, name: &str) -> Value {
                 "native constructor {v:?} {name} {key}: original role identity"
             );
             number_is(
-                got.get("marker").unwrap(),
+                got.read("marker").unwrap(),
                 [12.3, 3.6, 4.2, 9.1, 2.5, 6.7, 8.1, 8.2][i],
                 &format!("native constructor {v:?} {name} {key} role value"),
             )
@@ -418,7 +421,7 @@ fn ctor_case(v: Venue, name: &str) -> Value {
                 "native constructor captured guard role {i} {name}"
             );
             number_is(
-                h.guards.borrow()[i].get("marker").unwrap(),
+                h.guards.borrow()[i].read("marker").unwrap(),
                 [12.3, 3.6, 4.2, 9.1, 2.5, 6.7, 8.1, 8.2][k],
                 "native constructor captured guard marker",
             );
@@ -869,7 +872,7 @@ fn conn_case(v: Venue, name: &str) -> Value {
             "native clear ticket partial effect"
         );
     }
-    json!({"trace":*h.trace.borrow(),"url":*h.url.borrow(),"listeners":h.listeners.borrow().iter().map(|(e,w)|json!({"event":e,"marker":wire(&w.get("marker").unwrap())})).collect::<Vec<_>>(),"emits":*h.emits.borrow(),"warnings":*h.warnings.borrow(),"connecting":h.state.connecting.get(),"resync":h.state.resync_orders.get(),"delay":h.state.retry_delay.get(),"ticket":wire(&h.state.retry_timer.borrow()),"timerDelay":h.timer.borrow().as_ref().map(|(_,d)|*d),"retried":h.retried.get(),"error":r.is_err()})
+    json!({"trace":*h.trace.borrow(),"url":*h.url.borrow(),"listeners":h.listeners.borrow().iter().map(|(e,w)|json!({"event":e,"marker":wire(&w.read("marker").unwrap())})).collect::<Vec<_>>(),"emits":*h.emits.borrow(),"warnings":*h.warnings.borrow(),"connecting":h.state.connecting.get(),"resync":h.state.resync_orders.get(),"delay":h.state.retry_delay.get(),"ticket":wire(&h.state.retry_timer.borrow()),"timerDelay":h.timer.borrow().as_ref().map(|(_,d)|*d),"retried":h.retried.get(),"error":r.is_err()})
 }
 type Keyless = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Failure>>>>;
 #[test]
@@ -926,7 +929,7 @@ impl SpotMessageBindings for Msg {
             return Err(self.err.clone());
         }
         if op == MessageOp::Account && self.case == "mutate-account" {
-            let event = args[0].get("0")?;
+            let event = args[0].read("0")?;
             event.assign("e", string("executionReport"));
             event.assign("id", number(42.0));
             event.assign("status", number(200.0));
@@ -1011,33 +1014,33 @@ fn message_case(name: &str) -> Value {
                 1,
                 "native routed count from expectation"
             );
-            let row = rows.borrow()[0].clone();
+            let row = rows.borrow()[0].clone().unwrap();
             number_is(
-                row.get("price").unwrap(),
+                row.read("price").unwrap(),
                 12.3,
                 "native Spot parsed price: 12.3 vs mutation 12",
             );
             number_is(
-                row.get("quantity").unwrap(),
+                row.read("quantity").unwrap(),
                 3.6,
                 "native Spot parsed quantity",
             );
-            let EventValue::Number(z) = row.get("zero").unwrap() else {
+            let EventValue::Number(z) = row.read("zero").unwrap() else {
                 panic!("native signed zero")
             };
             assert!(z.is_sign_negative() && z == 0.0, "native JSON signed zero");
             if name == "deep" {
-                let mut d = row.get("deep").unwrap();
+                let mut d = row.read("deep").unwrap();
                 for _ in 0..150 {
                     let EventValue::Array(a) = d else {
                         panic!("native deep JSON array depth")
                     };
                     assert_eq!(a.borrow().len(), 1);
-                    d = a.borrow()[0].clone();
+                    d = a.borrow()[0].clone().unwrap();
                 }
                 number_is(d, 0.0, "native deep JSON leaf");
                 assert!(
-                    matches!(row.get("overflow").unwrap(),EventValue::Number(x) if x.is_infinite() && x.is_sign_positive()),
+                    matches!(row.read("overflow").unwrap(),EventValue::Number(x) if x.is_infinite() && x.is_sign_positive()),
                     "native parsed numeric overflow is positive Infinity"
                 );
             }
@@ -1047,9 +1050,9 @@ fn message_case(name: &str) -> Value {
         let ops = h.ops.borrow();
         assert!(
             ops[3].1[0]
-                .get("0")
+                .read("0")
                 .unwrap()
-                .same(&ops[5].1[0].get("0").unwrap()),
+                .same(&ops[5].1[0].read("0").unwrap()),
             "native account/order same parsed reference after mutation"
         );
     }
@@ -1100,7 +1103,10 @@ impl Mode {
         .into_iter()
         .map(|(s, q, side, id)| {
             let p = ev(json!({"symbol":s,"contracts":q,"id":id,"info":{"marker":4.2}}));
-            p.assign("side", EventValue::Enum(PrivateEnum::PositionSide(side)));
+            p.assign(
+                "side",
+                EventValue::enum_value(PrivateEnum::PositionSide(side)),
+            );
             p
         })
         .collect());
@@ -1137,9 +1143,7 @@ impl ModeBindings for Mode {
         if self.case == "id-error" {
             return Err(self.err.clone());
         }
-        let EventValue::Enum(PrivateEnum::PositionSide(side)) = side else {
-            panic!("native side enum")
-        };
+        let side = category::<safe_cex_types::PositionSide>(&side);
         Ok(string(safe_cex_types::model_utils::create_position_id(
             &s.text()?,
             Some(side),
@@ -1197,8 +1201,8 @@ fn mode_case(name: &str) -> Value {
         assert_eq!(*m, mode, "native confirmed position mode enum");
         assert!(matches!(s, EventValue::String(_)));
         assert!(matches!(
-            side,
-            EventValue::Enum(PrivateEnum::PositionSide(_))
+            category::<safe_cex_types::PositionSide>(&(side)),
+            _
         ));
     }
     assert_eq!(
@@ -1220,7 +1224,7 @@ fn mode_case(name: &str) -> Value {
         "native confirmed update count"
     );
     if let Some(update) = h.updates.borrow().first() {
-        let rows = update.get("positions").unwrap();
+        let rows = update.read("positions").unwrap();
         let EventValue::Array(a) = &rows else {
             panic!("native mode positions")
         };
@@ -1239,18 +1243,18 @@ fn mode_case(name: &str) -> Value {
                 "native confirmed row {i} identity {name}"
             );
             assert!(
-                row.get("info")
+                row.read("info")
                     .unwrap()
-                    .same(&original.get("info").unwrap()),
+                    .same(&original.read("info").unwrap()),
                 "native shallow info reference"
             );
             if changed {
                 assert!(
-                    matches!(row.get("positionMode").unwrap(),EventValue::Enum(PrivateEnum::PositionMode(m)) if m==mode),
+                    matches!(category::<safe_cex_types::PositionMode>(&(row.read("positionMode").unwrap())), m if m==mode),
                     "native confirmed row typed mode"
                 );
                 assert!(
-                    row.get("id").unwrap().same(&string(match (i, hedged) {
+                    row.read("id").unwrap().same(&string(match (i, hedged) {
                         (0, true) => "BTC:long",
                         (0, false) => "BTC",
                         (2, true) => "ETH:short",
@@ -1261,7 +1265,7 @@ fn mode_case(name: &str) -> Value {
                 );
             }
         }
-        let leverage = update.get("fetchedLeverage").unwrap();
+        let leverage = update.read("fetchedLeverage").unwrap();
         for s in ["BTC", "ETH"] {
             let meta = leverage.get(s).unwrap();
             let updated = s == "ETH" || name != "symbol";
@@ -1273,46 +1277,46 @@ fn mode_case(name: &str) -> Value {
                 continue;
             }
             assert!(
-                matches!(meta.get("positionMode").unwrap(),EventValue::Enum(PrivateEnum::PositionMode(m))if m==mode),
+                matches!(category::<safe_cex_types::PositionMode>(&(meta.read("positionMode").unwrap())), m if m==mode),
                 "native leverage typed mode"
             );
             if name == "null-leverage" {
                 number_is(
-                    meta.get("buyLeverage").unwrap(),
+                    meta.read("buyLeverage").unwrap(),
                     0.0,
                     "native null leverage default",
                 );
                 number_is(
-                    meta.get("sellLeverage").unwrap(),
+                    meta.read("sellLeverage").unwrap(),
                     0.0,
                     "native null leverage default",
                 );
             } else if s == "BTC" {
                 number_is(
-                    meta.get("buyLeverage").unwrap(),
+                    meta.read("buyLeverage").unwrap(),
                     3.6,
                     "native confirmed buy leverage 3.6",
                 );
                 number_is(
-                    meta.get("sellLeverage").unwrap(),
+                    meta.read("sellLeverage").unwrap(),
                     0.0,
                     "native null sell default",
                 );
                 assert!(
-                    meta.get("nested")
+                    meta.read("nested")
                         .unwrap()
-                        .same(&h.leverage.get(s).unwrap().get("nested").unwrap()),
+                        .same(&h.leverage.get(s).unwrap().read("nested").unwrap()),
                     "native shallow metadata reference"
                 );
             } else {
                 assert!(
-                    meta.get("buyLeverage")
+                    meta.read("buyLeverage")
                         .unwrap()
                         .same(&EventValue::Bool(false)),
                     "native false leverage preserved"
                 );
                 assert!(
-                    meta.get("sellLeverage").unwrap().same(&string("")),
+                    meta.read("sellLeverage").unwrap().same(&string("")),
                     "native empty leverage preserved"
                 );
             }
@@ -1327,4 +1331,17 @@ fn confirmed_mode_cases() {
         cases("mode", 8).iter().map(|c| mode_case(c)).collect(),
         8,
     )
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

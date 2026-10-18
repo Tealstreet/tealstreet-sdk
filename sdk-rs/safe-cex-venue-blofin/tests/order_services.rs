@@ -175,7 +175,7 @@ fn assert_forwarded_order(native: &Order, raw: &Value) {
     );
     assert_eq!(native.filled, 0.0);
     assert_eq!(native.remaining, raw["amount"].as_f64().unwrap());
-    assert!(!native.reduce_only);
+    assert_eq!(native.reduce_only, false);
     assert_eq!(native.last_update, 123.0);
     assert_eq!(native.info.as_ref().unwrap()["witness"], raw["id"]);
 }
@@ -249,12 +249,24 @@ fn run_formatter(case: &Value) {
     };
     let name = case["name"].as_str().unwrap();
     let result = match name {
-        "formatTriggerOrder" => ready(format_trigger_order(&opts, source.as_ref(), &store, &host))
-            .map(|value| vec![value]),
-        "formatAlgoOrder" => {
-            ready(format_algo_order(&opts, &store, &host)).map(|value| vec![value])
-        }
-        "formatNormalOrder" => ready(format_normal_order(&opts, &store, &host)),
+        "formatTriggerOrder" => ready(format_trigger_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            source.as_ref(),
+            &store,
+            &host,
+        ))
+        .map(|value| vec![value]),
+        "formatAlgoOrder" => ready(format_algo_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            &store,
+            &host,
+        ))
+        .map(|value| vec![value]),
+        "formatNormalOrder" => ready(format_normal_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            &store,
+            &host,
+        )),
         _ => panic!("unknown formatter"),
     };
     let expected = &case["result"];
@@ -302,7 +314,7 @@ struct Adapter {
 impl RestAdapter for Adapter {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let payload = match &request.body {
-            Some(RestBody::Untransformed(value)) => value.clone(),
+            Some(RestBody::Untransformed(value)) => value.clone().into_value().unwrap(),
             None => Value::Null,
             _ => panic!("native request origin"),
         };
@@ -325,7 +337,12 @@ impl RestAdapter for Adapter {
                     status: 503,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"msg":message})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"msg":message}),
+                        )
+                        .unwrap(),
+                    ),
                 }));
             }
             if let Some(text) = row["responseBodyText"].as_str() {
@@ -335,8 +352,18 @@ impl RestAdapter for Adapter {
                     headers: Default::default(),
                     body: match self.path {
                         0 => RestResponseBody::Encoded(text.as_bytes().to_vec()),
-                        1 => RestResponseBody::Untransformed(Value::String(text.into())),
-                        _ => RestResponseBody::Transformed(Value::String(text.into())),
+                        1 => RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                Value::String(text.into()),
+                            )
+                            .unwrap(),
+                        ),
+                        _ => RestResponseBody::Transformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                Value::String(text.into()),
+                            )
+                            .unwrap(),
+                        ),
                     },
                 }));
             }
@@ -348,8 +375,12 @@ impl RestAdapter for Adapter {
                 headers: Default::default(),
                 body: match self.path {
                     0 => RestResponseBody::Encoded(serde_json::to_vec(&row).unwrap()),
-                    1 => RestResponseBody::Untransformed(row),
-                    _ => RestResponseBody::Transformed(row),
+                    1 => RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(row).unwrap(),
+                    ),
+                    _ => RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(row).unwrap(),
+                    ),
                 },
             })
         };
@@ -421,7 +452,7 @@ fn run_service(case: &Value, path: u8) {
         .map(|value| {
             assert_eq!(
                 value,
-                js_from_value(expected["value"].clone()).unwrap(),
+                js_from_value::<safe_cex_types::PositionMode>(expected["value"].clone()).unwrap(),
                 "native_position_mode_result"
             );
         }),
@@ -432,7 +463,7 @@ fn run_service(case: &Value, path: u8) {
         .map(|value| {
             assert_eq!(
                 value,
-                js_from_value(expected["value"].clone()).unwrap(),
+                js_from_value::<safe_cex_types::MarginType>(expected["value"].clone()).unwrap(),
                 "native_margin_type_result"
             );
         }),
@@ -639,7 +670,11 @@ fn native_large_split_profile_is_explicit_refusal() {
             cancel_algo_orders: Box::new(|_| Box::pin(std::future::ready(Ok(())))),
             broker_id_enabled: true,
         };
-        let result = ready(format_normal_order(&opts, &store, &host));
+        let result = ready(format_normal_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
+            &store,
+            &host,
+        ));
         assert!(
             result.is_err(),
             "native_cap_refuses_full_and_remainder_payloads"

@@ -65,7 +65,10 @@ fn request_signing_matches_live_interceptor() {
             url: config["url"].as_str().unwrap().into(),
             params: Some(config["params"].clone()),
             body: Some(safe_cex_transport::RestBody::Untransformed(
-                config["data"].clone(),
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    config["data"].clone(),
+                )
+                .unwrap(),
             )),
             headers: config["headers"]
                 .as_object()

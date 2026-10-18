@@ -41,6 +41,7 @@ pub(crate) struct Lane {
     timeout: f64,
     headers: Vec<(String, String)>,
     retries: Cell<u32>,
+    rate_limits: RefCell<Vec<Rc<safe_cex_transport::rate_limit::RateLimiter>>>,
     sign: Cell<Option<SignFn>>,
     receive: Cell<Option<ReceiveFn>>,
 }
@@ -141,6 +142,7 @@ impl Lane {
                     timeout,
                     headers,
                     retries: Cell::new(0),
+                    rate_limits: RefCell::new(vec![]),
                     sign: Cell::new(None),
                     receive: Cell::new(None),
                 }))
@@ -164,14 +166,13 @@ impl Lane {
     /// axios-rate-limit maxRPS over this lane's executor.
     #[expect(clippy::arc_with_non_send_sync)]
     pub(crate) fn limit(&self, runtime: Rc<dyn ExchangeRuntime>, max_rps: usize) {
-        let current = self.executor.borrow().clone();
-        *self.executor.borrow_mut() =
-            Arc::new(safe_cex_transport::rate_limit::RateLimitedAdapter::new(
-                current,
+        self.rate_limits.borrow_mut().push(Rc::new(
+            safe_cex_transport::rate_limit::RateLimiter::new(
                 Arc::new(RateClock { runtime }),
                 max_rps,
                 1000,
-            ));
+            ),
+        ));
     }
 }
 
@@ -181,43 +182,35 @@ pub(crate) struct Client {
     pub(crate) secondary: Rc<Lane>,
     pub(crate) base: Rc<BaseExchange>,
 }
-fn query_profile(value: &Value) -> Result<String, String> {
-    fn query(v: &Value) -> safe_cex_types::QueryValue {
-        use safe_cex_types::QueryValue as Q;
-        match v {
-            Value::Null => Q::Null,
-            Value::Bool(b) => Q::Bool(*b),
-            Value::Number(n) => Q::Number(n.as_f64().unwrap_or(f64::NAN)),
-            Value::String(s) => Q::String(s.clone()),
-            Value::Array(a) => Q::Array(a.iter().map(query).collect()),
-            Value::Object(o) => {
-                let mut keys: Vec<_> = o.iter().collect();
-                keys.sort_by_key(|(a, _)| *a);
-                Q::Object(
-                    keys.into_iter()
-                        .map(|(k, v)| (k.clone(), query(v)))
-                        .collect(),
-                )
-            }
-        }
+fn query_value(v: &Value) -> safe_cex_types::QueryValue {
+    use safe_cex_types::QueryValue as Q;
+    match v {
+        Value::Null => Q::Null,
+        Value::Bool(b) => Q::Bool(*b),
+        Value::Number(n) => Q::Number(n.as_f64().unwrap_or(f64::NAN)),
+        Value::String(s) => Q::String(s.clone()),
+        Value::Array(a) => Q::Array(a.iter().map(query_value).collect()),
+        Value::Object(o) => Q::Object(o.iter().map(|(k, v)| (k.clone(), query_value(v))).collect()),
     }
+}
+fn query_profile(value: &Value) -> Result<String, String> {
     safe_cex_transport::query::render_query(
-        &query(value),
+        &query_value(value),
         safe_cex_transport::query::QueryProfile {
-            key_order: safe_cex_transport::query::QueryKeyOrder::Preserve,
+            key_order: safe_cex_transport::query::QueryKeyOrder::JsRoot,
             arrays: safe_cex_transport::query::QueryArrayFormat::Repeat,
             encode: false,
         },
     )
     .map_err(|e| e.message.to_owned())
 }
-fn body_value(body: RestResponseBody) -> Value {
-    match body {
-        RestResponseBody::Encoded(bytes) => serde_json::from_slice(&bytes)
-            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned())),
-        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v,
-    }
+fn body_value(body: RestResponseBody) -> Result<Value, ExchangeError> {
+    body.transform_axios_response()
+        .map_err(|error| ExchangeError::new(error.to_string()))?
+        .json_value()
+        .map_err(|error| ExchangeError::new(error.to_string()))
 }
+
 fn signature_rejected(data: &Value) -> Result<bool, ExchangeError> {
     crate::api::is_bitunix_signature_rejection(data).map_err(|e| ExchangeError::new(e.message))
 }
@@ -277,13 +270,25 @@ impl Client {
             // The config stamp: one signature re-sign per call, by retry or by resend.
             let mut signature_retried = false;
             loop {
+                let limits = lane.rate_limits.borrow().clone();
+                for limit in limits.into_iter().rev() {
+                    limit
+                        .acquire()
+                        .await
+                        .map_err(|error| ExchangeError::new(error.to_string()))?;
+                }
                 let mut request = RestRequest {
                     method: method.into(),
                     url: url.clone(),
                     base_url: Some(lane.base_url.clone()),
                     timeout_ms: Some(timeout as i64),
                     params: params.clone(),
-                    body: body.clone().map(RestBody::Untransformed),
+                    body: body
+                        .clone()
+                        .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                        .transpose()
+                        .map_err(|error| ExchangeError::new(error.to_string()))?
+                        .map(RestBody::Untransformed),
                     ..Default::default()
                 };
                 let mut signed_headers = headers.clone();
@@ -298,14 +303,13 @@ impl Client {
                     "headers": Value::Object(headers.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect()),
                 });
                 let options = json!({"key": lane.options.key, "secret": lane.options.secret});
-                let runtime = client.base.runtime.clone();
-                let nonce_runtime = runtime.clone();
+                let nonce_runtime = client.base.runtime.clone();
                 let signed = sign(
                     &config_view,
                     &options,
                     &mut |p, _, _| query_profile(p),
-                    &mut || Ok(runtime.now_ms()),
-                    &mut || Ok(nonce_runtime.unique_id()),
+                    &mut || Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time()),
+                    &mut || Ok(nonce_runtime.unique_id().replace(['-', '_'], "")),
                 )
                 .map_err(ExchangeError::new)?;
                 if let Some(JsJsonValue::Object(fields)) = signed {
@@ -328,7 +332,7 @@ impl Client {
                         let rejected = !signature_retried
                             && match &failure.response {
                                 Some(response) => {
-                                    signature_rejected(&body_value(response.body.clone()))?
+                                    signature_rejected(&body_value(response.body.clone())?)?
                                 }
                                 None => false,
                             };
@@ -345,7 +349,7 @@ impl Client {
                     Ok(response) => response,
                 };
                 let status = response.status;
-                let data = body_value(response.body);
+                let data = body_value(response.body)?;
                 // ts: resendOnSignatureRejection in the response interceptor.
                 if !signature_retried && signature_rejected(&data)? {
                     signature_retried = true;

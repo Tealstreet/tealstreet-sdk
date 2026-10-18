@@ -245,7 +245,7 @@ fn orders(a: &SyncedOrders, e: &Value, indices: &Value, roots: &[ReadItem], n: &
             "{n}: side"
         );
         for (k, v) in [
-            ("price", o.price),
+            ("price", o.price.to_number()),
             ("amount", o.amount),
             ("filled", o.filled),
             ("remaining", o.remaining),
@@ -254,7 +254,7 @@ fn orders(a: &SyncedOrders, e: &Value, indices: &Value, roots: &[ReadItem], n: &
             num(v, &e[k], &format!("{n}.{k}"))
         }
         assert_eq!(
-            Some(o.reduce_only),
+            o.reduce_only.into_value(),
             e["reduceOnly"].as_bool(),
             "{n}: reduceOnly"
         );
@@ -941,7 +941,7 @@ impl OrderSnapshotHost for SnapshotHost {
             now,
         );
         Ok(order.map(|mut fields| {
-            fields.info = None;
+            fields.info = (None).into();
             let root = Rc::new(RefCell::new(SyncedOrder { fields, info: raw }));
             self.mapped.borrow_mut().push(root.clone());
             root

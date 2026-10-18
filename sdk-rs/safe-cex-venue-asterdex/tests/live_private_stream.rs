@@ -83,8 +83,8 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.host.spawn_local(f)
     }
-    fn console(&self, s: &str, m: &str) {
-        self.host.console(s, m)
+    fn console_values(&self, s: &str, m: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.host.console_values(s, m)
     }
     fn unique_id(&self) -> String {
         self.host.unique_id()
@@ -95,7 +95,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, c: &Value) {
@@ -415,17 +419,17 @@ fn order(o: &Order, e: &Value, label: &str) {
     assert_eq!(o.id, e["id"].as_str().unwrap(), "{label} id");
     assert_eq!(
         o.status,
-        serde_json::from_value(e["status"].clone()).unwrap(),
+        serde_json::from_value::<safe_cex_types::OrderStatus>(e["status"].clone()).unwrap(),
         "{label} status"
     );
     assert_eq!(
         o.r#type,
-        serde_json::from_value(e["type"].clone()).unwrap(),
+        serde_json::from_value::<safe_cex_types::OrderType>(e["type"].clone()).unwrap(),
         "{label} type"
     );
     assert_eq!(
         o.side,
-        serde_json::from_value(e["side"].clone()).unwrap(),
+        serde_json::from_value::<safe_cex_types::OrderSide>(e["side"].clone()).unwrap(),
         "{label} side"
     );
     assert_eq!(o.symbol, e["symbol"].as_str().unwrap(), "{label} symbol");
@@ -435,7 +439,7 @@ fn order(o: &Order, e: &Value, label: &str) {
         "{label} reduceOnly"
     );
     for (k, v) in [
-        ("price", o.price),
+        ("price", o.price.to_number()),
         ("amount", o.amount),
         ("filled", o.filled),
         ("remaining", o.remaining),
@@ -450,7 +454,7 @@ fn position(p: &Position, e: &Value, label: &str) {
     assert_eq!(p.symbol, e["symbol"].as_str().unwrap(), "{label} symbol");
     assert_eq!(
         p.side,
-        serde_json::from_value(e["side"].clone()).unwrap(),
+        serde_json::from_value::<safe_cex_types::PositionSide>(e["side"].clone()).unwrap(),
         "{label} side"
     );
     for (k, v) in [
@@ -463,7 +467,7 @@ fn position(p: &Position, e: &Value, label: &str) {
     ] {
         number(v, &e[k], &format!("{label} {k}"));
     }
-    if let Some(v) = p.realized_pnl {
+    if let Some(v) = p.realized_pnl.into_value() {
         number(v, &e["realizedPnl"], label);
     } else {
         assert!(e.get("realizedPnl").is_none(), "{label} realizedPnl");
@@ -703,7 +707,11 @@ fn family(family: &str) {
                     assert_eq!(f.id.as_deref(), e["id"].as_str(), "private orders fill id");
                     assert_eq!(f.order_id.as_deref(), e["orderId"].as_str());
                     assert_eq!(f.symbol.as_deref(), e["symbol"].as_str());
-                    assert_eq!(f.side, serde_json::from_value(e["side"].clone()).unwrap());
+                    assert_eq!(
+                        f.side,
+                        serde_json::from_value::<safe_cex_types::OrderSide>(e["side"].clone())
+                            .unwrap()
+                    );
                     number(f.amount, &e["amount"], "private orders fill amount");
                     number(f.price, &e["price"], "private orders fill price");
                 }

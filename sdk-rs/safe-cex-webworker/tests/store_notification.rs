@@ -1,3 +1,7 @@
+#[path = "support/data_trace.rs"]
+mod data_trace;
+#[path = "support/error_post.rs"]
+mod error_post_support;
 use serde_json::Value;
 
 #[test]
@@ -127,7 +131,7 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
     // BBO still has an infallible core callback; its source throw is separate.
 }
 
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
@@ -182,6 +186,29 @@ fn ready<T>(future: impl Future<Output = T>) -> T {
 }
 #[test]
 fn native_store_notification_reaches_worker_after_committed_mutation() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/store_notification_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let source_rows = source["rows"].as_array().unwrap();
+    assert_eq!(
+        source_rows.len(),
+        36,
+        "NOTIFICATION original source case floor"
+    );
+    assert!(
+        source_rows.iter().all(|row| row["codeJson"] == "197"),
+        "NOTIFICATION actual source code stringify"
+    );
     for path in [
         "positions-full",
         "positions-partial",
@@ -220,7 +247,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                 });
                 let mut error = ExchangeError::new("subscriber failed");
                 error.name = name.into();
-                error.code = Some(json!(197));
+                error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197)));
                 error.stack = Some("native-stack".into());
                 error.context = Some(json!({"origin":"first listener"}));
                 error.store_subscriber_ids = vec![401];
@@ -275,7 +302,11 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                         }
                     }
                     "remove" => {
-                        let handler = CallMethodHandler::new(venue.clone(), post);
+                        let handler = CallMethodHandler::new(
+                            venue.clone(),
+                            data_trace::post(post),
+                            error_post_support::unexpected(),
+                        );
                         ready(handler.handle_call_method(
                             "r".into(),
                             "removeOrders".into(),
@@ -300,6 +331,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                                 panic!("NOTIFICATION native failure retains notification origin");
                             };
                             let subscriber_id = notification.subscriber_id();
+                            let cause = notification.cause().clone();
                             assert_ne!(subscriber_id, 0, "NOTIFICATION native nonzero subscriber");
                             let recovered = ExchangeError::from(mutation);
                             assert_eq!(
@@ -311,9 +343,50 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                                 recovered.name, error.name,
                                 "NOTIFICATION native error name"
                             );
+                            let recovered_cause = recovered
+                                .store_subscriber_cause
+                                .as_ref()
+                                .expect("original subscriber cause");
+                            assert!(
+                                std::ptr::eq(
+                                    std::error::Error::source(recovered_cause).unwrap(),
+                                    std::error::Error::source(&cause).unwrap()
+                                ),
+                                "NOTIFICATION original cause identity"
+                            );
+                            let original = std::error::Error::source(recovered_cause)
+                                .unwrap()
+                                .downcast_ref::<ExchangeError>()
+                                .expect("original ExchangeError cause");
+                            assert_eq!(original, &error, "NOTIFICATION all original error fields");
+                            let mut expected_metadata = error.metadata.clone();
+                            expected_metadata.store_subscriber_ids.push(subscriber_id);
+                            expected_metadata.store_subscriber_cause = Some(cause);
                             assert_eq!(
-                                recovered.code, error.code,
-                                "NOTIFICATION native error code"
+                                recovered.metadata, expected_metadata,
+                                "NOTIFICATION original metadata plus fanout provenance"
+                            );
+                            let code = recovered
+                                .code
+                                .as_ref()
+                                .expect("NOTIFICATION native code presence");
+                            let safe_cex_exchange::js_runtime::value::Js::Number(number) = code
+                            else {
+                                panic!("NOTIFICATION native code type");
+                            };
+                            assert_eq!(
+                                number.to_bits(),
+                                197.0_f64.to_bits(),
+                                "NOTIFICATION native code bits"
+                            );
+                            let units =
+                                safe_cex_exchange::js_runtime::globals::stringify_json(code)
+                                    .unwrap()
+                                    .unwrap();
+                            assert_eq!(
+                                String::from_utf16(&units).unwrap(),
+                                source_rows[0]["codeJson"].as_str().unwrap(),
+                                "NOTIFICATION JS stringify code"
                             );
                             assert_eq!(
                                 recovered.stack, error.stack,

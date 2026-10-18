@@ -207,6 +207,12 @@ fn main() {
     let arguments: Vec<String> = arguments.collect();
     let paths: Vec<&std::path::Path> = arguments.iter().map(std::path::Path::new).collect();
     let recipes = safe_cex_parity::accepted_source::module_recipes(&paths).expect("sources parse");
+    let unused_core = if macro_origins.contains("core") {
+        unreferenced_core_modules(&paths, macro_origins.contains("std"))
+            .expect("source namespace proof parses")
+    } else {
+        std::collections::HashSet::new()
+    };
     for argument in &arguments {
         let path = std::path::Path::new(argument);
         for (name, line, column) in safe_cex_parity::accepted_source::local_types_with_recipes(
@@ -216,15 +222,145 @@ fn main() {
         )
         .expect("source parses")
         {
+            if name == "UNSUPPORTED_MACRO_NAMESPACE_SHADOW"
+                && unused_core.contains(&(path.to_path_buf(), line, column))
+            {
+                continue;
+            }
             println!("{argument}\t{name}\t{line}\t{column}");
         }
     }
+}
+
+struct CoreValueReferences {
+    identifiers: std::collections::HashSet<(usize, usize)>,
+    verified_std: bool,
+}
+impl CoreValueReferences {
+    fn record(&mut self, ident: &syn::Ident) {
+        if ident.to_string().trim_start_matches("r#") == "core" {
+            let at = ident.span().start();
+            self.identifiers.insert((at.line, at.column));
+        }
+    }
+}
+impl<'ast> syn::visit::Visit<'ast> for CoreValueReferences {
+    fn visit_pat_ident(&mut self, binding: &'ast syn::PatIdent) {
+        self.record(&binding.ident);
+        syn::visit::visit_pat_ident(self, binding);
+    }
+    fn visit_expr_path(&mut self, value: &'ast syn::ExprPath) {
+        if value.qself.is_none()
+            && value.path.leading_colon.is_none()
+            && value.path.segments.len() == 1
+        {
+            self.record(&value.path.segments[0].ident);
+        }
+        syn::visit::visit_expr_path(self, value);
+    }
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        // Only the authenticated std vec grammar is transparent here.
+        // Generic macro arguments, transcribers and cfg tokens stay opaque.
+        let vector = mac.path.is_ident("vec")
+            || mac.path.segments.len() == 2
+                && mac.path.segments[0].ident == "std"
+                && mac.path.segments[1].ident == "vec";
+        if self.verified_std && vector {
+            let bracket =
+                proc_macro2::Group::new(proc_macro2::Delimiter::Bracket, mac.tokens.clone());
+            if let Ok(expr) =
+                syn::parse2::<syn::Expr>(proc_macro2::TokenTree::Group(bracket).into())
+            {
+                self.visit_expr(&expr);
+            }
+        }
+        syn::visit::visit_macro(self, mac);
+    }
+}
+
+fn core_module_declarations(
+    items: &[syn::Item],
+    identifiers: &mut std::collections::HashSet<(usize, usize)>,
+    ends: &mut Vec<(usize, usize)>,
+) {
+    // Recurse only through modules. A function/impl/const-local module is
+    // not eligible; its identifier remains an ordinary token reference.
+    for item in items {
+        if let syn::Item::Mod(module) = item {
+            if module.ident.to_string().trim_start_matches("r#") == "core" {
+                let ident = module.ident.span().start();
+                identifiers.insert((ident.line, ident.column));
+                let end = syn::spanned::Spanned::span(module).end();
+                ends.push((end.line, end.column));
+            }
+            if let Some((_, items)) = &module.content {
+                core_module_declarations(items, identifiers, ends);
+            }
+        }
+    }
+}
+fn references_core_namespace(
+    tokens: proc_macro2::TokenStream,
+    declarations: &std::collections::HashSet<(usize, usize)>,
+) -> bool {
+    tokens.into_iter().any(|token| match token {
+        proc_macro2::TokenTree::Ident(ident)
+            if ident.to_string().trim_start_matches("r#") == "core" =>
+        {
+            let start = ident.span().start();
+            !declarations.contains(&(start.line, start.column))
+        }
+        proc_macro2::TokenTree::Group(group) => {
+            references_core_namespace(group.stream(), declarations)
+        }
+        _ => false,
+    })
+}
+
+// A module called core cannot redirect a trusted core macro when that spelling
+// is never used as a namespace anywhere in the selected source graph. Ordinary
+// value bindings/references do not resolve in the macro namespace. Inspect raw tokens
+// too: cfg-inactive branches and macro transcribers must revoke the proof. This
+// deliberately refuses even absolute ::core paths and harmless type references.
+// The normal source scanner remains authoritative for every other finding.
+fn unreferenced_core_modules(
+    paths: &[&std::path::Path],
+    verified_std: bool,
+) -> Result<std::collections::HashSet<(std::path::PathBuf, usize, usize)>, String> {
+    use std::collections::HashSet;
+    use syn::visit::Visit;
+
+    let mut output = HashSet::new();
+    for path in paths {
+        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let syntax = syn::parse_file(&source).map_err(|error| error.to_string())?;
+        let mut identifiers = HashSet::new();
+        let mut ends = Vec::new();
+        core_module_declarations(&syntax.items, &mut identifiers, &mut ends);
+        let mut values = CoreValueReferences {
+            identifiers,
+            verified_std,
+        };
+        values.visit_file(&syntax);
+        let tokens = source
+            .parse::<proc_macro2::TokenStream>()
+            .map_err(|error| error.to_string())?;
+        if references_core_namespace(tokens, &values.identifiers) {
+            return Ok(HashSet::new());
+        }
+        output.extend(
+            ends.into_iter()
+                .map(|(line, column)| (path.to_path_buf(), line, column)),
+        );
+    }
+    Ok(output)
 }
 
 // The permission producer inspects the real, unconditional source-module chain,
 // independently of rustdoc's selected sources. No invocation spelling grants it.
 fn number_output_provider(root: &std::path::Path) -> Result<serde_json::Value, String> {
     use std::{fs, path::Path};
+    use syn::spanned::Spanned;
     fn source(root: &Path, relative: &str) -> Result<syn::File, String> {
         let path = root
             .join(relative)
@@ -304,10 +440,20 @@ fn number_output_provider(root: &std::path::Path) -> Result<serde_json::Value, S
     {
         return Err("expected one unconditional macro_export definition".into());
     }
+    // Attribute coverage belongs only to this independently validated top-level
+    // definition. The ordinary scope scanner still rejects every macro_export.
+    let export = macros[0]
+        .attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("macro_export"))
+        .expect("the exact export attribute was validated above")
+        .span()
+        .end();
     Ok(serde_json::json!({
         "recipeFormat": "proc-macro2-token-string-v1",
         "tokens": macros[0].mac.tokens.to_string(),
         "definition": "safe-cex-num/src/numeric_ingress/eligibility.rs",
+        "exportAttribute": { "ident": "UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export", "line": export.line, "column": export.column },
         "moduleChain": ["safe-cex-num/src/lib.rs", "safe-cex-num/src/numeric_ingress.rs", "safe-cex-num/src/numeric_ingress/eligibility.rs"]
     }))
 }

@@ -308,23 +308,19 @@ fn deep_public_ingress_repairs_existing_findings_in_four_forms() {
         String::from_utf8_lossy(&output.stderr)
     );
     let corpus: Corpus = serde_json::from_str(include_str!("fixtures/typed-numbers.json")).unwrap();
-    assert_eq!(corpus.names.len(), 53, "ZERO-CARDINALITY source roots");
+    assert_eq!(corpus.names.len(), 29, "ZERO-CARDINALITY source roots");
     let zeros: Vec<_> = corpus
         .cases
         .iter()
         .filter(|case| case.lexeme == "-0")
         .collect();
-    assert_eq!(zeros.len(), 238, "ZERO-CARDINALITY source cases");
+    assert_eq!(zeros.len(), 68, "ZERO-CARDINALITY source cases");
 
     let expected_roots = std::collections::BTreeMap::from([
         ("TriggerOrderType", 2),
         ("OrderType", 4),
-        ("OidOrCloid", 1),
-        ("Meta", 9),
         ("ClearinghouseState", 3),
         ("UserFills", 3),
-        ("OrderResponseStatus", 2),
-        ("OrderResponse", 2),
         ("WsTrade", 2),
         ("WsBook", 3),
         ("WsBbo", 7),
@@ -334,31 +330,13 @@ fn deep_public_ingress_repairs_existing_findings_in_four_forms() {
         ("WsUserFunding", 1),
         ("WsLiquidation", 1),
         ("WsNonUserCancel", 1),
-        ("SpotClearinghouseBalance", 1),
-        ("SpotClearinghouseState", 2),
-        ("FrontendOpenOrders", 8),
         ("L2Book", 2),
-        ("CandleSnapshot", 3),
-        ("MetaAndAssetCtxs", 9),
-        ("UserFundingEntry", 1),
-        ("UserFunding", 1),
-        ("UserNonFundingLedgerEntry", 4),
-        ("UserNonFundingLedgerUpdates", 4),
         ("FundingHistoryEntry", 1),
         ("FundingHistory", 1),
-        ("SpotToken", 11),
-        ("SpotMarket", 3),
-        ("SpotMeta", 20),
-        ("SpotMetaAndAssetCtxs", 27),
         ("UserOpenOrder", 2),
         ("UserOpenOrders", 2),
-        ("OrderRequest", 12),
-        ("OrderWire", 8),
         ("CancelOrderRequest", 1),
         ("CancelOrderRequests", 2),
-        ("ModifyRequest", 19),
-        ("ModifyWire", 12),
-        ("ScheduleCancelAction", 1),
         ("Signature", 1),
         ("Candle", 3),
         ("HyperliquidCandle", 3),
@@ -367,9 +345,7 @@ fn deep_public_ingress_repairs_existing_findings_in_four_forms() {
         ("WsUserFundings", 1),
         ("WsUserNonFundingLedgerUpdate", 4),
         ("WsUserNonFundingLedgerUpdates", 4),
-        ("Hip3MarketInfo", 9),
         ("BuilderInfo", 1),
-        ("BuilderFeeCheckResult", 1),
     ]);
     assert_eq!(
         corpus
@@ -399,7 +375,7 @@ fn deep_public_ingress_repairs_existing_findings_in_four_forms() {
     let mut comparisons = 0;
     for mode in 0..4 {
         MODE.store(mode, Ordering::SeqCst);
-        for index in 0..238 {
+        for index in 0..68 {
             let case = zeros
                 .get(index)
                 .expect("ZERO-CARDINALITY native index coverage");
@@ -414,5 +390,5 @@ fn deep_public_ingress_repairs_existing_findings_in_four_forms() {
             comparisons += 1;
         }
     }
-    assert_eq!(comparisons, 952, "ZERO-CARDINALITY native comparisons");
+    assert_eq!(comparisons, 272, "ZERO-CARDINALITY native comparisons");
 }

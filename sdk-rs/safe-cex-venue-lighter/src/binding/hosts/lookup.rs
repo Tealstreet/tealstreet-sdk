@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 impl AccountLookupIterator for JsIterator {
     fn next(&self) -> SigningResult<Option<AccountValue>> {
-        Ok(self.step().map(|v| to_account(&v)))
+        Ok(self.step().map_err(to_signing)?.map(|v| to_account(&v)))
     }
     fn close(&self, completion: SigningResult<AccountValue>) -> SigningResult<AccountValue> {
         completion
@@ -24,7 +24,7 @@ impl AccountLookupHost for Bound {
     fn append_spread(&self, array: &AccountValue, source: AccountValue) -> SigningResult<()> {
         let target = to_js(array);
         let iterator = JsIterator::open(&to_js(&source)).map_err(to_signing)?;
-        while let Some(value) = iterator.step() {
+        while let Some(value) = iterator.step().map_err(to_signing)? {
             target.push(value).map_err(to_signing)?;
         }
         Ok(())

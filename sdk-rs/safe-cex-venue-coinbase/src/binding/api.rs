@@ -16,7 +16,7 @@ use safe_cex_exchange::{
     js_runtime::{
         client,
         promise::Promise as JsPromise,
-        value::{Js, Thrown, arg, to_json},
+        value::{Js, Thrown, arg, to_json, to_typed},
     },
     runtime::ExchangeError,
 };
@@ -29,7 +29,9 @@ use std::{cell::RefCell, rc::Rc};
 fn fields(config: &Js) -> Result<ApiRequest, PortfolioFailure> {
     let mut fields = IndexMap::new();
     for (key, value) in config.own_entries().map_err(from_thrown)? {
-        if key.as_ref() != "paramsSerializer".encode_utf16().collect::<Vec<_>>() {
+        if key.as_ref() != "paramsSerializer".encode_utf16().collect::<Vec<_>>()
+            && key.as_ref() != "adapter".encode_utf16().collect::<Vec<_>>()
+        {
             fields.insert(key.to_vec(), from_js(&value)?);
         }
     }
@@ -64,8 +66,9 @@ impl CoinbaseApiHost for Host {
                 .map_err(from_thrown)?;
         }
         let serialize = config.serialize;
-        let client = client::create(
+        let client = client::factory::create(
             self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
             Js::object(vec![
                 ("baseURL", Js::str(config.base_url)),
                 ("timeout", to_js(&config.timeout)),
@@ -85,7 +88,10 @@ impl CoinbaseApiHost for Host {
                     )]),
                 ),
             ]),
-        );
+            &to_js(&_options),
+            self.base(),
+        )
+        .map_err(from_thrown)?;
         Ok(self.register_client(client))
     }
     fn serialize_repeat(&self, params: Frame) -> Result<String, PortfolioFailure> {
@@ -157,6 +163,7 @@ impl CoinbaseApiHost for Host {
         let native = Js::function("coinbaseRequest", move |_, args| {
             let original = arg(&args, 0);
             let serializer = original.get("paramsSerializer")?;
+            let adapter = original.get("adapter")?;
             let config = fields(&original).map_err(|error| Thrown::from(exchange_error(&error)))?;
             let result = interceptor(config);
             let serializer = serializer.clone();
@@ -169,6 +176,9 @@ impl CoinbaseApiHost for Host {
                     let output = frame_config(&config);
                     if !serializer.is_undefined() {
                         output.define("paramsSerializer", serializer)?;
+                    }
+                    if !adapter.is_undefined() {
+                        output.define("adapter", adapter)?;
                     }
                     Ok(output)
                 }),
@@ -189,8 +199,16 @@ impl CoinbaseApiHost for Host {
         _options: Frame,
         _exchange_name: Option<Frame>,
     ) -> Result<(), PortfolioFailure> {
-        // The supplied JsHttpHost owns the terminal transport, including HOW.
-        Ok(())
+        client::factory::install_transport_adapter(
+            self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
+            &self.client(&_client)?,
+            &to_js(&_options),
+            to_typed(&_exchange_name.as_ref().map(to_js).unwrap_or(Js::Undefined))
+                .map_err(from_thrown)?,
+            safe_cex_transport::RestAdapterVariant::Default,
+        )
+        .map_err(from_thrown)
     }
     fn replace_url_params(
         &self,
@@ -255,7 +273,8 @@ impl CoinbaseApiHost for Host {
         let data = config.get("data").map_err(from_thrown)?;
         if !data.is_undefined() {
             request.body = Some(safe_cex_transport::RestBody::Untransformed(
-                to_json(&data).map_err(from_thrown)?,
+                safe_cex_exchange::js_runtime::value::to_retained_input(&data)
+                    .map_err(from_thrown)?,
             ));
         }
         let timeout = config.get("timeout").map_err(from_thrown)?;

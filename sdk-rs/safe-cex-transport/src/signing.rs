@@ -1,6 +1,7 @@
 use crate::{RestAdapter, RestRequest, RestResponse, TransportError, TransportFuture};
 use indexmap::IndexMap;
 use safe_cex_types::ExchangeName;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
@@ -14,8 +15,11 @@ pub struct SigningConfig {
     pub base_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    #[serde(
+        skip_serializing_if = "crate::native_data::omitted",
+        serialize_with = "crate::native_data::serialize_optional"
+    )]
+    pub data: Option<Input>,
     pub headers: IndexMap<String, String>,
 }
 #[derive(Serialize)]
@@ -31,7 +35,11 @@ pub struct HttpSigningRequest {
 pub struct SignedConfig {
     pub url: Option<String>,
     pub params: Option<Value>,
-    pub data: Option<Value>,
+    #[serde(
+        skip_serializing_if = "crate::native_data::omitted",
+        serialize_with = "crate::native_data::serialize_optional"
+    )]
+    pub data: Option<Input>,
     pub headers: IndexMap<String, String>,
 }
 #[derive(Default, Serialize)]
@@ -100,20 +108,34 @@ impl Serialize for RemoteSignerRequest {
         map.end()
     }
 }
+struct SigningHeader {
+    kind: String,
+    exchange_name: ExchangeName,
+    account_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "SigningHeader", rename_all = "camelCase")]
+struct SigningHeaderWire {
+    #[serde(rename = "type")]
+    kind: String,
+    exchange_name: ExchangeName,
+    account_name: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for SigningHeader {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        SigningHeaderWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
+}
+
 impl<'de> Deserialize<'de> for RemoteSignerRequest {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         // Do not buffer through Value: canonical WS extraData retains deep/overflow
         // metadata as RawValue. This header decode skips the untouched payload.
         let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Header {
-            #[serde(rename = "type")]
-            kind: String,
-            exchange_name: ExchangeName,
-            account_name: Option<String>,
-        }
-        let header: Header = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        let header: SigningHeader =
+            serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
         match header.kind.as_str() {
             "http" => serde_json::from_str(raw.get())
                 .map(Self::Http)
@@ -166,13 +188,10 @@ pub fn mark_skip_remote_signing(request: &mut SigningRequest) -> &mut SigningReq
     request.skip_remote_signing = true;
     request
 }
-pub fn try_parse_json(value: Value) -> Value {
-    if let Value::String(text) = &value
-        && let Ok(mut parsed @ (Value::Object(_) | Value::Array(_))) = serde_json::from_str(text)
+pub fn try_parse_json(value: Input) -> Input {
+    if let Input::Text(text) = &value
+        && let Ok(parsed @ (Input::Object(_) | Input::Array(_))) = Input::parse_json(text)
     {
-        // JSON.parse creates binary64 numbers and JS own-key ordering. Reuse the
-        // shared HOW projection, retaining signed zero and overflow lexemes.
-        crate::how::normalize_json_numbers(&mut parsed, false, false);
         return parsed;
     }
     value
@@ -308,7 +327,7 @@ impl RemoteSigningAdapter {
     }
     pub fn execute_signed(&self, request: SigningRequest) -> crate::RestFuture<'_, RestResponse> {
         Box::pin(async move {
-            self.execute_signed_with_receipt(request)
+            self.execute_signed_with_receipt(request, IndexMap::new())
                 .await
                 .map(|execution| execution.response)
         })
@@ -316,6 +335,7 @@ impl RemoteSigningAdapter {
     fn execute_signed_with_receipt(
         &self,
         request: SigningRequest,
+        config_extensions: IndexMap<String, safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> crate::RestFuture<'_, crate::RestExecution> {
         let mut original = RestRequest {
             method: request.config.method.clone(),
@@ -329,6 +349,7 @@ impl RemoteSigningAdapter {
             timeout_ms: request.timeout_ms,
             skip_remote_signing: request.skip_remote_signing,
             sign_ms: None,
+            config_extensions: config_extensions.clone(),
         };
         original.merge_axios_headers(&IndexMap::new());
         Box::pin(async move {
@@ -362,7 +383,7 @@ impl RemoteSigningAdapter {
                             } else {
                                 config.method.to_uppercase()
                             },
-                            params: config.params.clone().map(try_parse_json),
+                            params: config.params.clone().map(try_parse_params_json),
                             data: config.data.clone().map(try_parse_json),
                             headers: serialize_headers(&config.headers),
                             ..config.clone()
@@ -431,6 +452,7 @@ impl RemoteSigningAdapter {
                 skip_remote_signing: request.skip_remote_signing,
                 sign_ms,
                 timeout_ms: request.timeout_ms,
+                config_extensions,
             };
             // The source calls the selected inner adapter directly. Running
             // Axios transformation here would stringify an echoed object again.
@@ -486,20 +508,24 @@ impl RestAdapter for RemoteSigningAdapter {
             }
         };
         let skip_remote_signing = request.skip_remote_signing;
-        self.execute_signed_with_receipt(SigningRequest {
-            body_template: request.body.clone(),
-            skip_remote_signing,
-            timeout_ms: request.timeout_ms,
-            query_profile: request.query_profile,
-            config: SigningConfig {
-                method: request.method,
-                url: request.url,
-                base_url: request.base_url.unwrap_or_default(),
-                headers: request.headers,
-                params: request.params,
-                data,
+        let config_extensions = request.config_extensions;
+        self.execute_signed_with_receipt(
+            SigningRequest {
+                body_template: request.body.clone(),
+                skip_remote_signing,
+                timeout_ms: request.timeout_ms,
+                query_profile: request.query_profile,
+                config: SigningConfig {
+                    method: request.method,
+                    url: request.url,
+                    base_url: request.base_url.unwrap_or_default(),
+                    headers: request.headers,
+                    params: request.params,
+                    data,
+                },
             },
-        })
+            config_extensions,
+        )
     }
 }
 
@@ -512,8 +538,7 @@ fn warn_double_serialization(exchange: &ExchangeName, config: &SigningConfig) {
     eprintln!("{message}");
     #[cfg(target_arch = "wasm32")]
     {
-        use wasm_bindgen::prelude::*;
-        #[wasm_bindgen]
+        #[wasm_bindgen::prelude::wasm_bindgen]
         extern "C" {
             #[wasm_bindgen(js_namespace = console, js_name = warn)]
             fn warn(message: &str);
@@ -534,8 +559,8 @@ struct WireSigningConfig {
     #[serde(default, deserialize_with = "present_json")]
     params: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default, deserialize_with = "present_json")]
-    data: Option<Value>,
+    #[serde(default, deserialize_with = "crate::native_data::deserialize_present")]
+    data: Option<Input>,
     headers: IndexMap<String, String>,
 }
 impl<'de> Deserialize<'de> for SigningConfig {
@@ -566,8 +591,8 @@ struct WireSignedConfig {
     url: Option<String>,
     #[serde(default, deserialize_with = "present_json")]
     params: Option<Value>,
-    #[serde(default, deserialize_with = "present_json")]
-    data: Option<Value>,
+    #[serde(default, deserialize_with = "crate::native_data::deserialize_present")]
+    data: Option<Input>,
     headers: IndexMap<String, String>,
 }
 impl<'de> Deserialize<'de> for SignedConfig {
@@ -594,4 +619,41 @@ fn present_json<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Value>, D::Error> {
     Value::deserialize(deserializer).map(Some)
+}
+
+// Legacy params retain their bounded Value ABI; request data does not use this projection.
+pub fn try_parse_params_json(value: Value) -> Value {
+    let Value::String(text) = &value else {
+        return value;
+    };
+    let Ok(parsed) = crate::native_data::parse(text) else {
+        return value;
+    };
+    if !matches!(parsed, Input::Object(_) | Input::Array(_)) {
+        return value;
+    }
+    let Ok(mut projected) = parsed.into_value() else {
+        return value;
+    };
+    crate::how::normalize_json_numbers(&mut projected, false, false);
+    projected
+}
+
+#[cfg(test)]
+mod header_shape_tests {
+    use super::{ExchangeName, SigningHeader};
+    use serde_json::json;
+
+    #[test]
+    fn header_requires_object_and_preserves_native_fields() {
+        crate::accepted_frame_shapes::record::<SigningHeader>(
+            json!({"type":"http","exchangeName":"binance","accountName":"native-header-account"}),
+            json!(["http", "binance", "native-header-account"]),
+            |row| {
+                assert_eq!(row.kind, "http");
+                assert_eq!(row.exchange_name, ExchangeName::Binance);
+                assert_eq!(row.account_name.as_deref(), Some("native-header-account"));
+            },
+        );
+    }
 }

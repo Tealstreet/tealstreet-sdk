@@ -100,26 +100,44 @@ pub fn ping<E>(
     Ok(())
 }
 
-pub async fn subscribe<E, F: Future<Output = Result<(), E>>>(
+pub fn subscribe<E, F: Future<Output = Result<(), E>>>(
     topics: impl FnOnce() -> Result<Map<String, Value>, E>,
     mut send: impl FnMut(&str) -> Result<(), E>,
     mut sleep: impl FnMut(u64) -> F,
-) -> Result<(), E> {
-    let topics = topics()?;
-    let topics: Vec<Value> = crate::api_request::ordered_entries(&topics)
-        .into_iter()
-        .flat_map(|(_, value)| match value {
-            Value::Array(values) => values.clone(),
-            value => vec![value.clone()],
-        })
-        .collect();
-    for topics in topics.chunks(10) {
-        let frame = format!(
-            r#"{{"op":"subscribe","args":{}}}"#,
-            serde_json::to_string(topics).unwrap()
-        );
-        send(&frame)?;
-        sleep(10).await?;
+) -> impl Future<Output = Result<(), E>> {
+    // JS async functions execute through the first await at invocation time.
+    let prepared = (|| {
+        let topics = topics()?;
+        let topics: Vec<Value> = crate::api_request::ordered_entries(&topics)
+            .into_iter()
+            .flat_map(|(_, value)| match value {
+                Value::Array(values) => values.clone(),
+                value => vec![value.clone()],
+            })
+            .collect();
+        let frames: Vec<String> = topics
+            .chunks(10)
+            .map(|topics| {
+                format!(
+                    r#"{{"op":"subscribe","args":{}}}"#,
+                    serde_json::to_string(topics).unwrap()
+                )
+            })
+            .collect();
+        let Some(first) = frames.first() else {
+            return Ok(None);
+        };
+        send(first)?;
+        Ok(Some((frames, sleep(10))))
+    })();
+    async move {
+        if let Some((frames, first)) = prepared? {
+            first.await?;
+            for frame in frames.into_iter().skip(1) {
+                send(&frame)?;
+                sleep(10).await?;
+            }
+        }
+        Ok(())
     }
-    Ok(())
 }

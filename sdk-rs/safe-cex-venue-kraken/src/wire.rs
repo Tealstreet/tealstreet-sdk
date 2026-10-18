@@ -27,11 +27,13 @@ impl Wire {
             Self::Null => RetainedJsonInput::Null,
             Self::Bool(v) => RetainedJsonInput::Bool(v),
             Self::Number(v) => RetainedJsonInput::Float(v),
-            Self::Text(v) => RetainedJsonInput::Text(v),
+            Self::Text(v) => RetainedJsonInput::Text(v.encode_utf16().collect()),
             Self::Array(v) => RetainedJsonInput::Array(v.into_iter().map(Self::retained).collect()),
-            Self::Object(v) => {
-                RetainedJsonInput::Object(v.into_iter().map(|(k, v)| (k, v.retained())).collect())
-            }
+            Self::Object(v) => RetainedJsonInput::Object(
+                v.into_iter()
+                    .map(|(k, v)| (k.encode_utf16().collect(), v.retained()))
+                    .collect(),
+            ),
         }
     }
 }

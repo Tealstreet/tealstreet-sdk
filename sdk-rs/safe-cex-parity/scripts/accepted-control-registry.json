@@ -9,6 +9,9 @@
       "alias contracts retain actual types, compiler roots and direct native witnesses",
       "alias native cases cover positive conversions without redecoding their input"
     ],
+    "accepted-breakout-portfolio-native.test.mjs": [
+      "Breakout portfolio contracts execute the production native readers"
+    ],
     "accepted-callable-alias-native.test.mjs": [
       "generic callable aliases execute their actual fixed native probe and reject root identity drift"
     ],
@@ -19,10 +22,29 @@
       "callable compiler identity refuses missing registry and absent serde dependencies",
       "synthetic compiler Fn IDs resolve to sysroot along with Rc",
       "compiler-selected same-spelling workspace Fn never inherits sysroot permission",
-      "unresolved selected Fn compiler identity refuses before any path-name approval"
+      "unresolved selected Fn compiler identity refuses before any path-name approval",
+      "hosted signer tuple retains its exact native type and compiler roles"
+    ],
+    "accepted-constant-output-native.test.mjs": [
+      "reviewed serializer constants execute actual production values and reject native drift",
+      "reviewed direct transport constant executes the complete native and wasm compiler owner"
     ],
     "accepted-construction-chain-native.test.mjs": [
       "selected candle-cache inventory closes every construction owner and rejects both error policy mutations"
+    ],
+    "accepted-contract-files.test.mjs": [
+      "per-crate contracts preserve every legacy value and explicit fixture file",
+      "contract directories reject missing malformed misplaced duplicate and hidden inputs",
+      "contract shard namespace and complete merge checks reject executed mutations",
+      "authored JSON tokens retain integer key order, numbers and escaped keys",
+      "generated case wrappers retain nested and primitive authored input tokens",
+      "raw contract and dispatch token retention reject executed loader mutations",
+      "source-aware JSON rejects duplicate decoded keys at every nesting level",
+      "source-aware JSON retains programmatic and edited negative zero",
+      "source-aware JSON retains authored integer-key order after edits"
+    ],
+    "accepted-contract-order-native.test.mjs": [
+      "authored integer-key order reaches the maintained native decoder probe"
     ],
     "accepted-contracts.test.mjs": [
       "new public or private Deserialize owner fails closed by name",
@@ -36,7 +58,10 @@
       "multiple observed entrypoints execute independently and cannot claim non-decoder receipts",
       "open JSON and supplemental methods require native witnesses without replacing shape checks",
       "self-only Visitor unit witnesses cannot invent varying input or exempt data methods",
-      "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders"
+      "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders",
+      "reviewed serializer constants pin compiler source adapters and witnesses",
+      "reviewed direct transport constant pins raw compiler source and native capability observations",
+      "multi-entry dispatch carries authored raw case tokens into native contracts"
     ],
     "accepted-controls.test.mjs": [
       "private Cargo targets cannot execute a stale default scanner in production or history",
@@ -79,6 +104,9 @@
       "workspace payload identities refuse wrong package registry missing and mismatched owner IDs",
       "missing live context source identity and serde origin remain refusals"
     ],
+    "accepted-function-pointer-native.test.mjs": [
+      "reviewed function pointers execute actual SDK alias identity and trait probes"
+    ],
     "accepted-future-alias-native.test.mjs": [
       "local future aliases execute the actual fixed native probe and reject root identity drift"
     ],
@@ -87,10 +115,29 @@
       "local future alias pins reject output lifetime and generic redirection",
       "local future alias probes require actual compiler dependency and sysroot context"
     ],
+    "accepted-grvt-fields.test.mjs": [
+      "exact borrowed Fields policy retains every route and refuses compiler or witness redirects",
+      "borrowed Fields executes actual static and owned routes and rejects native drift"
+    ],
+    "accepted-hyperliquid-projection-native.test.mjs": [
+      "six associated aliases execute ordinary native and wasm traits and reject concrete owner drift"
+    ],
+    "accepted-hyperliquid-projection.test.mjs": [
+      "six associated projections retain exact compiler roots implementation and fixed host",
+      "associated projection compiler provenance and fixed policy guards reject executed mutations"
+    ],
     "accepted-identity-alias.test.mjs": [
       "identity aliases select one internal actual-alias monomorphization",
       "generic identity probes reject bounds defaults synthetic parameters and where clauses",
       "expanded identity cannot conceal a nonidentity source target"
+    ],
+    "accepted-inherited-constant-output-native.test.mjs": [
+      "reviewed inherited refusals execute the complete production owner and reject native error or HTTP drift"
+    ],
+    "accepted-inherited-constant-output.test.mjs": [
+      "reviewed inherited refusals retain exact compiler source fixture and native witnesses",
+      "reviewed inherited refusal source fixture and adapter pins reject executed mutations",
+      "Kucoin constant policies keep exact inherited override and observer provenance"
     ],
     "accepted-inventory.test.mjs": [
       "compiler impl identity sees manual private Deserialize and deduplicates reexports",
@@ -101,7 +148,12 @@
       "explicit owner regression scope cannot turn the default matrix inventory green",
       "inherent factories returning a different decoded owner remain inventoried",
       "alias defaults respect lexical parameter scopes and nested applications without weakening cycle refusal",
-      "unsupported receivers and uninstantiated defaults pass only with a reviewed source pin"
+      "unsupported receivers and uninstantiated defaults pass only with a reviewed source pin",
+      "receiver item hashes preserve Unicode columns and refuse invalid spans",
+      "compiler receiver item pins survive unrelated edits and refuse changes inside the impl"
+    ],
+    "accepted-json-source-native.test.mjs": [
+      "authored JSON order detects removal of actual Aster query key sorting"
     ],
     "accepted-loader-future-native.test.mjs": [
       "loader future actual compiler coverage refuses removal and restores the named assertion"
@@ -122,16 +174,37 @@
       "builtin macro capabilities follow sysroot realpaths and refuse Cargo shadows",
       "renamed same-name libraries require the active registry compiler artifact"
     ],
+    "accepted-model-field-native.test.mjs": [
+      "generic model field visitor has executed native decoder observations"
+    ],
+    "accepted-model-record-native.test.mjs": [
+      "model record visitors have executed native field observations"
+    ],
+    "accepted-napi-alias.test.mjs": [
+      "NAPI callbacks retain their exact compiler signatures and Cargo identities",
+      "unknown NAPI callback aliases keep the existing refusal",
+      "NAPI alias compiler and artifact guards are load bearing"
+    ],
+    "accepted-node-probes.test.mjs": [
+      "real Node probe execution is restricted to the production FFI addon profile",
+      "Node probe execution refuses failed builds and foreign or ambiguous Cargo artifacts"
+    ],
     "accepted-number-output-native.test.mjs": [
       "numeric production compiler binding catches a compiling recipe mutation"
     ],
     "accepted-number-output.test.mjs": [
       "numeric expression permission requires the canonical SDK compiler binding",
       "numeric provider recipe and unconditional source route reject executed mutations",
-      "numeric source inspection refuses opaque arguments later shadows and every glob"
+      "numeric source inspection refuses opaque arguments later shadows and every glob",
+      "numeric definition coverage retains exact export and declaration positions"
     ],
     "accepted-object-map-construction-native.test.mjs": [
       "object-map Clone classification follows the actual compiler owner and exact traits"
+    ],
+    "accepted-policy-files.test.mjs": [
+      "per-crate policy tables preserve compiler and source records exactly",
+      "policy shards refuse missing malformed misplaced duplicate symlink and obsolete inputs",
+      "policy shard ownership complete merge and direct cutover reject executed mutations"
     ],
     "accepted-ratchet.test.mjs": [
       "outstanding debt exactly matches measured and owned failures",
@@ -146,7 +219,9 @@
       "sibling introductions cannot launder delayed debt but genuine new-owner merges pass"
     ],
     "accepted-reviewed-aliases.test.mjs": [
-      "reviewed generic aliases return only their spec-owned fixed instantiation"
+      "reviewed generic aliases return only their spec-owned fixed instantiation",
+      "reviewed function pointers retain exact signatures and every nested compiler role",
+      "reviewed function pointer source signature roots and caller guards are load bearing"
     ],
     "accepted-scanner.test.mjs": [
       "scanner receipts bind the SDK package and actual fresh executable",
@@ -155,6 +230,13 @@
     ],
     "accepted-telemetry-defaults.test.mjs": [
       "telemetry defaults execute inherited native results and reject body drift"
+    ],
+    "accepted-transport-socket-native.test.mjs": [
+      "Transport socket and provider contracts execute all four owners and reject production disconnects"
+    ],
+    "accepted-weex-kline-alias.test.mjs": [
+      "exact Weex kline tuple policy refuses slot root and caller redirects",
+      "Weex kline tuple executes actual native slots identity and trait probes"
     ],
     "accepted-ws-auth-helper.test.mjs": [
       "WS auth helper uses actual parent native fields and detects swap and null loss"
@@ -288,6 +370,65 @@
     "metadata ExchangeFeatures positional-array widening",
     "metadata ExchangeMetadata positional-array widening",
     "metadata Snapshot positional-array widening",
-    "alias default substitution removed"
+    "alias default substitution removed",
+    "observed typed entrypoint raw compiler role",
+    "hosted signer tuple expanded target",
+    "constant serializer source pin",
+    "constant serializer compiler API pin",
+    "constant serializer adapter pin",
+    "constant serializer native witness pin",
+    "constant serializer unit native value",
+    "constant serializer tuple native state",
+    "function pointer source identity",
+    "function pointer expanded signature",
+    "function pointer nested root identity",
+    "function pointer caller redirection",
+    "function pointer retry native identity",
+    "function pointer factory native identity",
+    "Weex kline expanded slots",
+    "Weex kline native identity",
+    "Weex kline policy routing",
+    "contract shard namespace",
+    "contract shard complete merge",
+    "numeric provider unrelated export attribute",
+    "numeric definition export coverage",
+    "numeric definition export position",
+    "policy shard ownership",
+    "policy shard complete merge",
+    "policy shard direct cutover",
+    "inherited refusal maintained source pin",
+    "inherited refusal native fixture pin",
+    "inherited refusal native adapter pin",
+    "inherited refusal native error identity",
+    "inherited refusal native zero HTTP",
+    "Fields identity",
+    "Fields members",
+    "Fields route",
+    "direct constant maintained source pin",
+    "direct constant indexed raw method pin",
+    "direct constant native returned capability",
+    "Kucoin inherited observer fixture pin",
+    "Kucoin override observer fixture pin",
+    "Kucoin override maintained source pin",
+    "Kucoin inherited method scope",
+    "projection same-crate compiler root",
+    "projection compiler associated identity",
+    "projection exact raw target",
+    "projection fixed Realm host",
+    "projection selected workspace source",
+    "projection native concrete owner identity",
+    "receiver item pin widened to whole file",
+    "receiver item source check removed",
+    "transport HOW auth wire token",
+    "transport relay close code",
+    "transport registry instance precedence",
+    "transport provider foreign URL refusal",
+    "NAPI alias source identity",
+    "NAPI alias expanded signature",
+    "NAPI alias nested Cargo identity",
+    "NAPI alias caller redirection",
+    "authored JSON contract source retention",
+    "authored JSON dispatch token retention",
+    "authored JSON native key ordering"
   ]
 }

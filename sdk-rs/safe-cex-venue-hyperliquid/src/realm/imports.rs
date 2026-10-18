@@ -1,7 +1,10 @@
 //! Module imports the ported class bodies read by name, bound to the existing
 //! Rust ports. A name the bodies reach that is not bound throws a visible
 //! ReferenceError rather than resolving to a stand-in.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{PropKey, Thrown, Value},
+};
 use crate::{cloid, types};
 
 fn arg(args: &[Value], i: usize) -> Value {
@@ -108,14 +111,17 @@ pub(crate) fn bind(realm: &Realm) {
         Value::Number(crate::constants::SPOT_MAX_PRICE_DECIMALS as f64),
     );
 
-    // virtualClock: the runtime's wall clock (the venue offset is host-owned).
+    // The imported singleton retains the shared server clock correction.
     let clock = realm.new_object();
-    let now = realm.native("getCurrentTimeMs", 0, |r, _, _| {
-        Ok(Value::Number(r.runtime().now_ms()))
+    let now = realm.native("getCurrentTimeMs", 0, |_, _, _| {
+        Ok(Value::Number(
+            safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+        ))
     });
     realm.define_hidden(&clock, PropKey::str("getCurrentTimeMs"), now);
     realm.bind_import("virtualClock", clock);
 
+    super::host_spot::bind_spot_imports(realm).expect("shared dayjs import exists");
     bind_cloid(realm);
     bind_startup(realm);
     super::imports_utils::bind(realm);
@@ -162,7 +168,7 @@ fn bind_cloid(realm: &Realm) {
     realm.define_hidden(&o, PropKey::str("isValid"), f);
     let shape = rule.is_honorable_shape.clone();
     let f = realm.native("isHonorableShape", 1, move |r, _, a| {
-        let opts: safe_cex_types::PlaceOrderOpts = r.to_typed(&arg(a, 0))?;
+        let opts: safe_cex_types::PreparedOrderOpts = r.to_typed(&arg(a, 0))?;
         Ok(Value::Bool(shape.as_ref().is_none_or(|check| check(&opts))))
     });
     realm.define_hidden(&o, PropKey::str("isHonorableShape"), f);

@@ -102,7 +102,12 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: Some("OK".into()),
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(next["data"].clone()),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        next["data"].clone(),
+                    )
+                    .unwrap(),
+                ),
             })
         })
     }
@@ -197,7 +202,8 @@ fn order_execution_matches_live_typescript() {
         base.on(
             "error",
             Rc::new(move |_, value| {
-                e.borrow_mut().push(value[0].as_str().unwrap().to_owned());
+                let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
+                e.borrow_mut().push(value.as_str().unwrap().to_owned());
                 if mutate_error {
                     error_store.set_setting("isHedged", true).unwrap();
                 }
@@ -209,9 +215,8 @@ fn order_execution_matches_live_typescript() {
             base.on(
                 "log",
                 Rc::new(move |_, v| {
-                    if v[0].as_str().unwrap().contains("Bulk open-interest")
-                        && !failed.replace(true)
-                    {
+                    let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
+                    if v.as_str().unwrap().contains("Bulk open-interest") && !failed.replace(true) {
                         return Err(ExchangeError::new("log down"));
                     }
                     Ok(())
@@ -442,7 +447,9 @@ fn order_execution_matches_live_typescript() {
             assert_eq!(r.method, e["method"], "{name} method");
             assert_eq!(r.url, e["url"], "{name} url");
             match &r.body {
-                Some(RestBody::Untransformed(v)) => assert_json(v, &e["body"], &name),
+                Some(RestBody::Untransformed(v)) => {
+                    assert_json(&v.clone().into_value().unwrap(), &e["body"], &name)
+                }
                 None => assert!(e.get("body").is_none()),
                 _ => panic!("unexpected transformed request"),
             };
@@ -458,8 +465,12 @@ fn order_execution_matches_live_typescript() {
             );
             if r.method == "DELETE" {
                 assert_eq!(
-                    e["__suppressAsterUnknownOrderError"], true,
-                    "source Axios suppression carrier unavailable natively"
+                    r.config_extensions
+                        .get("__suppressAsterUnknownOrderError")
+                        .cloned()
+                        .map(|value| value.into_value().unwrap()),
+                    e.get("__suppressAsterUnknownOrderError").cloned(),
+                    "native request preserves source Axios suppression"
                 );
             }
         }

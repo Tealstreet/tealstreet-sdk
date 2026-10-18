@@ -116,18 +116,7 @@ struct Calls {
     current_handler_fields: BTreeSet<String>,
     aliases: BTreeSet<String>,
     findings: Vec<String>,
-    body_hash: String,
     inventory: Vec<serde_json::Value>,
-}
-fn fingerprint(tokens: &impl ToTokens) -> String {
-    let hash = tokens
-        .to_token_stream()
-        .to_string()
-        .bytes()
-        .fold(0xcbf29ce484222325u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-        });
-    format!("{hash:016x}")
 }
 fn base_type(ty: &syn::Type) -> bool {
     match ty {
@@ -247,11 +236,9 @@ impl<'ast> Visit<'ast> for Calls {
     }
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
         let old = std::mem::replace(&mut self.context, node.sig.ident.to_string());
-        let body = std::mem::replace(&mut self.body_hash, fingerprint(node));
         let aliases = std::mem::take(&mut self.aliases);
         syn::visit::visit_trait_item_fn(self, node);
         self.aliases = aliases;
-        self.body_hash = body;
         self.context = old;
     }
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
@@ -261,11 +248,9 @@ impl<'ast> Visit<'ast> for Calls {
             return;
         }
         let old = std::mem::replace(&mut self.context, node.sig.ident.to_string());
-        let body = std::mem::replace(&mut self.body_hash, fingerprint(node));
         let aliases = std::mem::take(&mut self.aliases);
         syn::visit::visit_item_fn(self, node);
         self.aliases = aliases;
-        self.body_hash = body;
         self.context = old;
     }
     fn visit_fn_arg(&mut self, node: &'ast syn::FnArg) {
@@ -288,16 +273,19 @@ impl<'ast> Visit<'ast> for Calls {
     }
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         let old = std::mem::replace(&mut self.context, node.sig.ident.to_string());
-        let body = std::mem::replace(&mut self.body_hash, fingerprint(node));
         let aliases = std::mem::take(&mut self.aliases);
         syn::visit::visit_impl_item_fn(self, node);
         self.aliases = aliases;
-        self.body_hash = body;
         self.context = old;
     }
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         if self.hooks.contains(&node.method.to_string()) {
-            self.inventory.push(serde_json::json!({"function":self.context,"body":self.body_hash,"call":node.to_token_stream().to_string()}));
+            let receiver = if self.base_receiver(&node.receiver) {
+                "base"
+            } else {
+                "dynamic"
+            };
+            self.inventory.push(serde_json::json!({"function":self.context,"kind":"call","hook":node.method.to_string(),"receiver":receiver}));
         }
 
         if !(self.allowed && node.method == self.context)
@@ -318,7 +306,12 @@ impl<'ast> Visit<'ast> for Calls {
                 .last()
                 .is_some_and(|segment| self.hooks.contains(&segment.ident.to_string()))
         {
-            self.inventory.push(serde_json::json!({"function":self.context,"body":self.body_hash,"reference":node.to_token_stream().to_string()}));
+            let receiver = if segments[segments.len() - 2].ident == "BaseExchange" {
+                "base"
+            } else {
+                "path"
+            };
+            self.inventory.push(serde_json::json!({"function":self.context,"kind":"reference","hook":segments.last().unwrap().ident.to_string(),"callee":node.to_token_stream().to_string(),"receiver":receiver}));
         }
 
         if segments.len() >= 2
@@ -374,6 +367,15 @@ struct ReviewedDelegations {
 }
 impl ReviewedDelegations {
     fn load(repo: &Path, overrides: &serde_json::Value) -> Self {
+        let source_review = Command::new("node")
+            .arg(repo.join("sdk-rs/safe-cex-exchange/scripts/dispose-source.cjs"))
+            .output()
+            .expect("Node and TypeScript required for disposal source review");
+        assert!(
+            source_review.status.success(),
+            "dispose classification disagrees with TypeScript source: {}",
+            String::from_utf8_lossy(&source_review.stderr)
+        );
         let reviewed: serde_json::Value =
             serde_json::from_str(include_str!("override-base-delegations.json")).unwrap();
         assert_eq!(
@@ -447,6 +449,20 @@ impl ReviewedDelegations {
     }
 }
 #[test]
+fn disposal_source_classification_rejects_mismatched_reviews() {
+    let output = Command::new("node")
+        .args(["--test", "scripts/dispose-source.test.cjs"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("Node and TypeScript required for disposal source controls");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+#[test]
 fn production_callers_do_not_bypass_exchange_override_hooks() {
     let rows: serde_json::Value =
         serde_json::from_str(include_str!("venue-overrides.json")).unwrap();
@@ -488,7 +504,7 @@ fn production_callers_do_not_bypass_exchange_override_hooks() {
     }
     files.sort();
     let mut delegations = ReviewedDelegations::load(workspace.parent().unwrap(), &rows);
-    let mut inventory = vec![];
+    let mut inventory = BTreeMap::<(String, String), BTreeMap<String, usize>>::new();
     for file in files {
         let source = syn::parse_file(&std::fs::read_to_string(&file).unwrap()).unwrap();
         let mut calls = Calls {
@@ -500,14 +516,18 @@ fn production_callers_do_not_bypass_exchange_override_hooks() {
             current_handler_fields: BTreeSet::new(),
             aliases: BTreeSet::new(),
             findings: vec![],
-            body_hash: String::new(),
             inventory: vec![],
         };
         calls.visit_file(&source);
         let relative = file.strip_prefix(workspace).unwrap().to_string_lossy();
         for mut row in calls.inventory {
-            row["file"] = serde_json::json!(relative);
-            inventory.push(row);
+            let function = row["function"].as_str().unwrap().to_owned();
+            row.as_object_mut().unwrap().remove("function");
+            *inventory
+                .entry((relative.to_string(), function))
+                .or_default()
+                .entry(row.to_string())
+                .or_default() += 1;
         }
         let unreviewed: Vec<_> = calls
             .findings
@@ -522,7 +542,24 @@ fn production_callers_do_not_bypass_exchange_override_hooks() {
         );
     }
     delegations.assert_all_used();
-    let inventory = serde_json::json!(inventory);
+    // Pins each body's hook edges (kind, hook, receiver, multiplicity), not its tokens:
+    // unrelated edits keep the row; adding, removing or re-targeting a hook call fails.
+    let inventory = serde_json::json!(
+        inventory
+            .into_iter()
+            .map(|((file, function), edges)| {
+                let edges: Vec<_> = edges
+                    .into_iter()
+                    .map(|(edge, count)| {
+                        let mut edge: serde_json::Value = serde_json::from_str(&edge).unwrap();
+                        edge["count"] = serde_json::json!(count);
+                        edge
+                    })
+                    .collect();
+                serde_json::json!({"file": file, "function": function, "edges": edges})
+            })
+            .collect::<Vec<_>>()
+    );
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/override-call-sites.json");
     if std::env::var_os("UPDATE_EXCHANGE_CALL_INVENTORY").is_some() {
         std::fs::write(
@@ -535,7 +572,7 @@ fn production_callers_do_not_bypass_exchange_override_hooks() {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(
         inventory, expected,
-        "override call sites or their enclosing bodies changed; review dynamic dispatch before updating override-call-sites.json"
+        "override hook call edges changed; review dynamic dispatch before updating override-call-sites.json"
     );
 }
 
@@ -606,7 +643,6 @@ fn test_attributes_do_not_hide_production_dispatch_bypasses() {
         current_handler_fields: BTreeSet::new(),
         aliases: BTreeSet::new(),
         findings: vec![],
-        body_hash: String::new(),
         inventory: vec![],
     };
     calls.visit_file(&source);
@@ -641,7 +677,6 @@ fn worker_handler_fields_do_not_hide_exchange_base_bypasses() {
         current_handler_fields: BTreeSet::new(),
         aliases: BTreeSet::new(),
         findings: vec![],
-        body_hash: String::new(),
         inventory: vec![],
     };
     calls.visit_file(&source);
@@ -650,4 +685,72 @@ fn worker_handler_fields_do_not_hide_exchange_base_bypasses() {
         2,
         "worker BaseHandler exclusion must retain both exchange base bypasses"
     );
+}
+
+fn edge_multiset(source: &str) -> Vec<String> {
+    let mut calls = Calls {
+        hooks: BTreeSet::from(["dispose".into(), "fetch_orders".into()]),
+        context: String::new(),
+        allowed: false,
+        base_impl: false,
+        handler_fields: BTreeMap::new(),
+        current_handler_fields: BTreeSet::new(),
+        aliases: BTreeSet::new(),
+        findings: vec![],
+        inventory: vec![],
+    };
+    calls.visit_file(&syn::parse_file(source).unwrap());
+    let mut edges: Vec<_> = calls.inventory.iter().map(ToString::to_string).collect();
+    edges.sort();
+    edges
+}
+
+#[test]
+fn call_edge_inventory_ignores_unrelated_body_edits() {
+    let pinned = edge_multiset("fn run(venue: &V) { let a = 1; venue.dispose(); }");
+    for edited in [
+        "fn run(venue: &V) { let renamed = compute(2); log(renamed); venue.dispose(); }",
+        "fn run(venue: &V) { if ready() { venue.dispose(); } else { retry(3) } }",
+        "fn run(venue: &V) { venue.dispose(); /* trailing */ let _ = other_call(); }",
+    ] {
+        assert_eq!(
+            edge_multiset(edited),
+            pinned,
+            "unrelated edit must keep edges: {edited}"
+        );
+    }
+}
+
+#[test]
+fn call_edge_inventory_fails_on_hook_edge_changes() {
+    let pinned = edge_multiset("fn run(venue: &V) { venue.dispose(); }");
+    for (change, edited) in [
+        (
+            "added hook call",
+            "fn run(venue: &V) { venue.dispose(); venue.fetch_orders(); }",
+        ),
+        (
+            "duplicated hook call",
+            "fn run(venue: &V) { venue.dispose(); venue.dispose(); }",
+        ),
+        ("removed hook call", "fn run(venue: &V) { other(); }"),
+        (
+            "venue switched to base",
+            "fn run(venue: &V) { self.base().dispose(); }",
+        ),
+        (
+            "hook renamed",
+            "fn run(venue: &V) { venue.fetch_orders(); }",
+        ),
+        (
+            "moved to another function",
+            "fn other(venue: &V) { venue.dispose(); }",
+        ),
+        (
+            "captured base reference",
+            "fn run(venue: &V) { let f = BaseExchange::dispose; }",
+        ),
+    ] {
+        assert_ne!(edge_multiset(edited), pinned, "{change} must change edges");
+    }
 }

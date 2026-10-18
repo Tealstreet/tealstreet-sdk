@@ -1,7 +1,13 @@
 //! Class allocation, `super` and method installation for the three venue
 //! classes. Constructors enter the mapped `construct_core_*` bodies; methods
 //! and arrows enter `call_core_*`.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{
+        FunctionData, Kind, NativeConstruct, NativeFn, ObjectData, Prop, PropKey, Slot, Thrown,
+        Value,
+    },
+};
 use crate::{
     core_exchange_class::{self, CoreExchangeCapture, CoreExchangeClassHost},
     helper_tasks::HelperObserver,

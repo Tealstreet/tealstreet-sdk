@@ -1,4 +1,5 @@
 //! Bybit V5 data and request machinery; variants remain inside this crate.
+mod hyro_configuration;
 pub mod rate_limits;
 pub mod spot_types;
 pub mod types;
@@ -67,8 +68,6 @@ pub mod variant_accessors;
 
 pub mod failure_diagnostics;
 
-pub mod local_order_cache;
-
 pub mod execution_guards;
 
 pub mod account_readers;
@@ -112,7 +111,6 @@ pub mod inverse_read_surface;
 
 pub mod spot_exchange_reads;
 
-pub mod inverse_socket_bodies;
 pub mod private_snapshot_refresh;
 
 pub mod local_order_reconciliation;
@@ -122,3 +120,10 @@ pub mod primary_startup;
 
 pub mod inverse_symbol;
 pub mod options;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_bybit;
+
+#[cfg(test)]
+#[path = "../tests/support/binding_harness.rs"]
+mod retained_config_binding_harness;

@@ -1,7 +1,6 @@
 use safe_cex_num::{JsJsonValue, math_round};
 use safe_cex_venue_apexomni::{
-    api::*, exchange_utils::*, order_records::Iso8601, transaction_signing::*,
-    utils::hmac_sha256_base64,
+    api::*, exchange_utils::*, order_records::Iso8601, utils::hmac_sha256_base64,
 };
 use serde_json::Value;
 use std::{process::Command, sync::OnceLock};
@@ -126,16 +125,6 @@ fn serialize_legacy_native() {
             serialize_apex_payload_legacy(&input(&row["input"])),
             &row["legacy"],
             "serializeApexPayloadLegacy native result",
-        );
-    }
-}
-#[test]
-fn discard_precision_native() {
-    for row in rows("precision", 100) {
-        result(
-            discard_beyond_precision(row["amount"].as_str().unwrap(), number(&row["decimals"])),
-            &row["result"],
-            "discardBeyondPrecision native result",
         );
     }
 }

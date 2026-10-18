@@ -144,6 +144,17 @@ function make(fixture) {
     }
     return { events, options, client, request, response, note, result, error };
 }
+// Additional production-client observations; the default corpus is unchanged.
+if (process.argv[2] === '--native-query') {
+    const samples = JSON.parse(process.argv[3]);
+    const results = samples.map(sample => {
+        const run = make({options:{key:'fixture-key',secret:'fixture-secret'}, nonce:sample.nonce,timeBits:sample.timeBits});
+        const result = run.request({method:'GET',url:'/api/v1/futures/account',params:sample.params});
+        return Object.fromEntries(Object.entries(result.headers).map(([key,value])=>[key,String(value)]));
+    });
+    fs.writeSync(1, JSON.stringify(results));
+    process.exit(0);
+}
 const factory = [];
 for (const testnet of [false, true])
     for (const publicDataOnly of [false, true]) {

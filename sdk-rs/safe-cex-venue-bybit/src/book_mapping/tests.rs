@@ -48,7 +48,7 @@ fn book_state_matches_live_source() {
         .iter()
         .map(|case| case["outcomes"].as_array().unwrap().len())
         .sum();
-    assert_eq!(source_total, 1746, "BOOK-CARDINALITY source total");
+    assert_eq!(source_total, 1755, "BOOK-CARDINALITY source total");
     let mut native_total = 0;
     let mut comparisons = 0;
     for (index, case) in cases.iter().enumerate() {
@@ -97,7 +97,7 @@ fn book_state_matches_live_source() {
             assert_eq!(actual, &normalize(expected), "case{index} step{step}");
         }
     }
-    assert_eq!(comparisons, 1746, "BOOK-CARDINALITY comparisons");
-    assert_eq!(native_total, 1746, "BOOK-CARDINALITY native total");
-    assert_eq!(cases.len(), 987);
+    assert_eq!(comparisons, 1755, "BOOK-CARDINALITY comparisons");
+    assert_eq!(native_total, 1755, "BOOK-CARDINALITY native total");
+    assert_eq!(cases.len(), 996);
 }

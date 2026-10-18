@@ -1,4 +1,4 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 #[path = "../../safe-cex-exchange/tests/support/store.rs"]
 mod test_store;
@@ -112,9 +112,10 @@ fn tracked_orders_completion_and_logs_match_live_manager_and_pin_alias_boundary(
             Rc::new(move |event, message| {
                 log_events
                     .borrow_mut()
-                    .push(json!({"event":event,"message":message}));
+                    .push(json!({"event":event,"message":safe_cex_exchange::js_runtime::value::to_json(message).unwrap()}));
                 if reentrant {
-                    target.data.borrow_mut().orders[0].status = safe_cex_types::OrderStatus::Closed;
+                    target.data.borrow_mut().orders[0].status =
+                        safe_cex_types::OrderStatus::Closed.into();
                 }
                 Ok(())
             }),
@@ -142,8 +143,8 @@ fn tracked_orders_completion_and_logs_match_live_manager_and_pin_alias_boundary(
     }
     let (instance, store) = fixture(&data["reentrant"], "id");
     let mut selected: Vec<Order> = get_current_orders(&instance);
-    store.data.borrow_mut().orders[0].status = safe_cex_types::OrderStatus::Closed;
-    selected[0].price = 42.0;
+    store.data.borrow_mut().orders[0].status = safe_cex_types::OrderStatus::Closed.into();
+    selected[0].price = 42.0.into();
     assert_eq!(
         data["alias"],
         json!({"selectedStatus":"closed","storePrice":42})
@@ -161,7 +162,7 @@ fn tracked_orders_completion_and_logs_match_live_manager_and_pin_alias_boundary(
             Rc::new(move |event, message| {
                 captured
                     .borrow_mut()
-                    .push(json!({"id":name,"event":event,"message":message}));
+                    .push(json!({"id":name,"event":event,"message":safe_cex_exchange::js_runtime::value::to_json(message).unwrap()}));
                 Ok(())
             }),
         );

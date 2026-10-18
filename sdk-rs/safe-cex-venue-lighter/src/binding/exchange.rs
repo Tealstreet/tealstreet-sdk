@@ -23,7 +23,7 @@ use safe_cex_exchange::{
         store,
         value::{Js, Thrown, arg, from_typed, to_typed},
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ListenerCleanup},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -78,8 +78,14 @@ fn base_exchange_class(weak: Weak<Shared>, name: ExchangeName, options: Exchange
             settings: settings(),
             external_public_data: None,
         };
-        let (instance, core) =
-            base_exchange::create(&shared.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;
+        let (instance, core) = base_exchange::create(
+            &shared.sockets,
+            parts,
+            arg(&a, 0),
+            arg(&a, 1),
+            arg(&a, 2),
+            |_| Ok(()),
+        )?;
         if shared.base.set(core).is_err() {
             return Err(Thrown::error("Error", "BaseExchange constructed twice"));
         }
@@ -185,6 +191,25 @@ impl LighterNativeExchange {
                 .map_err(err)?;
             to_typed(&value).map_err(err)
         })
+    }
+
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        member: &'static str,
+        options: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let listener = Js::function("callback", move |_, args| {
+            callback(to_typed(&arg(&args, 0))?);
+            Ok(Js::Undefined)
+        });
+        let this = self.this.borrow().clone();
+        let cleanup = this
+            .call_method(member, vec![options, listener])
+            .map_err(err)?;
+        Ok(Box::new(move || {
+            cleanup.call(Js::Undefined, vec![]).map(|_| ()).map_err(err)
+        }))
     }
 
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
@@ -365,6 +390,33 @@ impl Exchange for LighterNativeExchange {
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         inherited_rejection()
     }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", js(&options)?, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", js(&symbol)?, callback)
+    }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        self.invoke("fetchOHLCV", args!(js(&options)))
+    }
+    fn fetch_historical_fills(
+        &self,
+        options: ExecutionsOptions,
+    ) -> ExchangeFuture<'_, Vec<Execution>> {
+        self.invoke("fetchHistoricalFills", args!(js(&options)))
+    }
+    // Source performs one venue snapshot attempt with its own error handling.
+    fn fetch_and_set_private_snapshot(&self, _tries: u32) -> ExchangeFuture<'_, ()> {
+        self.invoke_unit("fetchAndSetPrivateSnapshot", vec![])
+    }
     // ts: base.ts:1138 — inherited fetchPublicTrades rejects.
     fn fetch_public_trades(
         &self,
@@ -401,7 +453,7 @@ mod tests {
         fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
             panic!("runtime used while installing globals")
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             panic!("runtime used while installing globals")
         }
@@ -412,7 +464,12 @@ mod tests {
             panic!("runtime used while installing globals")
         }
         fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
-        fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {}
+        fn report_raw_exception(
+            &self,
+            _: &safe_cex_exchange::js_runtime::value::Js,
+            _: &serde_json::Value,
+        ) {
+        }
         fn execute_worker_request(
             &self,
             _: serde_json::Value,

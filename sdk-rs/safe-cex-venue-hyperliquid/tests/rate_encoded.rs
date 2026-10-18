@@ -77,8 +77,9 @@ fn encoded_rate_classifier_parses_once_at_the_actual_prepare_callsite() {
         let clock = Arc::new(Clock::default());
         let limiter = Rc::new(RateLimiter::new(clock.clone(), 1200., 60000.));
         let api = client(limiter.clone());
-        let mut request =
-            api.build_request(if i == 2 { "/exchange" } else { "/info" }, &Value::Null);
+        let mut request = api
+            .build_request(if i == 2 { "/exchange" } else { "/info" }, &Value::Null)
+            .unwrap();
         request.body = Some(RestBody::Encoded(raw.as_bytes().to_vec()));
         let prepared = ready(api.prepare_request(request, i == 8)).unwrap();
         ready(limiter.wait_for_token(1.)).unwrap();
@@ -134,7 +135,7 @@ fn telemetry_receives_the_original_native_request_data_variant() {
                         .push((message.to_owned(), context.cloned()))
                 }),
             );
-        let mut request = api.build_request("/exchange", &input);
+        let mut request = api.build_request("/exchange", &input).unwrap();
         if i >= 2 {
             request.body = Some(RestBody::Encoded(
                 input.as_str().unwrap().as_bytes().to_vec(),
@@ -148,7 +149,10 @@ fn telemetry_receives_the_original_native_request_data_variant() {
                     reason: None,
                     headers: Default::default(),
                     body: RestResponseBody::Untransformed(
-                        json!({"status":"err","response":"venue rejected"}),
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"status":"err","response":"venue rejected"}),
+                        )
+                        .unwrap(),
                     ),
                 },
                 false,
@@ -240,4 +244,55 @@ fn encoded_pacing_telemetry_and_optional_weight_native_values_precede_source() {
     telemetry_receives_the_original_native_request_data_variant();
     omitted_weight_retains_the_source_default_and_numeric_normalization();
     source();
+}
+
+#[test]
+fn cancel_by_cloid_weight_reaches_real_http_prepare_for_raw_and_value_bodies() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/rate-encoded-source.cjs"
+        ))
+        .arg("--cloid-weights")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(source.len(), 6);
+    for (index, (mode, count, delay)) in [
+        ("raw", 39, 50),
+        ("raw", 40, 100),
+        ("raw", 80, 150),
+        ("value", 39, 50),
+        ("value", 40, 100),
+        ("value", 80, 150),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(source[index]["mode"], mode);
+        assert_eq!(source[index]["count"].as_u64(), Some(count as u64));
+        assert_eq!(source[index]["weight"].as_f64(), Some((delay / 50) as f64));
+        let clock = Arc::new(Clock::default());
+        let limiter = Rc::new(RateLimiter::new(clock.clone(), 1200.0, 60000.0));
+        let api = client(limiter.clone());
+        let action = json!({"action":{"type":"cancelByCloid","cancels":vec![Value::Null;count]}});
+        let body = if mode == "raw" {
+            Value::String(action.to_string())
+        } else {
+            action
+        };
+        ready(api.prepare_request(api.build_request("/exchange", &body).unwrap(), false)).unwrap();
+        ready(limiter.wait_for_token(1.0)).unwrap();
+        assert_eq!(
+            clock.now.load(Ordering::SeqCst),
+            delay,
+            "cancelByCloid batch pacing at HTTP prepare: {mode}/{count}"
+        );
+        assert_eq!(clock.sleeps.lock().unwrap().as_slice(), &[delay]);
+    }
 }

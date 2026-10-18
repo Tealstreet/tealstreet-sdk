@@ -1,6 +1,6 @@
 //! ECMAScript semantics the host families share: operators delegate to
-//! `js_runtime::ops`; string-hint ToString, built-in iteration, HasProperty and
-//! CopyDataProperties are local because js_runtime has no equivalent.
+//! `js_runtime::ops`; iteration uses the shared iterator protocol. String-hint
+//! ToString, HasProperty and CopyDataProperties remain local operations.
 use super::value::{to_account, to_js, to_signing};
 use crate::{sdk_account_api::AccountValue, transaction_signing::SigningResult};
 
@@ -8,7 +8,7 @@ use safe_cex_exchange::js_runtime::{
     builtins, ops as runtime,
     value::{Js, Str, Thrown, array_index, utf16},
 };
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 /// ToString: ToPrimitive with the string hint (toString before valueOf), which
 /// `js_runtime::ops::to_primitive` (default/number hint only) does not cover.
@@ -110,29 +110,8 @@ pub(crate) fn relation_bool(
     relation_value(op, left, right).map(AccountValue::Boolean)
 }
 
-enum Cursor {
-    Array {
-        items: Rc<RefCell<Vec<Option<Js>>>>,
-        next: usize,
-    },
-    Chars {
-        units: Str,
-        next: usize,
-    },
-    Map {
-        entries: Rc<RefCell<Vec<(Js, Js)>>>,
-        visited: Vec<Js>,
-    },
-    Set {
-        values: Rc<RefCell<Vec<Js>>>,
-        visited: Vec<Js>,
-    },
-}
-
-/// A built-in iterator (Array, String, Map, Set). Arrays re-read their length
-/// per step; Map/Set skip entries deleted before being reached and see appended
-/// ones. None carries `return`, so IteratorClose keeps the original completion.
-pub(crate) struct JsIterator(RefCell<Option<Cursor>>);
+/// A retained record over the shared intrinsic iterator protocol.
+pub(crate) struct JsIterator(RefCell<Option<(Js, Js)>>);
 
 fn not_iterable(value: &Js) -> Thrown {
     Thrown::type_error(&match value {
@@ -146,88 +125,67 @@ fn not_iterable(value: &Js) -> Thrown {
     })
 }
 
-fn unvisited<T: Clone>(items: &[T], key: impl Fn(&T) -> &Js, visited: &[Js]) -> Option<T> {
-    items
-        .iter()
-        .find(|item| !visited.iter().any(|v| v.same_value_zero(key(item))))
-        .cloned()
-}
-
-impl Cursor {
-    fn next_value(&mut self) -> Option<Js> {
-        match self {
-            Cursor::Array { items, next } => {
-                let value = items.borrow().get(*next)?.clone().unwrap_or(Js::Undefined);
-                *next += 1;
-                Some(value)
-            }
-            Cursor::Chars { units, next } => {
-                let first = *units.get(*next)?;
-                let pair = (0xD800..0xDC00).contains(&first)
-                    && units
-                        .get(*next + 1)
-                        .is_some_and(|u| (0xDC00..0xE000).contains(u));
-                let width = if pair { 2 } else { 1 };
-                let out = Js::utf16(&units[*next..*next + width]);
-                *next += width;
-                Some(out)
-            }
-            Cursor::Map { entries, visited } => {
-                let (key, value) = unvisited(&entries.borrow(), |(k, _)| k, visited)?;
-                visited.push(key.clone());
-                Some(Js::array(vec![key, value]))
-            }
-            Cursor::Set { values, visited } => {
-                let value = unvisited(&values.borrow(), |v| v, visited)?;
-                visited.push(value.clone());
-                Some(value)
-            }
-        }
-    }
-}
-
 impl JsIterator {
-    /// GetIterator(value, sync) over the runtime's iterable intrinsics.
     pub(crate) fn open(value: &Js) -> Result<Self, Thrown> {
-        let cursor = match value {
-            Js::Array(items) => Cursor::Array {
-                items: items.clone(),
-                next: 0,
-            },
-            Js::String(units) => Cursor::Chars {
-                units: units.clone(),
-                next: 0,
-            },
-            Js::Map(entries) => Cursor::Map {
-                entries: entries.clone(),
-                visited: vec![],
-            },
-            Js::Set(values) => Cursor::Set {
-                values: values.clone(),
-                visited: vec![],
-            },
-            other => return Err(not_iterable(other)),
-        };
-        Ok(Self(RefCell::new(Some(cursor))))
-    }
-    /// IteratorStepValue: `None` once done, and stays done.
-    pub(crate) fn step(&self) -> Option<Js> {
-        let mut slot = self.0.borrow_mut();
-        let value = slot.as_mut()?.next_value();
-        if value.is_none() {
-            *slot = None;
+        if value.is_nullish() {
+            return Err(not_iterable(value));
         }
-        value
+        let method = value.get_property(&Js::SymbolIterator)?;
+        if method.is_nullish() {
+            return Err(not_iterable(value));
+        }
+        let iterator = method.call(value.clone(), vec![])?;
+        if !iterator.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        let next = iterator.get("next")?;
+        Ok(Self(RefCell::new(Some((iterator, next)))))
     }
-    pub(crate) fn close(&self) {
-        *self.0.borrow_mut() = None;
+    pub(crate) fn step(&self) -> Result<Option<Js>, Thrown> {
+        let Some((iterator, next)) = self.0.borrow().clone() else {
+            return Ok(None);
+        };
+        let result = (|| {
+            let step = next.call(iterator, vec![])?;
+            if !step.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+            if step.get("done")?.truthy() {
+                Ok(None)
+            } else {
+                step.get("value").map(Some)
+            }
+        })();
+        if !matches!(&result, Ok(Some(_))) {
+            self.0.borrow_mut().take();
+        }
+        result
+    }
+    pub(crate) fn close(&self) -> Result<(), Thrown> {
+        let Some((iterator, _)) = self.0.borrow_mut().take() else {
+            return Ok(());
+        };
+        let method = iterator.get("return")?;
+        if !method.is_nullish() {
+            let result = method.call(iterator, vec![])?;
+            if !result.is_object() {
+                return Err(Thrown::type_error(
+                    "Iterator return result is not an object",
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
 /// Every value of an iterable, in order (array spread / argument spread).
 pub(crate) fn spread(value: &Js) -> Result<Vec<Js>, Thrown> {
     let iterator = JsIterator::open(value)?;
-    Ok(std::iter::from_fn(|| iterator.step()).collect())
+    let mut values = vec![];
+    while let Some(value) = iterator.step()? {
+        values.push(value);
+    }
+    Ok(values)
 }
 
 pub(crate) fn spread_values(value: &AccountValue) -> SigningResult<Vec<AccountValue>> {
@@ -244,7 +202,7 @@ pub(crate) fn for_of(
     mut body: impl FnMut(AccountValue) -> SigningResult<()>,
 ) -> SigningResult<()> {
     let iterator = JsIterator::open(&to_js(value)).map_err(to_signing)?;
-    while let Some(item) = iterator.step() {
+    while let Some(item) = iterator.step().map_err(to_signing)? {
         body(to_account(&item))?;
     }
     Ok(())
@@ -317,6 +275,7 @@ pub(crate) fn spread_with_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
 
     fn big(text: &str) -> Js {
         Js::BigInt(Rc::new(text.parse().unwrap()))
@@ -362,11 +321,65 @@ mod tests {
     }
 
     #[test]
+    fn map_values_use_the_live_shared_iterator() {
+        let map = Js::new_map();
+        let set = map.get("set").unwrap();
+        set.call(map.clone(), vec![Js::str("a"), Js::Number(1.0)])
+            .unwrap();
+        set.call(map.clone(), vec![Js::str("b"), Js::Number(2.0)])
+            .unwrap();
+        let values = map
+            .get("values")
+            .unwrap()
+            .call(map.clone(), vec![])
+            .unwrap();
+        let iterator = JsIterator::open(&values).unwrap();
+        assert!(
+            iterator
+                .step()
+                .unwrap()
+                .unwrap()
+                .strict_equals(&Js::Number(1.0))
+        );
+        map.get("delete")
+            .unwrap()
+            .call(map.clone(), vec![Js::str("b")])
+            .unwrap();
+        set.call(map.clone(), vec![Js::str("c"), Js::Number(-0.0)])
+            .unwrap();
+        let Js::Number(number) = iterator.step().unwrap().unwrap() else {
+            panic!("native number")
+        };
+        assert_eq!(number.to_bits(), (-0.0_f64).to_bits());
+        assert!(iterator.step().unwrap().is_none());
+        set.call(map.clone(), vec![Js::str("d"), Js::Number(4.0)])
+            .unwrap();
+        assert!(iterator.step().unwrap().is_none());
+    }
+
+    #[test]
+    fn iterator_next_keeps_the_original_thrown_value() {
+        let thrown = Js::object(vec![("marker", Js::Number(7.0))]);
+        let captured = thrown.clone();
+        let iterator = Js::object(vec![(
+            "next",
+            Js::function("next", move |_, _| Err(Thrown::new(captured.clone()))),
+        )]);
+        // Retain the iterator and next function exactly as open() does.
+        let record = JsIterator(RefCell::new(Some((
+            iterator.clone(),
+            iterator.get("next").unwrap(),
+        ))));
+        assert!(record.step().unwrap_err().value.strict_equals(&thrown));
+        assert!(record.step().unwrap().is_none());
+    }
+
+    #[test]
     fn string_iteration_yields_code_points_and_stays_done() {
         let iterator = JsIterator::open(&Js::str("a\u{1F600}")).unwrap();
-        assert_eq!(iterator.step().unwrap().to_display(), "a");
-        assert_eq!(iterator.step().unwrap().to_display(), "\u{1F600}");
-        assert!(iterator.step().is_none() && iterator.step().is_none());
+        assert_eq!(iterator.step().unwrap().unwrap().to_display(), "a");
+        assert_eq!(iterator.step().unwrap().unwrap().to_display(), "\u{1F600}");
+        assert!(iterator.step().unwrap().is_none() && iterator.step().unwrap().is_none());
         assert!(JsIterator::open(&Js::object(vec![])).is_err());
     }
 }

@@ -33,7 +33,7 @@ export function validatePolicy(metadata, source) {
     assert.ok(exchange.features.includes('health'), 'facade must enable exchange health by default');
     assert.equal(exchange.uses_default_features, false, 'facade must select health explicitly instead of core defaults');
     const code = source.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').trim();
-    assert.equal(code, 'pub use safe_cex_exchange::*;', 'facade must unconditionally re-export exchange-core contracts');
+    assert.match(code, /^pub use safe_cex_exchange::\*;/, 'facade must unconditionally re-export exchange-core contracts');
 }
 function hasRegex(tree) {
     return tree.split('\n').some((line) => line.trim().split(/\s+/)[0] === 'regex');
@@ -42,11 +42,25 @@ function hasRegex(tree) {
 test('actual feature declarations keep health opt-in for the core and enabled in the facade', () => {
     validatePolicy(actual, facadeSource);
 });
-test('actual normal dependency graphs exclude regex in the default core and include it in the facade', () => {
-    const core = cargo(['tree', '--locked', '-p', 'safe-cex-exchange', '-e', 'normal', '--prefix', 'none', '--format', '{p}']);
-    const facade = cargo(['tree', '--locked', '-p', 'safe-cex', '-e', 'normal', '--prefix', 'none', '--format', '{p}']);
-    assert.equal(hasRegex(core), false, 'default core dependency graph must exclude regex');
-    assert.equal(hasRegex(facade), true, 'default facade dependency graph must include health regex');
+test('actual dependency graphs keep the core health regex opt-in and enable health through the facade', () => {
+    // Crypto and Store also use regex. Check the core's own optional edge,
+    // rather than rejecting those unrelated transitive dependencies.
+    const direct = ['-e', 'normal', '--depth', '1', '--prefix', 'none'];
+    const core = cargo(['tree', '--locked', '-p', 'safe-cex-exchange', ...direct, '--format', '{p}']);
+    const health = cargo(['tree', '--locked', '-p', 'safe-cex-exchange', '--features', 'health', ...direct, '--format', '{p}']);
+    const facade = cargo(['tree', '--locked', '-p', 'safe-cex', ...direct, '--format', '{p}\t{f}']);
+    assert.equal(hasRegex(core), false, 'default core direct dependencies must exclude health regex');
+    assert.equal(hasRegex(health), true, 'explicit core health must include its direct regex dependency');
+    const exchange = facade.split('\n').find(line => line.startsWith('safe-cex-exchange '));
+    assert.ok(exchange?.split('\t')[1]?.split(',').includes('health'), 'resolved facade must enable core health');
+});
+for (const [label, replacement] of [
+    ['removed', ''],
+    ['conditional', '#[cfg(feature = "health")]\npub use safe_cex_exchange::*;'],
+    ['nested', 'pub mod hidden { pub use safe_cex_exchange::*; }'],
+]) test(`${label} facade core re-export is rejected`, () => {
+    const broken = facadeSource.replace('pub use safe_cex_exchange::*;', replacement);
+    assert.throws(() => validatePolicy(actual, broken), /facade must unconditionally re-export exchange-core contracts/);
 });
 test('removing facade health is rejected for its intended reason', () => {
     const broken = structuredClone(actual);

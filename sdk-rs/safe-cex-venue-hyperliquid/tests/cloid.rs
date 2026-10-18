@@ -85,7 +85,7 @@ fn actual_source_cloid_helpers_match_native_values() {
                     .unwrap();
                     opts.r#type = r#type;
                     assert_eq!(
-                        shape(&opts),
+                        shape(&safe_cex_types::PreparedOrderOpts::from(&opts)),
                         honorable.as_bool().unwrap(),
                         "CLOID honorable {name}"
                     );

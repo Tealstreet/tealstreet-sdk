@@ -189,3 +189,13 @@ The portable actual-source witness is
 native counterpart, native failure control and repair remain owed. No native
 result for this new witness is claimed. PR7851 remains draft while the urgent
 formatter CI repair is isolated on a fresh integration branch.
+
+
+### Unused mapper cleanup
+
+The separate closed `map_binance_historical_order_typed` adapter and its dedicated
+`tests/order_history.rs` target were removed. Historical source evidence remains
+in `tests/history_native.rs`; both production history contexts continue through
+the canonical native mapper. The earlier typed-policy measurements above describe
+the original tree only. Event tests now consume the production native rejection
+classifier; the unused JSON-domain `private_order_logic` copy is removed.

@@ -29,7 +29,9 @@ fn decoded(v: Value) -> EventValue {
 fn failure() -> Failure {
     let mut e = ExchangeError::new("api fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!("api-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "api-code"
+    )));
     e.response = Some(json!({"status":503}));
     Rc::new(e)
 }
@@ -39,11 +41,10 @@ fn wire(v: &EventValue) -> Value {
         EventValue::Null => Value::Null,
         EventValue::Bool(v) => json!(v),
         EventValue::Number(v) => json!(v),
-        EventValue::String(v) => json!(v),
-        EventValue::Array(v) => v.borrow().iter().map(wire).collect(),
-        EventValue::Object(v) => v
-            .borrow()
-            .fields
+        EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
+        EventValue::Array(v) => array_values(v).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
@@ -54,7 +55,11 @@ fn text(v: &EventValue, want: &str, label: &str) {
     let EventValue::String(got) = v else {
         panic!("{label}: expected native String, {v:?}")
     };
-    assert_eq!(got, want, "{label}")
+    assert_eq!(
+        got.as_ref(),
+        want.encode_utf16().collect::<Vec<_>>(),
+        "{label}"
+    )
 }
 fn num(v: &EventValue, want: f64, label: &str) {
     let EventValue::Number(got) = v else {
@@ -72,11 +77,15 @@ fn original(got: &Failure, want: &Failure, label: &str) {
     assert!(Rc::ptr_eq(got, want), "{label}: original Error Rc");
     assert_eq!(got.name, "RangeError", "{label}");
     assert_eq!(got.message, "api fixture", "{label}");
-    assert_eq!(got.code, Some(json!("api-code")), "{label}");
+    assert_eq!(
+        observed_error_code(&got.code),
+        Some(json!("api-code")),
+        "{label}"
+    );
     assert_eq!(got.response, Some(json!({"status":503})), "{label}")
 }
 fn error_wire(e: &Failure, want: &Failure) -> Value {
-    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
 }
 #[derive(Default)]
 struct Trace(Vec<Value>);
@@ -200,7 +209,7 @@ impl RequestBindings for Request {
         if self.case == "headers-fail" {
             Err(self.error.clone())
         } else {
-            Ok(EventValue::object(h.spread()))
+            Ok(EventValue::record_object(h.spread()))
         }
     }
     fn mark_skip(&mut self, c: EventValue) -> Result<EventValue, Failure> {
@@ -208,7 +217,7 @@ impl RequestBindings for Request {
         if self.case == "skip-fail" {
             return Err(self.error.clone());
         }
-        c.define("safeCexSkipRemoteSigning", EventValue::Bool(true));
+        c.write("safeCexSkipRemoteSigning", EventValue::Bool(true));
         Ok(c)
     }
     fn sign(
@@ -235,8 +244,8 @@ impl RequestBindings for Request {
             if fail {
                 Err(e)
             } else {
-                let out = EventValue::object(c.spread());
-                out.define("signed", EventValue::Bool(true));
+                let out = EventValue::record_object(c.spread());
+                out.write("signed", EventValue::Bool(true));
                 Ok(out)
             }
         }))
@@ -258,11 +267,11 @@ impl ResponseBindings for Response {
 fn options(name: &str) -> EventValue {
     let o = decoded(json!({"key":"key-A","secret":"secret-A"}));
     match name {
-        "testnet" => o.define("testnet", EventValue::Bool(true)),
-        "recv-zero" => o.define("extra", record([("recvWindow", number(0.0))])),
-        "recv-null" => o.define("extra", record([("recvWindow", EventValue::Null)])),
-        "recv-string" => o.define("extra", record([("recvWindow", string("2500"))])),
-        "tunnel" | "install-fail" => o.define("tealstreetTunnel", EventValue::Bool(true)),
+        "testnet" => o.write("testnet", EventValue::Bool(true)),
+        "recv-zero" => o.write("extra", record([("recvWindow", number(0.0))])),
+        "recv-null" => o.write("extra", record([("recvWindow", EventValue::Null)])),
+        "recv-string" => o.write("extra", record([("recvWindow", string("2500"))])),
+        "tunnel" | "install-fail" => o.write("tealstreetTunnel", EventValue::Bool(true)),
         _ => {}
     }
     o
@@ -416,11 +425,11 @@ fn factories(family: &str) {
                 )
             }
             text(
-                &c.headers.get("Content-Type").unwrap(),
+                &c.headers.read("Content-Type").unwrap(),
                 "application/json, charset=utf-8",
                 &label,
             );
-            let key = c.headers.get("X-MBX-APIKEY").unwrap();
+            let key = c.headers.read("X-MBX-APIKEY").unwrap();
             if is_public(family) {
                 assert!(
                     matches!(key, EventValue::Undefined),
@@ -512,10 +521,10 @@ fn factories(family: &str) {
         let mut responses = vec![];
         if !failed {
             if name == "live-options" {
-                o.define("testnet", EventValue::Bool(true));
-                o.define("key", string("key-B"));
-                o.define("extra", record([("recvWindow", number(9876.0))]));
-                e.define("name", string("renamed"));
+                o.write("testnet", EventValue::Bool(true));
+                o.write("key", string("key-B"));
+                o.write("extra", record([("recvWindow", number(9876.0))]));
+                e.write("name", string("renamed"));
             }
             let handler = b.request.as_ref().unwrap();
             for (j, r) in fixtures["requests"].as_array().unwrap().iter().enumerate() {
@@ -535,7 +544,7 @@ fn factories(family: &str) {
                 };
                 let public_path = format!("{ep}/exchangeInfo");
                 match rn {
-                    "listen" => input.define(
+                    "listen" => input.write(
                         "url",
                         string(if stem(family) == "binancepm" {
                             "/papi/v1/listenKey".into()
@@ -544,12 +553,12 @@ fn factories(family: &str) {
                         }),
                     ),
                     "public" | "headers-fail" | "skip-fail" => {
-                        input.define("url", string(&public_path))
+                        input.write("url", string(&public_path))
                     }
                     "missing-url" => {}
-                    "null-url" => input.define("url", EventValue::Null),
-                    "array-url" => input.define("url", decoded(json!([public_path]))),
-                    _ => input.define("url", string("/private")),
+                    "null-url" => input.write("url", EventValue::Null),
+                    "array-url" => input.write("url", decoded(json!([public_path]))),
+                    _ => input.write("url", string("/private")),
                 }
                 let listen = rn == "listen"
                     && !is_public(family)
@@ -593,34 +602,34 @@ fn factories(family: &str) {
                     let v = value.as_ref().unwrap();
                     assert_eq!(v.same(&input), listen, "{label}: native input referent");
                     assert!(
-                        v.get("nested").unwrap().same(&nested),
+                        v.read("nested").unwrap().same(&nested),
                         "{label}: native nested referent"
                     );
                     assert_eq!(
-                        v.get("headers").unwrap().same(&headers),
+                        v.read("headers").unwrap().same(&headers),
                         !public,
                         "{label}: native headers referent"
                     );
                     num(
-                        &v.get("timeout").unwrap(),
+                        &v.read("timeout").unwrap(),
                         if public { 20000.0 } else { 500.0 },
                         &format!("{label}: native request timeout"),
                     );
                     if signed {
-                        boolean(&v.get("signed").unwrap(), true, &label)
+                        boolean(&v.read("signed").unwrap(), true, &label)
                     } else {
-                        boolean(&v.get("safeCexSkipRemoteSigning").unwrap(), true, &label)
+                        boolean(&v.read("safeCexSkipRemoteSigning").unwrap(), true, &label)
                     }
                     if public {
                         assert!(
                             matches!(
-                                v.get("headers").unwrap().get("private").unwrap(),
+                                v.read("headers").unwrap().read("private").unwrap(),
                                 EventValue::Undefined
                             ),
                             "{label}: native private header removed"
                         );
                         text(
-                            &v.get("headers").unwrap().get("Content-Type").unwrap(),
+                            &v.read("headers").unwrap().read("Content-Type").unwrap(),
                             "application/json, charset=utf-8",
                             &label,
                         )
@@ -672,7 +681,7 @@ fn factories(family: &str) {
                     expected_calls,
                     "{label}: native helper call count"
                 );
-                requests.push(json!({"name":rn,"calls":calls.borrow().0,"value":value.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"refs":value.as_ref().ok().map(|v|json!({"input":v.same(&input),"headers":v.get("headers").unwrap().same(&headers),"nested":v.get("nested").unwrap().same(&nested)})),"signRefs":request.sign_refs,"failure":value.as_ref().err().map(|e|error_wire(e,&error))}));
+                requests.push(json!({"name":rn,"calls":calls.borrow().0,"value":value.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"refs":value.as_ref().ok().map(|v|json!({"input":v.same(&input),"headers":v.read("headers").unwrap().same(&headers),"nested":v.read("nested").unwrap().same(&nested)})),"signRefs":request.sign_refs,"failure":value.as_ref().err().map(|e|error_wire(e,&error))}));
             }
             if let Some((success, None)) = &b.response {
                 // PM/spot: the last interceptor only resends, so every response passes.
@@ -724,7 +733,7 @@ fn factories(family: &str) {
                             let expected = if rn == "fallback" {
                                 string("Binance Error: -1000")
                             } else {
-                                data.get("msg").unwrap()
+                                data.read("msg").unwrap()
                             };
                             assert!(
                                 effects.messages[0].same(&expected),
@@ -773,7 +782,7 @@ fn factories(family: &str) {
                                     _ => panic!(),
                                 };
                                 assert_eq!(message, expected_msg, "{label}: native Error message");
-                                let input_code = data.get("code").unwrap();
+                                let input_code = data.read("code").unwrap();
                                 assert!(
                                     code.same(&input_code),
                                     "{label}: native original error code"
@@ -969,7 +978,7 @@ fn auth() {
         let signer = record([("accountName", string("account-A"))]);
         let remote = name.starts_with("remote");
         if remote {
-            options.define("remoteSigner", signer.clone())
+            options.write("remoteSigner", signer.clone())
         }
         let result = match name {
             "remote-error" => {
@@ -985,7 +994,7 @@ fn auth() {
         let original_signature = if result.nullish() {
             EventValue::Undefined
         } else {
-            result.get("wsAuthSignature").unwrap()
+            result.read("wsAuthSignature").unwrap()
         };
         let error = failure();
         let trace = Rc::new(RefCell::new(Trace::default()));
@@ -1044,21 +1053,21 @@ fn auth() {
         } else {
             let v = out.as_ref().unwrap();
             text(
-                &v.get("apiKey").unwrap(),
+                &v.read("apiKey").unwrap(),
                 "key-A",
                 &format!("{label}: native captured API key"),
             );
             num(
-                &v.get("timestamp").unwrap(),
+                &v.read("timestamp").unwrap(),
                 1700000000123.0,
                 &format!("{label}: native timestamp"),
             );
             num(
-                &v.get("recvWindow").unwrap(),
+                &v.read("recvWindow").unwrap(),
                 5000.0,
                 &format!("{label}: native recvWindow"),
             );
-            let sig = v.get("signature").unwrap();
+            let sig = v.read("signature").unwrap();
             if remote {
                 assert!(
                     sig.same(&original_signature),
@@ -1066,7 +1075,7 @@ fn auth() {
                 );
                 match name {
                     "remote-number" => num(&sig, 7.0, &label),
-                    "remote-object" => num(&sig.get("value").unwrap(), 5.0, &label),
+                    "remote-object" => num(&sig.read("value").unwrap(), 5.0, &label),
                     _ => text(&sig, "remote-signature", &label),
                 }
             } else {
@@ -1104,21 +1113,25 @@ fn auth() {
         );
         if let Some((got, request)) = &*b.request.borrow() {
             assert!(got.same(&signer), "{label}: native remote signer referent");
-            text(&request.get("id").unwrap(), "tealstreet-user-data", &label);
-            text(&request.get("type").unwrap(), "ws-auth", &label);
-            text(&request.get("exchangeName").unwrap(), "binancespot", &label);
-            text(&request.get("accountName").unwrap(), "account-A", &label);
-            let auth = request.get("wsAuth").unwrap();
+            text(&request.read("id").unwrap(), "tealstreet-user-data", &label);
+            text(&request.read("type").unwrap(), "ws-auth", &label);
             text(
-                &auth.get("toSign").unwrap(),
+                &request.read("exchangeName").unwrap(),
+                "binancespot",
+                &label,
+            );
+            text(&request.read("accountName").unwrap(), "account-A", &label);
+            let auth = request.read("wsAuth").unwrap();
+            text(
+                &auth.read("toSign").unwrap(),
                 "apiKey=key-A&recvWindow=5000&timestamp=1700000000123",
                 &format!("{label}: native toSign"),
             );
-            text(&auth.get("outputFormat").unwrap(), "hex", &label);
-            let extra = auth.get("extraData").unwrap();
-            text(&extra.get("apiKey").unwrap(), "key-A", &label);
-            num(&extra.get("recvWindow").unwrap(), 5000.0, &label);
-            num(&extra.get("timestamp").unwrap(), 1700000000123.0, &label);
+            text(&auth.read("outputFormat").unwrap(), "hex", &label);
+            let extra = auth.read("extraData").unwrap();
+            text(&extra.read("apiKey").unwrap(), "key-A", &label);
+            num(&extra.read("recvWindow").unwrap(), 5000.0, &label);
+            num(&extra.read("timestamp").unwrap(), 1700000000123.0, &label);
         }
         if let Some((secret, payload)) = &b.hmac {
             text(
@@ -1147,7 +1160,7 @@ fn auth() {
             expected_effects,
             "{label}: native effect count"
         );
-        actual.push(json!({"name":name,"trace":trace.borrow().0,"value":out.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"signatureRef":out.as_ref().ok().map(|v|v.get("signature").unwrap().same(&original_signature)),"failure":out.as_ref().err().map(|e|error_wire(e,&error))}));
+        actual.push(json!({"name":name,"trace":trace.borrow().0,"value":out.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"signatureRef":out.as_ref().ok().map(|v|v.read("signature").unwrap().same(&original_signature)),"failure":out.as_ref().err().map(|e|error_wire(e,&error))}));
     }
     let source = oracle("auth");
     let source = source.as_array().unwrap();
@@ -1158,4 +1171,17 @@ fn auth() {
             "source Spot auth case{i}: native {a} source {b}"
         );
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

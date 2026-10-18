@@ -35,3 +35,6 @@ pub mod income_reads;
 pub mod lifecycle;
 
 pub mod classes;
+
+mod binding;
+pub use binding::exchange::{WeexDependencies, WeexExchange};

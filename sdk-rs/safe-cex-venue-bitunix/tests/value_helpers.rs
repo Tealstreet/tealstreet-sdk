@@ -72,7 +72,7 @@ fn actual_typescript_value_helpers() {
             f64::from_bits(u64::from_str_radix(row["fallback"].as_str().unwrap(), 16).unwrap());
         let parsed = match parse_finite_number(value.as_ref(), fallback) {
             Ok(n) => json!({"type":"number","value":bits(n)}),
-            Err(_) => json!({"error":"TypeError"}),
+            Err(error) => json!({"error":error.name,"message":error.message}),
         };
         parsed_count += 1;
         assert_eq!(
@@ -88,7 +88,7 @@ fn actual_typescript_value_helpers() {
         );
         let trigger = match has_finite_trigger_price(value.as_ref()) {
             Ok(v) => json!({"type":"boolean","value":v}),
-            Err(_) => json!({"error":"TypeError"}),
+            Err(error) => json!({"error":error.name,"message":error.message}),
         };
         trigger_count += 1;
         assert_eq!(trigger, row["trigger"], "hasFiniteTriggerPrice {raw:?}");
@@ -97,4 +97,45 @@ fn actual_typescript_value_helpers() {
     assert_eq!(support_count, 220, "VALUE support native comparison count");
     assert_eq!(trigger_count, 220, "VALUE trigger native comparison count");
     assert_eq!(refused, 5, "UTF8 refusal across fallbacks");
+}
+
+#[test]
+fn accepted_numeric_contracts_retain_actual_error_name_and_message() {
+    let contracts: Value = serde_json::from_str(include_str!(
+        "../../safe-cex-parity/accepted-set/contracts/safe-cex-venue-bitunix.json"
+    ))
+    .unwrap();
+    let mut errors = 0;
+    for owner in [
+        "value_helpers::parse_finite_number",
+        "value_helpers::has_finite_trigger_price",
+        "history_numbers::order_to_number",
+    ] {
+        let contract = &contracts[format!("safe_cex_venue_bitunix::{owner}")];
+        for case in contract["cases"].as_array().unwrap() {
+            let value = case["input"].get("value");
+            let result = match owner {
+                "value_helpers::parse_finite_number" => {
+                    parse_finite_number(value, case["input"]["fallback"].as_f64().unwrap())
+                        .map(|_| ())
+                }
+                "value_helpers::has_finite_trigger_price" => {
+                    has_finite_trigger_price(value).map(|_| ())
+                }
+                _ => safe_cex_venue_bitunix::history_numbers::order_to_number(value).map(|_| ()),
+            };
+            if let Err(error) = result {
+                errors += 1;
+                assert_eq!(
+                    case["output"],
+                    json!({"name":error.name,"message":error.message}),
+                    "accepted {owner} must retain the real native error class and cause"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        errors, 3,
+        "all three authored coercion-error witnesses must execute"
+    );
 }

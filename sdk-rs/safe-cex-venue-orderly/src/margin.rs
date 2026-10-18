@@ -82,7 +82,7 @@ pub fn resolve_margin_type_for_order(
                 && position.side == closing_side
                 && position.contracts > 0.0
         })
-        .map(|position| position.margin_type)
+        .map(|position| position.margin_type.into_value())
         .collect();
     if let Some(cached) = cached {
         let selected = candidates

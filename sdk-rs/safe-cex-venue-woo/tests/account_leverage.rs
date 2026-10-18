@@ -160,8 +160,9 @@ fn error_guards_and_account_validators_native_before_source() {
 
     let lone = js_from_str::<JsNumberInput>(r#""\ud800""#).unwrap_err();
     assert!(
-        lone.to_string().contains("unexpected end of hex escape"),
-        "WOO-GUARD native whole string ingress refusal"
+        lone.to_string()
+            .contains("invalid utf-16: lone surrogate found"),
+        "WOO-GUARD native typed String projection refusal"
     );
     assert!(
         js_from_str::<String>(r#""\ud800""#).is_err(),
@@ -171,8 +172,8 @@ fn error_guards_and_account_validators_native_before_source() {
     assert!(
         lone_key
             .to_string()
-            .contains("unexpected end of hex escape"),
-        "WOO-GUARD native whole record ingress refusal"
+            .contains("invalid utf-16: lone surrogate found"),
+        "WOO-GUARD native typed key projection refusal"
     );
     assert!(
         js_from_str::<JsObjectMap<JsNumberInput>>(r#"{"\ud800":1}"#).is_err(),

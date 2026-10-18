@@ -52,6 +52,10 @@ lighterStopSlippagePct?: number,
 /**
  * @ts-mutable
  */
+hyrotraderMode?: "demo" | "production", 
+/**
+ * @ts-mutable
+ */
 kucoinBroker?: { partner: string, brokerKey: string, brokerName: string, verify?: boolean, }, }, remoteSigner?: RemoteSigner, transport?: TransportProvider, payloadSigner?: PayloadSigner, hostedMode?: boolean, externalPublicData?: { 
 /**
  * @ts-mutable

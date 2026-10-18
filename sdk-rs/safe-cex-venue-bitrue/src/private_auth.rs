@@ -23,6 +23,7 @@ pub trait PrivateHost: ReadHost {
     fn join(&self, v: Vec<Self::Value>) -> Result<Self::Value, Self::Error>;
     fn query(&self, v: Self::Value) -> Result<Self::Value, Self::Error>;
     fn now(&self) -> Result<Self::Value, Self::Error>;
+    fn virtual_now(&self) -> Result<Self::Value, Self::Error>;
     fn parse_message(&self, data: Self::Value) -> Result<Self::Value, Self::Error>;
     fn error_instance(&self, error: &Self::Value) -> bool;
     fn console_args(&self, args: Vec<Self::Value>) -> Result<(), Self::Error>;
@@ -602,7 +603,7 @@ pub fn intercept<H: PrivateHost>(
         h.text("")
     };
     let path = h.add(base, suffix)?;
-    let timestamp = h.now()?;
+    let timestamp = h.virtual_now()?;
     let hmac = h.create_hmac("sha256", get(h, &options, "secret")?)?;
     let p = method(h, hmac, "update")?;
     let msg = h.join(vec![timestamp.clone(), verb, path, body])?;

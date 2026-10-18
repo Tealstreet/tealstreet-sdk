@@ -39,7 +39,9 @@ impl RestAdapter for Adapter {
             req.method,
             req.url,
             req.params,
-            req.body.as_ref().map(|b| b.untransformed().unwrap())
+            req.body
+                .as_ref()
+                .map(|b| b.untransformed().unwrap().clone().into_value().unwrap())
         ]));
         let data = self
             .responses
@@ -292,7 +294,7 @@ impl pd::PrivateDataHost for Socket {
                 .orders()
                 .iter()
                 .find(|o| o.id == fill.order_id)
-                .map(|o| o.status),
+                .and_then(|o| o.status.into_value()),
         );
         self.runtime.fills.borrow_mut().push(fill);
         self.runtime.event(json!(["fill"]));
@@ -590,7 +592,7 @@ impl BlofinExchangeHost for ExchangeHost {
         &self,
         _: &Self::Base,
         _: &safe_cex_exchange::client_order_id::ClientOrderIdRule,
-        opts: &PlaceOrderOpts,
+        opts: &safe_cex_types::PreparedOrderOpts,
     ) -> Result<Option<String>, String> {
         Ok(opts.client_order_id.clone())
     }
@@ -605,7 +607,7 @@ impl BlofinExchangeHost for ExchangeHost {
     fn assert_caller_client_order_ids(
         &self,
         _: &Self::Base,
-        _: &[PlaceOrderOpts],
+        _: &[safe_cex_types::PreparedOrderOpts],
     ) -> Result<(), String> {
         Ok(())
     }

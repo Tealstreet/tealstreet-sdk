@@ -1,4 +1,4 @@
-use safe_cex_num::{JsCoercionError, ProtoMember, js_string, parse_float};
+use safe_cex_num::{JsCoercionError, js_string, parse_float};
 use serde_json::Value;
 
 // ts: toOptionalNumber (binance.order-history.ts)
@@ -29,77 +29,4 @@ pub fn map_binance_historical_order(
     realm: &std::rc::Rc<safe_cex_num::PrototypeRealm>,
 ) -> Result<Option<crate::private_event_value::EventValue>, crate::request_weight::Failure> {
     crate::order_history_native::map_binance_historical_order_native(row, realm)
-}
-
-/// Explicit opt-in projection into the shared closed HistoricalOrder model.
-/// See parity/MANIFEST-SPEC.md#closed-typed-output-boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BinanceHistoricalOrderError {
-    Native(crate::request_weight::Failure),
-    ClosedOutput {
-        field: &'static str,
-        member: ProtoMember,
-    },
-    Projection(String),
-}
-impl std::fmt::Display for BinanceHistoricalOrderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Native(error) => error.fmt(f),
-            Self::ClosedOutput { field, member } => write!(
-                f,
-                "HistoricalOrder.{field} cannot carry inherited {member:?}"
-            ),
-            Self::Projection(message) => f.write_str(message),
-        }
-    }
-}
-impl std::error::Error for BinanceHistoricalOrderError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Native(error) => Some(error.as_ref()),
-            _ => None,
-        }
-    }
-}
-
-pub fn map_binance_historical_order_typed(
-    row: &serde_json::Map<String, Value>,
-) -> Result<Option<safe_cex_types::HistoricalOrder>, BinanceHistoricalOrderError> {
-    use crate::private_event_value::EventValue;
-    let realm = safe_cex_num::PrototypeRealm::current();
-    let input = crate::private_session::native(Value::Object(row.clone()));
-    let Some(result) = map_binance_historical_order(&input, &realm)
-        .map_err(BinanceHistoricalOrderError::Native)?
-    else {
-        return Ok(None);
-    };
-    // Run the complete source body before applying the requested output model.
-    for field in ["type", "status", "positionSide"] {
-        if let EventValue::Builtin(reference) = result
-            .get(field)
-            .map_err(BinanceHistoricalOrderError::Native)?
-            && let safe_cex_num::BuiltinIdentity::Object(member) = reference.member()
-        {
-            return Err(BinanceHistoricalOrderError::ClosedOutput { field, member });
-        }
-    }
-    // The typed optional fields deserialize a present value as T. Native own
-    // undefined denotes an absent optional value at this explicit projection.
-    let EventValue::Object(record) = result else {
-        unreachable!("canonical history returns a record")
-    };
-    let record = record.borrow();
-    let projected = EventValue::object_in_realm(
-        record.realm.clone(),
-        record
-            .fields
-            .iter()
-            .filter(|(_, value)| !matches!(value, EventValue::Undefined))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect(),
-    );
-    crate::class_decode::decode(projected)
-        .map(Some)
-        .map_err(|error| BinanceHistoricalOrderError::Projection(error.to_string()))
 }

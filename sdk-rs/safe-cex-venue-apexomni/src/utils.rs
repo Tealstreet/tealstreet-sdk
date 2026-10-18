@@ -43,3 +43,23 @@ pub fn hmac_sha256_base64(message: &[u16], key: &[u16]) -> String {
         safe_cex_crypto::Encoding::Base64,
     )
 }
+
+#[cfg(test)]
+mod accepted_scalar_helper_tests {
+    use super::*;
+    use crate::accepted_scalar_helper_support::*;
+    #[test]
+    fn drop_prefix_native_output() {
+        check("utils::drop_prefix", 8, |value| {
+            let input = value["text"].as_str().unwrap();
+            let actual = drop_prefix(input);
+            let offset = usize::try_from(value["offset"].as_u64().unwrap()).unwrap();
+            assert_eq!(
+                actual.as_ptr(),
+                input.as_bytes()[offset..].as_ptr(),
+                "literal borrowed slice identity"
+            );
+            serde_json::json!(actual)
+        });
+    }
+}

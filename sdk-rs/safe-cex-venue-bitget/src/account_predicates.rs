@@ -7,11 +7,25 @@ use std::cell::Cell;
 pub const BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE: &str = "Bitget UTA routing is available for USDT-M and USDC-M only; this market variant is not enabled for UTA yet.";
 
 /// The source payload's declared string-or-number code.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug)]
 pub enum ApiCode {
     Text(String),
     Number(f64),
+}
+
+impl<'de> Deserialize<'de> for ApiCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Capture before an untagged Serde buffer can turn decimal Number
+        // tokens into maps. Both union arms use existing checked scalar codecs;
+        // ApiCode does not acquire a serialization capability for this repair.
+        let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?;
+        if let Ok(number) = input.clone().decode::<f64>() {
+            return Ok(Self::Number(number));
+        }
+        input.decode::<String>().map(Self::Text).map_err(|_| {
+            serde::de::Error::custom("data did not match any variant of untagged enum ApiCode")
+        })
+    }
 }
 
 // ts: isBitgetUtaClassicUnsupported

@@ -56,7 +56,14 @@ fn emit(rt: &Rt, args: Vec<Js>) -> Result<(), Thrown> {
     Ok(())
 }
 
-fn apply_local(rt: &Rt, order: &Js, update: Js) -> Result<(), Thrown> {
+fn apply_local(rt: &Rt, order: &Js, update: Js, primary: bool) -> Result<(), Thrown> {
+    if !primary {
+        rt.this.call_method(
+            "applyLocalOrderUpdateAfterRestWrite",
+            vec![order.clone(), update],
+        )?;
+        return Ok(());
+    }
     crate::primary_local_order_writes::apply_local_order_update_after_rest_write(
         rt,
         &rt.this,
@@ -74,7 +81,8 @@ async fn cancel(rt: &Rt, order: &Js) -> Result<(), Thrown> {
 }
 
 fn category(rt: &Rt, symbol: &str) -> Result<Js, Thrown> {
-    Ok(Js::str(venue(rt)?.get_category_for_symbol(symbol)))
+    rt.this
+        .call_method("getCategoryForSymbol", vec![Js::str(symbol)])
 }
 
 /// `data.result.orderId`.
@@ -84,6 +92,15 @@ fn result_order_id(data: &Js) -> Result<Js, Thrown> {
 
 // ts: BybitExchange.updateOrder
 pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
+    update_body(rt, opts, true)
+}
+
+// ts: BybitInverseExchange.updateOrder
+pub(crate) fn update_inverse_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
+    update_body(rt, opts, false)
+}
+
+fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
     let rt = rt.clone();
     let body_rt = rt.clone();
     Ok(rt.spawn(Box::pin(async move {
@@ -97,8 +114,17 @@ pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
 
         if kind == "trailing_stop_market" {
             cancel(&rt, &order).await?;
-            let ids = place_trailing_stop_loss(&rt, &merge(&order, &update)?).await?;
-            apply_local(&rt, &order, update)?;
+            let replacement = merge(&order, &update)?;
+            let ids = if primary {
+                place_trailing_stop_loss(&rt, &replacement).await?
+            } else {
+                await_js(
+                    rt.this
+                        .call_method("placeTrailingStopLoss", vec![replacement])?,
+                )
+                .await?
+            };
+            apply_local(&rt, &order, update, primary)?;
             return Ok(ids);
         }
 
@@ -111,7 +137,7 @@ pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         let position_tpsl = is_bybit_position_tpsl_mode(Some(&to_json(&tpsl_mode)?));
         let is_stop = kind == STOP_LOSS || kind == TAKE_PROFIT;
 
-        if !is_virtual && is_stop && position_tpsl {
+        if !is_virtual && is_stop && position_tpsl && (primary || update.has_own("price")) {
             let mark = venue(&rt)?
                 .base
                 .store
@@ -136,10 +162,18 @@ pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                 cancel(&rt, &order).await?;
                 let replacement = merge(&order, &update)?;
                 replacement.set("type", projected.clone())?;
-                let ids = place_stop_loss_or_take_profit(&rt, &replacement).await?;
+                let ids = if primary {
+                    place_stop_loss_or_take_profit(&rt, &replacement).await?
+                } else {
+                    await_js(
+                        rt.this
+                            .call_method("placeStopLossOrTakeProfit", vec![replacement])?,
+                    )
+                    .await?
+                };
                 let local = update.spread_object()?;
                 local.set("type", projected)?;
-                apply_local(&rt, &order, local)?;
+                apply_local(&rt, &order, local, primary)?;
                 return Ok(ids);
             }
         }
@@ -175,7 +209,7 @@ pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                     let message = data.get("retMsg")?;
                     if message.strict_equals(&Js::str("OK")) {
                         updated.push(result_order_id(&data)?);
-                        apply_local(&rt, &order, update.clone())?;
+                        apply_local(&rt, &order, update.clone(), primary)?;
                     } else if !message.strict_equals(&Js::str("order not modified")) {
                         emit(&rt, vec![message.clone()])?;
                         return Err(error(&message)?);
@@ -229,7 +263,7 @@ pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             let message = data.get("retMsg")?;
             if message.strict_equals(&Js::str("OK")) {
                 updated.push(result_order_id(&data)?);
-                apply_local(&rt, &order, update.clone())?;
+                apply_local(&rt, &order, update.clone(), primary)?;
             } else if !message.strict_equals(&Js::str("order not modified")) {
                 emit(&rt, vec![message])?;
             }
@@ -238,25 +272,39 @@ pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         if !is_conditional && !is_virtual && is_stop {
             let amount = order.get("amount")?;
             let partial = !amount.strict_equals(&Js::Number(0.));
-            let order_json = to_json(&order)?.as_object().cloned().unwrap_or_default();
+            let position_index = if primary {
+                let order_json = to_json(&order)?.as_object().cloned().unwrap_or_default();
+                get_order_position_idx(&rt, order_json).await?
+            } else {
+                await_js(
+                    rt.this
+                        .call_method("getOrderPositionIdx", vec![order.clone()])?,
+                )
+                .await?
+                .to_number()?
+            };
             let payload = Js::object(vec![
                 ("category", category(&rt, &symbol)?),
                 ("symbol", Js::str(&symbol)),
-                (
-                    "positionIdx",
-                    Js::Number(get_order_position_idx(&rt, order_json).await?),
-                ),
+                ("positionIdx", Js::Number(position_index)),
                 (
                     "tpslMode",
-                    Js::str(if partial { "Partial" } else { "Full" }),
+                    if primary {
+                        Js::str(if partial { "Partial" } else { "Full" })
+                    } else {
+                        Js::Undefined
+                    },
                 ),
             ]);
+            if !primary {
+                payload.delete(&"tpslMode".encode_utf16().collect::<Vec<_>>());
+            }
             let stop_loss = kind == STOP_LOSS;
             if update.has_own("price") {
                 let key = if stop_loss { "stopLoss" } else { "takeProfit" };
                 payload.set(key, template(&update.get("price")?)?)?;
             }
-            if partial {
+            if primary && partial {
                 let size = if update.has_own("amount") {
                     update.get("amount")?
                 } else {
@@ -268,7 +316,7 @@ pub(crate) fn update_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             let data = post(&rt, endpoint("SET_TRADING_STOP"), payload).await?;
             let message = data.get("retMsg")?;
             if message.strict_equals(&Js::str("OK")) {
-                apply_local(&rt, &order, update)?;
+                apply_local(&rt, &order, update, primary)?;
             } else if !message.strict_equals(&Js::str("order not modified")) {
                 emit(&rt, vec![message])?;
             }

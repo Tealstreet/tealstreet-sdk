@@ -29,8 +29,6 @@ pub mod order_inference;
 // Exchange transport and websocket composition is still incomplete.
 pub mod exchange;
 
-pub mod ws_public;
-
 pub mod json_boundaries;
 pub mod json_models;
 pub mod json_values;
@@ -75,7 +73,6 @@ pub mod placement_dispatch;
 pub mod private_class;
 pub mod public_constructor;
 pub mod spot_market_bootstrap;
-pub mod spot_rate_limiter;
 pub mod spot_runtime;
 pub mod spot_trading;
 pub mod spot_user_event;
@@ -89,3 +86,13 @@ pub mod public_class;
 
 pub mod core_exchange_class;
 pub mod core_exchange_leaves;
+
+pub mod spot_binding;
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_projection_aliases.rs"]
+mod accepted_projection_aliases;
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_future_aliases.rs"]
+mod accepted_future_aliases;

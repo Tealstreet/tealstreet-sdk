@@ -419,11 +419,3 @@ pub fn create_trading_api<H: ApiHost>(
 ) -> JsResult<H::Value> {
     create(h, options, exchange, Gateway::Trading)
 }
-/// ts: lastSegment. Calls string methods without URL normalization or eager coercion.
-pub fn last_segment<H: SessionHost>(h: &H, path: H::Value) -> JsResult<H::Value> {
-    let parts = method(h, path, "split", vec![h.string("?")])?;
-    let path = h.get(&parts, "0")?;
-    let parts = method(h, path, "split", vec![h.string("/")])?;
-    let last = method(h, parts, "pop", vec![])?;
-    Ok(if h.nullish(&last) { h.string("") } else { last })
-}

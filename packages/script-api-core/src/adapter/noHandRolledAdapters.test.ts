@@ -78,6 +78,7 @@ describe('no hand-rolled CoreAdapters', () => {
     );
   });
 
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('no host in this repo implements the interface', () => {
     const offenders = trackedFiles()
       .filter((file) => !isOwnPackage(file) && !isTest(file))
@@ -89,7 +90,7 @@ describe('no hand-rolled CoreAdapters', () => {
         'HostBindings; it does not implement the interface. If a host needs ' +
         'different behaviour, add a binding in HostBindings.ts.',
     ).toEqual([]);
-  });
+  }, 30_000);
 
   it.skipIf(!HAS_WEB_APP)('the two host spokes exist and go through the factory', () => {
     // Pins that the spokes are still spokes — if one is deleted or renamed the

@@ -1,7 +1,7 @@
 {
   "oracle": "actual TypeScript generateV3Signature/buildV3SigningPayload; preimages at ethers boundaries",
   "sourcePath": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts",
-  "sourceSha256": "5ade2118df55617de0f4443bc213b8e10bf9dee5058eca1297e2b3e0d23d9ed6",
+  "sourceSha256": "80a7fd744fc6ff268685fbff008e9312306705017ada6adb29bede875c9468be",
   "cases": [
     {
       "name": "complete",

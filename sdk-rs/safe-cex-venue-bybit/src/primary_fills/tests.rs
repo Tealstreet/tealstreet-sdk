@@ -1,4 +1,6 @@
 use super::*;
+use safe_cex_exchange::js_runtime::value::{from_json, to_json};
+use serde_json::Value;
 fn class(n: f64) -> &'static str {
     if n.is_nan() {
         "NaN"
@@ -37,26 +39,36 @@ fn primary_fill_mapping_preserves_prefix_and_numeric_classes() {
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
     for (i, c) in cases.iter().enumerate() {
-        let mut fills = vec![];
-        let result = append_primary_fills(c["rows"].as_array().unwrap(), "fallback", &mut fills);
+        let fills = Js::array(vec![]);
+        let result = append_primary_fills(
+            &from_json(&c["rows"]),
+            &Js::str("fallback"),
+            &fills,
+            c["variant"] == "bybitinverse",
+        );
         assert_eq!(
-            result.err().as_deref(),
+            result
+                .err()
+                .map(|e| e.to_exchange_error().message)
+                .as_deref(),
             c.get("error").and_then(Value::as_str),
             "error case{i}: {c}"
         );
         assert_eq!(
-            normalize(serde_json::to_value(&fills).unwrap()),
+            normalize(to_json(&fills).unwrap()),
             normalize(c["result"].clone()),
             "fills case{i}: {c}"
         );
         let classes: Vec<_> = fills
+            .array_values()
+            .unwrap()
             .iter()
             .map(|r| {
                 vec![
-                    class(r.timestamp),
-                    class(r.price),
-                    class(r.qty),
-                    class(r.commission.unwrap()),
+                    class(r.get("timestamp").unwrap().to_number().unwrap()),
+                    class(r.get("price").unwrap().to_number().unwrap()),
+                    class(r.get("qty").unwrap().to_number().unwrap()),
+                    class(r.get("commission").unwrap().to_number().unwrap()),
                 ]
             })
             .collect();

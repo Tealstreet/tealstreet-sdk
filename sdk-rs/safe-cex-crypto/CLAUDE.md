@@ -38,6 +38,14 @@ being re-keyed; each scheme tests raw two-key wire order and signature-last,
 and the transmitted authenticated input is checked against its signing preimage.
 The output-format match remains exhaustive with no wildcard.
 
+Encoding and WsOutputFormat represent the maintained inline string unions.
+Their concrete deserializers admit String before private Serde remote enums;
+valid tagged maps are not source inputs. Serialize metadata and native variants
+remain unchanged. The string_enum_ingress target checks all nine variants and
+raw/owned/borrowed/qualified refusals. scripts/string-enum-controls.py removes
+each frontdoor independently, requires a compiled named tagged-map failure,
+then restores exact bytes and requires both tests to pass.
+
 See [GATE_EVIDENCE.md](GATE_EVIDENCE.md) for actual mutation outcomes and any
 pending integration gates; a fixture count alone does not prove corpus coverage.
 
@@ -137,6 +145,9 @@ hex formatting; WasmError carries the string verbatim. Native field identities
 precede wire checks, and encoded lone-unit controls preserve size while changing
 bytes so refusal of both inputs cannot hide a stale UTF16 witness. These records
 do not implement WASM loader state or random key generation.
+The mandatory `crypto:oracles:check` runner includes `live_poseidon_types` with
+`--include-ignored`, executing both native record identity and the encoded-content
+mutation control after the existing signing oracles and fixture drift check.
 
 Stark felt/shortstring inputs normalize numeric strings with shared `js_bigint`
 before the existing prime-range guard. Failed numeric conversions retain the
@@ -201,3 +212,6 @@ are already typed after WASM conversion; native JSON u32/string refusals do not
 claim to reproduce JavaScript's modulo conversions. Existing primitive fixtures
 remain unchanged. The separately labeled24-contract npm supplement plus18
 rounding cases pin fields and wire signatures, with immutable artifact hashes.
+The native Contract JSON boundary accepts named objects through a private remote
+companion and the shared object guard. Complete positional arrays are rejected;
+the post-WASM field types and authenticated byte construction stay the same.

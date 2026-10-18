@@ -7,6 +7,18 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 inherited identities through shared `TableHit`. Retain the hit until applying the
 source branch; a typed own-entry array alone cannot represent inherited values.
 
+`BitrueOrderType` and `FetchOrdersResponseDataItemSide` admit strings before
+private Serde remote metadata companions. Their TypeScript literal unions do not
+admit externally tagged objects. `accepted_enum_shapes` checks all six native
+variants and existing serialization, then rejects tagged maps and other shapes
+through owned, borrowed, text and qualified decoders. Run
+`scripts/accepted-enum-controls.py` serially: each concrete guard removal must
+compile and fail its named tagged-object assertion, and exact restoration must
+pass. The two numeric trigger enums retain their separate numeric domains.
+The two accepted-set contracts do not classify other Bitrue owners or aliases.
+The ordinary inventory still refuses 32 unreviewed trait methods on
+`Scope<binding::Extra>`; selected owner receipts do not clear that receiver boundary.
+
 `wire.rs` mirrors declared response shapes, not unchecked Axios runtime values.
 Numbers are binary64. Record Deserialize implementations capture `JsNumberInput`
 before private map-only companions. Optional fields distinguish omission from
@@ -86,8 +98,8 @@ source distinction instead of adding rounding.
 Balance parsing takes a borrow of the production Store balance for the falsy
 input fallback. It uses shared JsObjectMap insertion order and math_max, and
 coerces only fields explicitly Number-coerced by source. Nonnumeric upnl is a
-CHOSEN shared-model refusal, after the entire source reduction (including
-replacements and later coercion failures). The witness inspects native fields,
+maintainer-approved per-row refusal: warn with currency, Balance.upnl and its
+original value, and preserve valid rows even when the rejected row repeats a coin. The witness inspects native fields,
 not serialized Balance bytes; every maximum candidate can independently win.
 
 Cardinality is asserted at source totals/subcorpora, per-case arrays, independent
@@ -155,3 +167,82 @@ all other JS values are strictly comparison-equivalent false without coercion.
 These are field-body ports; WebSocket construction, transport and callers remain
 pending. ws_primitives.rs executes actual source initializers and asserts native
 booleans/unit before inventory checks; one runtime discriminator per row is required.
+
+`binding::BitrueExchange` now assembles those existing field bodies on the shared
+JS runtime with production Store, signed HTTP client and both BaseWebSocket
+cores. Its Exchange implementation forwards all sixteen required methods; the
+five methods absent from the source class retain `base.ts`'s exact inherited
+`Not implemented` rejection (getAccount, fetchTickers, changePositionMode,
+scheduleCancel, fetchPublicTrades). changeMarginType keeps Bitrue's explicit
+source refusal. Batch placement receives a ValidatedBatch; single placement
+receives a ValidatedOrder, enforcing the shared client-ID gate before dispatch.
+
+The binding keeps the existing typed/JSON helper boundaries and their recorded
+divergences. The native Exchange boundary also converts declared typed inputs
+and results through JSON; executable callbacks and socket/class handles stay in
+shared JS values internally. HTTP creation uses the shared source factory and runtime provider. The source
+tealstreetTunnel branch installs its BigInt adapter through the shared factory;
+proxy authorization follows venue signing. No venue-local adapter refusal remains.
+Public jsonParse performs ordinary Number parsing, while the private big-int
+parser retains its source non-string passthrough. Browser compressed Blob input
+uses the existing Store read_blob helper with its byte-to-character projection.
+
+`tests/exchange_binding.rs` covers all sixteen methods, caller-ID fail-closed
+behavior before any single/batch write, private listen-key failure without a
+private dial/subscription, and the native Buffer/plain-JSON public frame path.
+`scripts/binding-controls.py` sequentially breaks each trait dispatch and requires
+its named assertion, then a restored pass. Do not compile concurrently with it.
+The registry's native_host_bitrue test verifies the HMAC at a local HTTP server.
+
+`routing-controls.py` compiles disconnected factory and adapter bindings; both
+must fail the constructed venue routing assertion, then pass after restoration.
+Run these controls sequentially without another compiler.
+
+The typed `Exchange::update_symbol_metadata` entry forwards to the assembled
+`updateSymbolMetadata` body. It fetches the symbol's leverage bracket and commits
+the returned maximum to the Store, preserving the source public-only guard and
+caught-fetch behavior. The real-binding regression in `tests/exchange_binding.rs`
+checks both the HTTP request and replacement of the stored leverage limit.
+The same test target drives a real private socket frame for each of orders,
+fills, positions and balance. Account/balance notifications exercise the source
+350ms refresh through the signed REST binding before checking the Store.
+
+
+The production collection host consumes `ReadHost::items` with the shared iterator
+protocol. The background order loop reads the actual `prioritySymbols` Set before
+issuing requests; requiring an array there aborts every symbol refresh. The
+constructed-binding `background_orders` target checks known LIMIT rows alongside
+IOC/FOK/POST_ONLY/STOP_LIMIT rows, real HMACs and asynchronous Store commits.
+Those REST type lookups preserve own undefined through shared ModelField rather
+than dropping the symbol’s snapshot. The private parser separately maps these
+native types to Limit; `exchange_binding` checks that source behavior on actual
+private frames. REST and WebSocket lookup rules must remain distinct.
+
+REST signing uses `PrivateHost::virtual_now`, bound to the shared synced clock,
+matching the API's `virtualClock.getCurrentTimeMs()`. `PrivateHost::now` remains
+raw for the private order-event `Date.now()` fallback. Registry
+`native_host_bitrue_clock` proves the distinction with a 90-second server offset
+and independently verifies the HMAC on a real native signed account request.
+
+Public depth rows use the shared iterator protocol for the source two-entry
+array pattern, including early close after two entries. Numeric-keyed objects
+and scalar rows must not be published as books. The constructed raw-socket
+regression compares actual source refusals and verifies a later valid snapshot
+still reaches its callback; it does not claim an async rejection diagnostic sink.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` exercises
+32 field-independent cases through the constructed venue's actual socket and
+DefaultStore. Null, numeric/prefix/NaN strings, objects, overflow, signed zero and
+false arrive beside good rows as consecutive single-row protocol frames. The
+maintained TS exchange and actual TS DefaultStore produce the comparison values;
+eleven native number fields are checked before JSON. The shared ticker census
+records the witness; `parity/scripts/ticker-native-controls.py bitrue` compiles
+a production binding fault, requires the named assertion, restores and reruns.
+
+The constructed public candle witness compares all six native fields against
+maintained `mapKline` with installed Day.js, including Singapore wall-clock time,
+subsecond precision, epoch zero, invalid-date NaN and signed zero. Both the real
+socket witness and an independent installed-library probe fail on master without
+`utcOffset` and pass with the shared #453 implementation. Callback cleanup is
+observed; typed Candle still has its separately declared retained-object limits.

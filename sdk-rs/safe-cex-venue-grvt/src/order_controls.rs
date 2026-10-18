@@ -7,8 +7,8 @@ use crate::{
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_num::js_truthy;
 use safe_cex_types::{
-    Candle, OHLCVOptions, Order, OrderBook, OrderType, PlaceOrderOpts, UpdateOrderOpts,
-    UpdateOrderOptsUpdate,
+    Candle, OHLCVOptions, Order, OrderBook, OrderType, PlaceOrderOpts, PreparedOrderOpts,
+    UpdateOrderOpts, UpdateOrderOptsUpdate,
 };
 use serde_json::{Value, json};
 use std::future::Future;
@@ -260,7 +260,7 @@ pub fn place_orders<'a, F: Future<Output = Result<Vec<String>, BatchOrderError>>
     }
 }
 
-fn replacement(opts: &UpdateOrderOpts) -> Result<PlaceOrderOpts, ExchangeError> {
+fn replacement(opts: &UpdateOrderOpts) -> Result<PreparedOrderOpts, ExchangeError> {
     let order = &opts.order;
     let time_in_force = order.time_in_force.ok_or_else(|| {
         ExchangeError::new(format!(
@@ -270,19 +270,19 @@ fn replacement(opts: &UpdateOrderOpts) -> Result<PlaceOrderOpts, ExchangeError> 
     })?;
     let (amount, price) = match &opts.update {
         UpdateOrderOptsUpdate::Variant0(update) => {
-            (update.amount, update.price.unwrap_or(order.price))
+            (update.amount, update.price.or(order.price.into_value()))
         }
         UpdateOrderOptsUpdate::Variant1(update) => {
-            (update.amount.unwrap_or(order.amount), update.price)
+            (update.amount.unwrap_or(order.amount), Some(update.price))
         }
     };
-    let mut new = PlaceOrderOpts {
+    let mut new = PreparedOrderOpts {
         symbol: order.symbol.clone(),
-        r#type: order.r#type,
-        side: order.side,
+        r#type: order.r#type.into_property(),
+        side: order.side.into_property(),
         amount,
-        price: Some(price),
-        reduce_only: Some(order.reduce_only),
+        price,
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: Some(time_in_force),
         trigger_price: None,
         stop_loss: None,
@@ -295,7 +295,11 @@ fn replacement(opts: &UpdateOrderOpts) -> Result<PlaceOrderOpts, ExchangeError> 
         close: None,
         implied_volatility: None,
     };
-    if matches!(order.r#type, OrderType::StopLoss | OrderType::TakeProfit) {
+    if matches!(
+        order.r#type,
+        safe_cex_types::ModelField::Value(OrderType::StopLoss)
+            | safe_cex_types::ModelField::Value(OrderType::TakeProfit)
+    ) {
         let info = match order.info.as_ref() {
             None => return Err(trigger_info_error("undefined")),
             Some(Value::Null) => return Err(trigger_info_error("null")),
@@ -381,7 +385,7 @@ pub fn update_order<
 >(
     opts: &UpdateOrderOpts,
     cancel: impl FnOnce(&Order) -> F,
-    place: impl FnOnce(PlaceOrderOpts) -> G,
+    place: impl FnOnce(PreparedOrderOpts) -> G,
     mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError>,
     mut emit_error: impl FnMut(&str) -> Result<(), ExchangeError>,
 ) -> impl Future<Output = Result<Vec<String>, ExchangeError>> {
@@ -440,4 +444,25 @@ where
     C: FnMut(OrderBook),
 {
     listen(symbol, callback)
+}
+
+#[cfg(test)]
+mod accepted_contract_tests {
+    #[test]
+    fn accepted_trigger_info_error_factory() {
+        for kind in ["undefined", "null", "café\n\0💠"] {
+            let actual = super::trigger_info_error(kind);
+            assert_eq!(actual.name, "TypeError", "native diagnostic name");
+            assert_eq!(
+                actual.message,
+                format!("Cannot read properties of {kind} (reading 'metadata')"),
+                "native diagnostic text"
+            );
+            assert_eq!(
+                actual.metadata.as_ref(),
+                &safe_cex_exchange::runtime::ExchangeErrorMetadata::default(),
+                "fresh native metadata"
+            );
+        }
+    }
 }

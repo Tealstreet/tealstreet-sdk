@@ -28,7 +28,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected spawn")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "reporter-fixture".into()
     }
@@ -38,7 +38,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -68,7 +72,7 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
     marker.name = "ReporterMarkerError".into();
     marker.is_axios_error = true;
     marker.request = Some(json!({"requestMarker":73}));
-    marker.code = Some(json!(79));
+    marker.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(79)));
     marker.response = Some(json!({"status":429,"data":{"code":71}}));
     marker.context = Some(json!({"marker":"native-listener"}));
     let expected_metadata = marker.metadata.clone();
@@ -79,9 +83,10 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
     base.on(
         "error",
         Rc::new(move |event, payload| {
+            let payload = safe_cex_exchange::js_runtime::value::to_json(payload).unwrap();
             assert_eq!(event, "error", "concrete reporter event");
             assert_eq!(
-                payload[0], "Exchange Error: page failure",
+                payload, "Exchange Error: page failure",
                 "concrete reporter message"
             );
             first_count.set(first_count.get() + 1);

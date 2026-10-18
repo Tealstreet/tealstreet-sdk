@@ -1,6 +1,9 @@
-#[path = "support/runtime.rs"]
+#[path = "support/error_trace.rs"]
+mod error_trace;
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use indexmap::IndexMap;
+use safe_cex_exchange::delivery_timers::WorkerPortTimers;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
@@ -8,10 +11,12 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::{StoreUpdate, store::DefaultStore};
 use safe_cex_types::{ExchangeName, FetchedLeverage, PlaceOrderOpts};
-use safe_cex_webworker::{
-    chaser::ChaserOrderInstance, command_handlers::*, payload::*, task_types::*, twap_instance::*,
-    twap_manager::*, worker_ports::WorkerPortTimers,
-};
+use safe_cex_webworker::chaser::ChaserOrderInstance;
+use safe_cex_webworker::command_handlers::*;
+use safe_cex_webworker::payload::*;
+use safe_cex_webworker::task_types::*;
+use safe_cex_webworker::twap_instance::*;
+use safe_cex_webworker::twap_manager::*;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -46,13 +51,19 @@ impl ExchangeRuntime for Clock {
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.inner.spawn_local(f)
     }
-    fn console(&self, l: &str, m: &str) {
+    fn console_values(&self, l: &str, m: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(m);
+        let m = rendered.as_str();
         self.logs.borrow_mut().push((l.into(), m.into()));
     }
     fn is_worker(&self) -> bool {
         true
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, v: &Value) {
@@ -106,7 +117,7 @@ struct Host {
     spawned: RefCell<Vec<ExchangeFuture<'static, ()>>>,
     chasers: RefCell<Vec<Rc<ChaserOrderInstance>>>,
     twaps: RefCell<IndexMap<String, Rc<TwapInstance<Self>>>>,
-    posts: RefCell<Vec<StoreWorkerPayload>>,
+    posts: Rc<RefCell<Vec<StoreWorkerPayload>>>,
     released: Rc<Cell<bool>>,
     post_failure: Cell<bool>,
     replace_state: Cell<bool>,
@@ -186,6 +197,10 @@ impl TwapHost for Host {
     }
 }
 impl CommandHandlerHost for Host {
+    fn worker_error_post(&self) -> safe_cex_webworker::error_post::WorkerErrorPost {
+        let posts = self.posts.clone();
+        error_trace::post(Rc::new(move |payload| posts.borrow_mut().push(payload)))
+    }
     fn post_payload(&self, p: StoreWorkerPayload) -> Result<(), ExchangeError> {
         self.posts.borrow_mut().push(p);
         Ok(())
@@ -245,7 +260,7 @@ impl Host {
             spawned: RefCell::default(),
             chasers: RefCell::default(),
             twaps: RefCell::default(),
-            posts: RefCell::default(),
+            posts: Rc::default(),
             post_failure: Cell::new(false),
             replace_state: Cell::new(false),
             orders: RefCell::default(),

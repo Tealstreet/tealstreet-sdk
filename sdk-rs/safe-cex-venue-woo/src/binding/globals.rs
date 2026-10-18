@@ -4,7 +4,7 @@
 use super::{
     client,
     rt::{Rt, Shared},
-    value::{Js, Thrown, arg, from_json, from_typed, to_json},
+    value::{Js, Thrown, arg, from_typed, to_typed},
 };
 use crate::constants;
 use safe_cex_exchange::js_runtime::{
@@ -29,12 +29,20 @@ fn table(entries: &[(&str, &str)]) -> Js {
 }
 
 fn enum_table<T: serde::Serialize>(entries: &[(&str, T)]) -> Js {
-    Js::object(
+    let table = Js::object(
         entries
             .iter()
             .map(|(k, v)| (*k, Js::str(&serde_text(v))))
             .collect(),
-    )
+    );
+    // The source exports ordinary objects: unknown keys can inherit the actual
+    // realm's Object.prototype members. Preserve those referents as values.
+    if let Js::Object(object) = &table {
+        *object.proto.borrow_mut() = Some(Js::Builtin(
+            safe_cex_num::PrototypeRealm::current().reference(safe_cex_num::ProtoMember::Prototype),
+        ));
+    }
+    table
 }
 
 fn strings(values: &[&str]) -> Js {
@@ -55,7 +63,8 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
         settings: super::exchange::settings(),
         external_public_data: extra.external_public_data.clone(),
     };
-    let (this, base) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
+    let (this, base) =
+        base_exchange::create(&rt.shared.sockets, parts, name, options, store, |_| Ok(()))?;
     let _ = rt.shared.base.set(base);
     Ok(this)
 }
@@ -64,12 +73,6 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
 // factory step: public skip, broker injection, remote/keyless bypass, V1/V3 signing.
 fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
     let typed: ExchangeOptions = base_exchange::exchange_options(&options)?;
-    if typed.tealstreet_tunnel == Some(true) {
-        return Err(Thrown::error(
-            "Error",
-            "Tealstreet tunnel transport is not available in the Rust WOO binding",
-        ));
-    }
     let timeout = typed
         .extra
         .as_ref()
@@ -86,8 +89,9 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
         })
         .map(|(_, v)| *v)
         .unwrap_or_default();
-    let xhr = client::create(
+    let xhr = client::factory::create(
         rt.shared.http.clone(),
+        &*rt.shared.runtime.transport(),
         Js::object(vec![
             ("baseURL", Js::str(base_url)),
             ("timeout", Js::Number(timeout)),
@@ -96,7 +100,7 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 Js::object(vec![(
                     "serialize",
                     Js::function("serialize", |_, a| {
-                        crate::api::sorted_query(&to_json(&arg(&a, 0))?, false)
+                        crate::api::sorted_query(&arg(&a, 0), false)
                             .map(|q| Js::str(&q))
                             .map_err(|e| Thrown::error("Error", &e))
                     }),
@@ -110,7 +114,9 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 ]),
             ),
         ]),
-    );
+        &options,
+        rt.base(),
+    )?;
     xhr.call_method(
         "__configureRetry",
         vec![Js::object(vec![
@@ -122,14 +128,22 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
             ),
         ])],
     )?;
-    // The signer capability is not serializable; it lives on the typed options.
-    let remote = rt.shared.extra.options.remote_signer.is_some();
+    if typed.tealstreet_tunnel == Some(true) {
+        client::factory::install_transport_adapter(
+            rt.shared.http.clone(),
+            &*rt.shared.runtime.transport(),
+            &xhr,
+            &options,
+            rt.base().name.clone(),
+            safe_cex_transport::RestAdapterVariant::Default,
+        )?;
+    }
     let runtime = rt.shared.runtime.clone();
     let interceptor = Js::function("", move |_, a| {
-        // The signer works on the JSON view; callables (paramsSerializer) ride across.
-        let original = arg(&a, 0);
-        let serializer = original.get("paramsSerializer")?;
-        let config = to_json(&original)?;
+        // Native shallow config copies preserve callable and data identities.
+        let config = arg(&a, 0);
+        // BaseExchange injects executable signer handles into these live options.
+        let remote = options.get("remoteSigner")?.truthy();
         let typed = typed.clone();
         let runtime = runtime.clone();
         Ok(Js::Promise(super::promise::Promise::spawn(
@@ -145,10 +159,6 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 )
                 .await
                 .map_err(|e| Thrown::error("Error", &e))?;
-                let next = from_json(&next);
-                if !serializer.is_undefined() {
-                    next.set("paramsSerializer", serializer)?;
-                }
                 Ok(next)
             }),
         )))
@@ -235,6 +245,66 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
+
+    // The actual imported journal operations used by the source lifecycle body.
+    def(
+        "wooOrdersToExecutions",
+        Js::function("wooOrdersToExecutions", |_, args| {
+            let orders: Vec<safe_cex_types::HistoricalOrder> = to_typed(&arg(&args, 0))?;
+            from_typed(&crate::journal::woo_orders_to_executions(&orders))
+        }),
+    );
+    def(
+        "reconstructPositionIntervals",
+        Js::function("reconstructPositionIntervals", |_, args| {
+            use safe_cex_exchange::position_intervals::{
+                PositionIntervalOptions, reconstruct_position_intervals,
+            };
+            let executions: Vec<safe_cex_types::Execution> = to_typed(&arg(&args, 0))?;
+            let intervals = reconstruct_position_intervals(
+                &executions,
+                &mut PositionIntervalOptions::default(),
+            )
+            .map_err(|message| Thrown::error("Error", &message))?;
+            from_typed(&intervals)
+        }),
+    );
+    def(
+        "mapFoldedInterval",
+        Js::function("mapFoldedInterval", |_, args| {
+            use safe_cex_exchange::{
+                fold_position_adapter::{FoldPositionAdapterDeps, map_folded_interval},
+                position_intervals::PositionInterval,
+            };
+            let interval: PositionInterval = to_typed(&arg(&args, 0))?;
+            // The native adapter's callbacks are infallible. Evaluate the source's
+            // fallible resolver only after its refusal guards, before calling it.
+            if interval.closed_at.is_none()
+                || interval.closed_size.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+                || interval.realized_pnl.is_none()
+            {
+                return Ok(Js::Null);
+            }
+            let deps = arg(&args, 1);
+            let account: String = to_typed(&deps.get("account")?)?;
+            let currency =
+                deps.call_method("resolveSettleCurrency", vec![Js::str(&interval.symbol)])?;
+            let currency: String = to_typed(&currency)?;
+            let mut resolve = |_: &str| currency.clone();
+            let record = map_folded_interval(
+                &interval,
+                &mut FoldPositionAdapterDeps {
+                    account: &account,
+                    resolve_settle_currency: &mut resolve,
+                    resolve_funding: None,
+                },
+            );
+            match record {
+                Some(record) => from_typed(&record),
+                None => Ok(Js::Null),
+            }
+        }),
+    );
 
     // woo.types.ts
     def("RECV_WINDOW", Js::Number(constants::RECV_WINDOW as f64));

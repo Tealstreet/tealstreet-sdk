@@ -37,7 +37,7 @@ impl ExchangeRuntime for Runtime {
         drop(future);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -47,7 +47,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {
@@ -196,7 +200,9 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
         let calls = Rc::new(Cell::new(0));
         let cleanup_clocks = Rc::new(Cell::new(0));
         let mut original_error = ExchangeError::new("handler failure");
-        original_error.code = Some(json!("HANDLER_ORIGIN"));
+        original_error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "HANDLER_ORIGIN"
+        )));
         original_error.response = Some(json!({"sentinel": 42}));
         let a: MessageHandler = {
             let (trace, b, c) = (trace.clone(), b.clone(), c.clone());
@@ -322,7 +328,7 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
         total_callbacks += trace.borrow().len();
         total_routes += calls.get();
         native.push(json!({"name":name,"log":*trace.borrow(),"oldLength":old_len,"currentLength":current_len,
-            "routes":calls.get(),"cleanup":cleanup_clocks.get(),"errorCode":error.and_then(|e|e.code.clone())}));
+            "routes":calls.get(),"cleanup":cleanup_clocks.get(),"errorCode":error.and_then(|e|observed_error_code(&e.code).clone())}));
     }
     assert_eq!(
         total_callbacks, 16,
@@ -388,4 +394,17 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
         source["cases"],
         "secondary source/native trace comparison"
     );
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

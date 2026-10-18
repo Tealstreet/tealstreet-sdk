@@ -3,10 +3,13 @@
 //! CHOSEN: reads are snapshots. `store.orders` returns a fresh array of fresh
 //! order objects, so mutating a returned object does not write the Store; the
 //! ported bodies write through the Store methods, which is what persists.
-use super::{Realm, value::*};
-use safe_cex_store::{Store, StoreUpdate};
+use super::{
+    Realm,
+    value::{Exotic, Kind, PropKey, Thrown, Value},
+};
+use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{Order, Position};
-use serde_json::{Map, Value as Json};
+use serde_json::Value as Json;
 use std::rc::Rc;
 
 #[derive(Clone, Copy)]
@@ -25,19 +28,15 @@ struct TableView {
 impl Exotic for TableView {
     fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value> {
         let key = String::from_utf16_lossy(key.units()?);
-        let json = match self.table {
-            Table::MarketsBySymbol => {
-                serde_json::to_value(self.store.markets_by_symbol().get(&key)?)
-            }
-            Table::MarketsById => serde_json::to_value(self.store.markets_by_id().get(&key)?),
-            Table::TickersBySymbol => {
-                serde_json::to_value(self.store.tickers_by_symbol().get(&key)?)
-            }
-            Table::TickersById => serde_json::to_value(self.store.tickers_by_id().get(&key)?),
+        match self.table {
+            Table::MarketsBySymbol => realm.from_typed(self.store.markets_by_symbol().get(&key)?),
+            Table::MarketsById => realm.from_typed(self.store.markets_by_id().get(&key)?),
+            Table::TickersBySymbol => realm.from_typed(self.store.tickers_by_symbol().get(&key)?),
+            Table::TickersById => realm.from_typed(self.store.tickers_by_id().get(&key)?),
         }
-        .ok()?;
-        Some(realm.from_serde(&json))
+        .ok()
     }
+
     fn keys(&self) -> Vec<PropKey> {
         let keys: Vec<String> = match self.table {
             Table::MarketsBySymbol => self.store.markets_by_symbol().keys().cloned().collect(),
@@ -64,12 +63,31 @@ fn id_of(r: &mut Realm, selector: &Value) -> Result<String, Thrown> {
     let id = r.get_str(selector, "id")?;
     r.to_rust_string(&id)
 }
-fn patch(r: &mut Realm, changes: &Value) -> Result<Map<String, Json>, Thrown> {
-    match r.to_serde(changes)? {
-        Json::Object(map) => Ok(map),
-        _ => Err(r.type_error("store patch must be an object")),
+// Model fields cross the native patch boundary before JSON can omit undefined
+// or turn a nonfinite scalar into null. Opaque metadata retains its JSON policy.
+fn patch(r: &mut Realm, changes: &Value) -> Result<ModelPatch, Thrown> {
+    if !matches!(changes, Value::Object(_)) || changes.is_callable() {
+        return Err(r.type_error("store patch must be an object"));
     }
+    let fields = r.new_object();
+    let mut native = ModelPatch::default();
+    for (key, value) in r.own_entries(changes)? {
+        let Some(units) = key.units() else { continue };
+        let field = r.to_rust_string(&Value::String(units.into()))?;
+        match value {
+            Value::Undefined => native.set_undefined(field),
+            Value::Number(number) if field != "info" => native.set_number(field, number),
+            value => r.define_str(&fields, &field, value)?,
+        }
+    }
+    let Json::Object(fields) = r.to_serde(&fields)? else {
+        return Err(r.type_error("store patch must be an object"));
+    };
+    let mut changes = ModelPatch::from(fields);
+    changes.0.extend(native.0);
+    Ok(changes)
 }
+
 fn snapshot<T: serde::Serialize + ?Sized>(r: &mut Realm, value: &T) -> Result<Value, Thrown> {
     r.from_typed(&value)
 }
@@ -120,9 +138,7 @@ pub(crate) fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
         "update",
         2,
         Rc::new(|r, s, a| {
-            let json = r.to_serde(&arg(a, 0))?;
-            let changes: StoreUpdate = serde_json::from_value(json)
-                .map_err(|e| r.type_error(&format!("store.update: {e}")))?;
+            let changes: StoreUpdate = r.to_typed(&arg(a, 0))?;
             let from_worker = arg(a, 1).truthy();
             mutation(r, s.update(changes, from_worker))
         }),
@@ -224,4 +240,51 @@ pub(crate) fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
         }),
     );
     o
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::realm::test_runtime::TestRuntime;
+    use safe_cex_store::store::DefaultStore;
+    use serde_json::json;
+
+    #[test]
+    fn production_store_facade_retains_native_patch_numbers_and_undefined() {
+        let mut realm = Realm::new(Rc::new(TestRuntime::default()));
+        let store = Rc::new(DefaultStore::new());
+        store
+            .add_order(
+                serde_json::from_value(json!({
+                    "id":"o", "symbol":"BTC-PERP", "amount":1, "filled":0,
+                    "remaining":1, "reduceOnly":false, "lastUpdate":1, "price":7
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let facade = store_object(&realm, store.clone());
+        let update = realm.get_str(&facade, "updateOrder").unwrap();
+        let selector = realm.object_from(vec![("id", Value::str("o"))]);
+        for value in [-0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let changes = realm.object_from(vec![("price", Value::Number(value))]);
+            realm
+                .call(&update, &facade, &[selector.clone(), changes])
+                .unwrap();
+            assert_eq!(
+                store.orders()[0].price.as_ref().unwrap().to_bits(),
+                value.to_bits()
+            );
+        }
+        let changes = realm.object_from(vec![("price", Value::Undefined)]);
+        realm
+            .call(&update, &facade, &[selector.clone(), changes])
+            .unwrap();
+        assert!(store.orders()[0].price.is_undefined());
+        let omitted = realm.new_object();
+        realm.call(&update, &facade, &[selector, omitted]).unwrap();
+        assert!(
+            store.orders()[0].price.is_undefined(),
+            "an absent patch preserves the field"
+        );
+    }
 }

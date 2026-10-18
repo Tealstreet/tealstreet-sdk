@@ -1,6 +1,7 @@
 """One Node corpus per target; all controls compile, fail by name, restore/pass."""
 from pathlib import Path
 import os,subprocess,re,argparse
+from decoder_mutations import replace_decoder_field
 parser=argparse.ArgumentParser();parser.add_argument("--start-at",type=int,default=0);args=parser.parse_args()
 crate=Path(__file__).resolve().parents[1];source=crate/'src/candles.rs';test=crate/'tests/candles.rs';types=crate/'src/types.rs'
 env=dict(os.environ,SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript')
@@ -16,7 +17,7 @@ for name,old,new,assertion in controls[args.start_at:]:
  originals={p:p.read_bytes() for p in [source,test,types]}
  try:
   if name.startswith('consuming'):
-   s=originals[types].decode();s=s.replace('    pub events: Vec<CandleEvent>,','    #[serde(deserialize_with="consume_all")]\n    pub events: Vec<CandleEvent>,')
+   s=originals[types].decode();s=replace_decoder_field(s,'    pub events: Vec<CandleEvent>,','    #[serde(deserialize_with="consume_all")]\n    pub events: Vec<CandleEvent>,')
    s+='\nfn consume_all<\'de,D:serde::Deserializer<\'de>>(d:D)->Result<Vec<CandleEvent>,D::Error>{let consumed=Vec::<CandleEvent>::deserialize(d)?;drop(consumed);Ok(vec![])}\n';types.write_text(s)
   else:
    s=originals[source].decode();assert s.count(old)==1,(name,s.count(old));s=s.replace(old,new).replace('let candles = data','let candles: Vec<Candle> = data');source.write_text(s)

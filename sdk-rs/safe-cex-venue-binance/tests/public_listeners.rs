@@ -24,7 +24,7 @@ fn event(v: Value) -> EventValue {
     EventValue::from_json(v)
 }
 fn arr(v: EventValue) -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(vec![v])))
+    EventValue::array(vec![v])
 }
 fn wire(v: &EventValue) -> Value {
     match v {
@@ -38,12 +38,10 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::Bool(v) => json!(v),
-        EventValue::String(s) => json!(s),
-        EventValue::Enum(e) => e.wire(),
-        EventValue::Array(a) => a.borrow().iter().map(wire).collect(),
-        EventValue::Object(o) => o
-            .borrow()
-            .fields
+        EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
+        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
@@ -53,7 +51,9 @@ fn wire(v: &EventValue) -> Value {
 fn error() -> Failure {
     let mut e = ExchangeError::new("listener fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!(-1000));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        -1000
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"listener detail"}}));
     Rc::new(e)
 }
@@ -170,7 +170,7 @@ impl Host {
         }
     }
     fn json(&self) -> Value {
-        json!({"sent":self.sent.borrow().iter().map(wire).collect::<Vec<_>>(),"timers":self.timers.borrow().iter().map(|t|json!({"delay":t.delay,"id":t.id})).collect::<Vec<_>>(),"cleared":self.cleared.borrow().iter().map(wire).collect::<Vec<_>>(),"cleanup":*self.cleaned.borrow(),"handlers":self.state.handlers.borrow().iter().map(|(k,v)|(k.clone(),json!(v.len()))).collect::<serde_json::Map<_,_>>(),"topics":self.state.topics.borrow().iter().map(|(k,v)|(k.clone(),json!(v))).collect::<serde_json::Map<_,_>>(),"nextId":self.state.next_subscription_id.get(),"candles":*self.candles.borrow(),"books":*self.book_values.borrow(),"gets":self.gets.borrow().iter().map(|(v,s,l)|json!({"client":if *v==Venue::Spot{"xhr"}else{"publicXhr"},"endpoint":if *v==Venue::Spot{"/api/v3/depth"}else{"/fapi/v1/depth"},"symbol":s,"limit":l})).collect::<Vec<_>>(),"applies":self.applies.borrow().iter().map(|(d,p)|json!({"u":wire(&d.get("u").unwrap()),"previous":p})).collect::<Vec<_>>(),"ops":*self.ops.borrow(),"failures":self.failures.borrow().iter().map(|e|json!({"original":Rc::ptr_eq(e,&self.primary),"name":e.name,"message":e.message,"code":e.code,"response":e.response})).collect::<Vec<_>>(),"inner":self.state.inner.borrow().iter().map(|(k,v)|(k.clone(),json!({"loaded":v.snapshot_loaded.get(),"updates":v.updates.borrow().iter().map(wire).collect::<Vec<_>>()}))).collect::<serde_json::Map<_,_>>()})
+        json!({"sent":self.sent.borrow().iter().map(wire).collect::<Vec<_>>(),"timers":self.timers.borrow().iter().map(|t|json!({"delay":t.delay,"id":t.id})).collect::<Vec<_>>(),"cleared":self.cleared.borrow().iter().map(wire).collect::<Vec<_>>(),"cleanup":*self.cleaned.borrow(),"handlers":self.state.handlers.borrow().iter().map(|(k,v)|(k.clone(),json!(v.len()))).collect::<serde_json::Map<_,_>>(),"topics":self.state.topics.borrow().iter().map(|(k,v)|(k.clone(),json!(v))).collect::<serde_json::Map<_,_>>(),"nextId":self.state.next_subscription_id.get(),"candles":*self.candles.borrow(),"books":*self.book_values.borrow(),"gets":self.gets.borrow().iter().map(|(v,s,l)|json!({"client":if *v==Venue::Spot{"xhr"}else{"publicXhr"},"endpoint":if *v==Venue::Spot{"/api/v3/depth"}else{"/fapi/v1/depth"},"symbol":s,"limit":l})).collect::<Vec<_>>(),"applies":self.applies.borrow().iter().map(|(d,p)|json!({"u":wire(&d.read("u").unwrap()),"previous":p})).collect::<Vec<_>>(),"ops":*self.ops.borrow(),"failures":self.failures.borrow().iter().map(|e|json!({"original":Rc::ptr_eq(e,&self.primary),"name":e.name,"message":e.message,"code":observed_error_code(&e.code),"response":e.response})).collect::<Vec<_>>(),"inner":self.state.inner.borrow().iter().map(|(k,v)|(k.clone(),json!({"loaded":v.snapshot_loaded.get(),"updates":v.updates.borrow().iter().map(wire).collect::<Vec<_>>()}))).collect::<serde_json::Map<_,_>>()})
     }
 }
 impl ListenerHost for Host {
@@ -275,12 +275,12 @@ impl ListenerHost for Host {
             let EventValue::Array(a) = data.get(key).unwrap() else {
                 panic!("authored levels")
             };
-            a.borrow()
+            array_values(&a)
                 .iter()
                 .map(|r| {
                     vec![
-                        r.get("0").unwrap().text().unwrap(),
-                        r.get("1").unwrap().text().unwrap(),
+                        r.read("0").unwrap().text().unwrap(),
+                        r.read("1").unwrap().text().unwrap(),
                     ]
                 })
                 .collect::<Vec<_>>()
@@ -289,7 +289,7 @@ impl ListenerHost for Host {
             &mut b.borrow_mut(),
             &rows("bids"),
             &rows("asks"),
-            data.get("lastUpdateId")?.number()?,
+            data.read("lastUpdateId")?.number()?,
             &mut s.borrow_mut(),
         );
         Ok(())
@@ -302,7 +302,7 @@ impl ListenerHost for Host {
         self.ops.borrow_mut().push("buffer");
         let mut out = vec![];
         for u in updates {
-            if u.get("u")?.number()? > id.number()? {
+            if u.read("u")?.number()? > id.number()? {
                 self.buffered.borrow_mut().push(u.clone());
                 out.push(u);
             }
@@ -350,7 +350,11 @@ fn check_failures(h: &Host, n: usize, label: &str) {
             e.message, "listener fixture",
             "{label}: native error message"
         );
-        assert_eq!(e.code, Some(json!(-1000)), "{label}: native error code");
+        assert_eq!(
+            observed_error_code(&e.code),
+            Some(json!(-1000)),
+            "{label}: native error code"
+        );
         assert_eq!(
             e.response,
             Some(json!({"status":503,"data":{"msg":"listener detail"}})),
@@ -360,12 +364,12 @@ fn check_failures(h: &Host, n: usize, label: &str) {
 }
 fn check_payloads(h: &Host, id_dynamic: bool, book: bool, label: &str) {
     for (i, p) in h.sent.borrow().iter().enumerate() {
-        let method = p.get("method").unwrap();
+        let method = p.read("method").unwrap();
         assert!(
-            matches!(method,EventValue::String(ref v)if v=="SUBSCRIBE"||v=="UNSUBSCRIBE"),
+            matches!(method,EventValue::String(v)if v.as_ref()=="SUBSCRIBE".encode_utf16().collect::<Vec<_>>()||v.as_ref()=="UNSUBSCRIBE".encode_utf16().collect::<Vec<_>>()),
             "{label}: native method"
         );
-        let EventValue::Number(id) = p.get("id").unwrap() else {
+        let EventValue::Number(id) = p.read("id").unwrap() else {
             panic!("{label}: native id type")
         };
         assert_eq!(
@@ -379,12 +383,12 @@ fn check_payloads(h: &Host, id_dynamic: bool, book: bool, label: &str) {
             },
             "{label}: native subscription ID"
         );
-        let EventValue::Array(a) = p.get("params").unwrap() else {
+        let EventValue::Array(a) = p.read("params").unwrap() else {
             panic!("native params")
         };
         assert_eq!(a.borrow().len(), 1, "{label}: native params count");
         assert!(
-            a.borrow()[0].same(&string(if book {
+            a.borrow()[0].as_ref().unwrap().same(&string(if book {
                 "btcusdt@depth"
             } else {
                 "btcusdt@kline_1m"
@@ -401,9 +405,9 @@ fn native_methods(h: &Host, expected: &[&str], label: &str) {
     );
     for (p, m) in h.sent.borrow().iter().zip(expected) {
         assert!(
-            p.get("method").unwrap().same(&string(*m)),
+            p.read("method").unwrap().same(&string(*m)),
             "{label}: native method {m}, got {:?}",
-            p.get("method").unwrap()
+            p.read("method").unwrap()
         );
     }
 }
@@ -458,8 +462,8 @@ fn candle_case(v: Venue, name: &str) -> Value {
     }
     let mut data = h.fixture["candle"].clone();
     if name == "live-opts" {
-        opts.define("symbol", string("ETHUSDT"));
-        opts.define("interval", string("5m"));
+        opts.write("symbol", string("ETHUSDT"));
+        opts.write("interval", string("5m"));
         data["k"]["s"] = json!("ETHUSDT");
         data["k"]["i"] = json!("5m");
     }
@@ -808,7 +812,7 @@ fn book_case(v: Venue, name: &str) -> Value {
             "{label}: native previous-final flag"
         );
         assert!(
-            matches!(d.get("u").unwrap(), EventValue::Number(_)),
+            matches!(d.read("u").unwrap(), EventValue::Number(_)),
             "{label}: native update ID kind"
         );
     }
@@ -1126,4 +1130,17 @@ fn constructors_futures() {
 #[ignore = "mandatory live oracle"]
 fn constructors_pm() {
     run_constructors(true, "constructors_pm")
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

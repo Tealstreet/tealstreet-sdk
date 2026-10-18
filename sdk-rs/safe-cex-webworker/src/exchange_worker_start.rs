@@ -1,6 +1,7 @@
 //! ExchangeWorker startup, live dispatch, constructor registry and event bridges.
 //! Dynamic venue imports and heterogeneous constructors are explicit callable
 //! dependencies; none of the worker method bodies is delegated to a success hook.
+use crate::data_post::{WorkerDataPayload, WorkerDataPost};
 use crate::{
     exchange_worker::{
         ExchangeWorker, ExchangeWorkerHost, WorkerConstruction, WorkerHandler, WorkerHandlerKind,
@@ -10,6 +11,7 @@ use crate::{
     postprocessor_registry::PostprocessorRegistry,
     worker_logging::{self, WorkerLogLevel},
 };
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture},
@@ -22,6 +24,50 @@ use std::{
     rc::{Rc, Weak},
     task::Waker,
 };
+
+/// Install the source fill and variadic log bridge on a production exchange.
+/// The post callback is the worker port; no event payload is interpreted as args.
+pub fn install_exchange_event_bridge(
+    base: &safe_cex_exchange::exchange::BaseExchange,
+    post: WorkerDataPost,
+) {
+    let fill_post = post.clone();
+    base.on(
+        "fill",
+        Rc::new(move |_, data| {
+            fill_post.send(WorkerDataPayload {
+                op: StoreWorkerOp::Fill,
+                data: data.clone(),
+            })
+        }),
+    );
+    let logs = [
+        ("error", StoreWorkerOp::Error),
+        ("warning", StoreWorkerOp::Warning),
+        ("log", StoreWorkerOp::Log),
+        ("exec-log", StoreWorkerOp::ExecLog),
+        ("exec-result", StoreWorkerOp::ExecResult),
+        ("chaser:complete", StoreWorkerOp::ChaserComplete),
+        ("grafana-info", StoreWorkerOp::GrafanaInfo),
+        ("grafana-error", StoreWorkerOp::GrafanaError),
+        ("grafana-pws", StoreWorkerOp::GrafanaPws),
+        ("grafana-pws-sub", StoreWorkerOp::GrafanaPwsSub),
+        ("grafana-http-request", StoreWorkerOp::GrafanaHttpRequest),
+        ("grafana-http-response", StoreWorkerOp::GrafanaHttpResponse),
+    ];
+    for (name, op) in logs {
+        let post = post.clone();
+        base.on_args(
+            name,
+            Rc::new(move |_, args| {
+                post.send(WorkerDataPayload {
+                    op,
+                    data: Js::array(args.to_vec()),
+                })
+            }),
+        );
+    }
+}
 
 pub struct ProcessorArguments {
     pub account_name: String,
@@ -67,6 +113,7 @@ pub trait WorkerBootstrapHost: ExchangeWorkerHost {
         payload: StoreWorkerPayload,
     ) -> Result<(), ExchangeError>;
     fn post_payload(&self, payload: StoreWorkerPayload) -> Result<(), ExchangeError>;
+    fn post_event(&self, payload: WorkerDataPayload) -> Result<(), ExchangeError>;
     /// Enqueue and drive the whole future; dropping it on a lost race is forbidden.
     fn construct_exchange_start(&self, exchange: Rc<dyn Exchange>) -> ExchangeFuture<'static, ()>;
     fn error_properties(&self, error: &ExchangeError) -> Value;
@@ -492,55 +539,17 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                 Ok(())
             }));
         let worker = Rc::downgrade(self);
-        self.exchange()
-            .ok_or_else(|| ExchangeError::new("No exchange for fill listener"))?
-            .base()
-            .on(
-                "fill",
-                Rc::new(move |_, data| {
-                    if let Some(w) = worker.upgrade() {
-                        w.construction.ctx.post_payload(StoreWorkerPayload {
-                            op: StoreWorkerOp::Fill,
-                            instance_id: None,
-                            data: Some(data.clone()),
-                        })?;
-                    }
-                    Ok(())
-                }),
-            );
-        let logs = [
-            ("error", StoreWorkerOp::Error),
-            ("warning", StoreWorkerOp::Warning),
-            ("log", StoreWorkerOp::Log),
-            ("exec-log", StoreWorkerOp::ExecLog),
-            ("exec-result", StoreWorkerOp::ExecResult),
-            ("chaser:complete", StoreWorkerOp::ChaserComplete),
-            ("grafana-info", StoreWorkerOp::GrafanaInfo),
-            ("grafana-error", StoreWorkerOp::GrafanaError),
-            ("grafana-pws", StoreWorkerOp::GrafanaPws),
-            ("grafana-pws-sub", StoreWorkerOp::GrafanaPwsSub),
-            ("grafana-http-request", StoreWorkerOp::GrafanaHttpRequest),
-            ("grafana-http-response", StoreWorkerOp::GrafanaHttpResponse),
-        ];
-        for (name, op) in logs {
-            let worker = Rc::downgrade(self);
+        install_exchange_event_bridge(
             self.exchange()
-                .ok_or_else(|| ExchangeError::new("Exchange cleared during event setup"))?
-                .base()
-                .on(
-                    name,
-                    Rc::new(move |_, data| {
-                        if let Some(w) = worker.upgrade() {
-                            w.construction.ctx.post_payload(StoreWorkerPayload {
-                                op,
-                                instance_id: None,
-                                data: Some(Value::Array(vec![data.clone()])),
-                            })?;
-                        }
-                        Ok(())
-                    }),
-                );
-        }
+                .ok_or_else(|| ExchangeError::new("No exchange for event bridge"))?
+                .base(),
+            WorkerDataPost::new(Rc::new(move |payload| {
+                if let Some(w) = worker.upgrade() {
+                    w.construction.ctx.post_event(payload)?;
+                }
+                Ok(())
+            })),
+        );
         let worker = Rc::downgrade(self);
         self.exchange()
             .ok_or_else(|| ExchangeError::new("No reconnect exchange"))?

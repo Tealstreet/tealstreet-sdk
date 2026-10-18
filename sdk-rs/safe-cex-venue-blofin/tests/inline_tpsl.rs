@@ -29,7 +29,7 @@ fn trigger(t: OrderStopTriggerType) -> &'static str {
     }
 }
 fn native(o: Order) -> Value {
-    let status = match o.status {
+    let status = match o.status.value().expect("present source enum in fixture") {
         OrderStatus::Open => "open",
         OrderStatus::Closed => "closed",
         OrderStatus::Canceled => "canceled",
@@ -37,7 +37,7 @@ fn native(o: Order) -> Value {
         OrderStatus::Updating => "updating",
         OrderStatus::Canceling => "canceling",
     };
-    let kind = match o.r#type {
+    let kind = match o.r#type.value().expect("present source enum in fixture") {
         OrderType::Market => "market",
         OrderType::Limit => "limit",
         OrderType::Conditional => "conditional",
@@ -45,17 +45,17 @@ fn native(o: Order) -> Value {
         OrderType::TakeProfit => "take_profit_market",
         OrderType::TrailingStopLoss => "trailing_stop_market",
     };
-    let mut value = json!({"id":o.id,"status":status,"symbol":o.symbol,"type":kind,"side":match o.side{OrderSide::Buy=>"buy",OrderSide::Sell=>"sell"},"price":bits(o.price),"amount":bits(o.amount),"filled":bits(o.filled),"remaining":bits(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":bits(o.last_update)});
-    if let Some(v) = o.parent_id {
+    let mut value = json!({"id":o.id,"status":status,"symbol":o.symbol,"type":kind,"side":match o.side.value().expect("present source enum in fixture"){OrderSide::Buy=>"buy",OrderSide::Sell=>"sell"},"price":bits((o.price).to_number()),"amount":bits(o.amount),"filled":bits(o.filled),"remaining":bits(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":bits(o.last_update)});
+    if let Some(v) = o.parent_id.into_value() {
         value["parentId"] = json!(v);
     }
-    if let Some(v) = o.close {
+    if let Some(v) = o.close.into_value() {
         value["close"] = json!(v);
     }
-    if let Some(v) = o.info {
+    if let Some(v) = o.info.into_value() {
         value["info"] = info(v);
     }
-    if let Some(v) = o.time_in_force {
+    if let Some(v) = o.time_in_force.into_value() {
         value["timeInForce"] = json!(match v {
             OrderTimeInForce::GoodTillCancel => "GoodTillCancel",
             OrderTimeInForce::ImmediateOrCancel => "ImmediateOrCancel",
@@ -68,16 +68,16 @@ fn native(o: Order) -> Value {
         ("tpTriggerType", o.tp_trigger_type),
         ("slTriggerType", o.sl_trigger_type),
     ] {
-        if let Some(v) = v {
+        if let Some(v) = v.into_value() {
             value[key] = json!(trigger(v));
         }
     }
     for (key, v) in [("takeProfit", o.take_profit), ("stopLoss", o.stop_loss)] {
-        if let Some(v) = v {
+        if let Some(v) = v.into_value() {
             value[key] = bits(v);
         }
     }
-    if let Some(e) = o.extra {
+    if let Some(e) = o.extra.into_value() {
         let mut extra = json!({});
         for (key, v) in [
             ("remainingNative", e.remaining_native),
@@ -170,14 +170,18 @@ fn live_inline_tpsl_corpus() {
                 for n in input.len()..pin.case_count(i, "/result/ok") {
                     let row = &rows[n];
                     let expected = &case["result"]["ok"][n];
-                    match row.r#type {
+                    match row.r#type.value().expect("present source enum in fixture") {
                         OrderType::TakeProfit => assert_eq!(
-                            bits(row.price),
+                            bits((row.price).to_number()),
                             expected["price"],
                             "inline_take_profit_price"
                         ),
                         OrderType::StopLoss => {
-                            assert_eq!(bits(row.price), expected["price"], "inline_stop_loss_price")
+                            assert_eq!(
+                                bits((row.price).to_number()),
+                                expected["price"],
+                                "inline_stop_loss_price"
+                            )
                         }
                         _ => panic!("inline_fallback_type"),
                     }

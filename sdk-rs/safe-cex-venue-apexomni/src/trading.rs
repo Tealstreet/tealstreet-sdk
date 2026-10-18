@@ -14,7 +14,7 @@ use num_bigint::BigUint;
 use safe_cex_exchange::{error_reporting::ExchangeErrorInput, runtime::ExchangeError};
 use safe_cex_num::{JsJsonValue as J, adjust, js_number_string};
 use safe_cex_types::{
-    Order, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PlaceOrderOpts,
+    Order, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PreparedOrderOpts,
     UpdateOrderOpts, UpdateOrderOptsUpdate,
 };
 fn number(value: f64) -> J {
@@ -41,17 +41,17 @@ fn add(record: &mut J, key: &str, value: J) {
     };
     fields.push((key.into(), value));
 }
-fn from_order(order: &Order) -> PlaceOrderOpts {
-    PlaceOrderOpts {
+fn from_order(order: &Order) -> PreparedOrderOpts {
+    PreparedOrderOpts {
         symbol: order.symbol.clone(),
-        r#type: order.r#type,
-        side: order.side,
+        r#type: order.r#type.into_property(),
+        side: order.side.into_property(),
         amount: order.amount,
-        price: Some(order.price),
+        price: order.price.into_value(),
         trigger_price: None,
         stop_loss: None,
         take_profit: None,
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: None,
         trigger_type: None,
         tp_trigger_type: None,
@@ -132,8 +132,12 @@ impl ApexOmniExchange {
             .map_err(failure)
     }
     // ts: ApexOmniExchange.placeOrder
-    pub async fn place_order(&self, opts: &PlaceOrderOpts) -> Result<Vec<String>, ExchangeError> {
-        let caller = self.base.resolve_caller_client_order_id(opts)?;
+    pub async fn place_order(
+        &self,
+        opts: impl Into<PreparedOrderOpts>,
+    ) -> Result<Vec<String>, ExchangeError> {
+        let opts = opts.into();
+        let caller = self.base.resolve_caller_client_order_id(&opts)?;
         let market = self
             .base
             .store
@@ -171,9 +175,9 @@ impl ApexOmniExchange {
             "SELL"
         };
         let trigger = present(opts.trigger_price).map(|v| adjust(v, p_price));
-        let execution = match opts.r#type {
-            OrderType::Limit => price.map_or_else(|| "null".into(), js_number_string),
-            OrderType::Market => {
+        let execution = match opts.r#type.into_value() {
+            Some(OrderType::Limit) => price.map_or_else(|| "null".into(), js_number_string),
+            Some(OrderType::Market) => {
                 let ticker = self
                     .base
                     .store
@@ -191,7 +195,7 @@ impl ApexOmniExchange {
                     p_price,
                 ))
             }
-            OrderType::StopLoss | OrderType::TakeProfit => {
+            Some(OrderType::StopLoss | OrderType::TakeProfit) => {
                 let effective = present(trigger).or(present(price)).unwrap_or_else(|| {
                     self.base
                         .store
@@ -218,22 +222,25 @@ impl ApexOmniExchange {
             .rev()
             .find(|(_, t)| *t == tif)
             .map_or(J::Undefined, |(s, _)| string(*s));
-        let trigger_price = if matches!(opts.r#type, OrderType::StopLoss | OrderType::TakeProfit) {
+        let trigger_price = if matches!(
+            opts.r#type.into_value(),
+            Some(OrderType::StopLoss | OrderType::TakeProfit)
+        ) {
             present(trigger)
-                .or(present(price))
+                .or(price)
                 .map_or_else(|| string("null"), |v| string(js_number_string(v)))
         } else {
             J::Undefined
         };
-        let trigger_type = match opts.r#type {
-            OrderType::StopLoss => string(
+        let trigger_type = match opts.r#type.into_value() {
+            Some(OrderType::StopLoss) => string(
                 if opts.sl_trigger_type == Some(OrderStopTriggerType::LastPrice) {
                     "MARKET"
                 } else {
                     "INDEX"
                 },
             ),
-            OrderType::TakeProfit => string(
+            Some(OrderType::TakeProfit) => string(
                 if opts.tp_trigger_type == Some(OrderStopTriggerType::IndexPrice) {
                     "INDEX"
                 } else {
@@ -251,7 +258,15 @@ impl ApexOmniExchange {
                     market.id
                 }),
             ),
-            ("side", string(side)),
+            (
+                "side",
+                opts.side.into_value().map_or(J::Undefined, |side| {
+                    string(match side {
+                        OrderSide::Buy => "BUY",
+                        OrderSide::Sell => "SELL",
+                    })
+                }),
+            ),
             ("type", mapped_type),
             ("size", string(js_number_string(amount))),
             ("price", string(execution)),
@@ -277,13 +292,14 @@ impl ApexOmniExchange {
             0.
         };
         let lot_size = adjust((amount - rest) / lots, p_amount);
-        if !lots.is_finite() || lots < 0. {
-            return Err(failure(
-                "typed lot iteration requires a finite nonnegative count".into(),
-            ));
-        }
+        // lodash times returns [] for counts outside 1..=MAX_SAFE_INTEGER.
+        let count = if (1. ..=9_007_199_254_740_991.).contains(&lots) {
+            lots as usize
+        } else {
+            0
+        };
         let mut payloads = Vec::new();
-        for _ in 0..lots as usize {
+        for _ in 0..count {
             let mut payload = req.clone();
             let J::Object(fields) = &mut payload else {
                 unreachable!()
@@ -301,7 +317,7 @@ impl ApexOmniExchange {
                 string(js_number_string(rest));
             payloads.push(payload);
         }
-        let mut ids = Vec::new();
+        let mut responses = Vec::new();
         for (index, mut payload) in payloads.into_iter().enumerate() {
             let config = self
                 .base
@@ -314,7 +330,8 @@ impl ApexOmniExchange {
                 Some(id) => id.clone(),
                 None => self.new_client_id(&account_id)?,
             };
-            let expiry = self.base.runtime.now_ms() + 30. * 24. * 60. * 60. * 1000.;
+            let expiry = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+                + 30. * 24. * 60. * 60. * 1000.;
             let mut pair = 0.;
             for contract in
                 crate::data::array(get(get(&config, "contractConfig"), "perpetualContract"))
@@ -423,19 +440,23 @@ impl ApexOmniExchange {
                     unlimited: true,
                 })
                 .await?;
-            if !matches!(response, J::Undefined) {
-                let id = get(get(&response, "data"), "id");
-                if let J::String(id) = id {
-                    ids.push(id.clone());
-                } else {
-                    return Err(failure(
-                        "typed order ID refuses a non-string response field".into(),
-                    ));
-                }
-            }
+            responses.push(response);
         }
+        // The source maps IDs only after mapSeries finishes all submissions.
+        let ids = responses
+            .iter()
+            .filter(|response| !matches!(response, J::Undefined))
+            .map(|response| crate::data::property(get(response, "data"), "id").cloned())
+            .collect::<Result<Vec<_>, _>>()?;
         services.throttle_fetch_orders()?;
-        Ok(ids)
+        ids.into_iter()
+            .map(|id| {
+                if matches!(id, J::Undefined) {
+                    return Err(failure("ApexOmni placement response is missing id".into()));
+                }
+                text(&id)
+            })
+            .collect()
     }
     // ts: ApexOmniExchange.updateOrder
     pub async fn update_order(&self, opts: &UpdateOrderOpts) -> Result<Vec<String>, ExchangeError> {
@@ -460,21 +481,21 @@ impl ApexOmniExchange {
                 .iter()
                 .find(|o| o.id == format!("{base_id}__stop_loss"))
             {
-                next.stop_loss = Some(sl.price);
-                next.sl_trigger_type = sl.sl_trigger_type;
+                next.stop_loss = sl.price.into_value();
+                next.sl_trigger_type = (sl.sl_trigger_type).into_value();
             }
             if let Some(tp) = orders
                 .iter()
                 .find(|o| o.id == format!("{base_id}__take_profit"))
             {
-                next.take_profit = Some(tp.price);
-                next.tp_trigger_type = tp.tp_trigger_type;
+                next.take_profit = tp.price.into_value();
+                next.tp_trigger_type = (tp.tp_trigger_type).into_value();
             }
             (base, next)
         } else {
             let mut next = from_order(order);
-            next.tp_trigger_type = order.tp_trigger_type;
-            next.sl_trigger_type = order.sl_trigger_type;
+            next.tp_trigger_type = (order.tp_trigger_type).into_value();
+            next.sl_trigger_type = (order.sl_trigger_type).into_value();
             (order.clone(), next)
         };
         let (price, amount) = match &opts.update {
@@ -539,14 +560,15 @@ impl ApexOmniExchange {
                 .iter()
                 .map(|o| {
                     let mut p = from_order(o);
-                    p.side = if o.side == OrderSide::Buy {
+                    p.side = (if o.side == OrderSide::Buy {
                         OrderSide::Sell
                     } else {
                         OrderSide::Buy
-                    };
-                    p.time_in_force = o.time_in_force;
-                    p.tp_trigger_type = o.tp_trigger_type;
-                    p.sl_trigger_type = o.sl_trigger_type;
+                    })
+                    .into();
+                    p.time_in_force = (o.time_in_force).into_value();
+                    p.tp_trigger_type = (o.tp_trigger_type).into_value();
+                    p.sl_trigger_type = (o.sl_trigger_type).into_value();
                     p
                 })
                 .collect();

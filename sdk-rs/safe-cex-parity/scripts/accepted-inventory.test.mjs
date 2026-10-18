@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inventory } from './accepted-inventory.mjs';
+import { inventory, receiverItemSha256 } from './accepted-inventory.mjs';
 
 function fixture() {
   return {
@@ -146,22 +146,72 @@ test('alias defaults respect lexical parameter scopes and nested applications wi
   assert.throws(() => inventory(doc), /recursive type alias needs explicit compiler resolution/);
 });
 test('unsupported receivers and uninstantiated defaults pass only with a reviewed source pin', async () => {
-  const { createHash } = await import('node:crypto');
   const source = Buffer.from('impl Local for External {}\n');
+  const span = { filename: 'src/lib.rs', begin: [1, 1], end: [1, source.toString().trimEnd().length + 1] };
   const doc = fixture();
   doc.index[0].inner.module.items.push(30);
   doc.paths[40] = { crate_id: 5, path: ['dependency', 'External'], kind: 'struct' };
   doc.index[30] = { id: 30, crate_id: 0, name: 'Local', visibility: 'public', inner: { trait: { items: [31], generics: { params: [] } } } };
-  doc.index[31] = { id: 31, name: 'read', span: { filename: 'src/lib.rs' }, inner: { function: { has_body: false, sig: { inputs: [['raw', { borrowed_ref: { type: { primitive: 'str' } } }]], output: null }, generics: { params: [] } } } };
-  doc.index[32] = { id: 32, crate_id: 0, span: { filename: 'src/lib.rs' }, inner: { impl: { trait: { id: 30, path: 'Local' }, for: { resolved_path: { id: 40, path: 'External' } }, items: [31] } } };
+  doc.index[31] = { id: 31, name: 'read', span, inner: { function: { has_body: false, sig: { inputs: [['raw', { borrowed_ref: { type: { primitive: 'str' } } }]], output: null }, generics: { params: [] } } } };
+  doc.index[32] = { id: 32, crate_id: 0, span, inner: { impl: { trait: { id: 30, path: 'Local' }, for: { resolved_path: { id: 40, path: 'External' } }, items: [31] } } };
   const key = 'production::Local::read for dependency::External';
   assert.throws(() => inventory(doc, { readSource: () => source }), /production::Local::read for dependency::External: accepted-set assertion: decoder trait on unsupported receiver/);
-  const reviewed = { category: 'non-decoder', file: 'src/lib.rs', reason: 'Reviewed fixture body.', sourceSha256: createHash('sha256').update(source).digest('hex') };
+  const reviewed = { category: 'non-decoder', file: 'src/lib.rs', reason: 'Reviewed fixture body.', itemSha256: receiverItemSha256(span, source) };
   assert.doesNotThrow(() => inventory(doc, { receiverTraits: { [key]: reviewed }, readSource: () => source }));
-  assert.throws(() => inventory(doc, { receiverTraits: { [key]: reviewed }, readSource: () => Buffer.from('changed') }), /reviewed source changed/);
+  assert.throws(() => inventory(doc, { receiverTraits: { [key]: reviewed }, readSource: () => Buffer.from('impl Local for External { }\n') }), /reviewed item source changed/);
   assert.throws(() => inventory(doc, { receiverTraits: { [key]: { ...reviewed, category: 'decoder' } }, readSource: () => source }), /unknown category/);
   doc.index[31].inner.function.has_body = true;
   delete doc.index[32];
   assert.throws(() => inventory(doc, { readSource: () => source }), /production::Local::read: accepted-set assertion: uninstantiated default decoder/);
   assert.doesNotThrow(() => inventory(doc, { receiverTraits: { 'production::Local::read': reviewed }, readSource: () => source }));
+});
+
+test('receiver item hashes preserve Unicode columns and refuse invalid spans', () => {
+  const item = 'impl Local for () {\r\n fn read() {}\r\n}';
+  const source = `// 😀\r\nconst É: &str = "😀"; ${item}\r\n// after\r\n`;
+  const span = { begin: [2, Array.from('const É: &str = "😀"; ').length + 1], end: [4, 2] };
+  assert.equal(receiverItemSha256(span, source), receiverItemSha256({ begin: [1, 1], end: [3, 2] }, item));
+  assert.equal(receiverItemSha256(span, Buffer.from(source)), receiverItemSha256(span, source));
+  for (const bad of [undefined, {}, { begin: [0, 1], end: [1, 2] }, { begin: [1, 0.5], end: [1, 2] }, { begin: [99, 1], end: [99, 2] }, { begin: [1, 99], end: [1, 100] }, { begin: [1, 2], end: [1, 2] }, { begin: [2, 1], end: [1, 1] }]) {
+    assert.throws(() => receiverItemSha256(bad, source), /reviewed receiver item span/);
+  }
+});
+
+test('compiler receiver item pins survive unrelated edits and refuse changes inside the impl', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { spawnSync } = await import('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'receiver-item-pins-'));
+  const filename = path.join(directory, 'lib.rs');
+  const header = 'pub trait Local { fn read(&self, raw: &str); }\n';
+  const impl = 'impl crate::Local for () { fn read(&self, _raw: &str) {} }';
+  const original = `${header}pub mod nested { const É: &str = "😀"; ${impl} }\n`;
+  const sources = [original, '// unrelated prefix\n'+original+'\n// unrelated suffix\n', original.replace('_raw: &str) {}', '_raw: &str) { let _ = 1; }')];
+  try {
+    const docs = sources.map(source => {
+      fs.writeFileSync(filename, source);
+      const result = spawnSync('rustdoc', [filename, '--crate-name', 'receiver_pin_fixture', '--edition=2024', '-Z', 'unstable-options', '--output-format=json', '--document-private-items', '-o', directory], { encoding: 'utf8', cwd: new URL('../../', import.meta.url), env: { ...process.env, RUSTC_BOOTSTRAP: '1' } });
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(fs.readFileSync(path.join(directory, 'receiver_pin_fixture.json')));
+    });
+    const span = Object.values(docs[0].index).find(item => item.inner.impl?.trait?.path === 'Local').span;
+    // Non-ASCII and non-BMP text precedes the compiler-owned impl on its line.
+    assert.equal(receiverItemSha256(span, original), receiverItemSha256({ begin: [1, 1], end: [1, impl.length + 1] }, impl));
+    const key = 'receiver_pin_fixture::Local::read for ()';
+    const reviewed = { category: 'non-decoder', file: filename, reason: 'Reviewed fixture discards the raw string.', itemSha256: receiverItemSha256(span, original) };
+    const url = new URL('./accepted-inventory.mjs', import.meta.url).href;
+    const check = `const {inventory}=await import(${JSON.stringify(url)});const docs=${JSON.stringify(docs)},sources=${JSON.stringify(sources)},key=${JSON.stringify(key)},reviewed=${JSON.stringify(reviewed)};const run=i=>inventory(docs[i],{receiverTraits:{[key]:reviewed},readSource:()=>sources[i]});assert.doesNotThrow(()=>run(0),'original impl admitted');assert.doesNotThrow(()=>run(1),'unrelated edits preserve impl pin');assert.throws(()=>run(2),/reviewed item source changed/,'inside impl edit must stale pin');assert.doesNotThrow(()=>run(0));const {itemSha256,...legacy}=reviewed;legacy.sourceSha256=itemSha256;assert.throws(()=>inventory(docs[0],{receiverTraits:{[key]:legacy},readSource:()=>sources[0]}),/unsupported fields/);`;
+    const site = 'receiverItemSha256(span, readSource(span.filename))';
+    const assertion = 'assert.equal(receiverItemSha256(span, readSource(span.filename)), contract.itemSha256, `${label}: reviewed item source changed`);';
+    const execute = mutation => spawnSync(process.execPath, ['--input-type=module', '--eval', `import assert from 'node:assert/strict';${mutation ? `import {registerHooks} from 'node:module';registerHooks({load(url,context,next){const result=next(url,context);if(url!==${JSON.stringify(url)})return result;let source=String(result.source);const before=${JSON.stringify(mutation === 'whole-file' ? site : assertion)};assert.equal(source.split(before).length-1,1,'one receiver pin mutation site');source=source.replace(before,${JSON.stringify(mutation === 'whole-file' ? "createHash('sha256').update(readSource(span.filename)).digest('hex')" : '')});return {...result,source};}});` : ''}${check}`], { encoding: 'utf8' });
+    let result = execute(); assert.equal(result.status, 0, result.stderr);
+    result = execute('whole-file'); assert.equal(result.status, 1, result.stderr); assert.match(result.stderr, /original impl admitted|unrelated edits preserve impl pin/);
+    console.log('receiver item pin widened to whole file: named assertion; process exit 1');
+    result = execute('unchecked'); assert.equal(result.status, 1, result.stderr); assert.match(result.stderr, /inside impl edit must stale pin/);
+    console.log('receiver item source check removed: named assertion; process exit 1');
+    result = execute(); assert.equal(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(directory, { recursive: true });
+  }
 });

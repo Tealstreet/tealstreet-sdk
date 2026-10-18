@@ -1,5 +1,9 @@
 //! Strict, transport-free V3 public decoders; no live route consumes this module.
-use crate::v3_contracts::*;
+use crate::v3_contracts::{
+    WooV3Instrument, WooV3InstrumentBaseAssetMultiplier, WooV3InstrumentBaseIMR,
+    WooV3InstrumentBaseMax, WooV3InstrumentBaseMin, WooV3InstrumentBaseTick,
+    WooV3InstrumentMinNotional, WooV3InstrumentQuoteTick,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -384,35 +388,51 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
         .enumerate()
         .map(|(index, row)| {
             let path = format!("WOO V3 instrument[{index}]");
-            macro_rules! number {
-                ($field:ident,$ty:ident,$wire:literal,$minimum:expr) => {{
-                    let value = match &row.$field {
-                        $ty::Number(value) => *value,
-                        $ty::Decimal(value) => safe_cex_num::number_from_string(value),
-                    };
-                    if !value.is_finite() || value < $minimum {
-                        return Err(format!(
-                            "{path}.{} must be at least {}",
-                            $wire,
-                            safe_cex_num::js_number_string($minimum)
-                        ));
+            let amount_min = {
+                let value = match &row.base_min {
+                    WooV3InstrumentBaseMin::Number(value) => *value,
+                    WooV3InstrumentBaseMin::Decimal(value) => {
+                        safe_cex_num::number_from_string(value)
                     }
-                    value
-                }};
-            }
-            let amount_min = number!(
-                base_min,
-                WooV3InstrumentBaseMin,
-                "baseMin",
-                f64::from_bits(1)
-            );
-            let amount_max = number!(base_max, WooV3InstrumentBaseMax, "baseMax", amount_min);
-            let base_imr = number!(
-                base_imr,
-                WooV3InstrumentBaseIMR,
-                "baseIMR",
-                f64::from_bits(1)
-            );
+                };
+                if !value.is_finite() || value < f64::from_bits(1) {
+                    return Err(format!(
+                        "{path}.baseMin must be at least {}",
+                        safe_cex_num::js_number_string(f64::from_bits(1))
+                    ));
+                }
+                value
+            };
+            let amount_max = {
+                let value = match &row.base_max {
+                    WooV3InstrumentBaseMax::Number(value) => *value,
+                    WooV3InstrumentBaseMax::Decimal(value) => {
+                        safe_cex_num::number_from_string(value)
+                    }
+                };
+                if !value.is_finite() || value < amount_min {
+                    return Err(format!(
+                        "{path}.baseMax must be at least {}",
+                        safe_cex_num::js_number_string(amount_min)
+                    ));
+                }
+                value
+            };
+            let base_imr = {
+                let value = match &row.base_imr {
+                    WooV3InstrumentBaseIMR::Number(value) => *value,
+                    WooV3InstrumentBaseIMR::Decimal(value) => {
+                        safe_cex_num::number_from_string(value)
+                    }
+                };
+                if !value.is_finite() || value < f64::from_bits(1) {
+                    return Err(format!(
+                        "{path}.baseIMR must be at least {}",
+                        safe_cex_num::js_number_string(f64::from_bits(1))
+                    ));
+                }
+                value
+            };
             if base_imr > 1.0 {
                 return Err(format!("{path}.baseIMR must not exceed 1"));
             }
@@ -426,18 +446,36 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                     .as_deref()
                     .is_none_or(|status| status == "TRADING"),
                 precision: MarketPrecision {
-                    amount: number!(
-                        base_tick,
-                        WooV3InstrumentBaseTick,
-                        "baseTick",
-                        f64::from_bits(1)
-                    ),
-                    price: number!(
-                        quote_tick,
-                        WooV3InstrumentQuoteTick,
-                        "quoteTick",
-                        f64::from_bits(1)
-                    ),
+                    amount: {
+                        let value = match &row.base_tick {
+                            WooV3InstrumentBaseTick::Number(value) => *value,
+                            WooV3InstrumentBaseTick::Decimal(value) => {
+                                safe_cex_num::number_from_string(value)
+                            }
+                        };
+                        if !value.is_finite() || value < f64::from_bits(1) {
+                            return Err(format!(
+                                "{path}.baseTick must be at least {}",
+                                safe_cex_num::js_number_string(f64::from_bits(1))
+                            ));
+                        }
+                        value
+                    },
+                    price: {
+                        let value = match &row.quote_tick {
+                            WooV3InstrumentQuoteTick::Number(value) => *value,
+                            WooV3InstrumentQuoteTick::Decimal(value) => {
+                                safe_cex_num::number_from_string(value)
+                            }
+                        };
+                        if !value.is_finite() || value < f64::from_bits(1) {
+                            return Err(format!(
+                                "{path}.quoteTick must be at least {}",
+                                safe_cex_num::js_number_string(f64::from_bits(1))
+                            ));
+                        }
+                        value
+                    },
                 },
                 limits: MarketLimits {
                     amount: MarketLimitsAmount {

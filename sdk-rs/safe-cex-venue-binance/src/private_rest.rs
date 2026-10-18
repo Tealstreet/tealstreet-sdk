@@ -99,25 +99,19 @@ fn json_data(v: &EventValue) -> Option<Value> {
         EventValue::Null => Some(Value::Null),
         EventValue::Bool(b) => Some(Value::Bool(*b)),
         EventValue::Number(n) => Some(json!(n)),
-        EventValue::String(s) => Some(json!(s)),
-        EventValue::Enum(v) => Some(v.wire()),
+        EventValue::String(_) => Some(json!(v.text().expect("native UTF-8 projection"))),
         EventValue::Array(a) => Some(Value::Array(
             a.borrow()
                 .iter()
-                .map(|v| json_data(v).unwrap_or(Value::Null))
+                .map(|v| v.as_ref().and_then(json_data).unwrap_or(Value::Null))
                 .collect(),
         )),
-        EventValue::Object(o) => Some(Value::Object(
-            o.borrow()
-                .fields
-                .iter()
-                .filter_map(|(k, v)| json_data(v).map(|v| (k.clone(), v)))
+        EventValue::Object(_) => Some(Value::Object(
+            v.spread()
+                .into_iter()
+                .filter_map(|(k, v)| json_data(&v).map(|v| (k, v)))
                 .collect(),
         )),
-        EventValue::Inherited(safe_cex_num::ProtoMember::Prototype) => {
-            Some(Value::Object(Default::default()))
-        }
-        EventValue::Inherited(_) => None,
         EventValue::Builtin(reference) => {
             if reference.is_callable() {
                 None
@@ -134,20 +128,21 @@ fn json_data(v: &EventValue) -> Option<Value> {
                 ))
             }
         }
+        _ => None,
     }
 }
 pub(crate) fn keyed(o: &EventValue, key: &str) -> Result<EventValue, Failure> {
     if o.nullish() {
         return Ok(EventValue::Undefined);
     }
-    if let EventValue::Object(a) = o {
+    if matches!(o, EventValue::Object(_)) {
         for name in [
             key.to_owned(),
             safe_cex_num::lodash_snake_case(key),
             safe_cex_num::lodash_camel_case(key),
         ] {
-            if a.borrow().fields.contains_key(&name) {
-                return o.get(&name);
+            if o.has_own(&name) {
+                return o.read(&name);
             }
         }
         return Ok(EventValue::Undefined);
@@ -196,18 +191,19 @@ pub(crate) fn map(
     let n = a.borrow().len();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let v = a.borrow().get(i).cloned();
+        let v = a.borrow().get(i).cloned().flatten();
         out.push(match v {
             Some(v) => visit(v)?,
             None => EventValue::Undefined,
         })
     }
-    Ok(EventValue::Array(Rc::new(std::cell::RefCell::new(out))))
+    Ok(EventValue::array(out))
 }
 fn subtract(a: EventValue, b: EventValue) -> Result<f64, Failure> {
     fn digits(v: &EventValue) -> Result<f64, Failure> {
-        if let EventValue::Object(o) = v {
-            if let Some(method) = o.borrow().fields.get("toString") {
+        if matches!(v, EventValue::Object(_)) && v.has_own("toString") {
+            let method = v.read("toString")?;
+            {
                 if method.nullish() {
                     return Ok(2.0);
                 }
@@ -230,7 +226,7 @@ fn order_type(o: &EventValue, v: Venue, key: &str) -> Result<EventValue, Failure
         Venue::PM => crate::binancepm_types::ORDER_TYPE,
         Venue::Spot => crate::binancespot_types::ORDER_TYPE_SPOT,
     };
-    table(entries, o.get(key)?, PrivateEnum::Type)
+    table(entries, o.read(key)?, PrivateEnum::Type)
 }
 fn trigger(
     out: &EventValue,
@@ -254,8 +250,8 @@ fn trigger(
             Some(v) => v.clone(),
             None => order_type(o, v, "type")?,
         };
-        if value.same(&EventValue::Enum(PrivateEnum::Type(typ))) {
-            out.define(
+        if value.same(&EventValue::enum_value(PrivateEnum::Type(typ))) {
+            out.write(
                 key,
                 table(entries, keyed(o, "workingType")?, PrivateEnum::Trigger)?,
             )
@@ -284,16 +280,16 @@ fn regular(
     } else {
         id
     };
-    let status = EventValue::Enum(PrivateEnum::Status(OrderStatus::Open));
-    let symbol = o.get("symbol")?;
+    let status = EventValue::enum_value(PrivateEnum::Status(OrderStatus::Open));
+    let symbol = o.read("symbol")?;
     let typ = order_type(&o, v, if conditional { "strategyType" } else { "type" })?;
     let sides = match v {
         Venue::Futures => crate::binance_types::ORDER_SIDE,
         Venue::PM => crate::binancepm_types::ORDER_SIDE,
         Venue::Spot => crate::binancespot_types::ORDER_SIDE,
     };
-    let side = table(sides, o.get("side")?, PrivateEnum::Side)?;
-    let first = o.get("price")?.float()?;
+    let side = table(sides, o.read("side")?, PrivateEnum::Side)?;
+    let first = o.read("price")?.float()?;
     let price = if first != 0.0 && !first.is_nan() {
         first
     } else {
@@ -336,7 +332,7 @@ fn regular(
         ("reduceOnly", reduce),
     ]);
     if let Some(close) = close {
-        out.define("close", close)
+        out.write("close", close)
     }
     for (k, v) in [
         ("filled", number(filled)),
@@ -344,7 +340,7 @@ fn regular(
         ("remaining", number(remaining)),
         ("info", o.clone()),
     ] {
-        out.define(k, v)
+        out.write(k, v)
     }
     trigger(&out, &o, v, None)?;
     Ok(out)
@@ -357,10 +353,10 @@ fn algo(o: EventValue, b: &mut impl SnapshotBindings) -> Result<EventValue, Fail
     )?;
     let aid = keyed(&o, "algoId")?;
     let id = aid.optional_id("algoId")?;
-    let symbol = o.get("symbol")?;
+    let symbol = o.read("symbol")?;
     let side = table(
         crate::binance_types::ORDER_SIDE,
-        o.get("side")?,
+        o.read("side")?,
         PrivateEnum::Side,
     )?;
     let price = fallback(number(keyed(&o, "triggerPrice")?.float()?), number(0.0));
@@ -371,13 +367,13 @@ fn algo(o: EventValue, b: &mut impl SnapshotBindings) -> Result<EventValue, Fail
     let remaining = fallback(number(keyed(&o, "quantity")?.float()?), number(0.0));
     let info = record([("algoId", aid)]);
     for (k, v) in o.spread() {
-        info.define(&k, v)
+        info.write(&k, v)
     }
     let out = record([
         ("id", id),
         (
             "status",
-            EventValue::Enum(PrivateEnum::Status(OrderStatus::Open)),
+            EventValue::enum_value(PrivateEnum::Status(OrderStatus::Open)),
         ),
         ("symbol", symbol),
         ("type", typ.clone()),
@@ -438,14 +434,18 @@ pub(crate) async fn pair(
 fn concat(a: EventValue, b: EventValue) -> Result<EventValue, Failure> {
     fn values(v: EventValue) -> Result<Vec<EventValue>, Failure> {
         match v {
-            EventValue::Array(a) => Ok(a.borrow().clone()),
-            EventValue::String(s) => Ok(s.chars().map(|c| string(c.to_string())).collect()),
+            EventValue::Array(a) => Ok(array_values(&a)),
+            EventValue::String(s) => Ok(EventValue::String(s.clone())
+                .text()?
+                .chars()
+                .map(|c| string(c.to_string()))
+                .collect()),
             _ => Err(type_error("(intermediate value) is not iterable")),
         }
     }
     let mut out = values(a)?;
     out.extend(values(b)?);
-    Ok(EventValue::Array(Rc::new(std::cell::RefCell::new(out))))
+    Ok(EventValue::array(out))
 }
 fn arg(v: EventValue) -> SnapshotArgument {
     SnapshotArgument::Value(v)
@@ -642,19 +642,19 @@ pub async fn fetch_pm_balance(b: &mut impl SnapshotBindings) -> Result<EventValu
         let (mut total, mut used, mut free, mut upnl) = (0.0, 0.0, 0.0, 0.0);
         let mut i = 0;
         while i < rows.borrow().len() {
-            let item = rows.borrow()[i].clone();
-            let asset = item.get("asset")?;
+            let item = rows.borrow()[i].clone().unwrap_or(EventValue::Undefined);
+            let asset = item.read("asset")?;
             if ["USDT", "USDC", "FDUSD"]
                 .iter()
                 .any(|s| asset.same(&string(*s)))
             {
-                let item = rows.borrow()[i].clone();
-                let item_total = item.get("totalWalletBalance")?.float()?;
-                let item_free = item.get("crossMarginFree")?.float()?;
+                let item = rows.borrow()[i].clone().unwrap_or(EventValue::Undefined);
+                let item_total = item.read("totalWalletBalance")?.float()?;
+                let item_free = item.read("crossMarginFree")?.float()?;
                 free += item_free;
                 total += item_total;
                 used += item_total - item_free;
-                upnl += item.get("umUnrealizedPNL")?.float()?
+                upnl += item.read("umUnrealizedPNL")?.float()?
             }
             i += 1
         }
@@ -695,12 +695,16 @@ pub async fn fetch_spot_positions_balance(
         let currencies = record([]);
         let coins = record([]);
         let (mut free, mut used, mut total) = (0.0, 0.0, 0.0);
-        let balances = fallback(data.get("balances")?, empty());
+        let balances = fallback(data.read("balances")?, empty());
         let mut i = 0;
         loop {
             let entry = match &balances {
-                EventValue::Array(a) => a.borrow().get(i).cloned(),
-                EventValue::String(s) => s.chars().nth(i).map(|c| string(c.to_string())),
+                EventValue::Array(a) => a.borrow().get(i).cloned().flatten(),
+                EventValue::String(s) => EventValue::String(s.clone())
+                    .text()?
+                    .chars()
+                    .nth(i)
+                    .map(|c| string(c.to_string())),
                 _ => {
                     return Err(type_error(
                         "object is not iterable (cannot read property Symbol(Symbol.iterator))",
@@ -709,9 +713,9 @@ pub async fn fetch_spot_positions_balance(
             };
             let Some(row) = entry else { break };
             i += 1;
-            let asset = row.get("asset")?;
-            let af = fallback(row.get("free")?, string("0")).float()?;
-            let au = fallback(row.get("locked")?, string("0")).float()?;
+            let asset = row.read("asset")?;
+            let af = fallback(row.read("free")?, string("0")).float()?;
+            let au = fallback(row.read("locked")?, string("0")).float()?;
             let at = af + au;
             let price = b.asset_price(asset.clone())?;
             currencies.assign(
@@ -772,12 +776,12 @@ pub async fn find_futures_order_by_client_id(
     let orders = b.orders()?;
     let EventValue::Array(orders) = orders else {
         if orders.nullish() {
-            orders.get("find")?;
+            orders.read("find")?;
         }
         return Err(type_error("this.store.orders.find is not a function"));
     };
     let found = find(&orders, |o| {
-        Ok(o.get("symbol")?.same(&string(symbol)) && b.carries_client_id(o, id)?)
+        Ok(o.read("symbol")?.same(&string(symbol)) && b.carries_client_id(o, id)?)
     })?;
     if found.truthy() {
         return Ok(record([
@@ -815,8 +819,8 @@ pub async fn find_futures_order_by_client_id(
                 ("definitive", EventValue::Bool(false)),
             ]));
         }
-        let amount = order.get("amount")?;
-        let filled = order.get("filled")?;
+        let amount = order.read("amount")?;
+        let filled = order.read("filled")?;
         let difference = amount.number()? - filled.number()?;
         let remaining = if difference.is_nan() {
             f64::NAN
@@ -824,22 +828,22 @@ pub async fn find_futures_order_by_client_id(
             difference.max(0.0)
         };
         let out = record([
-            ("id", order.get("id")?),
+            ("id", order.read("id")?),
             ("symbol", string(symbol)),
-            ("side", order.get("side")?),
-            ("type", order.get("type")?),
-            ("status", order.get("status")?),
-            ("price", nullish(order.get("price")?, number(0.0))),
+            ("side", order.read("side")?),
+            ("type", order.read("type")?),
+            ("status", order.read("status")?),
+            ("price", nullish(order.read("price")?, number(0.0))),
             ("amount", amount),
             ("filled", filled),
             ("remaining", number(remaining)),
             (
                 "reduceOnly",
-                nullish(order.get("reduceOnly")?, EventValue::Bool(false)),
+                nullish(order.read("reduceOnly")?, EventValue::Bool(false)),
             ),
             (
                 "lastUpdate",
-                nullish(order.get("updatedTime")?, order.get("createdTime")?),
+                nullish(order.read("updatedTime")?, order.read("createdTime")?),
             ),
             ("info", data),
         ]);

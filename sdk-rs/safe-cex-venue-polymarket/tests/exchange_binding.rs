@@ -3,9 +3,10 @@
 #[allow(dead_code)]
 mod binding_harness;
 use binding_harness::{Harness, Http, harness, options};
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_store::StoreUpdate;
 use safe_cex_types::*;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
 
 fn markets(http: &Http) {
@@ -184,6 +185,41 @@ fn place(h: &Harness, v: serde_json::Value) -> Result<Vec<String>, String> {
     ))
     .map_err(|e| e.message)
 }
+// A read preserves account data while the maintained Axios response interceptor
+// counts every actual HTTP outcome, including each cursor page and rejected reads.
+fn assert_private_read_snapshot(before: Value, mut after: Value, source_case: usize) {
+    static SOURCE: std::sync::OnceLock<Vec<Vec<String>>> = std::sync::OnceLock::new();
+    let source = SOURCE.get_or_init(|| {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/private-read-outcomes.cjs"
+            ))
+            .output()
+            .expect("execute maintained Axios outcome interceptor");
+        assert!(
+            output.status.success(),
+            "source outcomes: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows: Vec<Vec<String>> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(rows.len(), 3, "independent source private-read case count");
+        rows
+    });
+    let mut expected_stats = before["requestStats"].clone();
+    for outcome in &source[source_case] {
+        expected_stats[outcome] = json!(expected_stats[outcome].as_f64().unwrap() + 1.0);
+    }
+    assert_eq!(
+        after["requestStats"], expected_stats,
+        "private read counts actual source HTTP outcomes"
+    );
+    after["requestStats"] = before["requestStats"].clone();
+    assert_eq!(
+        after, before,
+        "private read preserves every other serialized store field"
+    );
+}
 #[test]
 fn concrete_fetch_positions_uses_holdings_and_keeps_snapshot_pure() {
     let h = private_harness(|http| {
@@ -204,7 +240,7 @@ fn concrete_fetch_positions_uses_holdings_and_keeps_snapshot_pure() {
     assert_eq!(positions[0].contracts, 10.);
     assert_eq!(positions[0].notional, 6.2);
     assert_eq!(positions[0].unrealized_pnl, 2.25);
-    assert_eq!(h.store.serialize(), before, "fetch_positions is pure");
+    assert_private_read_snapshot(before, h.store.serialize(), 0);
     assert_eq!(
         h.http.calls("/positions")[0].base_url,
         "https://data-api.polymarket.com"
@@ -247,7 +283,7 @@ fn concrete_fetch_orders_maps_all_pages_without_store_commit() {
         h.http.calls("/data/orders")[1].params["next_cursor"],
         "page-two"
     );
-    assert_eq!(h.store.serialize(), before, "fetch_orders is pure");
+    assert_private_read_snapshot(before, h.store.serialize(), 1);
 }
 #[test]
 fn concrete_place_order_posts_real_signed_gtc_payload() {
@@ -434,9 +470,11 @@ fn concrete_public_ohlcv_and_orderbook_socket() {
 }
 
 fn wire(request: &binding_harness::Request) -> Vec<u8> {
-    safe_cex_transport::RestBody::Untransformed(request.data.clone())
-        .wire_bytes_for_content_type(Some("application/json"))
-        .unwrap()
+    safe_cex_transport::RestBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(request.data.clone()).unwrap(),
+    )
+    .wire_bytes_for_content_type(Some("application/json"))
+    .unwrap()
 }
 
 #[test]
@@ -519,11 +557,7 @@ fn concrete_private_read_failure_rethrows_and_preserves_snapshot() {
         "source failure survives: {}",
         error.message
     );
-    assert_eq!(
-        h.store.serialize(),
-        before,
-        "failed private read preserves authoritative snapshot"
-    );
+    assert_private_read_snapshot(before, h.store.serialize(), 2);
     assert_eq!(
         h.http.calls("/data/orders").len(),
         1,
@@ -613,4 +647,299 @@ fn concrete_supplied_credentials_funder_and_all_signer_types_reach_requests() {
         );
         h.venue().dispose().unwrap();
     }
+}
+
+#[test]
+fn concrete_halfway_size_uses_js_to_fixed_in_signed_payload() {
+    let h = private_harness(|http| {
+        http.ok(
+            "POST",
+            "/order",
+            json!({"success":true,"orderID":"halfway-id"}),
+        );
+    });
+    let ids = place(
+        &h,
+        json!({"symbol":"event-Yes","type":"limit","side":"buy","amount":10.125,"price":0.5}),
+    )
+    .unwrap();
+    assert_eq!(ids, vec!["halfway-id"]);
+    let request = &h.http.calls("/order")[0];
+    let payload: serde_json::Value = serde_json::from_slice(&wire(request)).unwrap();
+    assert_eq!(
+        payload["order"]["takerAmount"], "10130000",
+        "source toFixed rounds 10.125 to size 10.13 before signing"
+    );
+    assert_eq!(payload["order"]["makerAmount"], "5065000");
+    assert_eq!(payload["order"]["signature"].as_str().unwrap().len(), 132);
+}
+
+#[test]
+fn concrete_l2_secret_decoding_matches_source_node_base64_acceptance() {
+    let capture = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/lenient-secret-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        capture.status.success(),
+        "{}",
+        String::from_utf8_lossy(&capture.stderr)
+    );
+    let source: Value = serde_json::from_slice(&capture.stdout).unwrap();
+    assert!(source["capture"]["nodeMajor"].as_u64().unwrap() >= 24);
+    assert!(
+        !source["capture"]["architecture"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
+    let cases = source["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 8);
+    let secrets = cases
+        .iter()
+        .map(|c| c["secret"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        secrets,
+        [
+            "abd=", "ab d=", "ab!d=", "abdaA", "-_8=", "c2VjcmV0", "a", "===="
+        ]
+    );
+    for case in cases {
+        let secret = case["secret"].as_str().unwrap();
+        let mut opts = wallet_options();
+        opts.polymarket = Some(ExchangeOptionsPolymarket {
+            api_key: Some("supplied-key".into()),
+            api_secret: Some(secret.into()),
+            api_passphrase: Some("supplied-passphrase".into()),
+            signer_type: Some(0.0),
+            funder_address: None,
+        });
+        let h = harness(ExchangeName::Polymarket, opts, private_routes);
+        let account = h.drive(h.venue().validate_account()).unwrap();
+        assert_eq!(
+            account.error,
+            "".into(),
+            "source-accepted secret {secret:?} reaches the native signed account read"
+        );
+        assert!(h.http.calls("/auth/derive-api-key").is_empty());
+        let calls = h.http.calls("/balance-allowance");
+        assert_eq!(
+            calls.len(),
+            1,
+            "source-accepted secret {secret:?} sends the actual L2 request"
+        );
+        assert_eq!(calls[0].headers["POLY_TIMESTAMP"], "1700000000");
+        assert_eq!(
+            calls[0].headers["POLY_SIGNATURE"], case["signature"],
+            "native HMAC matches actual source and independent Node crypto for {secret:?}"
+        );
+        h.venue().dispose().unwrap();
+    }
+}
+
+fn private_frame(h: &Harness, frame: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+    h.runtime.pump();
+}
+fn started_private() -> Harness {
+    let h = private_harness(|http| {
+        http.ok("GET", "/positions", json!([]));
+        http.ok("GET", "/data/orders", json!([]));
+    });
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    h
+}
+
+#[test]
+fn concrete_private_order_frame_commits_native_store_order() {
+    let h = started_private();
+    let mut row = source_order();
+    row["id"] = json!("ws-order-42");
+    row["event_type"] = json!("order");
+    private_frame(&h, row);
+    let orders = h.store.orders();
+    let actual = orders.iter().find(|o| o.id == "ws-order-42").unwrap();
+    assert_eq!(actual.symbol, "event-Yes");
+    assert_eq!(actual.price, 0.57);
+    assert_eq!(actual.filled, 2.5);
+    assert_eq!(actual.remaining, 7.75);
+    drop(orders);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn concrete_private_matched_order_commits_store_and_emits_fill() {
+    let h = started_private();
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let mut row = source_order();
+    row["event_type"] = json!("order");
+    row["status"] = json!("MATCHED");
+    row["size_matched"] = json!("10.25");
+    private_frame(&h, row);
+    assert_eq!(h.store.orders()[0].status, OrderStatus::Closed);
+    assert_eq!(fills.borrow().len(), 1);
+    assert!(
+        fills.borrow()[0]
+            .get("id")
+            .unwrap()
+            .strict_equals(&Js::str("rest-order"))
+    );
+    assert_eq!(fills.borrow()[0].get("price").unwrap().as_f64(), Some(0.57));
+    assert_eq!(
+        fills.borrow()[0].get("amount").unwrap().as_f64(),
+        Some(10.25)
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn concrete_private_trade_emits_fill_and_refreshes_positions_with_rest_balance_retained() {
+    let h = started_private();
+    assert!(h.store.positions().is_empty());
+    let balance_before = h.store.balance().clone();
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(method, path, _)| method != "GET" || path != "/positions");
+    h.http.ok("GET", "/positions", json!([{"asset":"123","size":7,"avgPrice":0.4,"curPrice":0.62,"cashPnl":1.54,"conditionId":"condition","redeemable":false,"mergeable":false}]));
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    private_frame(
+        &h,
+        json!({"event_type":"trade","id":"trade-42","asset_id":"123","side":"BUY","price":"0.62","size":"7"}),
+    );
+    assert_eq!(fills.borrow().len(), 1);
+    assert!(
+        fills.borrow()[0]
+            .get("id")
+            .unwrap()
+            .strict_equals(&Js::str("trade-42"))
+    );
+    assert!(
+        fills.borrow()[0]
+            .get("symbol")
+            .unwrap()
+            .strict_equals(&Js::str("event-Yes"))
+    );
+    assert_eq!(fills.borrow()[0].get("amount").unwrap().as_f64(), Some(7.0));
+    let positions = h.store.positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].contracts, 7.0);
+    assert_eq!(positions[0].unrealized_pnl, 1.54);
+    assert_eq!(h.store.balance().total, balance_before.total);
+    assert_eq!(h.store.balance().upnl, balance_before.upnl);
+    drop(positions);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
+    let h = harness(ExchangeName::Polymarket, options(), |_| {});
+    let sockets = h.venue().base().get_all_sockets();
+    assert_eq!(sockets.len(), 2, "both real source sockets are registered");
+    for socket in &sockets {
+        assert!(
+            !socket.recover_after_offline(true).unwrap(),
+            "the source socket requests an account reload"
+        );
+    }
+    assert!(
+        !h.venue().recover_after_offline().unwrap(),
+        "the production Exchange must expose the reload policy"
+    );
+    assert!(
+        h.runtime.sockets.borrow().is_empty(),
+        "recovery must not dial a second retry chain"
+    );
+    h.venue().dispose().unwrap();
+    assert!(
+        h.venue().recover_after_offline().unwrap(),
+        "disposed accounts do not request another reload"
+    );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::exchange::Exchange;
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("polymarket");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 24);
+    let h = harness(ExchangeName::Polymarket, options(), |http| {
+        let rows: Vec<_> = ["BTC", "ETH", "ADA"].into_iter().map(|asset| json!({
+            "conditionId":asset, "slug":asset, "question":"Question?", "description":"description",
+            "endDate":"2026-12-01", "active":true, "closed":false,
+            "enableOrderBook":true, "acceptingOrders":true,
+            "clobTokenIds":format!("[\"{asset}-token\"]"), "outcomes":"[\"Yes\"]",
+            "orderPriceMinTickSize":"0.01", "orderMinSize":"5", "negRisk":false,
+        })).collect();
+        http.ok("GET", "/markets", json!(rows));
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert_eq!(markets.len(), 3, "production token-to-symbol mappings");
+    let venue = h.exchange.clone();
+    let runtime = h.runtime.clone();
+    let store = h.store.clone();
+    let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    assert!(socket.is_connected(), "production ticker socket opens");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("polymarket")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            runtime.now.set(runtime.now.get() + 1100.0);
+            runtime.pump();
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.reports.borrow().is_empty(),
+        "{:?}",
+        runtime.reports.borrow()
+    );
+    venue.dispose().unwrap();
 }

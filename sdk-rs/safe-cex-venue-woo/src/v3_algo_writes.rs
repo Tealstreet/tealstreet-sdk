@@ -46,7 +46,7 @@ fn accepted<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     }
 }
 // ts: WooV3AlgoTriggerPriceType
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AlgoTriggerPriceType {
     #[serde(rename = "MARKET_PRICE")]
     MarketPrice,
@@ -57,13 +57,36 @@ pub enum WooV3AlgoTriggerPriceType {
     #[serde(rename = "LAST_PRICE")]
     LastPrice,
 }
+
+// Remote variants must retain the public enum names.
+#[allow(clippy::enum_variant_names)]
+#[derive(Deserialize)]
+#[serde(remote = "WooV3AlgoTriggerPriceType")]
+enum AcceptedWooV3AlgoTriggerPriceTypeWire {
+    #[serde(rename = "MARKET_PRICE")]
+    MarketPrice,
+    #[serde(rename = "MARK_PRICE")]
+    MarkPrice,
+    #[serde(rename = "INDEX_PRICE")]
+    IndexPrice,
+    #[serde(rename = "LAST_PRICE")]
+    LastPrice,
+}
+impl<'de> Deserialize<'de> for WooV3AlgoTriggerPriceType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3AlgoTriggerPriceTypeWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
 impl JsNumberOutput for WooV3AlgoTriggerPriceType {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{MarketPrice,MarkPrice,IndexPrice,LastPrice});
     }
 }
 // Supporting exact anonymous string union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AlgoPlaceFamily {
     #[serde(rename = "STOP_MARKET")]
     StopMarket,
@@ -72,13 +95,32 @@ pub enum WooV3AlgoPlaceFamily {
     #[serde(rename = "POSITIONAL_TP_SL")]
     PositionalTpSl,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3AlgoPlaceFamily")]
+enum AcceptedWooV3AlgoPlaceFamilyWire {
+    #[serde(rename = "STOP_MARKET")]
+    StopMarket,
+    #[serde(rename = "TRAILING_STOP")]
+    TrailingStop,
+    #[serde(rename = "POSITIONAL_TP_SL")]
+    PositionalTpSl,
+}
+impl<'de> Deserialize<'de> for WooV3AlgoPlaceFamily {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3AlgoPlaceFamilyWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
 impl JsNumberOutput for WooV3AlgoPlaceFamily {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{StopMarket,TrailingStop,PositionalTpSl});
     }
 }
 // Supporting exact anonymous string union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AlgoPlaceType {
     #[serde(rename = "STOP")]
     Stop,
@@ -90,6 +132,29 @@ pub enum WooV3AlgoPlaceType {
     TakeProfit,
     #[serde(rename = "STOP_LOSS")]
     StopLoss,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3AlgoPlaceType")]
+enum AcceptedWooV3AlgoPlaceTypeWire {
+    #[serde(rename = "STOP")]
+    Stop,
+    #[serde(rename = "TRAILING_STOP")]
+    TrailingStop,
+    #[serde(rename = "POSITIONAL_TP_SL")]
+    PositionalTpSl,
+    #[serde(rename = "TAKE_PROFIT")]
+    TakeProfit,
+    #[serde(rename = "STOP_LOSS")]
+    StopLoss,
+}
+impl<'de> Deserialize<'de> for WooV3AlgoPlaceType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3AlgoPlaceTypeWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(value),
+        )
+    }
 }
 impl JsNumberOutput for WooV3AlgoPlaceType {
     fn check_number_output(&self) {

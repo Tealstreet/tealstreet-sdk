@@ -1,5 +1,11 @@
 # JavaScript numeric and language semantics
 
+The individually reviewed accepted contracts and their native/default evidence
+are described in [ACCEPTED_CONTRACTS.md](ACCEPTED_CONTRACTS.md). Keep decoder
+observations separate from body-specific non-decoder classifications. The
+numeric_output_invariant target checks native changed-bit refusals and nested
+paths; its compiling comparison fault must fail before exact restoration passes.
+
 This crate hosts shared ECMAScript compatibility helpers below services and venues.
 Use `js_trim` when porting JavaScript String.prototype.trim. Its exact set is:
 U+0009–000D, U+0020, U+00A0, U+1680, U+2000–200A, U+2028, U+2029,
@@ -332,3 +338,36 @@ regressions are restored by `scripts/order-policy-controls.py`; failures must
 include the named native assertion, never only a compiler diagnostic.
 
 get_balance_slice returns a borrowed BalanceSlice containing the source account or exact currency row. An available/locked row remains that shape; get_total_balance_from_balance sees its absent total and applies the source zero default. Do not fall back to the account total merely because a present currency row has a different runtime shape.
+
+Externally tagged numeric enum objects enter through MapAccessDeserializer, whose
+EnumAccess bridge invokes the enum visitor. MapDeserializer's ordinary enum hint
+forwards to visit_map and cannot decode these variants. Require exactly one tag
+before dispatch; the bridge alone need not consume extra keys. Raw/owned/borrowed
+regressions inspect unit/newtype/tuple/record variants and numeric bits, while
+shared string-union front guards still reject tagged maps.
+
+
+`js_date_to_iso_string` applies the existing TimeClip boundary and returns the
+native RangeError name/message for invalid dates. It renders UTC milliseconds,
+including year zero and signed six-digit extended years, without a local timezone
+adapter. The formatter is shared with websocket diagnostics and native DXtrade
+candle bounds; no venue-local calendar copy is introduced. `tests/date_iso.rs`
+compares 1,044 independently counted native bit inputs with actual JavaScript
+Date construction/toISOString, including fractional, nonfinite and clip-edge
+values. It does not implement object-to-primitive Date constructor coercion.
+
+The retained JSON writer traverses the canonical UTF-16 carrier directly. It
+shares the lower quotation helper and numeric/key-order primitives with prepared
+JSON rendering. Undefined and nonfinite numbers remain native until the final
+wire projection; typed Rust String/Value adapters explicitly reject lone units.
+The retained_json_writer target compares every UTF-16 unit and a native object
+containing duplicate/index/lone-unit keys, undefined, infinities and signed zero
+with Node JSON.stringify. It also observes the retained input after rendering.
+`python3 scripts/retained-json-controls.py` runs exclusively, injecting the former
+string refusal, former key replacement, writer text replacement and a truncated
+writer array. Each compiled fault must fail its named production boundary or
+Node comparison and pass again after exact source restoration.
+`node ../safe-cex-parity/scripts/retained-json-contracts.mjs --package=safe-cex-num`
+checks the six compiler-owned writer APIs: one native prepared-value conversion
+and five specific outbound classifications. Those classifications are separate
+from the executed Node comparisons and corruption controls above.

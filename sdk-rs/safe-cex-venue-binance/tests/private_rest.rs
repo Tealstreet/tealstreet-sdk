@@ -47,15 +47,7 @@ fn wire(v: &EventValue) -> Value {
                 json!(n)
             }
         }
-        EventValue::String(s) => json!(s),
-        EventValue::Enum(v) => v.wire(),
-        EventValue::Inherited(p) => {
-            if *p == ProtoMember::Prototype {
-                json!({"$prototype":true})
-            } else {
-                json!({"$function":p.js_string()})
-            }
-        }
+        EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
         EventValue::Builtin(reference) => {
             if reference.is_callable() {
                 json!({"$function":reference.js_string()})
@@ -63,19 +55,22 @@ fn wire(v: &EventValue) -> Value {
                 json!({"$prototype":true})
             }
         }
-        EventValue::Array(a) => Value::Array(a.borrow().iter().map(wire).collect()),
+        EventValue::Array(a) => Value::Array(array_values(a).iter().map(wire).collect()),
         EventValue::Object(o) => {
-            let o = o.borrow();
-            let mut out = o
-                .fields
+            let mut out = v
+                .spread()
                 .iter()
                 .map(|(k, v)| (k.clone(), wire(v)))
                 .collect::<serde_json::Map<_, _>>();
-            if let Some(p) = &o.prototype {
-                out.insert("$customPrototype".into(), wire(p));
+            if let Some(p) = &*o.proto.borrow() {
+                if !matches!(p, EventValue::Builtin(reference) if reference.member() == safe_cex_num::BuiltinIdentity::Object(ProtoMember::Prototype))
+                {
+                    out.insert("$customPrototype".into(), wire(p));
+                }
             }
             Value::Object(out)
         }
+        _ => panic!("fixture projection requires decoded data"),
     }
 }
 fn prop(v: &EventValue, key: &str) -> EventValue {
@@ -98,19 +93,15 @@ fn num(v: EventValue, n: f64, label: &str) {
 }
 fn val(v: EventValue, n: EventValue, label: &str) {
     match (v, n) {
-        (EventValue::Enum(a), EventValue::Enum(b)) => {
-            assert_eq!(a, b, "{label}: native enum value")
-        }
-        (_, EventValue::Enum(_)) => panic!("{label}: native enum representation"),
         (EventValue::String(a), EventValue::String(b)) => {
             assert_eq!(a, b, "{label}: native string")
         }
         (EventValue::Bool(a), EventValue::Bool(b)) => assert_eq!(a, b, "{label}: native bool"),
         (EventValue::Undefined, EventValue::Undefined) => {}
-        (EventValue::Builtin(actual), EventValue::Inherited(expected)) => {
+        (EventValue::Builtin(actual), EventValue::Builtin(expected)) => {
             assert_eq!(
                 actual.member(),
-                safe_cex_num::BuiltinIdentity::Object(expected),
+                expected.member(),
                 "{label}: native inherited table member identity"
             );
             assert!(
@@ -125,11 +116,11 @@ fn items(v: &EventValue) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("native Array")
     };
-    a.borrow().clone()
+    array_values(a)
 }
 fn own(v: &EventValue, k: &str) -> bool {
-    if let EventValue::Object(o) = v {
-        o.borrow().fields.contains_key(k)
+    if matches!(v, EventValue::Object(_)) {
+        v.has_own(k)
     } else {
         false
     }
@@ -164,12 +155,12 @@ fn setup(f: Value, venue: &'static str, family: &'static str) -> Bind {
     };
     if venue == "spot" && family == "orders" {
         if let EventValue::Array(a) = &mut payload {
-            if let Some(o) = a.borrow().first() {
+            if let Some(o) = a.borrow().first().and_then(Option::as_ref) {
                 if f["name"] == "stop" {
-                    o.define("type", string("STOP_LOSS_LIMIT"))
+                    o.write("type", string("STOP_LOSS_LIMIT"))
                 }
                 if f["name"] == "take-profit" {
-                    o.define("type", string("TAKE_PROFIT_LIMIT"))
+                    o.write("type", string("TAKE_PROFIT_LIMIT"))
                 }
             }
         }
@@ -180,28 +171,35 @@ fn setup(f: Value, venue: &'static str, family: &'static str) -> Bind {
         "snapshot fixture"
     });
     e.name = "RangeError".into();
-    e.code = Some(json!("snapshot-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "snapshot-code"
+    )));
     e.response = Some(
         json!({"status":503,"data":{"msg":"venue detail","code":if f["name"]=="not-found-code"{json!(-2013)}else if f["name"]=="string-not-found-code"{json!("-2013")}else{json!(-1000)}}}),
     );
     let mut e2 = e.clone();
     e2.message = "algo first".into();
-    e2.code = Some(json!("algo-code"));
+    e2.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "algo-code"
+    )));
     e2.response = Some(json!({"status":503,"data":{"msg":"algo detail","code":-1001}}));
     let orders = value(
         json!([{"id":"cached","symbol":"BTCUSDT","status":"open","type":"limit","side":"buy","price":8,"amount":2,"filled":1,"remaining":1,"reduceOnly":false,"lastUpdate":9,"info":{"clientOrderId":"client-A"}}]),
     );
     // Store graphs carry actual native enum variants, not source string spellings.
     for o in items(&orders) {
-        o.define(
+        o.write(
             "status",
-            EventValue::Enum(PrivateEnum::Status(OrderStatus::Open)),
+            EventValue::enum_value(PrivateEnum::Status(OrderStatus::Open)),
         );
-        o.define(
+        o.write(
             "type",
-            EventValue::Enum(PrivateEnum::Type(OrderType::Limit)),
+            EventValue::enum_value(PrivateEnum::Type(OrderType::Limit)),
         );
-        o.define("side", EventValue::Enum(PrivateEnum::Side(OrderSide::Buy)));
+        o.write(
+            "side",
+            EventValue::enum_value(PrivateEnum::Side(OrderSide::Buy)),
+        );
     }
     let stale = f["name"] == "already-stale";
     let algo = value(f["algo"].clone());
@@ -327,20 +325,20 @@ impl SnapshotBindings for Bind {
             return Err(s.error.clone());
         }
         if let EventValue::Array(a) = &s.payload {
-            let first = a.borrow().first().cloned();
+            let first = a.borrow().first().and_then(Option::as_ref).cloned();
             if let Some(o) = first {
                 if s.name() == "clock-mutates" {
-                    o.define("origQty", string("7.10"));
-                    o.define("executedQty", string("0.20"));
-                    o.define("type", string("STOP_MARKET"));
-                    items(&s.algo)[0].define("quantity", string("9"));
+                    o.write("origQty", string("7.10"));
+                    o.write("executedQty", string("0.20"));
+                    o.write("type", string("STOP_MARKET"));
+                    items(&s.algo)[0].write("quantity", string("9"));
                 }
                 if s.name() == "clock-bad-toString" {
-                    o.define("origQty", record([("toString", number(0.0))]));
+                    o.write("origQty", record([("toString", number(0.0))]));
                 }
                 if s.name() == "clock-appends" && s.clocks.get() == 1 {
                     let append = value(s.f["payload"][0].clone());
-                    a.borrow_mut().push(append);
+                    EventValue::Array(a.clone()).push(append).unwrap();
                 }
             }
         }
@@ -380,8 +378,9 @@ impl SnapshotBindings for Bind {
         if s.name() == "price-appends" {
             if let EventValue::Array(a) = prop(&s.payload, "balances") {
                 if a.borrow().len() == 2 {
-                    a.borrow_mut()
-                        .push(value(json!({"asset":"ETH","free":"1","locked":"1"})));
+                    EventValue::Array(a.clone())
+                        .push(value(json!({"asset":"ETH","free":"1","locked":"1"})))
+                        .unwrap();
                 }
             }
         }
@@ -415,36 +414,11 @@ impl SnapshotBindings for Bind {
         if s.name() == "map-fail" {
             return Err(s.error.clone());
         }
-        let input = wire(&data);
-        let row = input.as_object().expect("authored decoded history object");
-        let mapped = safe_cex_venue_binance::order_history::map_binance_historical_order_typed(row)
-            .expect("authored fixture opts into the typed HistoricalOrder projection");
-        Ok(match mapped {
-            None => EventValue::Null,
-            Some(o) => record([
-                ("id", string(o.id)),
-                ("side", EventValue::Enum(PrivateEnum::Side(o.side))),
-                ("type", EventValue::Enum(PrivateEnum::Type(o.r#type))),
-                ("status", EventValue::Enum(PrivateEnum::Status(o.status))),
-                (
-                    "price",
-                    o.price.map(number).unwrap_or(EventValue::Undefined),
-                ),
-                ("amount", number(o.amount)),
-                ("filled", number(o.filled)),
-                (
-                    "reduceOnly",
-                    o.reduce_only
-                        .map(EventValue::Bool)
-                        .unwrap_or(EventValue::Undefined),
-                ),
-                ("createdTime", number(o.created_time)),
-                (
-                    "updatedTime",
-                    o.updated_time.map(number).unwrap_or(EventValue::Undefined),
-                ),
-            ]),
-        })
+        safe_cex_venue_binance::order_history::map_binance_historical_order(
+            &data,
+            &safe_cex_num::PrototypeRealm::current(),
+        )
+        .map(|value| value.unwrap_or(EventValue::Null))
     }
 }
 fn method(m: SnapshotMethod) -> &'static str {
@@ -455,7 +429,7 @@ fn method(m: SnapshotMethod) -> &'static str {
     }
 }
 fn error_wire(e: &Failure) -> Value {
-    json!({"$error":true,"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"$error":true,"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
 }
 fn project(s: &State, result: &Result<EventValue, Failure>) -> Value {
     let v = result
@@ -464,17 +438,17 @@ fn project(s: &State, result: &Result<EventValue, Failure>) -> Value {
         .cloned()
         .unwrap_or(EventValue::Undefined);
     let list = if let EventValue::Array(a) = &v {
-        a.borrow().clone()
+        array_values(a)
     } else {
         vec![]
     };
     let rows = if let EventValue::Array(a) = &s.payload {
-        a.borrow().clone()
+        array_values(a)
     } else {
         vec![]
     };
     let algos = if let EventValue::Array(a) = &s.algo {
-        a.borrow().clone()
+        array_values(a)
     } else {
         vec![]
     };
@@ -495,7 +469,7 @@ fn project(s: &State, result: &Result<EventValue, Failure>) -> Value {
         Value::Null
     };
     let notices=s.notices.borrow().iter().map(|(m,args)|json!({"method":method(*m),"args":args.iter().map(|a|match a{SnapshotArgument::Value(v)=>wire(v),SnapshotArgument::Error(e)=>error_wire(e)}).collect::<Vec<_>>()})).collect::<Vec<_>>();
-    json!({"name":s.name(),"trace":*s.trace.borrow(),"notices":notices,"clocks":s.clocks.get(),"stale":s.stale.get(),"refs":{"fallbackOrders":v.same(&s.orders),"balance":bal.same(&s.balance),"positions":maybe("positions").same(&s.positions),"order":ord.same(&items(&s.orders)[0]),"info":info,"regularInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&rows.iter().any(|r|prop(o,"info").same(r))).count(),"algoInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&algos.iter().any(|a|!prop(o,"info").same(a)&&prop(&prop(o,"info"),"nested").same(&prop(a,"nested")))).count()},"value":wire(&v),"failure":result.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))})
+    json!({"name":s.name(),"trace":*s.trace.borrow(),"notices":notices,"clocks":s.clocks.get(),"stale":s.stale.get(),"refs":{"fallbackOrders":v.same(&s.orders),"balance":bal.same(&s.balance),"positions":maybe("positions").same(&s.positions),"order":ord.same(&items(&s.orders)[0]),"info":info,"regularInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&rows.iter().any(|r|prop(o,"info").same(r))).count(),"algoInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&algos.iter().any(|a|!prop(o,"info").same(a)&&prop(&prop(o,"info"),"nested").same(&prop(a,"nested")))).count()},"value":wire(&v),"failure":result.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))})
 }
 fn fixtures(family: &str, n: usize) -> Vec<Value> {
     let all: Vec<Value> = serde_json::from_str(include_str!("fixtures/private-rest.json")).unwrap();
@@ -561,7 +535,7 @@ fn original_error(e: &Failure, s: &State, label: &str) {
         "{label}: native error message"
     );
     assert_eq!(
-        e.code,
+        observed_error_code(&e.code),
         Some(json!("snapshot-code")),
         "{label}: native error code"
     );
@@ -635,7 +609,11 @@ fn generated_error(e: &Failure, s: &State, name: &str, message: &str, label: &st
         e.message, message,
         "{label}: native generated error message"
     );
-    assert_eq!(e.code, None, "{label}: native generated error code absent");
+    assert_eq!(
+        observed_error_code(&e.code),
+        None,
+        "{label}: native generated error code absent"
+    );
     assert_eq!(
         e.response, None,
         "{label}: native generated error response absent"
@@ -655,7 +633,7 @@ fn native_order(v: &EventValue, s: &State, family: &str, label: &str) {
     val(prop(v, "id"), id, &format!("{label}: native order id"));
     val(
         prop(v, "status"),
-        EventValue::Enum(PrivateEnum::Status(OrderStatus::Open)),
+        EventValue::enum_value(PrivateEnum::Status(OrderStatus::Open)),
         &format!("{label}: native status"),
     );
     val(
@@ -665,15 +643,15 @@ fn native_order(v: &EventValue, s: &State, family: &str, label: &str) {
     );
     val(
         prop(v, "side"),
-        EventValue::Enum(PrivateEnum::Side(OrderSide::Buy)),
+        EventValue::enum_value(PrivateEnum::Side(OrderSide::Buy)),
         &format!("{label}: native side"),
     );
     let typ = if name == "prototype-type" {
-        EventValue::Inherited(ProtoMember::Constructor)
+        EventValue::inherited(ProtoMember::Constructor)
     } else if name == "unknown-type" {
         EventValue::Undefined
     } else {
-        EventValue::Enum(PrivateEnum::Type(if conditional {
+        EventValue::enum_value(PrivateEnum::Type(if conditional {
             if name == "stop" {
                 OrderType::TakeProfit
             } else {
@@ -766,7 +744,7 @@ fn native_order(v: &EventValue, s: &State, family: &str, label: &str) {
         if expect {
             val(
                 prop(v, k),
-                EventValue::Enum(PrivateEnum::Trigger(OrderStopTriggerType::MarkPrice)),
+                EventValue::enum_value(PrivateEnum::Trigger(OrderStopTriggerType::MarkPrice)),
                 &format!("{label}: native trigger enum"),
             );
         }
@@ -1038,7 +1016,7 @@ fn order_tests(venue: &'static str, family: &'static str) {
                     "{label}: native earlier rejection name"
                 );
                 assert_eq!(
-                    e.code,
+                    observed_error_code(&e.code),
                     Some(json!("algo-code")),
                     "{label}: native earlier rejection code"
                 );
@@ -1106,12 +1084,12 @@ fn order_tests(venue: &'static str, family: &'static str) {
                     );
                     val(
                         prop(a, "type"),
-                        EventValue::Enum(PrivateEnum::Type(OrderType::TakeProfit)),
+                        EventValue::enum_value(PrivateEnum::Type(OrderType::TakeProfit)),
                         &format!("{label}: native algo type"),
                     );
                     val(
                         prop(a, "status"),
-                        EventValue::Enum(PrivateEnum::Status(OrderStatus::Open)),
+                        EventValue::enum_value(PrivateEnum::Status(OrderStatus::Open)),
                         &format!("{label}: native algo status"),
                     );
                     num(
@@ -1451,14 +1429,16 @@ fn balance_test(venue: &'static str) {
                                 panic!()
                             };
                             assert!(
-                                !c.borrow().fields.contains_key("__proto__"),
+                                !c.props.borrow().contains_key(
+                                    &"__proto__".encode_utf16().collect::<Vec<_>>()[..]
+                                ),
                                 "{label}: native prototype setter own-key policy"
                             );
                             assert!(
-                                c.borrow().prototype.is_some(),
+                                matches!(&*c.proto.borrow(), Some(EventValue::Object(_))),
                                 "{label}: native prototype assigned"
                             );
-                            let proto = c.borrow().prototype.clone().unwrap();
+                            let proto = c.proto.borrow().clone().unwrap();
                             assert!(
                                 prop(&proto, "info").same(first),
                                 "{label}: native prototype asset info identity"
@@ -1577,7 +1557,7 @@ fn lookup_test() {
                     );
                     val(
                         prop(&o, "status"),
-                        EventValue::Enum(PrivateEnum::Status(if name == "closed" {
+                        EventValue::enum_value(PrivateEnum::Status(if name == "closed" {
                             OrderStatus::Closed
                         } else {
                             OrderStatus::Open
@@ -1586,12 +1566,12 @@ fn lookup_test() {
                     );
                     val(
                         prop(&o, "type"),
-                        EventValue::Enum(PrivateEnum::Type(OrderType::Limit)),
+                        EventValue::enum_value(PrivateEnum::Type(OrderType::Limit)),
                         &format!("{label}: native type enum"),
                     );
                     val(
                         prop(&o, "side"),
-                        EventValue::Enum(PrivateEnum::Side(OrderSide::Buy)),
+                        EventValue::enum_value(PrivateEnum::Side(OrderSide::Buy)),
                         &format!("{label}: native side enum"),
                     );
                     num(
@@ -1665,4 +1645,17 @@ fn spot_balance_snapshots() {
 #[ignore = "requires direct TypeScript oracle"]
 fn futures_client_order_lookup() {
     lookup_test()
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

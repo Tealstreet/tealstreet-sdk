@@ -1,5 +1,8 @@
 //! Destructuring, spreads and parameter bindings with source IteratorClose.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{PropKey, Thrown, Value},
+};
 
 impl Realm {
     /// `const [a, b, ...] = value` over `slots`; a `false` slot is an elision.

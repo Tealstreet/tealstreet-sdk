@@ -1051,3 +1051,74 @@ impl<V: Clone + 'static> BookSubscription<V> {
         finish_unsubscribe(h, &self.topic)
     }
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn utf16_encoder_preserves_native_units() {
+        assert_eq!(u(""), Vec::<u16>::new());
+        assert_eq!(u("A🚀\0"), vec![65, 55357, 56960, 0]);
+        assert_eq!(u("é雪"), vec![233, 38634]);
+    }
+}
+
+#[cfg(test)]
+mod accepted_outbound_contract {
+    #[allow(dead_code, unused_imports)]
+    mod fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/accepted_host_fixture.rs"
+        ));
+    }
+    #[test]
+    fn send_builds_one_native_frame_and_keeps_failure_identity() {
+        use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+        let mut host = fixture::Host::new(&serde_json::Value::Null);
+        super::send(
+            &mut host,
+            "trade.subscribe",
+            vec![Js::str("BTCUSDT"), Js::Number(17.5)],
+            -0.0,
+        )
+        .unwrap();
+        let frames = host.sent.borrow();
+        assert_eq!(frames.len(), 1, "one outbound frame");
+        let frame = &frames[0];
+        assert_eq!(frame.own_keys().len(), 3, "exact outbound field count");
+        assert!(
+            frame
+                .get("method")
+                .unwrap()
+                .strict_equals(&Js::str("trade.subscribe"))
+        );
+        let params = frame.get("params").unwrap().array_values().unwrap();
+        assert_eq!(params.len(), 2);
+        assert!(params[0].strict_equals(&Js::str("BTCUSDT")));
+        let Js::Number(n) = params[1] else {
+            panic!("native numeric second param")
+        };
+        assert_eq!(n.to_bits(), 0x4031800000000000);
+        let Js::Number(id) = frame.get("id").unwrap() else {
+            panic!("native numeric request ID")
+        };
+        assert_eq!(
+            id.to_bits(),
+            0x8000000000000000,
+            "negative-zero request ID bits"
+        );
+        drop(frames);
+        host.fail_send = true;
+        let result = super::send(&mut host, "unsubscribe", vec![], 1200.0);
+        let Err(Thrown { value, .. }) = result else {
+            panic!("send failure must propagate")
+        };
+        assert!(
+            value.strict_equals(&host.sentinel),
+            "unchanged host rejection identity"
+        );
+        assert_eq!(host.sent.borrow().len(), 2);
+    }
+}

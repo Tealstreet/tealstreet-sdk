@@ -24,9 +24,10 @@ fn assigned_finding_targets_resolve_in_the_real_source_index() {
                 .as_nanos()
         )));
     fs::create_dir_all(&scope.0).unwrap();
-    let sources: [(&str, &[&str]); 5] = [
+    let sources: [(&str, &[&str]); 6] = [
         ("safe-cex-candle-cache", &["types.rs"]),
         ("safe-cex-exchange", &["proxy_token.rs", "websocket.rs"]),
+        ("safe-cex-num", &["prototype_realm.rs"]),
         ("safe-cex-store", &["instrument_class.rs", "risk.rs"]),
         ("safe-cex-venue-okx", &["income.rs", "rest_operations.rs"]),
         (
@@ -140,7 +141,7 @@ fn assigned_finding_targets_resolve_in_the_real_source_index() {
     }
     assert_eq!(
         targets.len(),
-        21,
-        "independent 15-row assignment floor, including original split targets; stop inverse.mapOrder"
+        48,
+        "independent 15-row assignment floor, including original split targets and 27 prototype-realm targets; stop inverse.mapOrder"
     );
 }

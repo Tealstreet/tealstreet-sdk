@@ -1058,6 +1058,7 @@ impl SigningHost for Host {
 }
 impl CompositionHost for Host {
     type Timer = u32;
+    type PrivateTimer = u32;
     type FillKey = String;
     fn base_exchange(&self, name: N, opts: N, store: N) -> JsResult<N> {
         self.event(vec![self.string("base-exchange"), name.clone()]);

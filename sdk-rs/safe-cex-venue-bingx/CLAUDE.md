@@ -1,3 +1,7 @@
+Every concrete mapOrder caller uses the shared synchronized VirtualClock: REST
+reads, private order frames, accepted placements and cancel-replace replies. The
+real binding clock regression checks all four; fetch throttle clocks stay Date.now.
+
 # BingX venue port
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bingx/CLAUDE.md).
@@ -142,8 +146,16 @@ and fixed executed-method counts.
 ScopeShared/Store, Axios client with raw-text bigint parsing, common intrinsics,
 and public/private BaseWebSocket facades. `BingxDependencies` supplies the HTTP
 wire host, WsRuntime and optional external-public-data factory. Secondary keys
-route GETs to the secondary client and writes to the primary. Hosted signer
-options fail visibly until the host supplies that capability.
+route GETs to the secondary client and writes to the primary. Hosted HTTP signing uses the shared native host capability; the BaseExchange
+signer view and API skip-local-signing branch receive the same capability.
+Payload-signing options remain unavailable without a host capability.
+
+The secondary read client's proxy is the first truthy secondaryProxyUrl or the
+provider's public CORS proxy. It always replaces the primary overrideProxyUrl,
+including clearing it for direct reads when neither resolves. Primary writes
+retain their own proxy and credentials. The production binding proxy regression
+checks routed URLs through DirectTransport for explicit, empty and absent
+secondary proxies, both with and without a public proxy.
 
 All 16 Exchange trait methods are bound. The source inherits the base rejection
 for fetchSymbolMaxLeverage, scheduleCancel and fetchPublicTrades; their tests
@@ -181,3 +193,80 @@ That owned-callback boundary is priced on the listenOrderBook manifest row.
 `scripts/binding-precision-controls.py` independently swaps the production amount
 and price precision operands. Fractional wire assertions must fail separately;
 integral placement inputs do not establish this protection.
+
+The HTTP bridge uses shared `client::factory::{create,install_transport_adapter}`
+for fixed20-second timeout, Axios Accept defaults, provider-selected routing and
+proxy authorization. Source createAPI's installTransportAdapter call uses the
+Default variant; raw-text response preservation still protects bigint parsing.
+The selected adapter handles both initial requests and one-shot signature resends.
+`tests/support/binding_factory.rs` checks non-default receive windows, Accept and
+a real custom provider/adapter. `scripts/binding-factory-controls.py` independently
+restores the old timeout, removes Accept and chooses BigInt; each compiled change
+must fail its named E2E and restore to pass. Run this controller serially.
+
+Native hosted-account coverage is in registry tests/native_host_bingx.rs. It starts
+with no local API secret, authenticates its private socket through the remote-signed
+HTTP listen-key flow, places/cancels, and checks the browser signer's HMAC over the
+transmitted order fields. A stray local secret must not trigger local signing.
+A refusing signer sends no HTTP request. hosted-signing-controls.py independently
+removes HTTP forwarding, BaseExchange signer attachment and API local-signing
+bypass; each must compile/fail the named native E2E and restore to pass.
+
+The production batch-placement capability dispatches to BingxPlacement.place_orders,
+matching the source whole-batch formatting and submission loop. A formatting
+failure sends nothing; a submission rejection still allows later payloads to be
+attempted before the final error is thrown. Real binding regressions verify a
+rejected take profit does not suppress the stop loss, and a later invalid full
+stop prevents an earlier entry from being submitted.
+
+The binding witnesses now cover a replacement listen-key request held across an
+old socket Close event: only one replacement request/socket is created. The shared
+close-listener ownership provides this behavior; no venue fallback
+or replacement reconnect path is needed. Private text frames cover order Store
+writes, terminal fill emission/status, and position writes before REST healing.
+Balance-only account rows remain ignored as in TS; this socket has no balance
+handler and the REST balance stays unchanged. Approved strict-asset market row
+refusals include base/quote and nonnumeric leverage maxima. They emit the row,
+symbol, field and value while retaining valid siblings.
+Source/transport failures retain the stored snapshot; all refused rows return
+an empty fresh result.
+
+REST signature timestamps read the shared synced `VIRTUAL_CLOCK`, matching
+`bingx.api.ts`. Registry `native_host_bingx_clock` offsets server time by 90 seconds,
+performs a real signed account read, verifies the transmitted HMAC, and requires
+the timestamp to fall inside the synced interval. Raw runtime time remains the
+clock for source `Date.now()` paths.
+
+The concrete API serializer forwards the source's repeat-array and pinned
+localeCompare sort options to the shared qs binding for both signing and final
+wire serialization. The final sort includes the newly appended signature key.
+`safe-cex-registry/tests/native_host_bingx.rs` proves the account GET sends
+signature before timestamp and independently verifies its HMAC. Shared option
+corpora cover nested and 12-element array key sorting and comma/form encoding.
+
+Signature-predicate coercion failures retain their TypeError name and unprefixed
+message through the shared ExchangeError conversion. The real native receiver
+regressions cover both resolved and rejected HTTP responses without a resend.
+
+Historical fill ISO dates without an offset use the required
+`BingxDependencies.local_wall_time_to_utc` callback; explicit offsets bypass it.
+The native registry supplies its UTC profile explicitly. The real binding test
+compares actual TS executions in Singapore and New York (winter and summer).
+
+Amendment copies preserve Order.reduceOnly presence through PreparedOrderOpts;
+undefined is not reconciled as false. The real native updateOrder test supplies
+own undefined without a raw reduce-only alias, exercises position-side lookup,
+and compares the entire signed cancel-replace body to the maintained TypeScript
+class plus actual API signer/qs/HMAC. Undefined reduceOnly is omitted at the wire.
+
+The constructed native ticker corpus in `tests/binding.rs` covers 140 three-row
+market.contracts frames, including every camel/snake numeric alias and distinct
+later fallback values. Ten independent inputs include null, strings, malformed
+objects, NaN, overflow and signed zero; large finite values exercise derived
+prices. All eleven stored numeric fields are compared by bits with the maintained
+TS constructor and actual DefaultStore. The shared fault runner misroutes mark
+to index and requires a compiled native assertion failure and exact restored pass.
+
+Held HTTP fixtures use the shared wake-aware Release gate. The registry native
+listen-key witness holds a real reqwest response across the old socket Close
+acknowledgement and verifies one replacement dial after release.

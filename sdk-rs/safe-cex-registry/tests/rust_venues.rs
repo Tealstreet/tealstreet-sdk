@@ -25,7 +25,7 @@ use safe_cex_venue_binance::{
         CapturedAction, NativePrivateSocket, PrivateBase, PrivateCallback, PrivateParent,
         PrivateTimers,
     },
-    private_event_value::{EventValue, record, string},
+    private_event_value::{EventOps, EventValue, record, string},
     private_rest::{SnapshotCompletion, SnapshotRequestFuture},
     private_session::{Factory, Venue},
     protocol_types::BinanceOrderBookApplyResult,
@@ -85,7 +85,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, cancelled.clone()));
         Box::new(Task(cancelled))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "registry".into()
     }
@@ -98,7 +98,7 @@ impl ExchangeRuntime for Runtime {
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         panic!("unexpected exception report: {}", error.message)
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
         panic!("unexpected raw exception report")
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -158,11 +158,13 @@ fn run<T>(runtime: &Runtime, future: impl Future<Output = T>) -> T {
 #[derive(Default)]
 struct Wire {
     requests: Mutex<Vec<String>>,
+    request_data: Mutex<Vec<RestRequest>>,
     bodies: Mutex<BTreeMap<String, Value>>,
 }
 impl RestAdapter for Wire {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         self.requests.lock().unwrap().push(request.url.clone());
+        self.request_data.lock().unwrap().push(request.clone());
         let body = self
             .bodies
             .lock()
@@ -180,7 +182,9 @@ impl RestAdapter for Wire {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(body),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+                ),
             })
         })
     }
@@ -327,11 +331,11 @@ impl ExchangeImports for Imports {
         _: Rc<dyn Fn(EventValue) -> Result<EventValue, Failure>>,
         _: Option<safe_cex_venue_binance::private_session::RateHook>,
     ) -> Result<EventValue, Failure> {
-        Ok(EventValue::Array(Rc::new(RefCell::new(vec![
+        Ok(EventValue::array(vec![
             client("route"),
             client("primary"),
             client("secondary"),
-        ]))))
+        ]))
     }
     fn rate_limit(&self, client: EventValue, _: f64) -> Result<EventValue, Failure> {
         Ok(client)
@@ -490,15 +494,48 @@ struct Venues {
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 impl RustVenueHost for Venues {
+    fn lighter(
+        &self,
+    ) -> Result<safe_cex_venue_lighter::binding::exchange::LighterDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("lighter");
+        let registry = Rc::new(safe_cex_transport::TransportRegistry::default());
+        registry.set_default_transport(self.runtime.transport());
+        Ok(
+            safe_cex_venue_lighter::binding::exchange::LighterDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                    self.runtime.clone(),
+                    self.wire.clone(),
+                ),
+                registry,
+                signing_entropy: None,
+            },
+        )
+    }
+    fn grvt(
+        &self,
+    ) -> Result<safe_cex_venue_grvt::binding::exchange::GrvtDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("grvt");
+        Ok(safe_cex_venue_grvt::binding::exchange::GrvtDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                self.wire.clone(),
+            ),
+            external_public_data: None,
+        })
+    }
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
+        _: ExchangeName,
         _: &ExchangeOptions,
     ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
         self.calls.borrow_mut().push("hyperliquid");
         Ok(
             safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
                 runtime: self.runtime.clone(),
+                external_public_data: None,
                 http: self.wire.clone(),
                 limiter: Rc::new(safe_cex_venue_hyperliquid::rate_limit::RateLimiter::new(
                     Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
@@ -553,9 +590,9 @@ impl RustVenueHost for Venues {
                     provider: None,
                     signer: None,
                     account_name: None,
-                    adapter,
+                    adapter: adapter.clone(),
                     host: Rc::new(Host),
-                    runtime,
+                    runtime: runtime.clone(),
                     store: None,
                     stats: None,
                     logs: None,
@@ -715,6 +752,7 @@ fn table_members_are_exactly_the_bound_venues() {
     assert_eq!(
         names,
         [
+            ExchangeName::Apexomni,
             ExchangeName::Asterdex,
             ExchangeName::Backpack,
             ExchangeName::Binance,
@@ -725,15 +763,31 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitget,
             ExchangeName::Bitgetinverse,
             ExchangeName::Bitgetusdc,
+            ExchangeName::Bitrue,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
+            ExchangeName::Breakoutprop,
+            ExchangeName::Grvt,
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+            ExchangeName::Hyrotrader,
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
+            ExchangeName::Cryptocom,
             ExchangeName::Hyperliquid,
+            ExchangeName::Hyperliquidspot,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
+            ExchangeName::Kodiakfi,
+            ExchangeName::Mode,
+            ExchangeName::Salsadex,
+            ExchangeName::TealstreetDex,
+            ExchangeName::What,
+            ExchangeName::Woofi,
+            ExchangeName::Lighter,
+            ExchangeName::LighterRobinhood,
             ExchangeName::Kucoin,
             ExchangeName::Kucoinspot,
             ExchangeName::Mexc,
@@ -741,8 +795,12 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Okxdemo,
             ExchangeName::Okxeu,
             ExchangeName::Okxeudemo,
+            ExchangeName::Paradex,
+            ExchangeName::Phemex,
             ExchangeName::Polymarket,
+            ExchangeName::Txflow,
             ExchangeName::Woo,
+            ExchangeName::Weex,
         ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );
@@ -972,27 +1030,33 @@ fn okx_family_constructs_through_the_registry_and_reads_its_markets() {
             .lock()
             .unwrap()
             .iter()
-            .any(|u| u == "/api/v5/public/instruments"),
+            // fetchMarkets supplies params: {instType}; the HTTP host puts them in the URL.
+            .any(|u| u == "/api/v5/public/instruments?instType=SWAP"),
         "REGISTRY okx fetchMarkets reached the scripted wire"
     );
 }
 
 #[test]
-fn rust_path_for_an_unbound_name_is_a_named_error_without_module_fallback() {
+fn unknown_name_is_rejected_before_registry_or_module_fallback() {
     let modules = Modules::default();
-    let error = match native_constructor(
-        ExchangeName::Grvt,
-        ConstructionPath::Rust,
-        &modules,
-        venues(),
-    ) {
-        Ok(_) => panic!("REGISTRY unbound rust path must fail"),
-        Err(error) => error,
-    };
-    assert_eq!(error.to_string(), "no Rust constructor for grvt");
+    let host = venues();
+    // ExchangeName is closed: a synthetic name fails at typed admission before
+    // either constructor route. Real venue additions cannot invalidate this gate.
+    let result = serde_json::from_value::<ExchangeName>(json!("__unbound_registry_control__"))
+        .map(|name| native_constructor(name, ConstructionPath::Rust, &modules, host.clone()));
+    let error = result.err().expect("unknown registry name must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("unknown variant `__unbound_registry_control__`")
+    );
     assert!(
         modules.required.borrow().is_empty(),
         "REGISTRY no module-host fallback"
+    );
+    assert!(
+        host.calls.borrow().is_empty(),
+        "REGISTRY no venue inputs requested"
     );
 }
 
@@ -1101,6 +1165,57 @@ fn native_kraken_dependencies_retain_module_state_per_host() {
     assert!(
         !Rc::ptr_eq(&first.futures_nonces, &other.futures_nonces),
         "REGISTRY separate native runtimes have separate module state"
+    );
+}
+
+#[test]
+fn lighter_family_constructs_through_registry_and_reads_deployment_markets() {
+    let host = venues();
+    host.wire.bodies.lock().unwrap().insert("/api/v1/orderBookDetails".into(),json!({"code":200,"order_book_details":[{"symbol":"BTC","market_id":1,"market_type":"perp","status":"active","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"10","order_quote_limit":"1000","min_initial_margin_fraction":200,"market_config":{"market_margin_mode":0}}]}));
+    for (name, quote) in [
+        (ExchangeName::Lighter, "USDC"),
+        (ExchangeName::LighterRobinhood, "USDG"),
+    ] {
+        let exchange = construct(
+            name.clone(),
+            &host,
+            json!({"key":"","secret":"01000000000000000000000000000000000000000000000000000000000000000000000000000000","apiKeyIndex":"3","applicationId":"42"}),
+        );
+        let markets =
+            run(&host.runtime, exchange.fetch_markets()).expect("Lighter registry market read");
+        assert_eq!(exchange.name(), &name);
+        assert_eq!(markets.len(), 1);
+        assert_eq!(markets[0].symbol, "BTC");
+        assert_eq!(markets[0].quote, quote);
+        assert_eq!(markets[0].precision.amount, 0.0001);
+        exchange.dispose().unwrap();
+    }
+    assert_eq!(*host.calls.borrow(), ["lighter", "lighter"]);
+    assert_eq!(
+        *host.wire.requests.lock().unwrap(),
+        ["/api/v1/orderBookDetails", "/api/v1/orderBookDetails"]
+    );
+}
+
+#[test]
+fn grvt_constructs_through_registry_and_reads_actual_public_gateway() {
+    let host = venues();
+    host.wire.bodies.lock().unwrap().insert("/lite/v1/all_instruments".into(),json!({"r":[{"i":"BTC_USDT_Perp","k":"PERPETUAL","b":"BTC","q":"USDT","ms":"0.001","ts":"0.1","ih":"0x030501","bd":3,"qd":6}]}));
+    let exchange = construct(ExchangeName::Grvt, &host, json!({"key":"","secret":""}));
+    let markets = run(&host.runtime, exchange.fetch_markets()).expect("GRVT registry request");
+    assert_eq!(exchange.name(), &ExchangeName::Grvt);
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].symbol, "BTC_USDT_PERP");
+    assert_eq!(*host.calls.borrow(), ["grvt"]);
+    assert_eq!(
+        host.wire.request_data.lock().unwrap()[0]
+            .base_url
+            .as_deref(),
+        Some("https://market-data.grvt.io")
+    );
+    assert_eq!(
+        host.wire.requests.lock().unwrap()[0],
+        "/lite/v1/all_instruments"
     );
 }
 

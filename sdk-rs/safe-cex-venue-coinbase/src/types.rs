@@ -3467,6 +3467,12 @@ pub struct PlaceOrderRequest {
     pub client_order_id: String,
     pub product_id: String,
     pub side: PlaceOrderRequestSide,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present"
+    )]
+    pub leverage: Option<String>,
     pub order_configuration: OrderRequestConfig,
     #[serde(
         default,
@@ -3474,12 +3480,6 @@ pub struct PlaceOrderRequest {
         deserialize_with = "deserialize_present"
     )]
     pub self_trade_prevention_id: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_present"
-    )]
-    pub leverage: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

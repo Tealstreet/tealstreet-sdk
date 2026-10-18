@@ -1,3 +1,596 @@
+# Production emitter argument lists
+
+The Realm BaseExchange facade forwards TinyEmitter arguments through the shared
+BaseExchange::emit_args API. Empty calls retain an empty list, one array remains
+one argument, and separate message/metadata arguments remain separate. The
+existing per-value JSON boundary and native callback error propagation remain.
+
+The production-facade regression constructs the actual Realm superclass over a
+real BaseExchange and observes native on_args listeners. The old bridge compiles
+and fails: empty calls produce [null], and the warning pair produces one nested
+array. The single-array payload and inherited native log already match. After
+the bridge change, all 40 library, 24 production Perpetual binding and 21 Spot
+binding tests pass (85 total). Scoped formatting and strict native all-target
+Clippy pass. Independent review reports no findings; CodeRabbit is rate limited.
+This test scripts only the runtime boundary; the facade, native emitter and JSON conversions are real.
+
+The three existing enclosing-function pins for base_exchange_class are reviewed
+manually. Only b.emit becomes b.emit_args; the existing b.dispose, b.can_sign and
+b.name edges are unchanged. The token hash changes from d0b3260d4e9cb7dc to
+87e8a021dad29e72. No other call-site inventory or shared runtime code is authored
+in this slice. The required shared emitter API is inherited from PR425.
+Initial global parity reported five missing mappings in that shared dependency: emit_args,
+on_args, once_args, ArgsListener and install_exchange_event_bridge. No Hyperliquid
+finding is reported; the shared owner has the exact list. This is not a global
+gate clearance claim. The supported scoped Hyperliquid check passes using the
+unchanged existing exemption subset: 554 rows, 1243 public Rust items, zero
+invention/status findings. After inheriting the shared mapping repair at
+795d8691d6 through PR425 head ee665ced69, ordinary global parity passes with
+7459 rows and 17219 public Rust items, zero findings. The merged source/history
+and emitter slices retain all production test cases independently.
+
+# Production history, listeners and private snapshot dispatch
+
+The production perpetual Exchange now forwards candles, historical fills/orders,
+income history/range, client-ID lookup and private reconnect snapshots to the
+maintained Realm methods. Both public listeners use the existing Realm callback
+and cleanup boundary, matching the spot binding. Lookup preserves the source
+orderStatus request by cloid and its non-mutating behavior; reconnect runs the
+source parallel orders/core-state snapshot instead of the generic order-only
+fallback. Terminal-cancel classification, history collapse/mapping and derived
+closed-position imports now delegate to their existing maintained helpers.
+Derived closed positions remain distinct from fetchClosedPnl.
+
+Nine actual production-binding baselines fail before these overrides/imports:
+the read defaults return empty results, lookup takes the generic open-order path,
+reconnect skips core state and failed cancels replace the venue message with a
+ReferenceError. Both separately authored public listener baselines also fail
+against the defaults. After wiring, all fourteen new binding regressions pass.
+They observe real native candle/execution/history/income values, signed cancel
+cleanup, original nonterminal error preservation, precise REST queries, listener
+subscription/delivery/cleanup, and Store updates from actual private order,
+position and balance frames. The merged fill regression checks actual private
+userFills notifications, Store positions and emitted fill events; non-fill topic
+witnesses assert that those frames do not manufacture fill events. Only external
+HTTP, socket transport and clocks are scripted; imported names and mappers are
+production implementations. Startup order reads are joined before assertions so
+background startup completion cannot erase seeded orders or contaminate counts.
+
+Wiring exposed an additional native candle panic: the destructuring host returns
+only selected bindings, but fetchOHLCV indexed as if the leading skipped element
+occupied a slot. The compiled production candle case panics before this fix;
+reading selected slots zero and one matches the maintained TS destructuring and
+returns the authored candle/window values. Regex and arithmetic implementations
+are unchanged. Income-range expectations preserve the source's non-funding
+selection of both PnL and fee rows; balance total excludes unrealized PnL, and
+execution timestamps remain seconds while income timestamps remain milliseconds.
+
+Independent review caught an error bridge that inspected a resolver's thrown
+value before returning it. Its compiled Realm regression observes unwanted
+ordinary-object toString/code/response reads. The corrected bridge retains the
+original Value and uses an inert native sentinel only to unwind the DTO mapper.
+The restored test checks original identity and zero extra reads for both ordinary
+objects and Error values.
+
+Four additional production Realm tests execute the history imports, strict
+terminal classifier and derived native fields; retain callback throw identity;
+read all five actual class timeout properties; and exercise the four guarded
+browser network/approval flows without any window/ethers/browser stand-ins.
+Those guarded calls return their explicit missing-wallet refusal. This does not
+claim that every generic browser helper is directly callable on an unconfigured
+Realm. Browser workflow exports are not installed as Exchange class methods;
+the native class's builder-fee checker receives an explicit fourth fee argument.
+The production spot constructor aliases perp.createAPI to the native HTTP client,
+so its alternate generic spot_client factory and interceptor-only names are not
+assembled into the native path. These source-call graph distinctions retain the
+separate generic-helper/accepted-set obligations; no globals or exemptions were
+invented to suppress static leads.
+
+Seven independently compiled controls remove each of the four new import
+registrations, disconnect the orderUpdates and clearinghouseState dispatch
+branches, and invert the missing-window guard. They produce eight named native
+failures, including both clearinghouse positions and balance assertions. Every
+mutation is restored byte-for-byte. A first browser-control attempt failed to
+compile and is excluded; the corrected control compiles and fails its native
+missing-wallet assertion. The restored library, binding and placement targets
+pass 43 + 38 + 1 tests. Fourteen of the binding tests and four library tests are
+new in this slice. All 21 existing production Spot binding tests also pass after
+the shared import additions. Scoped formatting and strict native all-target Clippy
+pass. Global parity:check passes with 7459 rows and 17214 public Rust items,
+zero invention/status findings. Independent final review reports no remaining findings.
+
+The shared updateOrder result still returns Vec<String> and discards the named
+replacement clientOrderId property. The existing ReplacementOrderIds type and
+required common-trait/caller/dispatch migration are recorded for the overseer's
+shared API cutover; this venue slice does not claim to resolve that boundary.
+
+# Production TP/SL, fills and serial placement imports
+
+The production Realm now registers `hasSeenFill`, `markFillSeen`,
+`isFinitePositiveNumber`, `mapSeries` and
+`hyperliquidOrderResponseHasDeferredOrderStatus`. The fill wrappers share the
+same existing per-Realm cross-cache module as `getCrossCache`. The numeric
+predicate delegates only actual finite numbers to the existing native helper;
+non-number objects are never serialized or coerced. The deferred-status wrapper
+uses the ordinary native REST response DTO boundary.
+
+`mapSeries` keeps Realm values, receiver/error identity and promises intact.
+It reads live length and present slots, resolves `callback.call` before reading
+and awaiting an item, invokes that member with the callback as receiver, then
+awaits the result before moving on. Its default receiver is the retained module
+object, with a weak function capture. The installed p-iteration implementation
+independently agrees on the accessor/own-call order and serial live-length cases.
+
+Six `production_import_` regressions in `tests/binding.rs` construct the real
+production Exchange and Realm. Only external HTTP, sockets and runtime clocks
+are scripted. They observe signed zero-size position and partial TP/SL requests,
+a posted waiting trigger returning no IDs and scheduling a refresh without a
+duplicate POST, two ordered signed batch requests, first-error short-circuit,
+and real private userFills notifications. The fill case checks all three emitter
+events, the later BTC position update, replay deduplication and actual HIP-3
+clearinghouse HTTP after debounce and shared limiter pacing. Four additional
+Realm tests check the shared cache, strict numeric inputs, serial input/callback
+awaits, live length, module/custom receivers, own-call access order and original
+rejection identity. Unknown imports remain ReferenceErrors. The finite placement
+semantics host now refuses unreviewed names; its source-level stubs provide no
+production registration evidence.
+
+The compiled baseline fails all six production regressions. Five separate
+registration-name removals preserve helper bodies but fail the named production
+binding test for each missing import. The fill removals yield zero events; the
+numeric and mapping removals yield their named ReferenceErrors; the deferred
+removal fails after the trigger has already been posted. Each source is restored
+byte-for-byte before the next control. A restored replay runs the complete Realm,
+binding and placement-dispatch test targets: 39 library tests, 24 production
+binding tests and one native/source placement oracle, all passing.
+
+This slice covers these five imports and production paths. Cancellation,
+history and remaining static-name reachability, browser-only boundaries and
+missing perpetual trait wiring remain separate follow-up work. The current
+accepted-set preflight/refusals and contract backlog are unchanged; this is no
+whole-venue parity claim.
+
+# Request-weight nested helper ownership
+
+The local-functions policy previously delegated `rate_limit.rs::LOCAL_FUNCTION:text`
+to private `raw_number`, which is absent from the actual compiler inventory. The
+policy now names the inventoried `get_hyperliquid_rest_request_weight` decoder.
+Its actual call chain reaches `raw_request_weight`, `raw_number` and the unchanged
+nested `text` coercer. The category and whole-file source pin are unchanged;
+only the reviewed parent and its explanation change. No production body changes.
+
+The new exact compiler function contract has 51 independently authored raw and
+typed JSON cases. They observe the actual returned weight's decimal text and
+binary64 bits, or thrown error name/message. Cases cover Number coercion, array
+and nested-array joins, late own-toString failures after a surrogate, signed and
+overflow inputs, endpoint suffixes, single JSON parsing and batch boundaries.
+The maintained TS source plus its actual endpoint/type constants independently
+match all 51 expectations. The literal native adapter passes all 51 cases, and
+the normal fresh compiler/artifact/inventory `runProbes` path returns one actual
+runtime result, zero classifications and zero failures. All 534 owners and 36
+aliases remain indexed before selecting that one function.
+
+A compiled mutation changes only nested `text`'s comma separator to `0`. The
+public caller's named comma-join assertion fails with native weight 71 versus
+expected 20, proving the delegated helper executes. Exact source restoration
+passes all 51 native cases. Restoring the old policy parent independently
+reproduces the original named ordinary refusal; the correct policy bytes are
+then restored. The source remains byte-identical to its reviewed SHA
+`b147ca525ffac1439ed6d128d5d2779b4be6a964540f3e5c592bec461a3a103a`.
+
+Strict native all-target clippy, formatting and parity pass; parity indexes 7459
+rows and 17214 public Rust items. After inheriting merged #389, all 102 master
+contracts are unchanged and this PR adds one actual owner contract. Current
+coverage is 94 owners, nine aliases and two construction reviews: 105 of 572
+reviewed obligations, 467 remaining.
+
+Ordinary preflight advances past text and retains
+`browser_approval_flows.rs::LOCAL_FUNCTION:attempt_switch: unclassified nested free function`.
+That helper, live getter/prototype behavior, limiter scheduling, dependencies and
+other target/feature configurations retain their own reviews. No whole-package
+acceptance is claimed.
+
+# Twenty parent and collection record reviews
+
+This cohort reviews twenty concrete maintained records against the actual TS
+members, native field types and private remote rename/presence attributes.
+`tests/fixtures/accepted_nested_record_schema.json` is the manually reviewed
+mapping table and body-pin ledger; it grants no scanner or policy permission.
+The production decoder bodies and all private schema attributes are unchanged.
+
+| Native owner | Reviewed structure |
+| --- | --- |
+| `UserFills` | Both maintained merged interface declarations; all 13 native fill members |
+| `WsFill` | Required fill strings, bool and exact numeric bits |
+| `Candle` | Required OHLCV strings, distinct `t`/`T` native members and counters |
+| `HyperliquidCandle` | Its own concrete candle members and decoder |
+| `WsUserFill` | Its own concrete user-fill members and decoder |
+| `LimitOrderType` | Required Tif string tag plus actual native enum variant identity |
+| `TriggerOrderType` | Trigger numeric bits, boolean and native Tpsl identity |
+| `CancelByCloidRequest` | Distinct native coin and Cloid string |
+| `ClearinghouseStateAssetPositionsItemPosition` | Every scalar and nested funding/leverage member |
+| `ClearinghouseStateAssetPositionsItem` | Native position object and type string |
+| `ClearinghouseState` | Ordered position collection, both margin records, time and raw strings |
+| `WsOrder` | Native order object, status, timestamp bits and user |
+| `WsUserFills` | Snapshot bool, ordered fill collection and user |
+| `WsUserFundings` | Snapshot bool, ordered funding collection and user |
+| `WsUserNonFundingLedgerUpdate` | Time bits, coin/usdc and all four native ledger variants |
+| `WsUserNonFundingLedgerUpdates` | Snapshot bool, ordered ledger collection and user |
+| `WsBook` | Coin/time and independently observed bid/ask collections |
+| `L2Book` | Actual distinct bid/ask tuple members with element order/cardinality |
+| `WsBbo` | Both independently nullable book slots, coin and time bits |
+| `SpotClearinghouseBalance` | Required strings and optional token/entryNtl presence; present null refused |
+
+All 1,519 expected cases were authored from the reviewed declarations and values,
+without candidate decoder outputs. Each actual maintained adapter reads typed
+native members recursively before owner serialization. It records binary64 bits,
+native enum variants, Option presence and every sequence element in order. Values
+vary individually at each primitive leaf as well as together; collection witnesses
+use distinct elements, multiple lengths, empty collections and reversed order.
+The corpus independently checks every object member's omission/null/wrong shape,
+string versus tagged enum shapes, valid complete declaration-order arrays at
+nested map boundaries, wrong tuple lengths, scalar roots, negative zero, positive
+overflow and negative underflow. Both nullable bid/ask slots vary independently;
+optional spot members admit omission and reject present null.
+
+The installed twenty literal contract adapters pass twenty actual native tests,
+1,519 cases through six public Serde/shared ingress routes: 9,114 observations.
+The single-field LimitOrderType projection reads the actual tag and Rust variant;
+L2Book reads the actual two tuple members. These are native values, not echoed
+inputs or success/cardinality placeholders.
+
+Each public map guard was removed independently while preserving JsNumberInput capture and all private wire attributes. All twenty compiled mutations failed the named complete-valid-array native assertion. Separate mutations removed only token or entryNtl present-value admission; both compiled and failed their named present-null assertion. The entire production source was restored byte-for-byte after every mutation. The final restored replay passes all twenty native tests / 1,519 cases / 9,114 observations.
+
+After inheriting current master and merged #382, strict native all-target clippy, formatting and parity pass. parity:check indexes 7459 rows and 17214 public Rust items. Static compiler checks authenticate all reviewed native field identities (including the twenty roots and nine reused child records), exact owner APIs, unchanged public decoder and private wire bodies, and every original census key.
+
+All 82 master contracts are preserved unchanged, with only these twenty new rows appended. The actual inventory remains 534 owners, 36 aliases and two construction obligations (572 total). This branch has 93 reviewed owners, nine aliases and two construction reviews: 104 reviewed, 468 remaining.
+
+The ordinary package gate retains `rate_limit.rs::LOCAL_FUNCTION:text: decoder helper requires its inventoried production decoder`. That existing policy points at non-indexed raw_number; its caller/native-evidence review is separate. This batch does not change local-helper policies or grant a preflight exception.
+
+This reviews only the twenty concrete native/default owners. Child owners,
+private companions, local helpers, aliases, dependencies, serializers and the
+remaining target/feature matrix retain their own obligations. No whole-package
+acceptance is claimed.
+
+# Three fixed future and callback alias reviews
+
+The ordinary package preflight previously stopped at
+`spot_account_reads::AccountFuture` with `fixed local future alias probe:
+lifetime then output parameter required`. These three reviewed declarations use
+two type parameters, so their exact identities belong in the existing finite
+`generic-aliases` registry. No scanner, alias helper or validator is widened.
+All six existing fixed Realm projection records remain unchanged.
+
+| Actual alias | Fixed reviewed instantiation | Independent expected container |
+| --- | --- | --- |
+| `spot_account_reads::AccountFuture<V,E>` | production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>>>>` |
+| `income::IncomeFuture<'a,V,E>` | `'static`, production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>> + 'static>>` |
+| `startup_timeout::TimeoutCallback<V,E>` | production `Value, Value` | `Rc<dyn Fn(Vec<Value>)->Result<Value,Value>>` |
+
+The registry fixes the actual source file, compiler generic bounds, raw and
+expanded targets, parameter order, canonical Pin/Rc roots, sizedness and expected
+native type. Fresh ordinary compiler discovery retains every 534 owner and 36
+alias before selecting the three. Artifact authentication and all ordinary Serde
+and conversion detectors run through the maintained `runProbes` implementation.
+
+`tests/support/accepted_future_aliases.rs` additionally runs three actual native
+witnesses. Compile-time Realm host bounds authenticate Value/Error bindings;
+invariant mutable references and TypeId pin the independently authored expected
+container. Both futures preserve Pending, a real waker call, Ready success/error,
+exact numeric bits, lone UTF-16 units, undefined and object/error identity. Poll,
+wake and drop counts include unpolled cancellation. The callback preserves shared
+Rc allocation/clone identity, ordered native arguments and returned/thrown object
+identity. These are distinct runtime witnesses, not classification-only receipts.
+They do not exercise the host bodies that supply those executable containers.
+
+The three actual alias contracts pass ordinary native and target-specific Wasm capability classifications (three classifications, zero failures on each target). Separate native ownership/result tests pass 3/3. Strict all-target native clippy, formatting and parity pass; parity indexes 7459 rows and 17214 public Rust items.
+
+Removing each of the three exact finite registry entries independently restores its original ordinary preflight refusal in a fresh process using actual compiler/artifact context. Each policy file is restored byte-for-byte in finally, and all three native capability probes pass after restoration. No validator guard is removed or widened.
+
+After integrating merged #378, all 79 master contracts and six master projection records remain unchanged. The branch has 73 reviewed owners, nine aliases and two construction obligations: 84 of 572 reviewed, 488 remaining. Ordinary preflight advances past the three aliases and retains `rate_limit.rs::LOCAL_FUNCTION:text: decoder helper requires its inventoried production decoder`; its existing policy points to non-indexed `rate_limit::raw_number`. The inventoried request-weight caller and its native observations require a separate review.
+
+Only these three fixed Value/Value monomorphizations are classified; other
+arguments, IncomeFuture lifetimes, host bodies, local helpers, dependencies and
+the remaining feature/target matrix retain their separate obligations. No whole
+package clearance is claimed.
+
+# Twenty-two required-field record reviews
+
+This cohort reviews 22 concrete records individually against their maintained TS
+field declarations, native fields, private remote renames and required-field
+attributes. Every selected member is a required, non-nullable String, f64 or bool.
+The existing JsNumberInput capture and OnlyMap admission remain unchanged.
+`tests/fixtures/accepted_flat_record_schema.json` records the manually reviewed
+field mappings and exact public decoder body pins; it grants no policy permission.
+
+| Native owner | Maintained TS declaration | Required wire fields |
+| --- | --- | --- |
+| `ClearinghouseStateAssetPositionsItemPositionCumFunding` | `ClearinghouseState.assetPositions[].position.cumFunding` | `allTime`, `sinceChange`, `sinceOpen` |
+| `ClearinghouseStateAssetPositionsItemPositionLeverage` | `ClearinghouseState.assetPositions[].position.leverage` | `rawUsd`, `type`, `value` |
+| `ClearinghouseStateCrossMarginSummary` | `ClearinghouseState.crossMarginSummary` | `accountValue`, `totalMarginUsed`, `totalNtlPos`, `totalRawUsd` |
+| `ClearinghouseStateMarginSummary` | `ClearinghouseState.marginSummary` | `accountValue`, `totalMarginUsed`, `totalNtlPos`, `totalRawUsd` |
+| `OrderResponseStatusCase2` | `OrderResponseStatus error branch` | `error` |
+| `WsTrade` | `WsTrade` | `coin`, `side`, `px`, `sz`, `hash`, `time`, `tid` |
+| `WsLevel` | `WsLevel` | `px`, `sz`, `n` |
+| `WsOrderOrder` | `WsOrder.order` | `coin`, `side`, `limitPx`, `sz`, `oid`, `timestamp`, `origSz` |
+| `WsUserFunding` | `WsUserFunding` | `time`, `coin`, `usdc`, `szi`, `fundingRate` |
+| `WsLiquidation` | `WsLiquidation` | `lid`, `liquidator`, `liquidated_user`, `liquidated_ntl_pos`, `liquidated_account_value` |
+| `WsNonUserCancel` | `WsNonUserCancel` | `coin`, `oid` |
+| `L2BookLevelsItem0Item` | `L2Book.levels[0][]` | `px`, `sz`, `n` |
+| `L2BookLevelsItem1Item` | `L2Book.levels[1][]` | `px`, `sz`, `n` |
+| `FundingHistoryEntry` | `FundingHistoryEntry` | `coin`, `fundingRate`, `premium`, `time` |
+| `SpotTokenEvmContract` | `SpotToken.evmContract concrete object branch` | `address`, `evm_extra_wei_decimals` |
+| `UserOpenOrder` | `UserOpenOrder` | `coin`, `limitPx`, `oid`, `side`, `sz`, `timestamp` |
+| `CancelOrderRequest` | `CancelOrderRequest` | `coin`, `o` |
+| `CancelOrderRequestsItem` | `CancelOrderRequests[]` | `a`, `o` |
+| `Signature` | `Signature` | `r`, `s`, `v` |
+| `Notification` | `Notification` | `notification`, `user` |
+| `BuilderInfo` | `BuilderInfo` | `b`, `f` |
+| `BuilderFeeApprovalResult` | `BuilderFeeApprovalResult` | `success`, `message` |
+
+The permanent typed projections read every native member before owner serialization.
+Distinct values catch swapped field mappings. The 549 independently authored cases
+include changed Unicode/boolean/number values, reversed object keys, ignored extra
+keys, omission/null/wrong primitive for every required member, negative-zero,
+overflow and negative-underflow bits for every numeric member, complete valid
+Serde-declaration-order arrays and invalid scalar roots. All six native ingress
+routes are checked for each case. The typed fixture passes 22 tests, and the actual
+installed contract expressions independently pass 22 tests / 549 cases / 3294
+native route observations. `OrderResponseStatusCase2` additionally reads the actual
+error string's UTF-16 units; native fields are never success/count placeholders.
+
+Each of the 22 public map-only guards was removed independently while retaining numeric capture and private wire metadata. Every compiled mutation failed its named complete-valid-array assertion; exact source restoration then passed all 22 native tests.
+
+Integrated native tests pass 22/22; strict native all-target clippy and formatting pass. parity:check passes with 7459 rows and 17214 public Rust items. Static compiler checks confirm exact scalar field identities, reviewed decoder bodies and all existing master rows.
+
+The current compiler inventory contains 534 owners, 36 aliases and two construction obligations (572 total). This branch reviews 73 owners, six aliases and two construction obligations: 81 reviewed, 491 remaining. Every original census key is retained.
+
+The ordinary package gate retains the AccountFuture refusal (`fixed local future alias probe: lifetime then output parameter required`). This cohort changes only the
+22 reviewed contracts and their evidence; private helpers, other records, aliases,
+local scopes, dependencies and the feature/target matrix retain separate reviews.
+No whole-package acceptance is claimed.
+
+
+# Six fixed Realm associated-projection contracts
+
+Six accepted contracts classify only `PrivateValue<Realm>`, `PrivateError<Realm>`,
+`PublicValue<Realm>`, `PublicError<Realm>`, `ExchangeValue<Realm>` and
+`ExchangeError<Realm>`. Their actual raw and expanded targets remain the exact
+`<H as WsPingHost>::Value` or `::Error` projection. The shared finite mechanism in
+merged #362 authenticates the same-crate trait, concrete Realm, native Value enum,
+unique Realm implementation and associated bindings from fresh compiler metadata.
+This consumer preserves all six policy records and installs only its six contracts.
+
+`tests/support/accepted_projection_aliases.rs`: **6/6 native runtime identity tests
+pass** against the refreshed master. Each checks invariant mutable-reference type
+equality in both directions, TypeId, the original native slot, undefined,
+negative-zero/infinity bits, unpaired UTF-16 units and object/thrown identity. A
+write through the alias remains visible through the original object.
+
+`scripts/accepted-projection-native.mjs` reads the installed contracts and runs fresh
+ordinary rustdoc/check discovery, source claims and compiler-root authentication
+before selecting the finite cohort. It discovers all 534 owners and 36 aliases and
+requires new compiler-derived `projectionIdentity` evidence for every selected alias.
+The maintained `runProbes` executes the ordinary Serde and conversion detectors:
+**six native capability classifications pass with zero failures**. These are
+classification receipts, separate from the six runtime identity tests above.
+The target-specific Wasm run also passes all six capability classifications with
+zero failures, retaining all 534 owners and 36 aliases. Reproduce it with
+`--target=wasm32-unknown-unknown`.
+
+The shared mechanism's five executed provenance/host/source guard removals and its
+compiled concrete-owner rename control remain unchanged in #362. The normal native
+consumer probes grant only one fixed Realm identity per alias. Other generic hosts,
+remaining alias families, runtime decoder owners, local helpers, dependency and
+feature/target obligations retain their separate reviews. No package acceptance is
+claimed by these six contracts.
+
+The refreshed ordinary package gate now advances beyond all six projections to
+`spot_account_reads::AccountFuture`, where the unreviewed local-future shape is
+refused. Every original census key remains indexed. All 51 master contract rows
+were retained exactly; the shard now contains 51 owner contracts and six reviewed
+aliases, alongside two existing Clone reviews: **59 reviewed of 572 entries,
+513 unreviewed**. Earlier cohort sections below record their original snapshots.
+
+Strict native all-targets clippy and formatting pass. Parity passes with
+7459 rows, 17214 public items and zero findings. The final independent review
+found no issues after the evidence status was updated.
+
+# Two waiting-status owner reviews
+
+`OrderResponseStatusCase3` admits only `waitingForFill`; `OrderResponseStatusCase4`
+admits only `waitingForTrigger`. Each concrete native variant, private wire rename
+and String admission was reviewed against the separate maintained TS union branch
+at hyperliquid.types.ts lines 190–191. Production source is unchanged. The outer
+status union and each private companion retain their own review obligations.
+
+The existing literal fixture now also checks both status variants, their exact wire
+tags, JSON whitespace, rejection of the other status, every valid tagged-unit object
+and seven other invalid values through six native ingress routes. With merged #359,
+**14/14 integrated literal tests pass**. The two direct contract expressions pass
+**22 independently authored cases / 132 native route observations**, comparing
+variants and fixed ordinals before serialization. The original four-owner adapter
+runner still passes its unchanged 50 cases / 300 observations.
+
+Run `scripts/accepted-literal-native.py --cohort=statuses` for the two contract
+adapters and `scripts/accepted-literal-controls.py --cohort=statuses` for the two
+String admission controls. The default cohort remains the original four order
+literals. Both controls **compile and fail their named tagged-object assertions**;
+exact source restoration passes each test and the complete six-test fixture.
+No compiler failure is counted as a control; temporary adapter files are removed.
+
+The master merge retained all 49 existing contract rows and appended only these
+two rows. Every row from both merge stages was verified with deep equality,
+including signed zero. Fresh compiler API/eligibility checks pass for both owners
+and retain every original census key. Current scope is **51 owner contracts plus
+two Clone reviews: 53 reviewed of 572 entries, 519 unreviewed**. This includes the
+534 actual owners, 36 aliases and two construction obligations; the two additional
+owners absent from the old 570 census remain unreviewed.
+
+Strict native all-targets clippy, formatting and parity pass (7459 rows, 17206
+public items, zero findings). The ordinary accepted-set gate still refuses the
+actual `private_class::PrivateValue` associated projection before native package
+receipts. Its finite mechanism and six-alias consumer are separate PRs. No package,
+dependency, local-helper, feature or Wasm acceptance is claimed by this two-row batch.
+
+# Eight account, market and ledger string-enum reviews
+
+Individually reviewed contracts cover `HyperliquidUserAbstractionMode`, both
+`MetaUniverseItem` margin/growth enums, `UserFundingDeltaType`,
+`UserNonFundingLedgerDeltaType`, `WsUserNonFundingLedgerUpdateType` and both
+`Hip3MarketInfo` margin/growth enums. Maintained TS lines 79-80, 104-105, 396,
+410, 633 and 666-667 define their exact tag sets. Each native declaration and
+private remote rename table matches its own TS declaration. The production
+String admissions and bodies remain unchanged.
+
+Native tests pass **8/8** for all 23 valid tags, exact native variants and wire
+spelling, JSON whitespace, every valid externally tagged map rejection and seven
+other forbidden values. Each input traverses text, qualified owned/borrowed Value
+and all three shared numeric ingress functions. Direct contract expressions pass
+**8/8**, with **110 independently authored cases / 660 native route observations**;
+variant/ordinal fields are read before serialization. Temporary probe files are
+removed after execution.
+
+`scripts/accepted-mode-controls.py`: **8 compiled named tagged-shape failures /
+8 restored passes; final 8/8 pass**. Each existing String admission is removed
+independently, forwarding directly to that owner's private remote decoder. Its
+named test fails on the admitted tagged object, and exact source restoration
+passes. No compiler error counts as negative evidence; `types.rs` is restored
+byte-for-byte. These are owner-specific native/default reviews, with no alias,
+private helper, local scope, dependency or target-matrix exemption.
+
+Master #349's four string owners are preserved alongside these eight: 49 owner
+contracts and two Clone reviews, **51 reviewed of 572 current obligations**, with
+**521 unreviewed**. Fresh discovery's additional `host_spot::class_pair` and
+`spot_binding::HyperliquidSpotExchange` remain explicit and unreviewed. Integrated native literal tests pass **12/12** after the master merge. The
+associated-projection policy review is separate #346; its ordinary refusal is
+not waived by this batch. Strict native all-targets clippy and formatting pass
+after integration. Fresh compiler API/static eligibility passes for all eight
+owners, retaining every original census key and both additional owners. The
+ordinary gate still stops at PrivateValue's exact associated projection; it
+emits no acceptance receipts. `parity:check` passes with 7459 rows, 17206 public
+items and zero findings.
+
+# Four string-enum contract reviews
+
+The contract shard adds individual reviews for `Tif`, `Tpsl`, `Grouping` and
+`ScheduleCancelActionType`, matching the maintained TS literal declarations and
+concrete native enum variants. Each decoder retains its String admission before
+its private remote metadata; no production source changes are proposed.
+
+`tests/accepted_literal_contracts.rs`: **4/4 native tests pass**, checking all nine
+valid tags, exact native enum identity and serialization, JSON whitespace, every
+valid externally tagged map rejection, and seven other forbidden values. Each
+input runs through direct text, qualified owned and borrowed Value deserialization
+and the three shared numeric ingress functions. The contract expressions also
+execute directly: **4/4 pass, 50 authored cases across six native routes (300
+observations)**, comparing native variant/ordinal fields before serialization.
+The temporary direct-witness file is removed after execution.
+
+`scripts/accepted-literal-controls.py`: **4 compiled named tagged-shape failures /
+4 restored passes; final 4/4 pass**. Each control independently removes only one
+public decoder's String admission and calls its existing remote decoder directly.
+The named native test fails on the newly admitted tagged object. Every control
+restores `types.rs` byte-for-byte; no compiler error counts as negative evidence.
+
+The original 37-owner witness script now names its exact cohort, so new contract
+rows cannot accidentally expand or break that historical reproduction: its
+37/37 native tests pass again, covering the unchanged 248 cases and formatter. All
+existing master contracts are retained. This batch reviews four more obligations:
+41 owner contracts plus two Clone reviews, 43 of the original 570 census keys.
+Fresh compiler discovery retains every original key and additionally indexes
+`realm::host_spot::class_pair` and `spot_binding::HyperliquidSpotExchange`.
+The current total is 572 (534 owners, 36 aliases, two construction obligations):
+529 remain unreviewed, including both additional owners. The six associated-type
+projections remain a separate batch.
+Strict native all-targets clippy and formatting pass. `parity:check` passes with
+7459 rows, 17206 public items and zero findings. All four contracts match
+fresh compiler API inventory and static eligibility. The ordinary package gate
+still stops at the exact unreviewed PrivateValue associated projection; it emits
+no native acceptance receipts. No package, dependency, local-scope or target-matrix
+acceptance is claimed.
+
+# First Hyperliquid accepted-contract cohort
+
+The per-crate contract shard classifies 37 selected owners: cloid and raw-JSON
+helpers, response interpretation, cancellation records, raw/retained JSON values,
+and the placement record. Direct native tests execute actual production-module
+receivers, including private helpers: **37/37 owner tests pass**, covering 248
+independently authored cases plus the typed formatter witness. Temporary test
+modules are restored byte-for-byte. An initial adapter shadowing compile error
+was corrected before execution and is not counted as native failure evidence.
+The field observations read native variants, values, presence, UTF-16 units and
+float bits before serialization. JsonObject's witness fixes T to JsString; it
+makes no claim about arbitrary generic arguments.
+
+Fresh native/default compiler discovery retains 532 owners, 36 aliases and two
+construction obligations. The 37 installed contracts match the actual compiler
+API lists and pass static contract eligibility. Two additional construction reviews classify only the derived Clone of
+`HelperObserver<V,E>` and `SigningPayload`; their owner APIs remain independent.
+The other 531 census obligations remain unreviewed. No package, dependency, feature or wasm acceptance is claimed.
+
+The two construction witnesses pass against actual native owners. HelperObserver
+clones share pending state and preserve fulfillment/rejection object identity,
+registered wakers and late-clone completion. SigningPayload clones retain both
+independent wire and encoding snapshots, including native infinity, omitted JSON
+fields and signing nil members. Changing either clone implementation independently
+compiles and fails its named assertion; exact restoration passes both witnesses.
+Run `scripts/accepted-construction-controls.py` for the two mutation controls, or
+`scripts/accepted-leaf-native.py` for the 37 direct owner witnesses. These scripts
+restore every temporarily edited source byte in `finally`. Neither script grants
+compiler, local, namespace, alias, dependency or target-matrix acceptance. Strict
+native all-targets clippy passes with both permanent Clone witnesses installed.
+
+Production imports in 25 files now name their actual dependencies explicitly.
+After removing use declarations, each file is byte-identical to its prior body;
+module/API declarations are unchanged. Strict native all-targets clippy passes.
+Existing native tests pass 63/63: 24 library tests, 18 production binding E2Es
+and 21 Spot binding E2Es. No extra tests were added for the import-only change.
+A fresh source scan removes all import/attribute-scope refusals, while retaining
+305 events: both actual core namespace refusals, 146 local OnlyMap types, 146
+visitor implementations, ten nested functions and one Step type. Both core
+modules remain intact. Compiler artifacts, verified macro origins, source hashes
+and the complete scan were preserved for the shared namespace review. The focused
+preflight still refuses those unresolved scopes. The ordinary package gate stops
+earlier at `private_class::PrivateValue<H>`: the actual associated-type projection
+`<H as WsPingHost>::Value` is unsupported by the direct-identity generic alias
+probe. It produces no native acceptance receipts. The exact alias remains public
+and unclassified; no scanner or alias-policy exemption was introduced.
+
+# Placement-record decoder boundary proof
+
+The actual `HyperliquidPlacementRecord` decoder initially failed three named
+native tests: it admitted a complete eight-field positional array, admitted a
+present null `timeInForce`, and rejected raw `1e400` before binary64 capture.
+The two initial native-field/required-field tests passed. The repair retains the
+public serialization schema, uses a private remote decoder behind the existing
+object guard, and captures through `JsNumberInput` with exhaustive output checks.
+
+`tests/placement_record_ingress.rs`: **5/5 pass**, including native enum/field
+identity, optional presence, overflow, negative zero and binary64 integer rounding
+through public Serde and shared numeric entrypoints. No serialized roundtrip is
+used to establish native field identity. The shared capture-depth and scalar
+Unicode boundaries remain declared in crate guidance.
+
+`python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/placement-record-controls.py`:
+**3 compiled named failures / 3 restored passes; final 5/5 pass**. Removing only
+the object guard admits the otherwise valid declaration-order array; removing
+only the present-field adapter admits null; introducing a Value-first buffer
+trips the shared numeric pipeline's explicit buffer refusal. Each control restores
+the production source bytes exactly. Logs remain outside the repository.
+
+Integrated checks after merging master: **18/18 scoped native tests pass**
+(cache_runtime 11, cloid 2 with the actual maintained TS source oracle, and
+placement_record_ingress 5). Strict native all-targets clippy and wasm32 library
+clippy pass with warnings denied. `parity:check` exits zero: 7459 manifest rows,
+17204 public Rust items, zero invention/status findings. The independent review
+found no issues; CodeRabbit's manual review was rate limited, and no unresolved
+GitHub review conversations remain.
+
+This is decoder-boundary evidence. The 570-key accepted-contract review remains
+open: the selected 37-draft formal runner still refuses unresolved local helper
+and import/macro scopes, and no package/dependency/matrix clearance is claimed.
+
 # Hyperliquid pure-phase verification
 
 Scope: types/tables, signing composition, order-response helpers, weighted limiter
@@ -1290,3 +1883,178 @@ Historical survivor status made explicit: **3 resolved /0 current survivors** wi
 The earlier tests missed, respectively, the fixed-to-user composition edge because topics were empty on fixed calls; the native dispose edge because only its descriptor was inspected; and own interval:undefined because Get and JSON text cannot distinguish it from absence. The current native test invokes installed fixed with populated topics, invokes installed prototype dispose with original receiver/effect observations, and compares exact own key/descriptors before wire. FINDINGS_11_REVALIDATION.json records each cause, named assertion and broken/restored exit. This is a finite three-recipe repeat; the other twenty unique recipes are not re-run in this unit. No discarded-duplicate capture file is edited.
 
 Pinned read-only sub-agent closure review is appended to FINDINGS_11_REVIEWS.md. Final local gates remain only workspace fmt --check and locked workspace build at the delivered commit, with exits bound in the local receipt. Clippy, wasm, wiring, layers and routing are centrally owned and not run locally; full suites/static/extractor/live/CI checks also are not run. No push.
+
+
+### Production journal fold binding (ddi2il-20)
+
+`Exchange::fetch_historical_positions` now dispatches the existing source arrow,
+whose superclass helper uses the shared `build_records` engine. The engine reads
+the same realm instance's source income-range and historical-fill methods; income
+mapper/pager imports bind to `income.rs`, and asynchronous REST callbacks use the
+existing owned task dispatcher. The shared typed output boundary still applies.
+
+Compiled negative controls used the new round-trip production test: the original
+trait default failed with `no journal records path declared`; enabling only trait
+dispatch failed with `fetchHistoricalPositions is not bound by this realm`. Both
+are runtime failures after successful compilation. The restored implementation
+returns a real closed round trip (PnL1000, fees3) with requested account, bounds
+and market settlement currency. A separate default-window test pins integer
+Date.now, the source30-day range and the shared14-day straddle lookback. A native
+registry test obtains the same closed record through real reqwest HTTP without
+starting sockets. Empty results or bypassing symbol-scoped execution reads fail
+the nonempty-record assertion. The source `deriveClosedPositions` axis remains
+separate from this shared journal fold.
+
+Scoped gates: production binding16/16; native Hyperliquid HTTP2/2; registry
+construction13/13; actual-source core snapshots/core REST/rest helpers11/11;
+Hyperliquid venue-oracle39/39; parity:check0; registry48 names and control1/1;
+layers88/88. Native all-target and wasm library strict clippy plus fmt pass for
+the venue and registry. No fixture or manifest regeneration.
+### Native external public data binding (ddi2il-20)
+
+`HyperliquidDependencies.external_public_data` accepts the shared provider factory.
+The realm superclass delegates initialization to the existing native BaseExchange:
+provider creation receives the same Store owner, startup waits for both loaded
+flags, and BaseExchange disposes the retained provider. The registry supplies its
+existing gateway factory. An embedding with configured external data and no
+factory gets the shared explicit diagnostic before network activity.
+
+A new production registry test,
+`native_host_external_data::hyperliquid_starts_on_a_public_data_gateway_over_websocket`,
+was compiled against the old binding and failed at startup with the old explicit
+Hyperliquid refusal (0 passed, 1 failed). After wiring the factory it passes over
+real native websocket IO, receives gateway markets/tickers and makes no venue
+REST request. `binding::external_startup_waits_for_both_loaded_flags_and_disposes_its_provider`
+keeps startup pending with markets alone, completes after ticker hydration,
+checks the exact Store owner, makes no direct public request/socket and observes
+provider disposal once. The companion missing-factory test refuses visibly.
+
+Scoped validation: production binding 16/16; native gateway suite 4/4; native
+Hyperliquid signed HTTP 1/1; registry construction 13/13; Hyperliquid venue-oracle
+39 passing tests across its 11 selected binaries; registry source equivalence
+48 names plus mutation-control test 1/1; layers 88/88; parity:check zero findings.
+Native all-target and wasm library strict clippy cover the venue and registry.
+No manifests or fixture corpora were regenerated. The inherited seed oracle
+hash failure was resolved by merging landed #198, including its one-row
+provenance check, before the passing oracle run.
+
+### Override inventory review after external-data and journal assembly
+
+Reviewed the two `realm/facade_exchange.rs::base_exchange_class` inventory rows.
+`b.dispose()` is the inherited BaseExchange implementation reached by the source
+class's explicit super-dispose path; source override dispatch happens in the
+realm first. `b.name()` serves the inherited name getter over the native account
+name. Neither call newly bypasses a venue override. The external-data hydration/
+disposal test observes the provider released exactly once, and construction/
+native registry tests retain the venue name.
+
+The stale inventory compiled and failed
+`production_callers_do_not_bypass_exchange_override_hooks` before the repair.
+After reviewing the final combined journal/external-data body, only those two
+fingerprints changed to `f16535160061e222`; the same test passes (1/1). No inventory
+regeneration or blanket delegation was used. This final body differs from the
+external-data-only master body's fingerprint because it also binds journal folding.
+
+## 2026-10-17 — raw socket close preserves forceClosed
+
+The production family BaseWebSocket facade now forwards source `ws.close()` to
+shared `BaseWebSocket::close_current_websocket()` from merged #227. It previously
+called `force_close()`, incorrectly changing the superclass forceClosed flag.
+The source private perpetual socket's `dispose` calls stopPingLoop and raw close,
+without super.dispose or forceClose (`hyperliquid.ws-private.ts`).
+
+`realm::socket_tests::private_no_super_dispose_closes_wire_without_force_closing_base`
+constructs the production Hyperliquid exchange and invokes its actual private
+socket methods through the family realm. The compiled old bridge closed the wire
+but failed the direct native forceClosed assertion. After the transport-only
+cutover, the wire closes once and native forceClosed/parent-disposal stay false.
+The independent `tests/private-close-source.cjs` executes the actual source class,
+checks those same observations, and rejects a source forceClose mutation. Its
+control runs inside the maintained native test. No test transport flags stand in
+for the production BaseWebSocket state.
+
+The existing `base_websocket_class` inventory pin is reviewed and updated from
+98b2e6c011ff88a4 to4a6e54ae7b9b544a. The inventoried h.socket.dispose call is
+unchanged and remains the explicit superclass socket path; only raw close changes.
+The inventory is reconciled manually, with other lanes' rows retained.
+
+Measured close-fix validation: production realm test1/1 (with actual-source
+mutation control), core binding18/18, native/private-class source target1/1 with
+60 source cases, strict native all-target Clippy and wasm32 library Clippy pass,
+scoped formatting passes, parity0 (7459 rows,17146 public items). The full global
+override guard's inherited eight Binance pins are repaired by author PR#235;
+that repair is inherited separately before marking this change ready.
+
+## 2026-10-17 — Hyperliquid Spot production binding
+
+`spot_binding::HyperliquidSpotExchange::new` constructs the existing Spot class
+inside the production family realm, with the shared BaseExchange, Store, socket,
+HTTP, signer and caller-owned limiter inputs. The native BaseExchange also records
+`is_spot = true`. `RustVenueHost::hyperliquid` now takes the selected exchange name;
+all callers are updated. The native registry constructs both names independently.
+The source constructor's imported perpetual API factory and default-mainnet local
+signing calls are preserved.
+
+Observed gates on the integrated branch:
+
+- `cargo +1.99.0 test --locked --manifest-path sdk-rs/Cargo.toml -p
+  safe-cex-venue-hyperliquid --test binding --test spot_binding --test
+  spot_runtime --test spot_account_reads --test spot_ws_dispatch`: 18 + 21 + 11 +
+  10 + 9 passing tests. Every required Spot method is invoked; seven absent
+  source overrides retain the exact BaseExchange rejection. Additional tests
+  exercise real source OHLCV, book/candle message dispatch and cleanup, preflight
+  caller/batch IDs, the native spot flag, and source numeric-key result handling.
+- `python3 scripts/spot-binding-controls.py`: 19/19 independent method mutations
+  compiled and failed their named test; restored 21/21 pass. Sixteen required
+  methods and the three candle/book operations are controlled individually.
+- `scripts/spot-boundary-controls.py`: the three old-bridge/oracle controls and
+  separately selected `native-spot-flag` each compiled and failed their named
+  assertion; exact byte restoration passed Spot21 + source-runtime11. The wrong
+  omitUndefined stub still reads the actual source utility, keeping its source
+  count at9; it fails the native result assertion, not a hash/count guard.
+- Registry tests `native_host_external_data`, `native_host_hyperliquid`,
+  `native_host_hyperliquidspot`, `rust_venues`: 5 + 2 + 1 + 14 pass. The new Spot
+  test constructs through the real table, boots via loopback reqwest/tungstenite,
+  verifies source action/nonce signatures server-side, preserves caller cloid,
+  uses asset10000 and cancels oid777. The gateway test proves configured Spot
+  external-data startup without direct venue public REST/socket. Earlier table
+  removal compiled and failed that gateway construction witness. Hyperliquid's
+  native host test also proves the same limiter Rc across Spot/perpetual hosts
+  and selected Spot exchange-name metadata at the remote HTTP adapter.
+- Scoped strict Clippy passes for native all-targets and wasm32 library targets;
+  scoped formatting passes. `layers:check`:88/88. Registry equivalence:48 ordered
+  names plus its corrupt-claim control pass. `parity:check`:0 invention/status
+  findings (7459 rows,17127 public items on this observed tree).
+
+The real utility `utils/omitUndefined.ts` delegates to lodash/omitBy: source Spot
+placement returns a numeric-key object. The old source-runtime stub incorrectly
+used Array.filter. The corrected oracle executes the actual utility; the test host
+now reproduces its object result. The production realm already retained the right
+shape. Native order IDs use the explicit conversion documented on the place/update
+manifest rows and README under MANIFEST-SPEC#closed-typed-output-boundary; source
+objects are not rewritten to arrays. Batch preflight/mapSeries ordering is retained
+while combining lowered IDs at the native ABI.
+
+Realistic Spot asset contexts omit oraclePx/funding, producing source NaN. The
+Store/DTO bridge now uses the shared js_runtime typed codec instead of JSON and
+preserves f64 values through native snapshots/lookups; wire JSON is unchanged.
+The candle body also exposed an old production host error: object fields t/o/h/l/c/v
+were destructured as an array. The actual object pattern is now bound, with a
+compiling old-code control. Calendar arithmetic is the existing shared dayjs
+implementation, exposed through the two operations this source consumes.
+
+Override inventory updates are reviewed manually, without regeneration: the common
+Binding extraction preserves core dynamic dispose and its unbound fallback; the
+family base getter binds inherited BaseExchange isPublicDataOnly. Neither source
+Hyperliquid class overrides canSign. The new Spot start capability calls the
+concrete venue hook. Only affected existing pins and these two new calls are
+reconciled; other lanes' rows are retained.
+
+Spot integration follow-up: inherited merged #229's GRVT delegate review and
+current master, retaining both Spot and ApexOmni construction docs. Core18 and
+Spot21 production tests pass again; live TS override inventory passes1/1. The
+full guard reached the final inventory comparison: manually reviewed Spot/base
+class/core-dispose rows match. A further Store facade enclosing-body pin is
+updated for the typed Store.update bridge; its native Store.update_order call
+is unchanged. Remaining stale Binance rows on that master tree were reported
+to their author lane for review; they are not regenerated or edited here.

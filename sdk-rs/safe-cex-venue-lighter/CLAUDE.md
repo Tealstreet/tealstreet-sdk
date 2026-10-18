@@ -347,3 +347,108 @@ Signer validation has a separate nine-case live TransactionClient precedence
 oracle. That bounded proof does not establish arbitrary SDK input, constructor
 reflection or typed-array crypto parity. The archived signing-preimage fixture
 remains immutable; source-only corpus provenance is checked after native values.
+
+The current source Lighter family uses LighterApiClient and a local TransactionClient
+signer. It does not populate BaseExchange.xhr for shared hosted HTTP signing;
+ensureSignerAdapter and SDK initialization require a local secret even when a
+remoteSigner is available. `tests/hosted_signer.rs` compares six live source gates
+and both native family names with an advertised hosted capability, preserving
+the missing-key error before HTTP or signer calls. This evidence covers that
+conditional source limitation, not hosted transaction signing.
+
+
+Native stream, candle, fills and private snapshot hooks now invoke the existing
+Lighter class members. Listener cleanup calls the original closure once; it
+must remove the parser or polling timer. The snapshot ignores the base retry
+argument because the source helper owns one attempt and its error handling.
+Historical fills retain the source public-only refusal, authenticated reads,
+filtering and complete collection; they no longer hit the empty trait default.
+`real_trait_` regressions in exchange_binding use the production constructor,
+actual signed HTTP and socket events. `scripts/trait-binding-controls.py` requires
+compiled named failures and exact restoration, including empty/subset REST
+results and both listener cleanup paths. Run controls without another Cargo
+process or concurrent production edits in this worktree.
+
+Measured stream/history checkpoint: the six regressions fail on the original
+trait defaults and pass after binding; the complete constructed target passes
+23 tests. Six independent compiled production faults fail named tests, and each
+exact restoration passes all six regressions. Venue-local parity passes 695
+manifest rows and 1,404 public Rust items with full workspace target resolution.
+
+Strict host all-target and WASM library lint pass. The override contract passes
+8 tests including the live TypeScript inventory, and the production binding
+inventory passes 25 tests. After the shared ModelField and library-pin merges,
+all 23 constructed tests and the all-features cancellation inventory (6 tests,
+explicit export ignored) pass.
+
+Private feed/stream for-of and spread consume the shared GetIterator protocol,
+including iterator objects and live collection mutations. A for-of body throw
+runs IteratorClose while preserving its original cause; next/done/value failures
+escape without closing. Registered private-class regressions cover live Set,
+Map-values and array traces plus these four abrupt-completion boundaries.
+This slice is scoped to binding/ws_private/slots.rs, rather than every venue host.
+The supplementary close-spread regression substitutes an iterator-valued helper
+result and restores the real DefaultStore mutator. On the master slot body the
+position remains open; the repaired spread delivers the close pair, clears margin
+through own undefined, and increments the position revision once. It exercises
+latent iterable admission; maintained wire payloads still provide arrays.
+
+Partner-attribution order rejection helpers are installed in the production
+module globals. Their source String/nullish coercion runs before the existing
+account-tier classifiers; matching codes short-circuit the message read.
+Real signed-placement rejection tests cover tier, approval and ordinary errors,
+including the normalized message delivered through the native error reporter.
+
+Public ingress loops and pair patterns use the existing native IteratorRecord.
+Abrupt callbacks and early breaks invoke return once; original callback errors
+win over close errors, while normal pair completion validates the return result.
+The constructed public class and its real operation table carry the regressions.
+The native exchange target also covers account_all orders, positions, fills and
+the source-throttled balance refresh through the real private socket.
+
+Account-tier extraction consumes live Js records, stopping at the first non-nullish
+alias even when its normalized tier is unknown. It preserves getter order, native
+number values, UTF-16 strings, unrelated cycles and original throws. The attributed
+placement regression drives overflow-number limits through the real client and
+signer, while live_tier retains the existing source corpus plus native-value cases.
+
+Private fill freshness uses Number.isFinite's non-coercing numeric guard before
+reading either clock. `private_fill_timestamp_types_match_the_maintained_handler`
+drives actual account_all data.fills frames against maintained TypeScript arrow
+bodies for 15 timestamp values, retaining the five-second boundary and future
+numeric timestamps while rejecting strings, arrays and other non-number inputs.
+
+Public REST payload parsers retain native arrays and row references. Book fallback
+selection stays lazy, ticker candidate capture stays eager, and guarded book-side
+reads occur twice as in the source. Native source tests retain UTF16 and sparse rows.
+
+Private market-payload flattening retains native JS rows and skips array holes
+without copying through JSON. The orders wrapper applies its object guard before
+calling the live owner helper; source oracles cover identity, numeric bits and UTF16.
+
+The TransactionClient JS decoder treats null trigger/expiry fields as absent and
+maps unknown order-type/time-in-force values to the source limit/GTC defaults.
+The real SDK/crypto regression compares 31 exact preimages and computed defaults.
+Nonce retry classification reads the original error's code and message directly.
+Both String conversions precede the final OR, so matching codes still observe
+message coercion failures. Unread surrogate fields and cycles stay untouched.
+
+The TransactionClient approval binding retains raw l1Signature metadata outside
+its typed signing parameters. Falsy values remain visible to callers and are
+omitted by the actual SDK request serializer, matching the maintained source.
+
+Signer class flag inputs use JavaScript truthiness for preimage bits and preserve
+original JS values in returned order metadata. Group validation shares one body
+with typed callers and receives strict raw-side equality from the JS binding.
+
+Cancellation and market-precision/minimum helper globals consume native JS fields,
+without whole Order/Market decoding. Keep market lookup and precision fallback
+lazy; unused properties and metadata must not be inspected or serialized.
+
+The constructed native ticker census in `tests/exchange_binding.rs` drives
+1,240 field-independent cases through 2,280 public socket frames. All numeric
+aliases, nested book-side forms, ticker batches and market-stat batches receive
+eight malformed/coercion values between distinct good rows. Native binary64
+fields are checked against the constructed TS exchange and DefaultStore, with
+finite resets before every case. The shared control runner misroutes mark/index
+in the live ingress body and requires compiled failure and restored success.

@@ -6,20 +6,20 @@ use crate::{
 use safe_cex_exchange::{
     exchange::BaseExchange,
     js_runtime::{
-        client::{self, JsHttpHost},
-        promise::{JsFuture, await_js},
-        value::{Js, Thrown, arg, from_json, to_json},
+        client,
+        promise::await_js,
+        value::{Js, Thrown, arg, from_json, from_typed, to_json},
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
+    runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_transport::{
-    RestAdapterContext, RestAdapterVariant, RestBody, RestRequest, RestTransportContext,
+    RestAdapterVariant, RestBody, RestRequest,
     retry::{ClassifiedRequest, ReadClassification},
     signature_rejection::{IsSignatureRejection, SignatureRetry, signature_rejected_response},
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -28,40 +28,8 @@ use std::{
 pub(super) struct ClientEntry {
     transport: Weak<dyn ReadTransport>,
     client: Js,
-    route: Rc<Route>,
     signer: Rc<RefCell<Weak<BingxApi>>>,
     signature: Rc<RefCell<Option<IsSignatureRejection>>>,
-}
-struct Route {
-    runtime: Rc<dyn safe_cex_exchange::websocket::WsRuntime>,
-    sender: RefCell<Rc<dyn JsHttpHost>>,
-    authorize: Option<std::sync::Arc<dyn safe_cex_transport::RestAuthorizer>>,
-}
-impl JsHttpHost for Route {
-    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
-        self.runtime.clone()
-    }
-    fn send(&self, config: Js) -> JsFuture<'static> {
-        let sender = self.sender.borrow().clone();
-        let authorizer = self.authorize.clone();
-        Box::pin(async move {
-            if let Some(auth) = authorizer {
-                let mut request = RestRequest {
-                    method: config.get("method")?.to_display(),
-                    url: config.get("url")?.to_display(),
-                    ..Default::default()
-                };
-                auth.authorize(&mut request)
-                    .await
-                    .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-                let headers = config.get("headers")?;
-                for (name, value) in request.headers {
-                    headers.define(&name, Js::str(&value))?;
-                }
-            }
-            sender.send(config).await
-        })
-    }
 }
 struct Transport {
     client: Js,
@@ -99,7 +67,9 @@ impl ReadTransport for Transport {
             }
             if let Some(body) = request.body {
                 let data = match body {
-                    RestBody::Untransformed(v) => from_json(&v),
+                    RestBody::Untransformed(v) => {
+                        safe_cex_exchange::js_runtime::value::from_retained_input(v)
+                    }
                     other => Js::str(&String::from_utf8_lossy(
                         &other
                             .wire_bytes()
@@ -133,7 +103,9 @@ impl ReadTransport for Transport {
                         }
                         let body = config.get("data")?;
                         if !body.is_nullish() {
-                            next.body = Some(RestBody::Untransformed(to_json(&body)?));
+                            next.body = Some(RestBody::Untransformed(
+                                safe_cex_exchange::js_runtime::value::to_retained_input(&body)?,
+                            ));
                         }
                         let next = api.prepare(next).map_err(Thrown::from)?;
                         config.define(
@@ -143,7 +115,9 @@ impl ReadTransport for Transport {
                         config.define(
                             "data",
                             match next.body {
-                                Some(RestBody::Untransformed(v)) => from_json(&v),
+                                Some(RestBody::Untransformed(v)) => {
+                                    safe_cex_exchange::js_runtime::value::from_retained_input(v)
+                                }
                                 _ => Js::Undefined,
                             },
                         )?;
@@ -175,13 +149,9 @@ impl ReadTransport for Transport {
                         );
                         if let Some(response) = response {
                             let raw = response.get("data").map_err(error)?;
-                            let data = if raw.is_string() {
-                                safe_cex_transport::how::big_int_as_string_json_parse(
-                                    &raw.to_display(),
-                                )
-                            } else {
-                                to_json(&raw).map_err(error)?
-                            };
+                            let data =
+                                safe_cex_exchange::js_runtime::value::to_retained_input(&raw)
+                                    .map_err(error)?;
                             failure.response = Some(Box::new(safe_cex_transport::RestResponse {
                                 status: response
                                     .get("status")
@@ -199,7 +169,7 @@ impl ReadTransport for Transport {
                             .clone()
                             .expect("factory configures signature retry");
                         if signature_rejected_response(&failure, &retry, &predicate)
-                            .map_err(|e| ExchangeError::new(e.to_string()))?
+                            .map_err(ExchangeError::from)?
                         {
                             continue;
                         }
@@ -208,11 +178,7 @@ impl ReadTransport for Transport {
                 }
             };
             let data = response.get("data").map_err(error)?;
-            let value = if data.is_string() {
-                safe_cex_transport::how::big_int_as_string_json_parse(&data.to_display())
-            } else {
-                to_json(&data).map_err(error)?
-            };
+            let value = to_json(&data).map_err(error)?;
             serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))
         })
     }
@@ -245,7 +211,7 @@ impl Host {
         *entry.signer.borrow_mut() = Rc::downgrade(api);
         Ok(())
     }
-    fn client(&self, transport: &Rc<dyn ReadTransport>) -> Result<(Js, Rc<Route>), ExchangeError> {
+    fn client(&self, transport: &Rc<dyn ReadTransport>) -> Result<Js, ExchangeError> {
         self.clients
             .borrow()
             .iter()
@@ -254,13 +220,13 @@ impl Host {
                     .transport
                     .upgrade()
                     .filter(|t| Rc::ptr_eq(t, transport))
-                    .map(|_| (entry.client.clone(), entry.route.clone()))
+                    .map(|_| entry.client.clone())
             })
             .ok_or_else(|| ExchangeError::new("BingX HTTP client was not created by this host"))
     }
     pub fn configure_limit(&self, api: &Rc<BingxApi>, rps: f64) -> Result<(), ExchangeError> {
         self.configure_signing(api)?;
-        let (client, _) = self.client(&api.client)?;
+        let client = self.client(&api.client)?;
         client
             .call_method(
                 "__configureRateLimit",
@@ -271,6 +237,9 @@ impl Host {
     }
 }
 impl ApiHost for Host {
+    fn has_remote_signer(&self) -> bool {
+        self.scope.http.hosted_signer().is_some()
+    }
     fn create(
         &self,
         defaults: ApiDefaults,
@@ -281,32 +250,27 @@ impl ApiHost for Host {
             let _ = self.scope.base.set(base.clone());
         }
         let provider = self.scope.runtime.transport();
-        let request = RestRequest {
-            base_url: Some(defaults.base_url.clone()),
-            ..Default::default()
-        };
-        let routing = provider
-            .rest(RestTransportContext {
-                exchange: &ExchangeName::Bingx,
-                options,
-                config: &request,
-            })
-            .map_err(|e| ExchangeError::new(e.to_string()))?;
-        let route = Rc::new(Route {
-            runtime: self.scope.runtime.clone(),
-            sender: RefCell::new(self.scope.http.clone()),
-            authorize: routing.authorize,
-        });
         let serializer = defaults.params_serializer;
-        let client = client::create(
-            route.clone(),
+        let client = client::factory::create(
+            self.scope.http.clone(),
+            provider.as_ref(),
             Js::object(vec![
-                (
-                    "baseURL",
-                    Js::str(routing.base_url.as_deref().unwrap_or(&defaults.base_url)),
-                ),
+                ("baseURL", Js::str(&defaults.base_url)),
                 ("timeout", Js::Number(defaults.timeout)),
-                ("responseType", Js::str("text")),
+                (
+                    "transformResponse",
+                    Js::function("bigIntAsStringJsonParse", |_, args| {
+                        let value = arg(&args, 0);
+                        if !value.is_string() {
+                            return Ok(value);
+                        }
+                        Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+                            safe_cex_transport::how::big_int_as_string_json_parse(
+                                &value.to_display(),
+                            ),
+                        ))
+                    }),
+                ),
                 (
                     "headers",
                     Js::object(
@@ -327,7 +291,10 @@ impl ApiHost for Host {
                     }),
                 ),
             ]),
-        );
+            &from_typed(options).map_err(error)?,
+            base,
+        )
+        .map_err(error)?;
         client
             .get("interceptors")
             .and_then(|i| i.get("request"))
@@ -356,7 +323,6 @@ impl ApiHost for Host {
         self.clients.borrow_mut().push(ClientEntry {
             transport: Rc::downgrade(&transport),
             client,
-            route,
             signer,
             signature,
         });
@@ -378,7 +344,7 @@ impl ApiHost for Host {
                 *entry.signature.borrow_mut() = Some(signature.clone());
             }
         }
-        let (client, _) = self.client(transport)?;
+        let client = self.client(transport)?;
         let condition = Js::function("retryRead", move |_, args| {
             let failure = arg(&args, 0);
             let config = failure.get("config")?;
@@ -408,7 +374,9 @@ impl ApiHost for Host {
                     status: s as u16,
                     reason: None,
                     headers: Default::default(),
-                    body: safe_cex_transport::RestResponseBody::Untransformed(Value::Null),
+                    body: safe_cex_transport::RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::Null,
+                    ),
                 })
             });
             Ok(Js::Bool(
@@ -432,27 +400,55 @@ impl ApiHost for Host {
         options: &ExchangeOptions,
         _: &Rc<BaseExchange>,
     ) -> Result<(), ExchangeError> {
-        if let Some(adapter) = self
-            .scope
-            .runtime
-            .transport()
-            .rest_adapter(RestAdapterContext {
-                exchange: &ExchangeName::Bingx,
-                options,
-                variant: RestAdapterVariant::BigInt,
-            })
-        {
-            let (_, route) = self.client(client)?;
-            *route.sender.borrow_mut() =
-                client::rest_http_host(self.scope.runtime.clone(), adapter);
-        }
-        Ok(())
+        client::factory::install_transport_adapter(
+            self.scope.http.clone(),
+            self.scope.runtime.transport().as_ref(),
+            &self.client(client)?,
+            &from_typed(options).map_err(error)?,
+            ExchangeName::Bingx,
+            RestAdapterVariant::Default,
+        )
+        .map_err(error)
     }
-    fn serialize(&self, params: &Value) -> Result<String, ExchangeError> {
+    fn serialize(
+        &self,
+        params: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<String, ExchangeError> {
         self.scope
             .globals
             .get("qs")
-            .and_then(|q| q.call_method("stringify", vec![from_json(params)]))
+            .and_then(|q| {
+                let collator = safe_cex_num::JsRootCollator::try_new()
+                    .map_err(|e| Thrown::error(e.name, e.message))?;
+                let sort = Js::function("localeCompare", move |_, args| {
+                    let left =
+                        String::from_utf16(&arg(&args, 0).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    let right =
+                        String::from_utf16(&arg(&args, 1).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    Ok(Js::Number(match collator.compare(&left, &right) {
+                        std::cmp::Ordering::Less => -1.0,
+                        std::cmp::Ordering::Equal => 0.0,
+                        std::cmp::Ordering::Greater => 1.0,
+                    }))
+                });
+                q.call_method(
+                    "stringify",
+                    vec![
+                        safe_cex_exchange::js_runtime::value::from_retained_input(params.clone()),
+                        Js::object(vec![("arrayFormat", Js::str("repeat")), ("sort", sort)]),
+                    ],
+                )
+            })
             .map(|s| s.to_display())
             .map_err(error)
     }
@@ -464,6 +460,6 @@ impl ApiHost for Host {
             .map_err(error)
     }
     fn now_ms(&self) -> f64 {
-        self.scope.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
 }

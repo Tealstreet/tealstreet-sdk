@@ -1,4 +1,4 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use runtime::Runtime;
 use safe_cex_exchange::{
@@ -338,7 +338,7 @@ fn margin_fetch_effects_match_live_source() {
             if fail.contains(&json!(n)) {
                 let mut error = ExchangeError::new(format!("notify {n}"));
                 error.name = "TypeError".into();
-                error.code = Some(json!(n));
+                error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(n)));
                 return Err(error.into());
             }
             Ok(())
@@ -392,10 +392,22 @@ fn margin_fetch_effects_match_live_source() {
                     expected.get("message").unwrap().as_str().unwrap(),
                     "MARGIN native error message {index}"
                 );
+                let code = error.code.as_ref().expect("MARGIN original code presence");
+                let safe_cex_exchange::js_runtime::value::Js::Number(number) = code else {
+                    panic!("MARGIN original numeric code type {index}");
+                };
                 assert_eq!(
-                    error.code.as_ref(),
-                    expected.get("code"),
-                    "MARGIN native error code {index}"
+                    number.to_bits(),
+                    expected["code"].as_f64().unwrap().to_bits(),
+                    "MARGIN native error code bits {index}"
+                );
+                let units = safe_cex_exchange::js_runtime::globals::stringify_json(code)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    String::from_utf16(&units).unwrap(),
+                    row["codeJson"].as_str().unwrap(),
+                    "MARGIN actual JS stringify code {index}"
                 );
                 assert_eq!(
                     error.store_subscriber_ids.len(),
@@ -407,7 +419,7 @@ fn margin_fetch_effects_match_live_source() {
         }
         let thrown = result
             .err()
-            .map(|error| json!({"name":error.name,"message":error.message,"code":error.code}));
+            .map(|error| json!({"name":error.name,"message":error.message,"code":error.code.as_ref().map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())}));
         wire_results.push((
             numeric(
                 json!({"calls":venue.calls.get(),"notifications":count.get(),"events":*venue.events.borrow(),"state":json!({"fetched":*store.fetched_leverage(),"leverage":store.positions().iter().map(|p|p.leverage).collect::<Vec<_>>()}),"thrown":thrown})

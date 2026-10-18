@@ -13,13 +13,17 @@ Both variants remain in this family crate. `types.rs` maps `kraken.types.ts`;
 in `binding/members.rs`, to its ported body; the host traits are implemented
 over `Js` in `binding/host*.rs` (REST family on the receiver scope) and
 `binding/sockets.rs` (one `SocketHost` per socket object, owning the slots the
-traits borrow). The Exchange trait's sixteen methods call the assembled members;
+traits borrow). Every Exchange trait method either source class overrides calls
+its assembled member (`--test trait_dispatch` drives each through the trait);
 the five members Kraken inherits from base.ts reject with its `Not implemented`.
 The host supplies two module-scoped values, never per instance: the Futures nonce
 counter (`api::FuturesModule`) and the Spot client-ID generator (`spot_client_ids`).
-The binding never owns transport: `JsHttpHost` sends, so `installTransportAdapter`
-is a no-op here. Axios's rejected response handler is reproduced by wrapping the
-client verbs, because the shared client runs fulfilled interceptors only.
+REST clients come from the shared `client::factory` over the runtime provider:
+`create_client` applies provider routing and the 20 s timeout, and keyed Futures
+clients install the provider adapter (HOW when tunnelled); Spot never does.
+`--test transport_binding` drives both through a scripted provider. Axios's
+rejected response handler is reproduced by wrapping the client verbs, because
+the shared client runs fulfilled interceptors only.
 
 Gates: `--test exchange_binding` (scripted transport, every trait method, start
 through private-socket auth), and `scripts/binding-controls.py` from `sdk-rs/`,
@@ -74,9 +78,13 @@ Structural gates for the types slice:
 - Build the maintained indexer with `cargo build --manifest-path sdk-rs/Cargo.toml
   -p safe-cex-parity --bin parity-check --jobs 1`, then run
   `python3.12 sdk-rs/safe-cex-venue-kraken/scripts/types-parity-check.py`.
-  Its temporary source-index workspace includes only this crate as a member,
-  only this crate's implemented rows across seven manifests, and no exemptions. It does not validate the
-  inherited shared-crypto row or any other crate's implementation.
+  It retains the complete workspace source index for canonical reexport resolution,
+  then gates this crate's public invention obligations against its owned rows in
+  every committed Kraken manifest, with no exemptions. Scalar and split mappings
+  retain all original targets and notes; provenance comes from committed
+  rust_files declarations. It does not validate the inherited shared-crypto row
+  or another crate's invention obligations. The list-mapping regression runs with
+  `python3.12 sdk-rs/safe-cex-venue-kraken/scripts/types-parity-check-test.py`.
 
 
 `fills.rs` and `income.rs` map all ten utility rows individually; their chosen
@@ -260,11 +268,15 @@ Measured code SHA, exits and non-claims are committed in `GATE_EVIDENCE.md`.
 
 `futures_candles.rs::fetch_ohlcv` implements the Futures charts read at the
 [Futures candle host boundary](../parity/MANIFEST-SPEC.md#kraken-futures-candle-host).
-The existing one-process read oracle adds 47 cases, 74 records and 444 direct
-native numeric comparisons. It observes inherited interval lookup, clock use,
+The existing one-process read oracle has 47 cases and 74 source records. It
+observes inherited interval lookup, clock use,
 request range, sorting, missing-data reporting, catch reporting and emission.
 Both error callbacks remain fallible and preserve original metadata on failure.
-The paired mixed-NaN witness records the explicit sortable-timestamp refusal.
+NaN timestamps are refused per row with a visible row/field/value diagnostic;
+good rows survive and sort normally, without claiming NaN comparator ordering.
+The corpus observes 73 admitted native rows and 438 numeric fields plus the
+refused row. The constructed `exchange_binding` regression covers mixed,
+multiple-bad and all-bad batches against unchanged maintained-source capture.
 `scripts/rest-read-controls.py` proves one production mutation per new read
 with a named native assertion failure and a restored pass.
 No Store write, timer, or two-axis precision adjustment is introduced.
@@ -306,3 +318,113 @@ and the two-request ceiling. `scripts/spot-api-binding-controls.py` independentl
 mutates each new native API-host method, requires a named runtime failure, restores
 exact bytes and requires the test to pass again. Shared retry-config preservation
 is covered by `safe-cex-exchange/tests/js_runtime.rs` and the same native E2E.
+
+Native hosted accounts enter through the shared Js HTTP host, which injects the
+signer into the live parent options. Private challenge auth must read that live
+`parent.options.remoteSigner.accountName`, not the original typed constructor
+options. The native registry HTTP and WS witnesses and compiling controls live
+in `safe-cex-registry/tests/native_host_kraken_signer.rs` and
+`safe-cex-registry/scripts/kraken-hosted-controls.py`.
+
+
+`KrakenBaseUrl` is a string-only decoder for the two source literals. Its private
+remote Serde schema retains lowercase serialization; `String::deserialize` guards
+all admission paths before variant decoding. `tests/accepted_base_url.rs` checks
+both native variants before serialization and refuses each valid tagged-null map
+through owned, borrowed, qualified, JSON-text and shared numeric-ingress routes.
+Run `scripts/base-url-string-control.py` with the explicit compiler environment
+for a compiled guard-removal failure and exact-source restored six-test pass.
+`node sdk-rs/safe-cex-venue-kraken/scripts/base-url-contracts.mjs` from repository
+root inventories and executes only this native/default production owner, including
+an independent native-variant observation. This selected probe leaves the 25
+whole-crate receiver refusals and all other owners/aliases/locals/construction
+open; it is not a whole-venue accepted-set pass. The compiler check also requires
+the private remote companion to have no independent Deserialize or public API.
+
+`tests/accepted_helpers.rs` directly observes all four module-helper APIs for
+accepted-contract review. The trigger decoder matches actual native enum variants,
+absence and coercion errors before serialization. Comparator operands, literal
+error construction/metadata snapshots and the entropy-backed ID generator retain
+three separate non-decoder roles; their classification receipts are not execution.
+Run the new native target together with `--test helpers` (one live TS process),
+then `scripts/helper-contract-controls.py` with the explicit TypeScript path.
+Its three role controls must fail named compiled native witnesses; the trigger
+control must fail its own actual production output probe. Every exact source
+restoration must pass. `scripts/helper-contracts.mjs` selects only these four
+native/default owners. Other owners, the 25 receiver refusals, aliases, local
+functions, construction and feature/wasm accepted behavior remain independent.
+The host profiles are already defined in MANIFEST-SPEC#kraken-module-utility-adapters.
+
+
+`tests/accepted_scalar_helpers.rs` observes six distinct fills/income scalar
+decoders: finite numbers, two presence-sensitive optional-number functions,
+seconds and millisecond date functions, and the raw-field position-size-leg
+predicate. Compare native f64 bits, Option presence, Boolean values and coercion
+error names before Serialize. Date fixtures retain the explicit local-time host
+boundary and pre-epoch flooring. The selected production gate
+`scripts/scalar-helper-contracts.mjs` runs all six actual APIs against independent
+cases; it is not a classification-only receipt. Run the native fixture with
+`--test utilities`, then the serial `scripts/scalar-helper-contract-controls.py`.
+Each control must fail its named compiled native witness and only its own
+production output probe; every exact restoration must pass the named native
+witness and all six production probes. Other owners, aliases and all 25 receiver
+refusals remain independent, under MANIFEST-SPEC#kraken-utility-wire-domain.
+
+The four private request records in `futures_candles`, `spot_reads` and `reads`
+use their concrete Deserialize boundary with the existing shared numeric backend
+and `strict_decode::object`, followed by private Serde remote companions. Preserve
+Serialize, wire renames, declaration order, optional/null rules, ignored fields
+and every numeric-output registration. The companions return the original owner;
+they must not gain independent Deserialize/conversion traits or new inherent APIs.
+
+Their cfg(test) native witnesses use `tests/support/accepted_record_shapes.rs` to
+observe every field, Option presence and f64 bits through seven ordinary,
+qualified and shared numeric routes, then reject complete valid declaration-order
+arrays. Run `cargo test -p safe-cex-venue-kraken --lib accepted_shape --jobs 1` from
+sdk-rs, then `scripts/private-record-shape-controls.py` serially. Each removal of
+only the object wrapper must fail its exact named full-array admission assertion;
+all four tests must pass after each exact restoration. The production gate
+`scripts/private-record-contracts.mjs` inventories the four actual owners and
+separately inspects complete compiler companion implementations. New traits,
+conversions or inherent APIs require review; private companion syntax alone is
+not proof. Other owners, aliases and receiver refusals remain independent.
+
+REST signing nonces use the shared `VIRTUAL_CLOCK.get_current_time_ms()` for
+both Futures and Spot. The shared JS virtualClock facade reads that same owner;
+Date.now and transport timing keep their runtime clocks. Futures cliOrdId uses
+the source utils/uuid separator removal, independently of Spot's existing
+client-ID generator. `tests/native_clock.rs` checks actual signed Futures/Spot
+requests under a pushed server offset and a different host wall clock;
+`tests/native_identity.rs` checks both nanoid separators in the native cliOrdId.
+The shared Bitunix native audit control runner checks both regressions.
+
+
+Unused `construction::futures_constructor` / `spot_constructor` wrappers and
+their generic constructor-only corpus are removed. Production construction stays
+on `classes::futures_exchange` / `spot_exchange`, sharing `construct_with` for the
+actual API-client assignments. Constructor manifest rows target those live class
+factories. `exchange_binding` covers startup plus production private orders,
+fills, positions and balance frames with native Store/event assertions.
+A compiled xhr-assignment mutation fails the production startup regression;
+exact restoration passes. Retained composition tests cover live class factories
+and polling rather than the deleted wrappers.
+
+Spot websocket candle dates use shared ToPrimitive before choosing UTF-16 date
+parsing or numeric TimeClip, matching the one-argument Date constructor. The
+constructed candle binding test compares eleven raw JSON input shapes to the
+maintained handleOHLC body, including array dates, invalid dates and fractional
+milliseconds; output timestamps and all price/volume fields are checked natively.
+
+The concrete book host uses the shared Js iterator after the source falsy-to-empty
+fallback. String sides are iterable: Futures/Spot snapshots skip their NaN quantities
+and emit an empty side, while Spot deltas retain a NaN level. The constructed
+public-book regression compares those actual source cases through real subscriptions
+and raw socket frames, retaining native price/amount bits before JSON projection.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` covers 224 Futures cases / 672 frames and40 Spot three-row frames, including every numeric get-key alias and distinct fallback values. Futures uses fractional relative funding, while Spot last also updates mark/index.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.

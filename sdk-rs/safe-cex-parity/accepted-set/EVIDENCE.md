@@ -1,5 +1,21 @@
 # Accepted-set gate evidence
 
+## Native source-tooling contract additions
+
+On source base `04171f4f19`, all production targets in `safe-cex-parity`
+produced 32 native/default receipts: 20 runtime results and 12 classifications.
+The new `fragment_named`, `local_types_with_recipes` and
+`parity_trait_inventory::collect` contracts execute actual native operations
+against independently authored token/file/AST witnesses. The concrete
+`ModuleRecipes` alias executes ordinary compiler identity and decoder/conversion
+trait probes; its exact native-tooling declaration claim does not skip them.
+
+All four new contracts pass. The package's five existing positional-array defect
+owners match the scoped standing ledger exactly, with no new or stale scoped
+shape failures. A plain package run reports those five known defects; the scoped
+ratchet comparison passes. This is native tooling evidence, not a full workspace
+or feature/wasm matrix result. The ledger and production Rust sources are unchanged.
+
 ## Initial native census
 
 Base: `7fcffd57e8`, branch `feat/rust-accepted-set-gate`. All 26 venue crates
@@ -330,3 +346,226 @@ The production matrix also found a function-local `macro_rules!` definition in
 not by macro name: its function-local declaration and call pass discovery, while
 the same macro hoisted to module scope fails with a named production assertion.
 This changes discovery coverage, not decoder or debt classification.
+
+### Mixed observed and typed APIs
+
+An alternate-only owner may combine executed `observed` entrypoints with
+explicitly classified `typed` entrypoints. Both retain the exact compiler API
+list. A typed entry must pass the same raw-input role and signature checks as
+an ordinary typed contract; a raw constructor, conversion, byte/string input,
+or decoder bound cannot inherit permission from a neighboring typed method.
+The owner must still execute at least one observed API. Generated dispatch
+contains only observed methods, each with its own input/output witnesses.
+
+This permits a native runtime type to classify an empty collection constructor
+without inventing varying inputs or outputs for it, while executing its raw
+string-key operations independently. The registered `observed typed entrypoint
+raw compiler role` mutation removes that validation at the production branch;
+its test requires an assertion failure and a restored passing baseline.
+This format support does not waive a decoder, change the defect ledger, or
+establish a complete production matrix result.
+
+
+### Serde forwarding macro discovery
+
+The qualified `serde::forward_to_deserialize_any!` identifier-only form is
+reviewed against registry Serde 1.0.229 and its selected registry serde_core
+1.0.229 provider. Both compiler artifact identities are required. Only the
+reviewed method-name tokens are accepted; custom visitor syntax, unknown names,
+extra token groups, imports under another name and shadowed namespaces remain
+unsupported. Rustdoc still inventories every expanded method, and each method
+retains its ordinary exact API classification and runtime obligations. This
+permission changes source discovery only; it does not exempt deserializers.
+
+The native typed-boundary observations use fixed visitors. Boolean forwarding
+witnesses show the actual captured boolean reaches that visitor, including
+methods whose names describe other Serde data types; they do not establish
+numeric, string, aggregate or arbitrary visitor semantics. Enum and newtype
+observations separately execute their concrete native branches.
+
+
+The concrete `HostedSigner` tuple has a separate bounded compiler identity
+probe: its source and expanded targets must be exactly an Rc of the native
+RemoteSigner trait plus an optional String. Rc, Option and String each require
+their resolved sysroot identity. An invariant native type equality checks the
+actual alias against the independently authored tuple. This gives no permission
+to generic tuples or other signer payloads. The registered expanded-target
+mutation proves the compiler-target refusal remains active.
+
+The active Serde rc feature makes `value::Str` (Rc<[u16]>) a real sequence
+decoder. Its contract observes native UTF-16 units, including a surrogate pair
+and a lone surrogate, and refuses strings, negative/out-of-range units and
+nonintegral numbers. Numeric runtime observations project binary64 bits before
+JSON so integer-valued floats cannot be confused with JSON integer storage.
+CrossTradeStore now constrains its remote-derived decoder to object input;
+its existing native observations and the focused object/array regression retain
+the original map fields and reject positional arrays. No debt entry was added.
+
+
+## Per-crate contract storage cutover
+
+At source base `71107baba8`, the former
+`contracts.json` held 797 contracts. Those exact entries now occupy 16 compiler
+crate files in `contracts/`; no row, native adapter, signature, expected value or
+classification changed. `accepted-contract-files.mjs` supplies the complete
+merged object to the gate, local helper review, native helper controls and
+proposal helper. Existing explicit JSON fixture files remain supported.
+
+The executed test compared the COMPLETE original production object with the
+new loader using deep strict equality, including every adapter string and
+ordered array. Their recursively key-sorted semantic JSON SHA-256 both equal
+`b396f4a835ef661ae97f65ad883a2e64b4ba4aa21bdab8b4ba09f21c69a2eab9`.
+On this cutover commit, reproduce the comparison from Git history as follows
+(later reviewed contract additions naturally change the complete live set):
+
+```sh
+git show 71107baba8:sdk-rs/safe-cex-parity/accepted-set/contracts.json > /tmp/accepted-contracts-before-cutover.json
+node sdk-rs/safe-cex-parity/scripts/accepted-contract-files.test.mjs --legacy-contracts=/tmp/accepted-contracts-before-cutover.json
+```
+
+The permanent legacy fixture also checks exact values, adapter newlines,
+Unicode, negative zero and explicit-file compatibility. New directory controls
+refuse missing/malformed/empty inputs, misplaced or duplicated owners,
+unexpected files and symlink entries. Removing the namespace check or dropping
+an entry from the loaded set each fails its named assertion; restoration passes.
+The registered controls retain all earlier tests and mutations: 123 tests and
+144 mutations. Only the three new focused tests and two new mutations were
+executed for this storage change; the long full control suite was not repeated.
+
+All 23 focused loader/policy/local-helper/proposal tests and all 368 wiring tests
+pass. Fresh ordinary OKX compiler discovery remains 145 owners/four aliases;
+24 existing selected production witnesses loaded through the new directory pass
+with zero failed owners. Independently running the ordinary gate on the existing
+isolated fixture with a JSON file and with its per-crate directory produces
+exactly equal six native receipts (five runtime, one classification), zero
+failed owners in both runs. This proves loader compatibility, not workspace
+contract completion or any change to the standing ratchet.
+
+## GRVT fixed compiler alias identities
+
+Eleven finite entries in `generic-aliases.json` pin the actual GRVT declarations,
+including their original generic defaults and lifetimes. The selected arguments
+are explicit bool/bool pairs or bool, with static lifetimes for the three
+unsized FnMut aliases. Source defaults are neither deleted nor silently used as
+broader coverage. Every existing registry entry remains unchanged; the reviewed
+alias implementation and its caller, source, compiler-target and root guards
+are unchanged.
+
+Fresh pinned native/default compiler discovery on source base `71107baba8`
+reports 182 owners, 19 aliases and three construction obligations. All eleven
+new entries match that compiler's raw/expanded targets and original generics,
+and their roots are authenticated against its actual selected Cargo artifacts.
+Ordinary production policy routing chooses exactly the independently authored
+expected Rust types. One metadata-only native Rust compilation proves invariant
+type equality for all eleven aliases against the actual selected GRVT rmeta,
+with warnings denied; three unsized aliases use invariant function/pointer
+PhantomData. This is compiler identity evidence, not runtime decoder proof.
+
+All 21 focused reviewed/identity/callable/alias policy regressions pass. The
+actual eleven-entry compiler preflight additionally rejects changed source,
+raw/expanded targets, generics, caller redirects, missing Serde origins and
+unknown registry names. There is no new general generic-alias permission.
+
+AddedMarkets<bool> and JsResult<bool,bool> remain real decoders whose contracts
+and native value witnesses belong to the consumer review. Fields<bool> retains
+`Rc<RefCell<IndexMap<&'static str,bool>>>`: its static Deserialize bound compiles,
+and its DeserializeOwned bound is rejected as not general enough. The ordinary
+owned alias emitter therefore still refuses this owner; explicitly selecting
+the borrowed emitter compiles and hits its existing runtime refusal. Neither
+refusal is a passing native witness. Exact borrowed production-path support is
+separate work; no keys, dependencies, classification, runtime guard or standing
+debt changes in this registry addition.
+
+
+## Transport Result-bearing future identities
+
+Two separate finite entries in `generic-aliases.json` review
+`safe_cex_transport::provider::TransportFuture<'static,bool>` and
+`safe_cex_transport::provider::RestFuture<'static,bool>`. Their actual source
+outputs are `Result<T,TransportError>` and `Result<T,RestFailure>`; neither is
+the original local-future family with `Output=T`. Every prior registry entry
+is unchanged, and no shared helper or guard changes.
+
+Fresh Rust 1.99 native/default rustdoc plus selected Cargo check artifacts on
+source base `54537b8d0a` discover 108 transport owners, six aliases and nine
+construction obligations. Both declarations retain exact raw/expanded ASTs,
+original lifetime/type parameters and the authenticated Pin/Box/Future/Result
+sysroot roots. The existing reviewed alias path emits invariant equality
+against independently authored native types containing the actual local
+TransportError/RestFailure. Actual production alias probes without cfg(test)
+execute ordinary Serde and conversion checks: two explicit classifications,
+zero failed owners. These focused temporary control contracts establish the
+fixed capability identities; they are not installed production classifications
+or evidence of future polling or transport execution.
+
+All 24 focused reviewed/identity/callable/future/alias policy tests pass.
+Against the fresh compiler aliases, changed source, raw/expanded target, generic
+default, caller expected-type redirection, missing root identity, missing
+serde_json origin and unknown names each retain their existing refusal.
+There is no permission for arbitrary Result-bearing futures or generic arguments.
+
+The ordinary transport inventory now passes both future registrations and stops
+at the separate `safe_cex_transport::secondary::RateLimitWrapper` declaration:
+its lifetime-only generic target requires another exact compiler review. No
+whole-package or workspace gate clearance is claimed here.
+
+
+## Transport rate-limit wrapper identity
+
+One finite registry entry reviews the actual
+`safe_cex_transport::secondary::RateLimitWrapper<'static>` alias on source base
+`4c2a8c0962`. Its raw and expanded compiler targets are the unsized
+`dyn Fn(Arc<dyn RestAdapter>)->Arc<dyn RestAdapter>+'a`, with one original
+unbounded lifetime parameter and no type substitution. Fresh pinned native
+rustdoc/check discovery retains 108 owners, six aliases and nine construction
+obligations; the selected Fn and repeated Arc roots authenticate against the
+actual sysroot artifacts. The independently authored native expected type
+retains the actual local RestAdapter trait in both positions. Existing registry
+entries and shared helper guards remain unchanged.
+
+Actual production alias probes without cfg(test) pass with one explicit
+classification and zero failed owners. The native emitter requires invariant
+function/pointer equality for this unsized type and runs its ordinary Serde and
+conversion checks; no callback invocation is claimed. All 24 focused alias
+policy regressions pass. Fresh compiler preflight also retains seven refusals
+for changed source/raw target/expanded target/generic bounds, caller redirect,
+missing serde_json origin and unknown owner. The focused temporary contract
+is not an installed production classification.
+
+## Exact inherited constant-method witnesses
+
+`inherited-constant-outputs/safe-cex-venue-grvt.json` separately reviews four actual indexed GRVT
+Exchange methods: fetch_symbol_max_leverage, change_position_mode,
+change_margin_type and fetch_public_trades. Each inherits the maintained TS
+BaseExchange rejection. The finite policy pins the complete normalized compiler
+API, actual package/manifest, raw-method role, Rust method span and source hash,
+TS base method lines/excerpt and whole-file hash, venue inheritance source hash,
+native binding fixture hash, and exact adapter/cases. Unreviewed methods cannot
+use the flag, and no unit-input or omitted-entry exception is added. The two
+existing Num serializer constants and all their guards remain unchanged.
+
+Distinct real inputs call the actual production Exchange methods and observe
+native Error name/message, HTTP count, Store balance bits/orders/positions/markets,
+notifications, socket count, logs, reports and clock state. No input echo stands
+in for native output. The complete control fixture retains all eleven compiler
+APIs, including the ordinary typed constructor and six independently reviewed
+nonconstant adapters. Its selected owner receipt is separate from any complete
+GRVT package or matrix claim; production classifications remain consumer-owned.
+
+The native control uses fresh pinned rustdoc discovery, then instruments a
+byte-preserving copy of the production library without cfg(test). Two separate
+post-validation emitter mutations alter the four native error-name observations
+or HTTP-count observations. Each must compile, produce eight named output
+mismatches for this actual owner, and fail the native witness assertion; restored
+execution must pass. Compiler or discovery refusals cannot count as controls.
+Three additional executed pure-policy mutations remove the maintained-source,
+fixture or adapter pin and must fail their named refusal assertion. The control
+registry retains every old control and adds three tests/five mutations, for
+126 tests and 149 mutations. The long complete control suite is not rerun here.
+
+Focused execution passes all three new tests and five executed mutations:
+the native test completes in 171 seconds with the complete eleven-API owner,
+eight expected mismatches for each compiled mutation, then restored zero
+failures. The 15 new/existing contract-policy tests, all 368 wiring tests and
+parity checking (7,459 rows / 17,198 public Rust items) pass. No whole-package
+GRVT, wasm or full accepted-set matrix clearance is claimed by this policy PR.

@@ -42,15 +42,20 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
     if let Some(response) = native.response.as_mut()
         && let Some(serde_json::Value::String(raw)) = response.get("data")
     {
-        response["data"] = safe_cex_transport::how::big_int_as_string_json_parse(raw);
+        response["data"] = safe_cex_exchange::runtime::response_json_view(
+            &safe_cex_transport::RestResponseBody::Transformed(
+                safe_cex_transport::how::big_int_as_string_json_parse(raw),
+            ),
+        );
     }
     native.config = field("config");
     native.request = field("request");
-    native.code = field("code");
+    // The common thrown-error projection already retains code as a native value.
     native
 }
 pub(super) struct Host {
     pub scope: Rc<Shared>,
+    pub local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
     pub inner: RefCell<Weak<Bodies>>,
     pub public: Js,
     pub private: Js,
@@ -103,6 +108,7 @@ impl Host {
             public,
             private,
             scope,
+            local_wall_time_to_utc: deps.local_wall_time_to_utc,
             inner: RefCell::default(),
             clients: RefCell::default(),
             next: Rc::new(Cell::new(0)),
@@ -193,6 +199,12 @@ impl Host {
     }
 }
 impl ExchangeHost for Host {
+    fn signers(&self) -> safe_cex_exchange::runtime::ExchangeSigners {
+        safe_cex_exchange::runtime::ExchangeSigners {
+            remote_signer: self.scope.http.hosted_signer().map(|hosted| hosted.0),
+            payload_signer: None,
+        }
+    }
     fn secondary(
         &self,
         options: &ExchangeOptions,
@@ -215,17 +227,17 @@ impl ExchangeHost for Host {
             })
             .collect();
         object.extend(secondary);
-        if let Some(proxy) = options
+        let mut secondary_options: ExchangeOptions =
+            serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))?;
+        // The source call supplies no otherOptions.proxyUrl. Always replace
+        // the primary override, including when the result is undefined.
+        secondary_options.override_proxy_url = options
             .secondary_proxy_url
             .as_ref()
-            .or(options.override_proxy_url.as_ref())
+            .filter(|proxy| !proxy.is_empty())
             .cloned()
-            .or_else(|| self.scope.runtime.transport().public_cors_proxy())
-        {
-            object.insert("overrideProxyUrl".into(), proxy.into());
-        }
-        let reader =
-            create(serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))?)?;
+            .or_else(|| self.scope.runtime.transport().public_cors_proxy());
+        let reader = create(secondary_options)?;
         self.configure_signing(&reader)?;
         Ok(Rc::new(super::http::Secondary { primary, reader }))
     }
@@ -268,7 +280,7 @@ impl HistoryHost for Host {
             .map_err(error)
     }
     fn local_to_utc(&self, ms: f64) -> f64 {
-        ms
+        (self.local_wall_time_to_utc)(ms)
     }
     fn is_public_data_only(&self) -> bool {
         ExchangeHost::is_public_data_only(self, self.base())

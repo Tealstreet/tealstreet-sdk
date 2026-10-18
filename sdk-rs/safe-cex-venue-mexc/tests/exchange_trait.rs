@@ -187,7 +187,17 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         "start ready log: {:?}",
         rt.console.borrow()
     );
-    rt.pump();
+    for _ in 0..64 {
+        if rt
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("\"login\""))
+        {
+            break;
+        }
+        rt.pump();
+    }
     let frames = rt.sent.borrow().clone();
     assert!(
         frames.iter().any(|f| f.contains("\"login\"")),
@@ -589,4 +599,250 @@ fn external_public_data_on_a_venue_without_public_only_support_rejects_start() {
         "base supportsPublicOnly gate"
     );
     assert!(calls(&wire).is_empty(), "nothing sent");
+}
+
+#[test]
+fn leverage_refresh_prefers_stored_settings_over_stale_positions() {
+    use safe_cex_store::Store;
+    use safe_cex_types::{Position, PositionMode};
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/leverage_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source leverage oracle: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["storedConfig"].as_object().unwrap().len(), 3);
+    for name in ["emptyRows", "untypedRows", "missingMarket"] {
+        let (o, rt, store, wire) = support::fixture();
+        let venue: &dyn Exchange = o.as_ref();
+        script_venue(&wire);
+        let markets = drive(&rt, venue.fetch_markets()).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        drive(&rt, venue.set_leverage("BTCUSDT".into(), 50.0, None)).unwrap();
+        assert_eq!(
+            store.fetched_leverage()["BTCUSDT"].buy_leverage,
+            50.0,
+            "{name}: real setter seeds settings"
+        );
+        assert_eq!(store.fetched_leverage()["BTCUSDT"].sell_leverage, 50.0);
+        let stale: Position = serde_json::from_value(json!({"id":"stale","symbol":"BTCUSDT","side":"long","contracts":2,"leverage":20,"marginType":"isolated","positionMode":"oneway","entryPrice":50000,"notional":100000,"unrealizedPnl":0,"liquidationPrice":0,"info":{"openType":1}})).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                positions: Some(vec![stale]),
+                markets: (name == "missingMarket").then(Vec::new),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        script(
+            &wire,
+            "/api/v1/private/position/leverage",
+            if name == "untypedRows" {
+                json!([{}])
+            } else {
+                json!([])
+            },
+        );
+        calls(&wire);
+        let fetched = drive(&rt, venue.fetch_leverage_for_symbol("BTCUSDT".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            fetched.buy_leverage, 50.0,
+            "{name}: stored settings win over stale position"
+        );
+        assert_eq!(fetched.sell_leverage, 50.0, "{name}");
+        assert_eq!(fetched.margin_type, Some(MarginType::Cross), "{name}");
+        assert_eq!(fetched.position_mode, Some(PositionMode::Hedged), "{name}");
+        assert_eq!(
+            fetched,
+            serde_json::from_value::<safe_cex_types::FetchedLeverage>(
+                expected["storedConfig"][name]["fetched"].clone()
+            )
+            .unwrap(),
+            "{name}: actual source result"
+        );
+        assert_eq!(
+            store.fetched_leverage()["BTCUSDT"],
+            serde_json::from_value::<safe_cex_types::FetchedLeverage>(
+                expected["storedConfig"][name]["stored"].clone()
+            )
+            .unwrap(),
+            "{name}: source Store result"
+        );
+        let log = calls(&wire);
+        assert_eq!(
+            log.len(),
+            usize::from(name != "missingMarket"),
+            "{name}: source request count"
+        );
+        assert_eq!(
+            log.len() as u64,
+            expected["storedConfig"][name]["requests"].as_u64().unwrap()
+        );
+        assert_eq!(
+            store.positions()[0].leverage,
+            20.0,
+            "{name}: stale position remains untouched"
+        );
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn rest_ticker_funding_time_uses_the_host_local_date_converter() {
+    use safe_cex_store::Store;
+    use std::cell::Cell;
+    let source = std::process::Command::new("node")
+        .env("TZ", "America/Los_Angeles")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/ticker-local-date-oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source ticker oracle: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected.len(), 4);
+    for (index, (id, timestamp)) in [
+        ("local", json!("2026-10-17T08:00:00")),
+        ("utc", json!("2026-10-17T08:00:00Z")),
+        ("date", json!("2026-10-17")),
+        ("numeric", json!(1792224000000_u64)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(expected[index]["id"], id);
+        let conversions = Rc::new(Cell::new(0));
+        let observed = conversions.clone();
+        let (o, rt, store, wire) = support::fixture_with_settings_and_local_time(
+            json!({"key":"fixture-key","secret":"fixture-secret"}),
+            Rc::new(|_, _| panic!("no external data configured")),
+            true,
+            Rc::new(move |local| {
+                observed.set(observed.get() + 1);
+                local + 7.0 * 60.0 * 60.0 * 1000.0
+            }),
+        );
+        let venue: &dyn Exchange = o.as_ref();
+        script_venue(&wire);
+        let markets = drive(&rt, venue.fetch_markets()).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        script(
+            &wire,
+            TICKER,
+            json!([{"symbol":"BTC_USDT","lastPrice":60000,"nextSettleTime":timestamp}]),
+        );
+        calls(&wire);
+        let tickers = drive(&rt, venue.fetch_tickers()).unwrap();
+        assert_eq!(tickers.len(), 1, "{id}");
+        assert_eq!(
+            tickers[0].funding_time.to_bits(),
+            expected[index]["fundingTime"].as_f64().unwrap().to_bits(),
+            "{id}: actual source funding time"
+        );
+        assert_eq!(
+            conversions.get(),
+            usize::from(id == "local"),
+            "{id}: only offset-less date-time needs host conversion"
+        );
+        let log = calls(&wire);
+        assert_eq!(bodies(&log, "GET", TICKER).len(), 1, "{id}");
+        venue.dispose().unwrap();
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("mexc");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 160);
+    let (venue, runtime, store, _) = support::fixture();
+    let seed = ticker_coercion::seed("mexc");
+    let markets = seed
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            serde_json::from_value(json!({
+                "id":t.id,"symbol":t.symbol,"base":"fixture","quote":"USDT","active":true,
+                "contractSize":(i+1) as f64 * 0.25,"precision":{"amount":0.01,"price":0.25},
+                "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+            }))
+            .unwrap()
+        })
+        .collect();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    assert!(socket.is_connected(), "production MEXC ticker socket opens");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
 }

@@ -746,7 +746,7 @@ impl JsNumberOutput for PositionsResponseData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum BatchPositionSide {
     #[serde(rename = "net")]
     Net,
@@ -754,6 +754,22 @@ pub enum BatchPositionSide {
     Long,
     #[serde(rename = "short")]
     Short,
+}
+impl<'de> Deserialize<'de> for BatchPositionSide {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(remote = "BatchPositionSide")]
+        enum Wire {
+            #[serde(rename = "net")]
+            Net,
+            #[serde(rename = "long")]
+            Long,
+            #[serde(rename = "short")]
+            Short,
+        }
+        let value = String::deserialize(d)?;
+        Wire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+    }
 }
 impl JsNumberOutput for BatchPositionSide {
     fn check_number_output(&self) {

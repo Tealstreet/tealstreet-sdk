@@ -132,7 +132,8 @@ fn leverage_matches_actual_typescript_and_store() {
                     if recovered {
                         let mut original = ExchangeError::new("observer failure");
                         original.response = Some(response);
-                        original.code = Some(json!("E_RECOVERED"));
+                        original.code =
+                            Some(safe_cex_exchange::js_runtime::value::Js::str("E_RECOVERED"));
                         // IDs from prior Store boundaries may repeat the new
                         // Store-local id 0; they must not be deduplicated.
                         original.store_subscriber_ids = vec![17, 0];
@@ -186,7 +187,8 @@ fn leverage_matches_actual_typescript_and_store() {
                     }
                     let mut observed = json!({"type":"error","name":error.name,"message":error.message,"response":error.response});
                     if let Some(code) = error.code.as_ref() {
-                        observed["code"] = code.clone();
+                        observed["code"] = safe_cex_exchange::js_runtime::value::to_json(code)
+                            .expect("finite fixture error code");
                     }
                     observed
                 }

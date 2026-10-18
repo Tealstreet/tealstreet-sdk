@@ -228,8 +228,8 @@ impl Exchange for BinanceExchange {
             )
             .await
             .map_err(|e| (*e).clone())?;
-            if value.get("found").map_err(|e| (*e).clone())?.truthy() {
-                let order = value.get("order").map_err(|e| (*e).clone())?;
+            if value.read("found").map_err(|e| (*e).clone())?.truthy() {
+                let order = value.read("order").map_err(|e| (*e).clone())?;
                 Ok(
                     safe_cex_exchange::client_order_id::ClientOrderLookup::Found(Box::new(
                         typed(&order).map_err(|e| (*e).clone())?,
@@ -238,7 +238,7 @@ impl Exchange for BinanceExchange {
             } else {
                 Ok(
                     safe_cex_exchange::client_order_id::ClientOrderLookup::NotFound {
-                        definitive: value.get("definitive").map_err(|e| (*e).clone())?.truthy(),
+                        definitive: value.read("definitive").map_err(|e| (*e).clone())?.truthy(),
                     },
                 )
             }

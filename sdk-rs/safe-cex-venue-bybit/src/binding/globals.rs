@@ -21,6 +21,94 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
+    let status_rt = rt.clone();
+    def(
+        "getBybitResponseMeta",
+        Js::function("getBybitResponseMeta", move |_, args| {
+            let scope = scope_of(&status_rt)?;
+            super::members::orders::position_response_meta(&scope, &arg(&args, 0))
+        }),
+    );
+    let json = g.get("JSON").expect("installed JSON builtin");
+    def(
+        "jsonParse",
+        Js::function("jsonParse", move |_, args| {
+            Ok(json.call_method("parse", args).unwrap_or(Js::Null))
+        }),
+    );
+    def(
+        "RegExp",
+        Js::function("RegExp", |_, args| {
+            let pattern = arg(&args, 0);
+            let flags = arg(&args, 1);
+            safe_cex_exchange::js_runtime::regexp::regexp(
+                &if pattern.is_undefined() {
+                    vec![]
+                } else {
+                    pattern.to_js_string()?.to_vec()
+                },
+                &if flags.is_undefined() {
+                    vec![]
+                } else {
+                    flags.to_js_string()?.to_vec()
+                },
+            )
+        }),
+    );
+    // The source import omits literal top-level keys from object-literal requests.
+    def(
+        "omit",
+        Js::function("omit", |_, args| {
+            let request = arg(&args, 0).spread_object()?;
+            for paths in args.iter().skip(1) {
+                for key in paths.array_values().unwrap_or_else(|| vec![paths.clone()]) {
+                    request.delete(&key.to_js_string()?);
+                }
+            }
+            Ok(request)
+        }),
+    );
+    let income_rt = rt.clone();
+    def(
+        "fetchBybitIncomeHistory",
+        Js::function("fetchBybitIncomeHistory", move |_, args| {
+            let rt = scope_of(&income_rt)?;
+            Ok(crate::ledger_history::fetch_bybit_income_history(
+                std::rc::Rc::new(rt),
+                arg(&args, 0),
+                arg(&args, 1),
+            ))
+        }),
+    );
+    let range_rt = rt.clone();
+    def(
+        "fetchBybitIncomeHistoryRange",
+        Js::function("fetchBybitIncomeHistoryRange", move |_, args| {
+            let rt = scope_of(&range_rt)?;
+            Ok(crate::ledger_history::fetch_bybit_income_history_range(
+                std::rc::Rc::new(rt),
+                arg(&args, 0),
+                arg(&args, 1),
+                arg(&args, 2),
+                arg(&args, 3),
+            ))
+        }),
+    );
+    def(
+        "splitTimeRange",
+        Js::function("splitTimeRange", |_, args| {
+            Ok(Js::array(
+                safe_cex_candle_cache::calendar::split_time_range(
+                    arg(&args, 0).to_number()?,
+                    arg(&args, 1).to_number()?,
+                    arg(&args, 2).to_number()?,
+                )
+                .iter()
+                .map(super::value::from_json)
+                .collect(),
+            ))
+        }),
+    );
     // utils/virtualClock: the one clock the signed clients also read.
     let start_clock = clock.clone();
     let start_rt = rt.clone();
@@ -49,6 +137,36 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
             ),
         ]),
     );
+    def(
+        "isBybitOrderAlreadyGoneCancelMessage",
+        Js::function("isBybitOrderAlreadyGoneCancelMessage", |_, args| {
+            let value = arg(&args, 0);
+            let value = if value.is_undefined() {
+                None
+            } else {
+                Some(super::value::to_json(&value)?)
+            };
+            Ok(Js::Bool(
+                crate::exchange_helpers::is_bybit_order_already_gone_cancel_message(value.as_ref())
+                    .map_err(|message| super::value::Thrown::error("TypeError", &message))?,
+            ))
+        }),
+    );
+    def(
+        "isUnknownOutcome",
+        Js::function("isUnknownOutcome", |_, args| {
+            let value = arg(&args, 0);
+            if !value.is_object() && !value.is_array() {
+                return Ok(Js::Bool(false));
+            }
+            Ok(Js::Bool(
+                safe_cex_store::remaining_utils::is_unknown_outcome(&super::value::to_json(
+                    &value,
+                )?)
+                .map_err(|message| super::value::Thrown::error("TypeError", &message))?,
+            ))
+        }),
+    );
     // ts: bybitFeeOverlay — null when no rate was returned, else (markets) => markets.
     def(
         "bybitFeeOverlay",
@@ -68,5 +186,37 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
         "ENDPOINTS",
         super::value::from_json(&crate::types::ENDPOINTS),
     );
+    for (key, value) in [
+        (
+            "HYROTRADER_SIMULATOR_URL",
+            &*crate::types::HYROTRADER_SIMULATOR_URL,
+        ),
+        (
+            "HYROTRADER_SIMULATOR_WS_URL",
+            &*crate::types::HYROTRADER_SIMULATOR_WS_URL,
+        ),
+        ("HYROTRADER_PROD_URL", &*crate::types::HYROTRADER_PROD_URL),
+        (
+            "HYROTRADER_PROD_WS_URL",
+            &*crate::types::HYROTRADER_PROD_WS_URL,
+        ),
+        ("INTERVAL", &*crate::types::INTERVAL),
+        ("ORDER_SIDE", &*crate::types::ORDER_SIDE),
+        ("POSITION_SIDE", &*crate::types::POSITION_SIDE),
+        ("ORDER_STATUS", &*crate::types::ORDER_STATUS),
+        ("ORDER_TYPE", &*crate::types::ORDER_TYPE),
+        ("ORDER_TIME_IN_FORCE", &*crate::types::ORDER_TIME_IN_FORCE),
+        (
+            "ORDER_TIME_IN_FORCE_OUTBOUND",
+            &*crate::types::ORDER_TIME_IN_FORCE_OUTBOUND,
+        ),
+        ("ORDER_TRIGGER_TYPE", &*crate::types::ORDER_TRIGGER_TYPE),
+        (
+            "POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE",
+            &*crate::types::POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+        ),
+    ] {
+        def(key, super::value::from_json(value));
+    }
     g
 }

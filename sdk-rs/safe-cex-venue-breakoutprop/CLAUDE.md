@@ -5,7 +5,7 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 The first slice provides the constants and seven response aliases from
 `breakoutprop.types.ts` (nested records are named Rust structs), plus
 `parseDxSessionTimeoutMs` and `toDxOrderType`. The portfolio read formatters are extracted into `portfolio.rs`. Exchange
-construction, REST I/O orchestration, writes and polling listeners remain pending. There is no native
+construction, REST I/O orchestration, writes and polling listeners are now assembled by the production binding described below. There is no native
 WebSocket in the source adapter.
 
 Decode response records through `safe_cex_num::numeric_ingress::{js_from_str,
@@ -17,6 +17,14 @@ UTF-8 boundary declared in the parity specification. Unknown record fields are
 not represented; the future REST slice must retain raw responses separately for
 `info`, including unknown fields. These codecs cover declared response shapes,
 not arbitrary malformed JavaScript objects.
+
+Each response record, including the internal combined-instrument pair, guards
+its concrete `Deserialize` entrypoint with `strict_decode::object`. Private Serde
+remote companions retain the original field names, order and custom cash-array
+decoder for both serialization and decoding. The guard rejects complete positional
+arrays; it does not add a second numeric capture or change the existing shared
+numeric-ingress pipeline. Decoder mutation controls select the remote schemas so
+the public data fields cannot mask a mutation of the actual decoder.
 
 Constants representing source objects retain source entry order as key/value
 slices. Open-string consumers must use `safe_cex_num::js_table_lookup`, including
@@ -48,12 +56,17 @@ conversion are host inputs. Explicitly offset RFC3339 timestamps bypass that
 local-date adapter through the shared parser. Do not substitute an unconditional
 UTC conversion in a host whose local timezone differs.
 
-Typed response validation is an explicit chosen boundary: malformed records
-refuse instead of reproducing arbitrary JavaScript property accesses. The live
-witness includes an omitted unused account field to demonstrate this difference.
-Unknown side/type/status strings cannot enter the closed shared Position/Order
-models. Order refusals are staged until the source mapping completes: a later
-missing leg must still log and return stored orders. Missing first portfolios
+Portfolio mapping reads only the properties used by each source formatter.
+Unused declaration fields and unrelated balance/position/order collections never
+validate a response; strict declaration codecs remain separate. Actual HTTP
+binding regressions and eighty-two maintained-source cases cover this boundary.
+Native position intermediates remain native through balance reductions and symbol
+filtering; strict Order/Position projection follows complete source mapping.
+Unknown side/type/status strings map to own undefined shared ModelField values,
+matching the source lookup tables; JSON omits those fields. Inherited table
+results that are functions or objects remain outside the final enum representation.
+Mapping finishes before projection; later property errors still report and return
+cached rows. Balance never projects side, entry price or contracts it does not return. Missing first portfolios
 remain undefined (`None`) for open positions and orders, distinct from `[]`.
 Balance catches its resulting reduce error; positions propagates its filter error.
 
@@ -149,8 +162,8 @@ coverage, not a claim that the production decoder is defective.
 then polls both pending children. Details determine output order; the first
 matching instrument wins; unmatched details are omitted. Raw numeric info is
 retained via shared passthrough capture, independently of typed validation.
-The existing response codecs require declared records. This boundary is witnessed
-by an unused field omitted in actual TypeScript but refused by Rust.
+Joining reads only the source symbol properties and retains the complete raw rows.
+Declaration codecs do not validate fields before the market mapping catch.
 
 The borrowed future does not detach children: dropping or rejecting it releases
 remaining child futures. Actual source Promises continue. If two errors become
@@ -164,9 +177,13 @@ full decoded output equality independently detects empty/subset/extra output.
 
 `quotes.rs` maps fetchMarkets, fetchTickersForSymbols and fetchTickers. Market
 mapping uses first USD replacement, first margin tier and separate amount/price
-increments. Validation is per combined row so an earlier missing tier returns
-stored markets before inspecting a later row. Raw info is captured first and
-retained, including unknown fields, signed zero and overflow lexemes.
+increments. Only source-accessed fields are projected. Mapping property errors
+report their cause and return cached markets before inspecting later rows. Raw
+info retains unknown fields, signed zero and overflow lexemes.
+Ticker mapping reads only symbol/bid/ask; unused type/time fields never validate
+a response. Mapping property errors report and return cached tickers before strict scalar
+projection. Twenty-two additional source cases and four actual HTTP regressions
+cover these paths.
 Ticker events absent/null produce source undefined (`None`), while empty events
 produce `Some([])`. Session/account/HTTP failures report and return current stored
 tickers; reporter errors retain their original ExchangeError. The market combined
@@ -208,6 +225,8 @@ NaN bounds, an ignored lone surrogate and discarded Promise continuation.
 Session acquisition remains its own pending row. Invalidation borrows only token
 and expiry, so it cannot clear the separate in-flight request. Cache lookup and
 session factory invocation occur eagerly; an empty cached string is not a hit.
+Native account discovery reads only first-user accounts, accountStatus and the
+selected account code. Unread metadata and later users never validate a response.
 Accounts filter FULL_TRADING and use the first substring match, not equality or
 the last match. Both cached values and mutations are observed directly.
 
@@ -215,5 +234,87 @@ Validation logs response.data.message but RETURNS response.data.msg; preserve
 that difference. Logger failures propagate original metadata. Logger arguments,
 returned error values and options are owned snapshots, with actual callback
 mutation and late-option-change witnesses. All candidate counts and identities
-are pinned independently: dropping a redundant matching account can leave the
+are pinned independently. Twelve additional maintained-source profiles cover
+missing/poisoned unused fields, array-like users and consumed-field TypeErrors.
+Dropping a redundant matching account can leave the
 selected result unchanged, so result equality alone is insufficient coverage.
+
+## Production binding
+
+The existing constructor now installs shared js_runtime class functions and
+promises, and the Exchange trait dispatches all 16 methods through them. Existing
+source ports remain the bodies for session, portfolio, order and polling work.
+ProductionHost supplies real API clients, the shared five-RPS scheduler, owned
+login/order/loop continuations, and a BaseWebSocket ancestor that never dials.
+BaseExchange is shared by Rc with external data providers; constructor and API
+oracles retain their original hosts and independent source comparisons.
+
+Create a fresh ProductionHost from BreakoutDependencies for each account. Its
+HTTP host supplies terminal I/O. The shared client factory selects transport
+and records outcomes; the source tunnel-install point installs its adapter. local_to_utc is
+an explicit host policy for offset-less legacy dates. ProductionHost rejects
+reuse for a different live account. No source product enablement is changed.
+
+The typed native order-result ABI carries a scalar source orderId as one string,
+and an array as its numeric/string scalar entries. Nonscalar IDs and lone UTF-16
+surrogates visibly refuse. Source undefined array returns likewise cannot enter
+required native Vec outputs. Existing helper snapshot/strict-codec choices still
+apply; shared typed conversion captures native Number events before JSON.
+
+Run tests/binding.rs for the production constructor and all 16 trait methods.
+Run python3 scripts/binding-controls.py from this crate (or repository root) for
+16 independent compiling dispatch failures and restored 14/14 passing tests.
+These are dispatch controls, not full JavaScript semantics or live API parity.
+Run them alone, never alongside another Cargo command; logs stay outside the repo.
+
+
+The registry's opt-in Rust path constructs this host with options-aware native
+HTTP and the shared gateway factory. Native DXtrade login refuses remoteSigner
+until that capability is implemented. Its JS date realm explicitly uses UTC for
+offset-less local dates; other hosts must supply their own local_to_utc policy.
+The live native HTTP witness is registry/tests/native_host_breakoutprop.rs.
+
+Four real HTTP binding regressions cover malformed margin/max-size mapping and
+unused declaration fields. The combined and quote source comparisons accept the
+source's omitted unused fields; failures outside the mapping catch still reject
+and reporter failures retain their metadata.
+
+The production UUID host removes both nanoid separators before the order path
+adds its `tealstreet-` prefix. The binding regression supplies runtime entropy
+containing both separators and observes the actual POST order code.
+
+
+The native Exchange now forwards book/candle subscriptions to the existing
+polling container and returns its original cleanup through the shared single-use
+ABI. Owned typed callback values retain the shared native callback boundary;
+the source polling algorithm and handler table remain canonical. fetchOHLCV
+invokes the existing candle body over the actual account/session/client and the
+shared num Date ISO formatter. It preserves both returned rows despite limit=1,
+the encoded JSON candle request and original HTTP refusal metadata.
+Five `real_trait_` binding witnesses exercise the real polling loop, table cleanup,
+REST request, HTTP error and pre-POST invalid-date refusal. The four initial
+hook regressions fail the original defaults. Run
+`scripts/stream-binding-controls.py` exclusively for compiled dispatch, cleanup,
+empty/subset collection and TimeClip faults with exact restored passes. The
+runner checks disk space and restricts any required clean to this worktree target.
+
+
+Authentication is installed in the native client's request interceptor before
+constructor rate limiting. It reads the current session after dequeue and on
+every network retry; the one-shot 401 recovery remains in DxApi. The three
+`auth_pipeline_` production binding regressions fail on the previous early-auth
+placement and pass with the native pipeline hook.
+
+Amendment copies retain Order.clientOrderId into internal PreparedOrderOpts.
+Both fresh and replacement placement enter the same caller-ID preflight before
+market/session work, outside the placement catch. Source updateOrder cancels
+first, then unsupported caller IDs (including the empty string) emit one refusal
+and prevent replacement HTTP. The binding regression compares absent, own
+undefined, nonempty and empty IDs against actual source updateOrder/placeOrder
+and BaseExchange guard bodies, preserving valid cancel-then-place controls.
+
+The production binding fixture drains ready promise reactions before advancing
+its virtual timer. `tests/binding_scheduling_source.cjs` executes the five actual
+BaseExchange rejection bodies and the maintained loop/sleep bodies: rejection
+needs no timer, and a complete ready-turn drain includes the loop's zero-delay
+callback. Clock/state/handle assertions remain native and unchanged.

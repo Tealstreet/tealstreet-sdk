@@ -1,0 +1,8 @@
+{
+  "safe-cex-types/src/ws_auth.rs::LOCAL_TRAIT_IMPL:serde::de::Visitor:PayloadVisitor": {
+    "category": "decoder-helper",
+    "runtimeOwner": "safe_cex_types::ws_auth::ws_auth_payload",
+    "reason": "Relocated canonical WS auth visitor linked to its actual production decoder with direct input/output witnesses; Deserialize shape probes remain mandatory alongside those outputs.",
+    "sourceSha256": "82ae56786796ad28f646a63aed1e41c6ee57458911ca6fe8c070daaa2f128b9a"
+  }
+}

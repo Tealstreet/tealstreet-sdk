@@ -72,7 +72,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/signer_helpers.rs::is_lighter_invalid_nonce_error"
 status = "ported"
-note = "Shared fallible String coerces code and message before final OR; matching code does not suppress a throwing message coercion."
+note = "Native Get and String coercion read only code and message before the final OR; matching code does not suppress a throwing message coercion. The production signer callback retains original error values, inherited fields and coercion hooks without JSON projection. Source992 cases and seven native production-host observations cover UTF-16/cycles in unused fields, inherited codes, String hint and original getter throws."
 
 [[symbol]]
 ts = "TealstreetLighterSignerAdapter"

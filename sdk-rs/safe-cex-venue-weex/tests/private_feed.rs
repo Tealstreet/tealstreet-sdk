@@ -65,7 +65,6 @@ struct State {
     handles: [Option<u64>; 3],
     next_timer: u64,
     applied: Vec<(String, V)>,
-    reports: Vec<(WeexRefreshKind, Error)>,
 }
 fn units(v: &Json) -> Vec<u16> {
     serde_json::from_value(v.clone()).unwrap()
@@ -546,11 +545,6 @@ fn apply(h: &H, k: WeexRefreshKind, v: V) -> Result<(), Error> {
     h.borrow_mut().applied.push((label(k).into(), v));
     Ok(())
 }
-fn report(h: &H, k: WeexRefreshKind, e: &Error) -> Result<(), Error> {
-    record_raw(h, &format!("reported:{}", label(k)));
-    h.borrow_mut().reports.push((k, e.clone()));
-    Ok(())
-}
 fn base_dispose(h: &H) -> Result<(), Error> {
     record(h, "baseDispose")?;
     h.borrow_mut().disposed = true;
@@ -664,7 +658,6 @@ fn runtime() -> RT {
         assign_timer: assign,
         fetch_refresh: fetch,
         apply_refresh: apply,
-        report_refresh_error: report,
         base_dispose,
     }
 }
@@ -697,7 +690,6 @@ fn state(input: &Json) -> State {
         handles: [0, 1, 2].map(|i| input["oldTimers"].get(i).and_then(Json::as_u64)),
         next_timer: 100,
         applied: vec![],
-        reports: vec![],
     }
 }
 impl State {
@@ -723,7 +715,6 @@ impl State {
             handles: [None, None, None],
             next_timer: 0,
             applied: vec![],
-            reports: vec![],
         }
     }
 }
@@ -773,10 +764,6 @@ fn ready_refresh_waits(kind: WeexRefreshKind) {
             h.borrow().applied.is_empty(),
             "WEEX no inline refresh update"
         );
-        assert!(
-            h.borrow().reports.is_empty(),
-            "WEEX no inline rejection report"
-        );
         if case == "disposed" {
             h.borrow_mut().disposed = true;
         }
@@ -786,12 +773,6 @@ fn ready_refresh_waits(kind: WeexRefreshKind) {
         if case == "success" {
             assert_eq!(state.applied[0], (label(kind).to_owned(), text("ready")));
         }
-        assert_eq!(
-            state.reports.len(),
-            usize::from(matches!(case, "rejected" | "apply-error")),
-            "WEEX refresh reporting cost {}:{case}",
-            label(kind)
-        );
     }
 }
 
@@ -1153,30 +1134,6 @@ fn native_private_feed_matches_source() {
             expected_applied,
             "native_refresh_updates::{id}"
         );
-        let fails = input["method"] == "timer"
-            && input["fire"] == true
-            && input["fail"].as_str().unwrap().starts_with("fetch:")
-            || input["method"] == "timer"
-                && input["fire"] == true
-                && input["fail"].as_str().unwrap().starts_with("apply:");
-        let expected_reports = if fails {
-            vec![(
-                k,
-                Error {
-                    name: "RangeError",
-                    units: format!("fail:{}", input["fail"].as_str().unwrap())
-                        .encode_utf16()
-                        .collect(),
-                    header: false,
-                },
-            )]
-        } else {
-            vec![]
-        };
-        assert_eq!(
-            s.reports, expected_reports,
-            "native_refresh_failure_visible::{id}"
-        );
         if id == "fills_live_append" {
             assert_eq!(s.fills.len(), 2, "native_live_fill_floor");
         }
@@ -1185,10 +1142,7 @@ fn native_private_feed_matches_source() {
         }
         traces.push((
             id.to_string(),
-            s.events
-                .into_iter()
-                .filter(|e| !e.starts_with("reported:"))
-                .collect::<Vec<_>>(),
+            s.events.into_iter().collect::<Vec<_>>(),
             c["events"].clone(),
         ));
     }

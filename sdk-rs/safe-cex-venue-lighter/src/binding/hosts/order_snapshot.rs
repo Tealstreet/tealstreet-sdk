@@ -21,12 +21,12 @@ struct Entries {
 
 impl CancelledOrderEntries for Entries {
     fn next_entry(&mut self) -> SigningResult<Option<(AccountValue, AccountValue)>> {
-        let Some(pair) = self.outer.step() else {
+        let Some(pair) = self.outer.step().map_err(to_signing)? else {
             return Ok(None);
         };
         let inner = JsIterator::open(&pair).map_err(to_signing)?;
-        let id = inner.step().unwrap_or(Js::Undefined);
-        let timestamp = inner.step().unwrap_or(Js::Undefined);
+        let id = inner.step().map_err(to_signing)?.unwrap_or(Js::Undefined);
+        let timestamp = inner.step().map_err(to_signing)?.unwrap_or(Js::Undefined);
         Ok(Some((to_account(&id), to_account(&timestamp))))
     }
     fn close_on_throw(&mut self, error: TransactionSigningError) -> TransactionSigningError {
@@ -117,7 +117,7 @@ impl OrderSnapshotHost for Bound {
         visitor: CandidateVisitor,
     ) -> SigningResult<Option<AccountValue>> {
         let iterator = JsIterator::open(&to_js(&iterable)).map_err(to_signing)?;
-        while let Some(value) = iterator.step() {
+        while let Some(value) = iterator.step().map_err(to_signing)? {
             if let Some(result) = visitor(to_account(&value))? {
                 return Ok(Some(result));
             }

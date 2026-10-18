@@ -1,171 +1,175 @@
-//! Bybit order-history fallback mapping, distinct from raw execution fills.
-use crate::{
-    api::truthy,
-    exchange_state::{number, parse_float},
-};
-use safe_cex_num::{js_number_string, js_string};
-use safe_cex_types::{Execution, OrderSide};
-use serde_json::Value;
+//! Native order-history fallback mapping, distinct from raw execution fills.
+use crate::primary_fills::{each_row, first, lower, truthy_first};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::collections::HashSet;
 
-fn first<'a>(row: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter()
-        .find_map(|key| row.get(*key).filter(|v| !v.is_null()))
-}
-fn text(value: Option<&Value>) -> Result<String, String> {
-    match value {
-        None => Ok(String::new()),
-        Some(value) => js_string(Some(value)).map_err(|e| e.message.into()),
+fn fee_detail(globals: &Js, detail: Js) -> Result<Js, Thrown> {
+    if !detail.truthy() {
+        return Ok(Js::Undefined);
     }
-}
-fn fee_detail(detail: Option<&Value>) -> Result<Option<f64>, String> {
-    let Some(detail) = detail.filter(|v| truthy(v)) else {
-        return Ok(None);
-    };
-    let parsed;
-    let detail = if let Some(raw) = detail.as_str() {
-        parsed = match serde_json::from_str::<Value>(raw) {
-            Ok(value) => value,
-            Err(_) => return Ok(None),
-        };
-        &parsed
+    let parsed = if detail.is_string() {
+        match (|| globals.get("JSON")?.call_method("parse", vec![detail]))() {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(Js::Undefined),
+        }
     } else {
         detail
     };
-    let values: Vec<&Value> = match detail {
-        Value::Array(values) => values.iter().collect(),
-        Value::Object(values) => crate::api_request::ordered_entries(values)
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect(),
-        _ => return Ok(None),
-    };
+    if !parsed.truthy() || parsed.type_of() != "object" {
+        return Ok(Js::Undefined);
+    }
+    let values = globals.get("Object")?.call_method("values", vec![parsed])?;
     let mut sum = 0.;
-    for value in values {
-        let fee = parse_float(Some(value))?;
+    each_row(&values, |value| {
+        let fee = value.parse_float()?;
         if fee.is_finite() {
             sum += fee.abs();
         }
-    }
-    Ok((sum > 0.).then_some(sum))
+        Ok(())
+    })?;
+    Ok(if sum > 0. {
+        Js::Number(sum)
+    } else {
+        Js::Undefined
+    })
 }
-
 pub fn map_order_history_rows_to_executions(
-    rows: &[Value],
-    symbol: &str,
-    order_id: Option<&str>,
-    from: Option<f64>,
-    to: Option<f64>,
-) -> Result<Vec<Execution>, String> {
-    let mut mapped = vec![];
-    for row in rows {
-        if row.is_null() {
-            return Err("Cannot read properties of null (reading 'orderId')".into());
-        }
-        let row_order_id = text(first(row, &["orderId"]))?;
-        if order_id
-            .is_some_and(|id| !id.is_empty() && !row_order_id.is_empty() && row_order_id != id)
+    globals: &Js,
+    rows: &Js,
+    symbol: Js,
+    order_id: Js,
+    from: Js,
+    to: Js,
+) -> Result<Js, Thrown> {
+    let mut mapped = Vec::new();
+    each_row(rows, |row| {
+        let row_id = first(&row, &["orderId"], Js::str(""))?;
+        let row_id = Js::String(row_id.to_js_string()?);
+        if order_id.truthy()
+            && row_id.truthy()
+            && !row_id.strict_equals(&Js::String(order_id.to_js_string()?))
         {
-            continue;
+            return Ok(());
         }
-        let status = text(first(row, &["orderStatus"]))?.to_lowercase();
-        // ts-bug: mapOrderHistoryRowsToExecutions accepts any filled substring, including unfilled.
-        if !status.is_empty() && !status.contains("filled") {
-            continue;
+        let status = lower(first(&row, &["orderStatus"], Js::str(""))?, false)?;
+        if status.truthy()
+            && !status
+                .call_method("includes", vec![Js::str("filled")])?
+                .truthy()
+        {
+            return Ok(());
         }
-        let qty = parse_float(first(row, &["cumExecQty", "execQty", "qty"]))?;
+        let qty = first(&row, &["cumExecQty", "execQty", "qty"], Js::str("0"))?.parse_float()?;
         if !qty.is_finite() || qty <= 0. {
-            continue;
+            return Ok(());
         }
-        let mut price = parse_float(first(row, &["avgPrice", "avgFilledPrice", "price"]))?;
+        let mut price =
+            first(&row, &["avgPrice", "avgFilledPrice", "price"], Js::str("0"))?.parse_float()?;
         if !price.is_finite() || price <= 0. {
-            let value = parse_float(first(row, &["cumExecValue", "cumExecAmt", "cumExecAmount"]))?;
+            let value = first(
+                &row,
+                &["cumExecValue", "cumExecAmt", "cumExecAmount"],
+                Js::str("0"),
+            )?
+            .parse_float()?;
             if value.is_finite() && value > 0. && qty > 0. {
                 price = value / qty;
             }
         }
         if !price.is_finite() || price <= 0. {
-            continue;
+            return Ok(());
         }
-        let side = text(first(row, &["side"]))?.to_lowercase();
-        let side = match side.as_str() {
-            "buy" => OrderSide::Buy,
-            "sell" => OrderSide::Sell,
-            _ => continue,
-        };
-        let timestamp = number(first(
-            row,
+        let side = lower(first(&row, &["side"], Js::str(""))?, false)?;
+        let buy = side.strict_equals(&Js::str("buy"));
+        if !buy && !side.strict_equals(&Js::str("sell")) {
+            return Ok(());
+        }
+        let time = first(
+            &row,
             &["updatedTime", "createdTime", "execTime", "transactionTime"],
-        ))?;
-        if !timestamp.is_finite() || timestamp <= 0. {
-            continue;
+            Js::Undefined,
+        )?
+        .to_number()?;
+        if !time.is_finite() || time <= 0. {
+            return Ok(());
         }
-        let timestamp = if timestamp > 100_000_000_000. {
-            timestamp
+        let time = if time > 100000000000. {
+            time
         } else {
-            timestamp * 1000.
+            time * 1000.
         };
-        if from.is_some_and(|from| timestamp < from) || to.is_some_and(|to| timestamp > to) {
-            continue;
+        if !from.is_undefined() && time < from.to_number()? {
+            return Ok(());
         }
-        let direct_fee = parse_float(first(row, &["cumExecFee", "execFee", "fee"]))?;
+        if !to.is_undefined() && time > to.to_number()? {
+            return Ok(());
+        }
+        let direct_fee =
+            first(&row, &["cumExecFee", "execFee", "fee"], Js::str(""))?.parse_float()?;
         let commission = if direct_fee.is_finite() {
-            Some(direct_fee.abs())
+            Js::Number(direct_fee.abs())
         } else {
-            fee_detail(row.get("cumFeeDetail"))?
+            fee_detail(globals, row.get("cumFeeDetail")?)?
         };
-        let symbol = match row.get("symbol").filter(|v| truthy(v)) {
-            Some(value) => value
-                .as_str()
-                .ok_or("Bybit typed Execution requires string symbol")?,
-            None => symbol,
-        };
-        let asset = ["feeCurrency", "feeCcy", "settleCoin", "quoteCoin"]
-            .into_iter()
-            .find_map(|key| row.get(key).filter(|v| truthy(v)));
-        let asset = asset
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .ok_or("Bybit typed Execution requires string commissionAsset")
-            })
-            .transpose()?;
-        mapped.push(Execution {
-            id: None,
-            timestamp: (timestamp / 1000.).floor(),
-            symbol: symbol.to_owned(),
-            order_id: (!row_order_id.is_empty()).then_some(row_order_id),
-            price,
-            qty,
-            side,
-            commission,
-            commission_asset: asset,
-            position_side: None,
-            realized_pnl: None,
-            maker: None,
-            venue_reported_revenue: None,
-            venue_reported_revenue_asset: None,
-        });
-    }
+        let mut fields = vec![
+            ("timestamp", Js::Number((time / 1000.).floor())),
+            ("symbol", truthy_first(&row, &["symbol"], symbol.clone())?),
+            (
+                "orderId",
+                if row_id.truthy() {
+                    row_id
+                } else {
+                    Js::Undefined
+                },
+            ),
+            ("price", Js::Number(price)),
+            ("qty", Js::Number(qty)),
+            ("side", Js::str(if buy { "buy" } else { "sell" })),
+            ("commission", commission),
+            (
+                "commissionAsset",
+                truthy_first(
+                    &row,
+                    &["feeCurrency", "feeCcy", "settleCoin", "quoteCoin"],
+                    Js::Undefined,
+                )?,
+            ),
+        ];
+        fields.retain(|(_, value)| !value.is_undefined());
+        mapped.push(Js::object(fields));
+        Ok(())
+    })?;
     let mut seen = HashSet::new();
-    mapped.retain(|e| {
-        seen.insert(format!(
-            "{}:{}:{}:{}:{}",
-            e.order_id.as_deref().unwrap_or(""),
-            js_number_string(e.timestamp),
-            if e.side == OrderSide::Buy {
-                "buy"
+    let mut out = Vec::new();
+    for execution in mapped {
+        let mut units = Vec::new();
+        for (i, key) in ["orderId", "timestamp", "side", "price", "qty"]
+            .iter()
+            .enumerate()
+        {
+            if i != 0 {
+                units.push(b':' as u16);
+            }
+            let value = execution.get(key)?;
+            let value = if *key == "orderId" && !value.truthy() {
+                Js::str("")
             } else {
-                "sell"
-            },
-            js_number_string(e.price),
-            js_number_string(e.qty)
-        ))
+                value
+            };
+            units.extend_from_slice(&value.to_js_string()?);
+        }
+        if seen.insert(units) {
+            out.push(execution);
+        }
+    }
+    out.sort_by(|a, b| {
+        b.get("timestamp")
+            .unwrap()
+            .to_number()
+            .unwrap()
+            .total_cmp(&a.get("timestamp").unwrap().to_number().unwrap())
     });
-    mapped.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-    Ok(mapped)
+    Ok(Js::array(out))
 }
-
 #[cfg(test)]
 mod tests;

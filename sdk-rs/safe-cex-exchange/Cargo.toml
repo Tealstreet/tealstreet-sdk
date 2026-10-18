@@ -35,3 +35,6 @@ workspace = true
 syn.workspace = true
 quote = "=1.0.47"
 trybuild = "=1.0.116"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio-tungstenite.workspace = true
