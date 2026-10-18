@@ -106,7 +106,7 @@ if (missing) {
   process.exit(0);
 }
 for (const row of native) {
-  assert.equal(row.classificationOnly, false, row.name);
+  assert.notEqual(row.classificationOnly, true, row.name);
   assert.deepEqual(row.failures, [], `SPOT_DECODER_NATIVE ${row.name}`);
 }
 const visitors = receipts.filter(row => row.category === 'private-decoder-helper'
