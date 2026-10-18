@@ -900,13 +900,13 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
         venue.dispose().unwrap();
     }
     assert_eq!(fixture["boundary"]["outputUnits"], json!([0xd800]));
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<safe_cex_types::Market>(
-            fixture["boundary"]["wire"].as_str().unwrap()
-        )
-        .is_err(),
-        "UTF-8 Market ingress refuses source-observable lone surrogate"
+    let raw = fixture["boundary"]["wire"].as_str().unwrap();
+    let market: safe_cex_types::Market = safe_cex_num::numeric_ingress::js_from_str(raw).unwrap();
+    assert_eq!(
+        market.symbol, "\u{fffd}",
+        "typed Market symbol projects the lone unit"
     );
+    typed_utf16::assert_projection(raw, &market);
 }
 
 #[test]
@@ -1683,3 +1683,6 @@ fn observed_error_code(
         safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
     })
 }
+
+#[path = "../../../../test-support/typed_utf16.rs"]
+mod typed_utf16;
