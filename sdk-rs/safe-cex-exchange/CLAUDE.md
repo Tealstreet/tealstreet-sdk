@@ -1922,3 +1922,11 @@ prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
 boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
+
+Internal update listeners subscribe to the canonical Store's native state referent.
+They do not project StoreData or visit unrelated getters before emitter fanout.
+Typed subscribers remain explicit projection boundaries at their reached slots;
+native and typed slots share live order, unsubscription and first-error behavior.
+StoreUpdateThrottle accepts a retained argument type while its existing StoreFrame
+constructor remains available. Native account delivery retains the Js argument
+through bursts and projects only when leading/trailing delivery actually runs.

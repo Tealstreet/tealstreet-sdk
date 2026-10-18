@@ -434,7 +434,7 @@ pub fn native_account_watch(
     let store_delivery = delivery.clone();
     let unsubscribe: Rc<dyn Fn()> = account
         .store
-        .subscribe(Box::new(move |data, _| {
+        .subscribe_native(Box::new(move |data, _| {
             store_delivery.update(data).map_err(|error| {
                 safe_cex_types::StoreSubscriberError::new(error.message.clone())
                     .with_cause(Rc::new(error))

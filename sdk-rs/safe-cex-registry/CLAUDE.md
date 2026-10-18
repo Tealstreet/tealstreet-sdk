@@ -304,3 +304,8 @@ correlation slot before venue error reporting. The JS factory reads primitive
 status/reason metadata without serializing response bodies; signing captures do
 not replace the slot, and successful responses clear it. `native_host_tunnel`
 exercises real WOO/Bybit HOW 404 reports and cyclic/nonfinite metadata profiles.
+
+Native account Store delivery subscribes to the canonical native state and retains
+that referent through the shared throttle. StoreData projection, postprocessing
+and payload encoding occur only on an actual leading/trailing invocation or an
+explicit snapshot, preserving latest-state delivery without a per-update copy.
