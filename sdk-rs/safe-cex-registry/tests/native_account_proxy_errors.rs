@@ -130,19 +130,20 @@ fn proxy_failures_retain_diagnostic_shape_without_credentials() {
         reset_venue_rest_diagnostics();
         let (account, seen) =
             proxied_account(json!({"__status":403,"body":{"message":"Invalid JWT"}})).await;
-        native_account_call(
-            account.clone(),
-            "fetchAndSetOrders".into(),
-            vec![Value::Null.into()],
-        )
-        .await
-        .unwrap();
+        native_account_call(account.clone(), "validateAccount".into(), vec![])
+            .await
+            .unwrap();
         let failures = drain_venue_rest_failure_samples();
-        assert!(
-            !failures.is_empty(),
-            "actual native proxy failures reach aggregate diagnostics"
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "rejected account validation sends one HTTP request"
         );
-        assert_eq!(failures.len(), seen.borrow().len());
+        assert_eq!(
+            failures.len(),
+            1,
+            "the actual proxy failure reaches diagnostics"
+        );
         for failure in failures {
             assert_eq!(failure.status, Some(403.0));
             assert_eq!(failure.rest_proxy_header_sent.as_deref(), Some("bearer"));
