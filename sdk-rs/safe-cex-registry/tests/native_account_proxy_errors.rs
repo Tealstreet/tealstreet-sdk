@@ -120,3 +120,121 @@ fn proxy_server_error_emits_error() {
         );
     });
 }
+
+#[test]
+fn rejected_order_snapshot_keeps_its_started_http_sibling_alive() {
+    run_local(async {
+        use std::time::Duration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::sync::{Barrier, Notify};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let paths = Rc::new(RefCell::new(Vec::new()));
+        let received = Rc::new(Barrier::new(2));
+        let release_algo = Rc::new(Notify::new());
+        let (requests, barrier, release) = (paths.clone(), received.clone(), release_algo.clone());
+        tokio::task::spawn_local(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let (requests, barrier, release) =
+                    (requests.clone(), barrier.clone(), release.clone());
+                tokio::task::spawn_local(async move {
+                    let mut headers = Vec::new();
+                    while !headers.ends_with(b"\r\n\r\n") {
+                        headers.push(stream.read_u8().await.unwrap());
+                    }
+                    let headers = String::from_utf8(headers).unwrap();
+                    let path = headers
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .split('?')
+                        .next()
+                        .unwrap()
+                        .to_owned();
+                    let algo = path.ends_with("/openAlgoOrders");
+                    requests.borrow_mut().push(path);
+                    barrier.wait().await;
+                    if algo {
+                        release.notified().await;
+                    }
+                    let body = r#"{"message":"Invalid JWT"}"#;
+                    let response = format!(
+                        "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        let account = open_native_account(NativeAccountSpec {
+            hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+            exchange: "binance".into(),
+            options: json!({"key":"test-key","secret":"test-secret","tealstreetProxy":true,
+                "overrideProxyUrl":origin})
+            .into(),
+            account_name: None,
+            sign: None,
+            proxy_token: Some(Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) }))),
+        })
+        .unwrap();
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let changed = Rc::new(Notify::new());
+        let (observed, signal) = (errors.clone(), changed.clone());
+        let unwatch = native_account_watch(
+            &account,
+            Rc::new(move |name, data| {
+                let value = support::boundary_json(data.clone());
+                if name == "error"
+                    && value[0].as_str().is_some_and(|message| {
+                        message.starts_with("[binance] Tealstreet proxy auth failed (403):")
+                    })
+                {
+                    observed.borrow_mut().push(value);
+                    signal.notify_one();
+                }
+            }),
+            Rc::new(|_| {}),
+        );
+        // binance.exchange.ts fetchOrders starts both xhr.get calls with Promise.all.
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            native_account_call(
+                account.clone(),
+                "fetchAndSetOrders".into(),
+                vec![Value::Null.into()],
+            ),
+        )
+        .await
+        .expect("first rejection settles without waiting for the held sibling")
+        .unwrap();
+        assert_eq!(
+            errors.borrow().len(),
+            1,
+            "only the first HTTP response was released"
+        );
+        let mut actual_paths = paths.borrow().clone();
+        actual_paths.sort();
+        assert_eq!(
+            actual_paths,
+            ["/fapi/v1/openAlgoOrders", "/fapi/v1/openOrders"]
+        );
+        release_algo.notify_one();
+        let completed = tokio::time::timeout(Duration::from_secs(2), async {
+            while errors.borrow().len() < 2 {
+                changed.notified().await;
+            }
+        })
+        .await;
+        unwatch();
+        native_account_call(account, "dispose".into(), vec![])
+            .await
+            .unwrap();
+        assert!(
+            completed.is_ok(),
+            "the already-started sibling must run its response interceptors after Promise.all rejects; observed {:?}",
+            errors.borrow()
+        );
+        assert_eq!(errors.borrow().len(), 2);
+    });
+}
