@@ -12,6 +12,7 @@ use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
+use safe_cex_exchange::{eager::start_eager, js_runtime::promise::await_js};
 use safe_cex_types::{
     ModelField, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts,
     PositionSide,
@@ -159,6 +160,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
         self: &Rc<Self>,
         instance: Rc<ChaserOrderInstance>,
     ) -> ExchangeFuture<'static, ()> {
+        let runtime = instance.exchange.base().runtime.clone();
         let reason = instance.state().borrow().stop_reason.clone();
         let ids: Vec<String> = instance
             .ever_tracked_order_ids()
@@ -183,7 +185,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
             Ok(())
         })();
         if let Err(error) = cached {
-            return Box::pin(async move { Err(error) });
+            return start_eager(&runtime, async move { Err(error) });
         }
         let method = self.host.fill_lookup(instance.exchange.clone());
         let eligible = instance
@@ -201,8 +203,12 @@ impl<H: ChaserHost> ChaserEngine<H> {
         };
         let engine = self.clone();
         if let Some(pending) = pending {
-            Box::pin(async move {
-                let reconciled = match pending.await {
+            start_eager(&runtime, async move {
+                let result = pending.await;
+                await_js(&instance.exchange.base().runtime, Js::Undefined)
+                    .await
+                    .map_err(|e| e.to_exchange_error())?;
+                let reconciled = match result {
                     Ok(fills) => {
                         for (id, n) in fills {
                             instance.set_filled_amount(&id, n);
@@ -224,7 +230,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
             })
         } else {
             let result = self.emit_complete_event(instance, &reason, false);
-            Box::pin(async move { result })
+            start_eager(&runtime, async move { result })
         }
     }
     fn emit_complete_event(
@@ -435,13 +441,18 @@ impl<H: ChaserHost> ChaserEngine<H> {
             Ok(Some((id, placement)))
         })();
         let engine = self.clone();
-        Box::pin(async move {
+        let runtime = instance.exchange.base().runtime.clone();
+        start_eager(&runtime, async move {
             let Some((client_id, placement)) = prefix? else {
                 return Ok(vec![]);
             };
             let mut ids = vec![];
             let mut error = None;
-            let result = match placement.await {
+            let placed = placement.await;
+            await_js(&instance.exchange.base().runtime, Js::Undefined)
+                .await
+                .map_err(|e| e.to_exchange_error())?;
+            let result = match placed {
                 Ok(returned) => {
                     ids = returned;
                     chaser_manager::log(
@@ -483,8 +494,11 @@ impl<H: ChaserHost> ChaserEngine<H> {
                                     vec![0.]
                                 },
                             )
-                            .await?;
-                        if let Some(order) = order {
+                            .await;
+                        await_js(&instance.exchange.base().runtime, Js::Undefined)
+                            .await
+                            .map_err(|e| e.to_exchange_error())?;
+                        if let Some(order) = order? {
                             if !matches!(
                                 order.status,
                                 ModelField::Value(OrderStatus::Closed | OrderStatus::Canceled)
@@ -530,6 +544,9 @@ impl<H: ChaserHost> ChaserEngine<H> {
                             vec![ChaserCancel::ById { id, symbol }],
                         )
                         .await;
+                    await_js(&instance.exchange.base().runtime, Js::Undefined)
+                        .await
+                        .map_err(|e| e.to_exchange_error())?;
                 }
                 return Ok(vec![]);
             }
@@ -546,10 +563,14 @@ impl<H: ChaserHost> ChaserEngine<H> {
                 } else {
                     100.
                 };
-            engine
+            let slept = engine
                 .host
                 .construct_sleep(instance.exchange.clone(), delay)
-                .await?;
+                .await;
+            await_js(&instance.exchange.base().runtime, Js::Undefined)
+                .await
+                .map_err(|e| e.to_exchange_error())?;
+            slept?;
             if instance.is_stopped() {
                 return Ok(vec![]);
             }

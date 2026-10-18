@@ -463,3 +463,12 @@ transport retains the same canonical cause through RestFailure and the Realm
 REST rejection.
 `tests/byteslike-signing-controls.py` requires compiled native failures for prefix
 admission and dropped error metadata, then exact restoration and passing tests.
+
+The four Spot `spot_models` records have separate map decoder contracts from
+the perpetual wire records. `scripts/spot-decoder-contracts.mjs` runs their real
+native owners and all four delegated OnlyMap visitors through the canonical
+compiler inventory. Observations retain raw UTF-16 units and binary64 bits;
+`scripts/spot-decoder-controls.py` corrupts each actual visitor and requires a
+named compiled failure plus exact-source restoration. See
+`SPOT_DECODER_REVIEW.md`; no Realm or Value-ingress equivalence follows from
+these raw decoder receipts.
