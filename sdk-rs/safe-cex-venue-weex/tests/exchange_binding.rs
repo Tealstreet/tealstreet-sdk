@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 mod binding_runtime;
 use binding_runtime::*;
-use safe_cex_exchange::runtime::ExchangeError;
+use safe_cex_exchange::{js_runtime::value::to_typed, runtime::ExchangeError};
 use safe_cex_store::Store;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -287,9 +287,11 @@ fn historical_fill_logs(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value
     h.venue().base().on_args(
         "log",
         std::rc::Rc::new(move |_, args| {
+            let message = to_typed::<String>(&args[0])?;
+            let severity = to_typed::<String>(&args[1])?;
             captured
                 .borrow_mut()
-                .push(json!({"message":args[0],"severity":args[1]}));
+                .push(json!({"message":message,"severity":severity}));
             Ok(())
         }),
     );
@@ -530,7 +532,7 @@ fn rejected_order_leg_keeps_successful_orders_without_error_event() {
     let captured = errors.clone();
     h.venue().base().on(
         "error",
-        std::rc::Rc::new(move |_, value: &Value| {
+        std::rc::Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
             captured.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -892,7 +894,9 @@ fn private_fill_reaches_emitter_and_disposal_cancels_refresh_timers() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
-            delivered.borrow_mut().push(value.clone());
+            delivered.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(value).expect("finite fixture fill"),
+            );
             Ok(())
         }),
     );
@@ -1341,7 +1345,10 @@ fn gap_snapshot_rejection_is_silent_and_keeps_the_existing_book() {
     h.venue().base().on(
         "log",
         Rc::new(move |_, message| {
-            delivered.borrow_mut().push(message.clone());
+            delivered.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(message)
+                    .expect("finite fixture event"),
+            );
             Ok(())
         }),
     );
@@ -1548,7 +1555,7 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
         let reported = errors.clone();
         h.venue().base().on(
             "error",
-            std::rc::Rc::new(move |_, value: &Value| {
+            std::rc::Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
                 reported.borrow_mut().push(value.clone());
                 Ok(())
             }),
@@ -1579,10 +1586,18 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
             let error = result.expect_err(&format!("source rejects malformed batch ID {id:?}"));
             assert_eq!(error.name, text(field(expected_error, "name")));
             assert_eq!(error.message, text(field(expected_error, "message")));
+            let errors = errors.borrow();
             assert_eq!(
-                *errors.borrow(),
-                vec![json!(format!("Exchange Error: {}", error.message))],
+                errors.len(),
+                1,
                 "production BaseExchange reports exactly one refusal"
+            );
+            assert!(
+                errors[0].strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(&format!(
+                    "Exchange Error: {}",
+                    error.message
+                ))),
+                "native emitter preserves the exact source refusal string"
             );
             assert_eq!(
                 h.store.orders()[0].time_in_force,
@@ -1725,8 +1740,7 @@ fn market_closed_refusal_does_not_replace_source_coercion_failure() {
     );
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .as_str()
+        String::from_utf16(errors.borrow()[0].as_str().unwrap().as_ref())
             .unwrap()
             .contains("Cannot convert object to primitive value")
     );

@@ -894,6 +894,7 @@ fn production_import_live_fills_emit_each_fill_update_later_positions_and_refres
     f.exchange.base().on(
         "fill",
         Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
             observed.borrow_mut().push(event.clone());
             Ok(())
         }),
@@ -1319,6 +1320,7 @@ fn seam_observe_fills(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
     f.exchange.base().on(
         "fill",
         Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
             observed.borrow_mut().push(event.clone());
             Ok(())
         }),
@@ -1589,4 +1591,43 @@ fn native_nonfinite_order_size_reaches_the_signed_order_post() {
         );
         assert_eq!(f.routes.count("exchange:order"), 1);
     }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("hyperliquid");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 24);
+    let f = started();
+    let wire = seam_socket(&f, "allMids");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.exchange.base().store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("hyperliquid")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            wire.push(WsEvent::Message(SocketFrame::Text(
+                frame.as_str().unwrap().into(),
+            )));
+            f.host.settle();
+        }
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+    }
+    assert!(
+        f.host.reports.borrow().is_empty(),
+        "{:?}",
+        f.host.reports.borrow()
+    );
+    f.exchange.dispose().unwrap();
 }

@@ -59,6 +59,7 @@ fn private_fill_frame_closes_the_order_and_emits_the_fill() {
     h.exchange.base().on(
         "fill",
         Rc::new(move |_, fill| {
+            let fill = safe_cex_exchange::js_runtime::value::to_json(fill).unwrap();
             capture.borrow_mut().push(fill.clone());
             Ok(())
         }),
@@ -133,6 +134,7 @@ fn refused_market_row_emits_its_value_and_returns_empty_fresh_markets() {
     h.exchange.base().on(
         "error",
         Rc::new(move |_, error| {
+            let error = safe_cex_exchange::js_runtime::value::to_json(error).unwrap();
             capture.borrow_mut().push(error.clone());
             Ok(())
         }),

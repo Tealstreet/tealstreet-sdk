@@ -6,6 +6,10 @@ The production binding host names its shared type imports explicitly. A wildcard
 can import macros and make its unqualified expression macros ambiguous to the
 accepted-set scanner; keep that scope check enforced without a policy waiver.
 
+`Iso8601` has a union contract with direct native variant/payload observations
+for its real timestamp visitor. The source alias accepts every string, including
+malformed-date text; only non-string/non-number shapes and malformed JSON refuse.
+
 Protocol constants are ordered own-property tables; consumer lookup behavior is
 not implied by the representation. Shared normalized order enums retain shared
 identity. Venue wire enums use String-first deserializers and have no permissive

@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkS
 import { homedir } from 'os';
 import { join } from 'path';
 import crypto from 'crypto';
+import { BRAND } from '../brand';
 
-const DIR = join(homedir(), '.tealstreet');
+const DIR = join(homedir(), BRAND.configDirName);
 const LISTENER_FILE = join(DIR, 'listener.json');
 const TRUSTED_FILE = join(DIR, 'trusted-clients.json');
 
