@@ -704,3 +704,11 @@ flat query, then checks one retained book through live updates and cleanup.
 the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
+
+Private REST shape checks, field aliases and diagnostics consume the canonical
+native graph directly. Never restore the recursive `json_data` projection.
+Existing borrowed-JSON array validators delegate to the same native guard.
+The executed function contracts and constructed native HTTP witnesses are
+reviewed in `PRIVATE_REST_CONTRACT_REVIEW.md`; snapshot callable aliases remain
+a separate cohort. Refresh the two reviewed nested-helper source pins after
+reviewing any change to `private_rest.rs`.
