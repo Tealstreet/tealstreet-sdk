@@ -143,7 +143,13 @@ pub(super) fn uniq_by(values: &Js, by: &Js) -> Result<Js, Thrown> {
         let key = iteratee(by, v.clone())?;
         if !seen.iter().any(|s| s.same_value_zero(&key)) {
             seen.push(key);
-            out.push(v);
+            // Lodash normalizes the returned value only, after the iteratee
+            // has observed the original signed zero.
+            out.push(if matches!(v, Js::Number(number) if number == 0.0) {
+                Js::Number(0.0)
+            } else {
+                v
+            });
         }
     }
     Ok(Js::array(out))

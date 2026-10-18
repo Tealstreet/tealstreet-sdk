@@ -229,7 +229,10 @@ for(const packed of [false,true]){
  assert.equal(error,cause);assert.equal(idReads,2);assert.equal(contractsReads,1);assert.equal(notices,0);assert.equal(store.updateIds.positions,0);
  ordering.push({case:'audit-log-expression-order',idReads,contractsReads,notices,revision:store.updateIds.positions,sameCause:error===cause});
 }
+const zeroStore=new DefaultStore();zeroStore.update({positions:[-0,0]});
+assert.equal(zeroStore.positions.length,1);assert.equal(Object.is(zeroStore.positions[0],0),true);
+const deduplicatedZeroIsPositive=Object.is(zeroStore.positions[0],0);
 const defaultSnapshot=new DefaultStore().serialize();
 const defaultProjection={starkConfigOwn:Object.hasOwn(defaultSnapshot,'starkConfig'),starkConfigUndefined:defaultSnapshot.starkConfig===undefined,wire:JSON.parse(JSON.stringify(defaultSnapshot))};
 assert.equal(defaultProjection.starkConfigOwn,true);assert.equal(defaultProjection.starkConfigUndefined,true);assert.equal(Object.hasOwn(defaultProjection.wire,'starkConfig'),false);
-process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances,ordering,defaultProjection}));
+process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances,ordering,defaultProjection,deduplicatedZeroIsPositive}));

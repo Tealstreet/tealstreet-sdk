@@ -1305,3 +1305,25 @@ fn typed_snapshot_does_not_invent_null_for_source_undefined_optional_properties(
             .is_none()
     );
 }
+
+#[test]
+fn position_deduplication_normalizes_returned_zero_like_lodash() {
+    assert_eq!(source()["deduplicatedZeroIsPositive"], true);
+    let native = DefaultStore::new();
+    let facade = native.facade().unwrap();
+    facade
+        .call_method(
+            "update",
+            vec![Js::object(vec![(
+                "positions",
+                Js::array(vec![Js::Number(-0.0), Js::Number(0.0)]),
+            )])],
+        )
+        .unwrap();
+    let positions = facade.get("positions").unwrap();
+    assert_eq!(positions.get("length").unwrap().as_f64(), Some(1.0));
+    assert_eq!(
+        positions.get("0").unwrap().as_f64().unwrap().to_bits(),
+        0.0_f64.to_bits()
+    );
+}
