@@ -15,11 +15,6 @@ pub struct ArrayData {
     pub(super) extensible: Cell<bool>,
 }
 
-thread_local! {
-    // Realm prototype roots, not per-array value/descriptor mirrors.
-    static PROTOTYPES: RefCell<Vec<(Weak<safe_cex_num::PrototypeRealm>, Weak<ArrayData>)>> = const { RefCell::new(Vec::new()) };
-}
-
 impl ArrayData {
     pub(super) fn new(items: Vec<Option<Js>>) -> Self {
         let length = u32::try_from(items.len()).expect("native array length fits uint32");
@@ -47,6 +42,11 @@ impl ArrayData {
 }
 
 pub(in crate::js_runtime) fn prototype() -> Js {
+    thread_local! {
+        // Realm prototype roots, not per-array value/descriptor mirrors.
+        static PROTOTYPES: RefCell<Vec<(Weak<safe_cex_num::PrototypeRealm>, Weak<ArrayData>)>> = const { RefCell::new(Vec::new()) };
+    }
+
     let realm = safe_cex_num::PrototypeRealm::current();
     if let Some(array) = PROTOTYPES.with(|roots| {
         roots.borrow().iter().find_map(|(r, a)| {
