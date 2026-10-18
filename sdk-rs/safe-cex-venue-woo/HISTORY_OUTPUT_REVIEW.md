@@ -4,8 +4,7 @@ The remaining history leads were reachable through the configured exchange.
 `woo.exchange.ts:1405–1582` stringifies truthy order IDs, numerically coerces
 limits and timestamp operands, and ignores unused option properties. The native
 member previously decoded the entire option object as a strict shared record,
-rejecting numeric IDs, string/array/null limits, null bounds and unread UTF16 data
-before any signed request. Its adapter now reads only source-consumed properties,
+rejecting supported values such as numeric order IDs before any signed request. Its adapter now reads only source-consumed properties,
 uses the installed symbol normalizer and native String/Number operations, then
 passes the resulting typed operands to the existing single history pipeline.
 Public-only guards still precede option reads; internal trades still require a

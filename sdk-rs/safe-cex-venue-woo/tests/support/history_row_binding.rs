@@ -308,7 +308,10 @@ fn assert_history_boundary(group: &str) {
                 .map_err(|e| e.to_exchange_error())
         }));
         let actual = actual.unwrap_or_else(|error| {
-            panic!("history boundary {} {}: {error:?}", case["method"], case["profile"])
+            panic!(
+                "history boundary {} {}: {error:?}",
+                case["method"], case["profile"]
+            )
         });
         fn typed_text(value: Value) -> Value {
             if let Some(units) = value.get("$units").and_then(Value::as_array) {
