@@ -91,12 +91,16 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                             Js::object(vec![("params", crate::binding::value::from_json(&params))]),
                         ],
                     );
-                    async move {
-                        let response = await_js(request.map_err(|e| e.message())?)
-                            .await
-                            .map_err(|e| e.message())?;
-                        to_json(&response.get("data").map_err(|e| e.message())?)
-                            .map_err(|e| e.message())
+                    {
+                        let await_runtime = rt.exchange_runtime();
+                        async move {
+                            let response =
+                                await_js(&await_runtime, request.map_err(|e| e.message())?)
+                                    .await
+                                    .map_err(|e| e.message())?;
+                            to_json(&response.get("data").map_err(|e| e.message())?)
+                                .map_err(|e| e.message())
+                        }
                     }
                 },
                 |message| {
@@ -135,25 +139,31 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         )
     })?;
     method(rt, "fetchTickersRaw", |rt, _| {
-        Ok(rt.clone().spawn(Box::pin(async move {
-            let response = await_js(rt.this.get("xhr")?.call_method(
-                "get",
-                vec![
-                    Js::str("/v5/market/tickers"),
-                    Js::object(vec![(
-                        "params",
-                        Js::object(vec![("category", Js::str("spot"))]),
-                    )]),
-                ],
-            )?)
-            .await?;
-            let data = response.get("data")?;
-            let message = crate::binding::host::get_key(&data, "retMsg")?;
-            if !message.strict_equals(&Js::str("OK")) {
-                rt.this.call_method("emitAndLogError", vec![message])?;
-                return Ok(Js::array(vec![Js::Null]));
+        Ok(rt.clone().spawn(Box::pin({
+            let await_runtime = rt.exchange_runtime();
+            async move {
+                let response = await_js(
+                    &await_runtime,
+                    rt.this.get("xhr")?.call_method(
+                        "get",
+                        vec![
+                            Js::str("/v5/market/tickers"),
+                            Js::object(vec![(
+                                "params",
+                                Js::object(vec![("category", Js::str("spot"))]),
+                            )]),
+                        ],
+                    )?,
+                )
+                .await?;
+                let data = response.get("data")?;
+                let message = crate::binding::host::get_key(&data, "retMsg")?;
+                if !message.strict_equals(&Js::str("OK")) {
+                    rt.this.call_method("emitAndLogError", vec![message])?;
+                    return Ok(Js::array(vec![Js::Null]));
+                }
+                data.get("result")?.get("list")
             }
-            data.get("result")?.get("list")
         })))
     })?;
     method(rt, "fetchTickers", |rt, _| {
@@ -251,14 +261,17 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let opts = arg(&a, 0).spread_object()?;
         opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>());
         let pending = rt.this.call_method("getOrderPositionIdx", vec![opts])?;
-        Ok(rt.spawn(Box::pin(async move {
-            let index = text(&await_js(pending).await?)?;
-            Js::object(vec![
-                ("0", Js::Number(0.)),
-                ("1", Js::Number(2.)),
-                ("2", Js::Number(1.)),
-            ])
-            .get(&index)
+        Ok(rt.spawn(Box::pin({
+            let await_runtime = rt.exchange_runtime();
+            async move {
+                let index = text(&await_js(&await_runtime, pending).await?)?;
+                Js::object(vec![
+                    ("0", Js::Number(0.)),
+                    ("1", Js::Number(2.)),
+                    ("2", Js::Number(1.)),
+                ])
+                .get(&index)
+            }
         })))
     })?;
     method(rt, "fetchOrdersPositionsAndBalance", |rt, _| {
@@ -286,11 +299,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 
 // ts: BybitSpotExchange.start — preserve the source's sequential awaited array operands.
 pub(crate) fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
-    Ok(rt.clone().spawn(Box::pin(async move {
+    Ok(rt.clone().spawn(Box::pin({ let await_runtime = rt.exchange_runtime(); async move {
         let this = &rt.this;
-        await_js(rt.shared.globals.get("virtualClock")?.call_method("start", vec![])?).await?;
+        await_js(&await_runtime, rt.shared.globals.get("virtualClock")?.call_method("start", vec![])?).await?;
         let public_only = this.get("isPublicDataOnly")?.truthy();
-        let external = await_js(this.call_method("initExternalPublicData", vec![])?).await?;
+        let external = await_js(&await_runtime, this.call_method("initExternalPublicData", vec![])?).await?;
         let probe = if public_only { Js::Null } else {
             this.call_method("fetchMarginAccountInfos", vec![])?.call_method("then", vec![
                 Js::function("privateProbeSuccess", |_, _| Ok(Js::Undefined)),
@@ -303,18 +316,18 @@ pub(crate) fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
             ])?
         };
         if !external.truthy() {
-            let markets = await_js(this.call_method("fetchMarkets", vec![])?).await?;
+            let markets = await_js(&await_runtime, this.call_method("fetchMarkets", vec![])?).await?;
             if !this.get("isDisposed")?.truthy() {
                 this.call_method("log", vec![Js::str(&format!("Loaded {} Bybit markets", text(&markets.get("length")?)?))])?;
                 publish_loaded(this, vec![("markets", markets)], &["markets"])?;
                 this.get("publicWebsocket")?.call_method("connectAndSubscribe", vec![])?;
             }
-            let raw = await_js(this.call_method("fetchTickersWithoutParse", vec![])?).await?;
+            let raw = await_js(&await_runtime, this.call_method("fetchTickersWithoutParse", vec![])?).await?;
             let tickers = this.call_method("parseTickers", vec![raw])?;
             if this.get("isDisposed")?.truthy() { return Ok(Js::Undefined); }
             publish_loaded(this, vec![("tickers", tickers)], &["tickers"])?;
         }
-        let failure = if probe.truthy() { await_js(probe).await? } else { Js::Undefined };
+        let failure = if probe.truthy() { await_js(&await_runtime, probe).await? } else { Js::Undefined };
         if failure.truthy() {
             this.call_method("log", vec![Js::str(&format!("Bybit market data is ready, but the private API was rejected ({}) — trading is unavailable", text(&failure)?)), Js::str("warning")])?;
         } else { this.call_method("log", vec![Js::str("Ready to trade on Bybit")])?; }
@@ -323,10 +336,10 @@ pub(crate) fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
             return Ok(Js::Undefined);
         }
         this.get("privateWebsocket")?.call_method("connectAndSubscribe", vec![])?;
-        await_js(this.call_method("fetchOrdersPositionsAndBalance", vec![])?).await?;
+        await_js(&await_runtime, this.call_method("fetchOrdersPositionsAndBalance", vec![])?).await?;
         this.call_method("tick", vec![])?;
         Ok(Js::Undefined)
-    })))
+    } })))
 }
 fn publish_loaded(
     this: &Js,

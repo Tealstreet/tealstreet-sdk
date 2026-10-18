@@ -71,20 +71,23 @@ impl CancellationHost for Host {
         side: Js,
         id: Vec<u16>,
     ) -> Result<Js, Thrown> {
-        safe_cex_exchange::js_runtime::promise::await_js(c.call_method(
-            "delete",
-            vec![
-                Js::str(e),
-                Js::object(vec![(
-                    "params",
-                    Js::object(vec![
-                        ("symbol", s),
-                        ("posSide", side),
-                        ("orderID", Js::utf16(&id)),
-                    ]),
-                )]),
-            ],
-        )?)
+        safe_cex_exchange::js_runtime::promise::await_js(
+            &self.rt.exchange_runtime(),
+            c.call_method(
+                "delete",
+                vec![
+                    Js::str(e),
+                    Js::object(vec![(
+                        "params",
+                        Js::object(vec![
+                            ("symbol", s),
+                            ("posSide", side),
+                            ("orderID", Js::utf16(&id)),
+                        ]),
+                    )]),
+                ],
+            )?,
+        )
         .await
     }
     fn flatten(&mut self, replies: Vec<Js>, _batch: bool) -> Result<Vec<Js>, Thrown> {

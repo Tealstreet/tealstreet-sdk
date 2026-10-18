@@ -115,7 +115,7 @@ fn streaming_map_keeps_nested_numbers_retained_info_and_late_display_fields() {
             safe_cex_types::retained_json::RetainedJsonInput::Lexeme(text) => text.as_str(),
             other => panic!("expected retained lexeme, got {other:?}"),
         },
-        "1e+400"
+        "1e400"
     );
     assert_eq!(value.exchange_name.as_deref(), Some("venue"));
     assert_eq!(value.has_active_chaser, Some(true));
