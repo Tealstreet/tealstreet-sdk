@@ -74963,7 +74963,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let input=$value[\"value\"].clone(); let result=match $value[\"kind\"].as_str().unwrap() { \"order\"=>$type::<crate::types::AsterDEXOrderResponse>(input).map(|v|serde_json::to_value(v).unwrap()), \"market\"=>$type::<crate::types::AsterDEXMarketResponse>(input).map(|v|serde_json::to_value(v).unwrap()), \"tickers\"=>$type::<Vec<crate::types::AsterDEXTickerResponse>>(input).map(|v|serde_json::to_value(v).unwrap()), _=>unreachable!() }; match result {Ok(value)=>serde_json::json!({\"ok\":true,\"value\":observed::project(value)}),Err(e)=>{assert!(!e.message.is_empty(),\"representation error retains decoder reason\");serde_json::json!({\"ok\":false,\"name\":e.name})}} }",
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let input=$value[\"value\"].clone(); let result=match $value[\"kind\"].as_str().unwrap() { \"order\"=>$type::<crate::types::AsterDEXOrderResponse>(input).map(observed::order), \"market\"=>$type::<crate::types::AsterDEXMarketResponse>(input).map(observed::market), \"tickers\"=>$type::<Vec<crate::types::AsterDEXTickerResponse>>(input).map(|rows|serde_json::Value::Array(rows.into_iter().map(observed::ticker).collect())), _=>unreachable!() }; match result {Ok(value)=>serde_json::json!({\"ok\":true,\"value\":observed::project(value)}),Err(e)=>{assert!(!e.message.is_empty(),\"representation error retains decoder reason\");serde_json::json!({\"ok\":false,\"name\":e.name})}} }",
     "cases": [
       {
         "input": {
@@ -75612,7 +75612,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let input=$value[\"value\"].clone(); let result=match $value[\"kind\"].as_str().unwrap() { \"string\"=>$type::<_,String>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"bool\"=>$type::<_,bool>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"number\"=>$type::<_,f64>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"strings\"=>$type::<_,Vec<String>>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"stp\"=>$type::<_,crate::types::AsterDEXStpMode>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), _=>unreachable!() }; match result {Ok((present,value))=>serde_json::json!({\"ok\":true,\"present\":present,\"value\":observed::project(value)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let input=$value[\"value\"].clone(); let result=match $value[\"kind\"].as_str().unwrap() { \"string\"=>$type::<_,String>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"bool\"=>$type::<_,bool>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"number\"=>{ let decoded=if let Some(text)=$value[\"nativeNumber\"].as_str() {$type::<_,f64>(serde::de::value::F64Deserializer::<serde_json::Error>::new(text.parse().unwrap()))}else{$type::<_,f64>(input)}; decoded.map(observed::present_number) }, \"strings\"=>$type::<_,Vec<String>>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"stp\"=>$type::<_,crate::types::AsterDEXStpMode>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), _=>unreachable!() }; match result {Ok((present,value))=>serde_json::json!({\"ok\":true,\"present\":present,\"value\":observed::project(value)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
     "cases": [
       {
         "input": {
@@ -75953,6 +75953,45 @@
         },
         "output": {
           "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "nativeNumber": "inf"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "7ff0000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "nativeNumber": "-inf"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "fff0000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "nativeNumber": "NaN"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "NaN"
+          }
         }
       }
     ],

@@ -80,7 +80,7 @@ their 98 fixed TS/native observations and five isolated compiled controls.
 
 
 `ACCOUNT_FUNCTION_CONTRACT_REVIEW.md` reviews eleven remaining account, signing
-and Serde/error adapter functions. The selected runner requires all 128 native
+and Serde/error adapter functions. The selected runner requires all 131 native
 observations and replays 68 maintained-source expectations. Its grouped compiled
 control must fail every real owner, then pass after exact restoration. Bootstrap
 rustdoc artifacts stay in the separate `target/accepted-inventory` directory.

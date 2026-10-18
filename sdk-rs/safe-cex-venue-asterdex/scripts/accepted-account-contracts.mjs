@@ -23,11 +23,11 @@ const selectedCounts = {
   'api_helpers::generate_aster_dex_code_message_signature': 7,
   'api_helpers::generate_v1_signature': 4,
   'types::opaque_fields': 8,
-  'types::present': 33,
+  'types::present': 36,
 };
 const selected = Object.keys(selectedCounts).map(name => 'safe_cex_venue_asterdex::' + name).sort();
 assert.equal(selected.length, 11);
-assert.equal(Object.values(selectedCounts).reduce((a, b) => a + b), 128);
+assert.equal(Object.values(selectedCounts).reduce((a, b) => a + b), 131);
 process.env.RUSTC_BOOTSTRAP = '1';
 const source = spawnSync(process.execPath, [fileURLToPath(new URL('./accepted-account-source.cjs', import.meta.url))], {
   cwd: workspace, env: process.env, encoding: 'utf8',
@@ -87,4 +87,4 @@ for (const row of results) {
   assert.deepEqual(row.failures, [], row.name);
   assert.ok(!row.classificationOnly, row.name + ': production native execution required');
 }
-console.log('Aster account cohort: 11 production-native owners / 128 observations, zero failures or classification-only receipts.');
+console.log('Aster account cohort: 11 production-native owners / 131 observations, zero failures or classification-only receipts.');

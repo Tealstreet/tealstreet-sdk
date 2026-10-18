@@ -119,3 +119,68 @@ pub fn position(row: &Value) -> safe_cex_types::Position {
         option: ModelField::Absent,
     }
 }
+
+// Capture all typed binary64 fields before any serialization. The remaining
+// record view contains strings/enums/booleans plus retained JSON extensions.
+fn numeric_fields<T: serde::Serialize>(row: &T, numbers: &[(&str, Option<String>)]) -> Value {
+    let mut value = project(serde_json::to_value(row).unwrap());
+    for (key, bits) in numbers {
+        if let Some(bits) = bits {
+            value[*key] = json!({"bits": bits});
+        }
+    }
+    value
+}
+pub fn order(row: crate::types::AsterDEXOrderResponse) -> Value {
+    let numbers = [
+        ("orderId", Some(bits(row.order_id))),
+        ("time", Some(bits(row.time))),
+        ("updateTime", Some(bits(row.update_time))),
+        ("workingTime", Some(bits(row.working_time))),
+    ];
+    numeric_fields(&row, &numbers)
+}
+pub fn ticker(row: crate::types::AsterDEXTickerResponse) -> Value {
+    let numbers = [
+        ("openTime", Some(bits(row.open_time))),
+        ("closeTime", Some(bits(row.close_time))),
+        ("firstId", Some(bits(row.first_id))),
+        ("lastId", Some(bits(row.last_id))),
+        ("count", Some(bits(row.count))),
+    ];
+    numeric_fields(&row, &numbers)
+}
+pub fn market(row: crate::types::AsterDEXMarketResponse) -> Value {
+    let numbers = [
+        ("deliveryDate", row.delivery_date.map(bits)),
+        ("onboardDate", row.onboard_date.map(bits)),
+        ("pricePrecision", Some(bits(row.price_precision))),
+        ("quantityPrecision", Some(bits(row.quantity_precision))),
+        ("baseAssetPrecision", Some(bits(row.base_asset_precision))),
+        ("quotePrecision", Some(bits(row.quote_precision))),
+        ("settlePlan", row.settle_plan.map(bits)),
+    ];
+    let limits: Vec<_> = row
+        .filters
+        .iter()
+        .map(|filter| filter.limit.map(bits))
+        .collect();
+    let mut value = numeric_fields(&row, &numbers);
+    for (filter, limit) in value["filters"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .zip(limits)
+    {
+        if let Some(bits) = limit {
+            filter["limit"] = json!({"bits": bits});
+        }
+    }
+    value
+}
+pub fn present_number(value: Option<f64>) -> (bool, Value) {
+    (
+        value.is_some(),
+        value.map_or(Value::Null, |number| json!({"bits": bits(number)})),
+    )
+}

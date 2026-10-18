@@ -28,7 +28,7 @@ ordinary native cache. The native probe runner retains its separate sandbox and
 | `api_helpers::generate_v1_signature` | Real shared HMAC signing, empty inputs, query ordering, distinct secrets and non-ASCII/NUL bytes. |
 | `api_helpers::generate_aster_dex_code_message_signature` | Real shared EIP-712 signing, both chains, optional testnet, bare/prefixed keys, non-ASCII messages and malformed/zero-key refusals. |
 
-The 128 fixed native observations include 68 expectations for seven helpers
+The 131 fixed native observations include 68 expectations for seven helpers
 derived from the maintained TypeScript bodies, with fixed numeric/signature
 anchors independent of the Rust output.
 `accepted-account-source.cjs` replays those unmodified bodies against the frozen
@@ -45,7 +45,16 @@ admission retain their existing reviewed boundaries. The presence adapter is
 instantiated at all five concrete types used in this file; this does not claim
 arbitrary external implementations of Deserialize are equivalent.
 
-Numeric observations read actual native binary64 bits before JSON projection;
+Typed numeric observations read actual native binary64 bits before JSON projection.
+The decode observers capture every typed order/market/ticker numeric field,
+including optional dates and nested filter limits, before serializing the remaining
+record fields and retained JSON extensions. The presence observer reads f64
+values directly; native F64Deserializer cases for both infinities and NaN prove
+that nonfinite values survive observation. All three compiled cases failed with
+the previous JSON-first observer, which returned null for each. These extra
+native deserializer cases test the observation boundary and do not claim an
+additional TypeScript JSON admission rule.
+
 NaN is a category rather than a platform-specific payload. Inherited status values
 retain ProtoMember identity and arity rather than widening the shared OrderStatus.
 The existing UTF-8, typed-output and snapshot boundaries remain declared in
@@ -70,7 +79,7 @@ SAFE_CEX_TYPESCRIPT_PATH=/absolute/path/to/typescript \
 it does not execute native probes. This selected cohort does not claim whole-crate,
 local-helper, alias, feature or WASM coverage.
 
-The measured default/native replay passes all eleven owners and 128 observations,
+The measured default/native replay passes all eleven owners and 131 observations,
 with zero classification-only receipts, after all 68 actual-source expectations
 pass. The grouped real-body faults compile and fail all eleven owners by name.
 Exact restoration of the four production files returns every native owner to PASS;
