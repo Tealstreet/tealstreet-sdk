@@ -391,10 +391,8 @@ The supplementary close-spread regression substitutes an iterator-valued helper
 result and keeps the real DefaultStore mutator from fixture construction. A second
 facade lookup returns the same object and cannot undo a recorder override. The
 maintained handler and actual TS Store confirm native row identity, zero bits,
-own-undefined margin and the revision increment. On the original slot body the
-position remains open; the repaired spread delivers the close pair, clears margin
-through own undefined, and increments the position revision once. It exercises
-latent iterable admission; maintained wire payloads still provide arrays.
+own-undefined margin and one position revision increment after the close pair.
+It exercises latent iterable admission; maintained wire payloads still provide arrays.
 
 Partner-attribution order rejection helpers are installed in the production
 module globals. Their source String/nullish coercion runs before the existing
