@@ -1,5 +1,16 @@
 # Bybit venue port (in progress)
 
+The 19 concrete SessionHost, SnapshotHost and AccountRefreshHost receiver rows
+are pinned to their full production impl items. The native `receiver_tests`
+construct primary/demo exchanges and observe cells, UTF-16, signed zero,
+captured methods, one-level flattening, callbacks and real Store updates.
+Run `cargo test -p safe-cex-venue-bybit --lib receiver_tests --jobs 1` from `sdk-rs`.
+`scripts/receiver-policy.mjs <fresh-rustdoc-json>` proves all19 missing-policy
+guard failures before restoring the unchanged guarded compiler inventory.
+`scripts/receiver-controls.py` compiles getter-loss and strong-owner faults,
+requires their named native failures, then restores exact bytes and replays.
+Receiver classification leaves package alias/decoder measurement separate.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bybit/CLAUDE.md).
 
 The first checkpoint maps tables, declared types, API predicates, site routing

@@ -61,14 +61,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        285,
+        294,
         5
       ],
       "end": [
-        287,
+        296,
         6
       ],
-      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
+      "sha256": "e10bf5d110a54962972c851bf624a947b897bacc4fc3a8960317ca81eb61c13d"
     },
     "typescript": {
       "base": {
@@ -92,7 +92,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-grvt/tests/support/binding_harness.rs",
-      "sha256": "312c88d74d07f1b44cfb334e34cd25781c25fecbf0118c5d88b55848206023d5"
+      "sha256": "89e4c3ceb4947f6554395e898db94fe53488f15e2af7e48a78a26f8a9b0b5f58"
     },
     "call": "{ #[allow(dead_code)] mod fixture {\n    use crate as safe_cex_venue_grvt;\n    include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/binding_harness.rs\"));\n}\nlet h=fixture::harness(safe_cex_types::ExchangeName::Grvt,fixture::options(),|_|{});\nlet venue:&$type=h.exchange.as_ref();\nlet notifications=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));\nlet observed=notifications.clone();\nlet unsubscribe=h.store.subscribe(std::sync::Arc::new(move|_,_|{observed.fetch_add(1,std::sync::atomic::Ordering::SeqCst);Ok(())}));\nlet snapshot=||{\n    let b=h.store.balance();\n    (b.clone(),[b.used.to_bits(),b.free.to_bits(),b.total.to_bits(),b.upnl.to_bits()],h.store.orders().to_vec(),h.store.positions().to_vec(),h.store.markets().to_vec())\n};\nlet before=snapshot();\nlet logs=h.runtime.logs.borrow().len();\nlet reports=h.runtime.reports.borrow().len();\nlet now=h.runtime.now.get().to_bits();\nlet sockets=h.runtime.sockets.borrow().len();let error=h.drive(<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(venue,$value[\"symbol\"].as_str().unwrap().to_owned())).unwrap_err();let state_unchanged=before==snapshot();\nlet result=serde_json::json!({\"error\":error.message,\"error_name\":error.name,\"http\":h.http.count(),\"sockets_unchanged\":sockets==h.runtime.sockets.borrow().len(),\"notifications\":notifications.load(std::sync::atomic::Ordering::SeqCst),\"state_unchanged\":state_unchanged,\"logs_unchanged\":logs==h.runtime.logs.borrow().len(),\"reports_unchanged\":reports==h.runtime.reports.borrow().len(),\"now_unchanged\":now==h.runtime.now.get().to_bits()});\nunsubscribe();result }",
     "cases": [
@@ -212,14 +212,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        298,
+        307,
         5
       ],
       "end": [
-        304,
+        313,
         6
       ],
-      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
+      "sha256": "e10bf5d110a54962972c851bf624a947b897bacc4fc3a8960317ca81eb61c13d"
     },
     "typescript": {
       "base": {
@@ -243,7 +243,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-grvt/tests/support/binding_harness.rs",
-      "sha256": "312c88d74d07f1b44cfb334e34cd25781c25fecbf0118c5d88b55848206023d5"
+      "sha256": "89e4c3ceb4947f6554395e898db94fe53488f15e2af7e48a78a26f8a9b0b5f58"
     },
     "call": "{ #[allow(dead_code)] mod fixture {\n    use crate as safe_cex_venue_grvt;\n    include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/binding_harness.rs\"));\n}\nlet h=fixture::harness(safe_cex_types::ExchangeName::Grvt,fixture::options(),|_|{});\nlet venue:&$type=h.exchange.as_ref();\nlet notifications=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));\nlet observed=notifications.clone();\nlet unsubscribe=h.store.subscribe(std::sync::Arc::new(move|_,_|{observed.fetch_add(1,std::sync::atomic::Ordering::SeqCst);Ok(())}));\nlet snapshot=||{\n    let b=h.store.balance();\n    (b.clone(),[b.used.to_bits(),b.free.to_bits(),b.total.to_bits(),b.upnl.to_bits()],h.store.orders().to_vec(),h.store.positions().to_vec(),h.store.markets().to_vec())\n};\nlet before=snapshot();\nlet logs=h.runtime.logs.borrow().len();\nlet reports=h.runtime.reports.borrow().len();\nlet now=h.runtime.now.get().to_bits();\nlet sockets=h.runtime.sockets.borrow().len();let error=h.drive(<$type as safe_cex_exchange::exchange::Exchange>::change_position_mode(venue,$value[\"flag\"].as_bool().unwrap(),$value[\"symbol\"].as_str().map(str::to_owned))).unwrap_err();let state_unchanged=before==snapshot();\nlet result=serde_json::json!({\"error\":error.message,\"error_name\":error.name,\"http\":h.http.count(),\"sockets_unchanged\":sockets==h.runtime.sockets.borrow().len(),\"notifications\":notifications.load(std::sync::atomic::Ordering::SeqCst),\"state_unchanged\":state_unchanged,\"logs_unchanged\":logs==h.runtime.logs.borrow().len(),\"reports_unchanged\":reports==h.runtime.reports.borrow().len(),\"now_unchanged\":now==h.runtime.now.get().to_bits()});\nunsubscribe();result }",
     "cases": [
@@ -365,14 +365,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        305,
+        314,
         5
       ],
       "end": [
-        311,
+        320,
         6
       ],
-      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
+      "sha256": "e10bf5d110a54962972c851bf624a947b897bacc4fc3a8960317ca81eb61c13d"
     },
     "typescript": {
       "base": {
@@ -396,7 +396,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-grvt/tests/support/binding_harness.rs",
-      "sha256": "312c88d74d07f1b44cfb334e34cd25781c25fecbf0118c5d88b55848206023d5"
+      "sha256": "89e4c3ceb4947f6554395e898db94fe53488f15e2af7e48a78a26f8a9b0b5f58"
     },
     "call": "{ #[allow(dead_code)] mod fixture {\n    use crate as safe_cex_venue_grvt;\n    include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/binding_harness.rs\"));\n}\nlet h=fixture::harness(safe_cex_types::ExchangeName::Grvt,fixture::options(),|_|{});\nlet venue:&$type=h.exchange.as_ref();\nlet notifications=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));\nlet observed=notifications.clone();\nlet unsubscribe=h.store.subscribe(std::sync::Arc::new(move|_,_|{observed.fetch_add(1,std::sync::atomic::Ordering::SeqCst);Ok(())}));\nlet snapshot=||{\n    let b=h.store.balance();\n    (b.clone(),[b.used.to_bits(),b.free.to_bits(),b.total.to_bits(),b.upnl.to_bits()],h.store.orders().to_vec(),h.store.positions().to_vec(),h.store.markets().to_vec())\n};\nlet before=snapshot();\nlet logs=h.runtime.logs.borrow().len();\nlet reports=h.runtime.reports.borrow().len();\nlet now=h.runtime.now.get().to_bits();\nlet sockets=h.runtime.sockets.borrow().len();let error=h.drive(<$type as safe_cex_exchange::exchange::Exchange>::change_margin_type(venue,$value[\"flag\"].as_bool().unwrap(),$value[\"symbol\"].as_str().map(str::to_owned))).unwrap_err();let state_unchanged=before==snapshot();\nlet result=serde_json::json!({\"error\":error.message,\"error_name\":error.name,\"http\":h.http.count(),\"sockets_unchanged\":sockets==h.runtime.sockets.borrow().len(),\"notifications\":notifications.load(std::sync::atomic::Ordering::SeqCst),\"state_unchanged\":state_unchanged,\"logs_unchanged\":logs==h.runtime.logs.borrow().len(),\"reports_unchanged\":reports==h.runtime.reports.borrow().len(),\"now_unchanged\":now==h.runtime.now.get().to_bits()});\nunsubscribe();result }",
     "cases": [
@@ -535,14 +535,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        325,
+        334,
         5
       ],
       "end": [
-        331,
+        340,
         6
       ],
-      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
+      "sha256": "e10bf5d110a54962972c851bf624a947b897bacc4fc3a8960317ca81eb61c13d"
     },
     "typescript": {
       "base": {
@@ -566,7 +566,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-grvt/tests/support/binding_harness.rs",
-      "sha256": "312c88d74d07f1b44cfb334e34cd25781c25fecbf0118c5d88b55848206023d5"
+      "sha256": "89e4c3ceb4947f6554395e898db94fe53488f15e2af7e48a78a26f8a9b0b5f58"
     },
     "call": "{ #[allow(dead_code)] mod fixture {\n    use crate as safe_cex_venue_grvt;\n    include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/binding_harness.rs\"));\n}\nlet h=fixture::harness(safe_cex_types::ExchangeName::Grvt,fixture::options(),|_|{});\nlet venue:&$type=h.exchange.as_ref();\nlet notifications=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));\nlet observed=notifications.clone();\nlet unsubscribe=h.store.subscribe(std::sync::Arc::new(move|_,_|{observed.fetch_add(1,std::sync::atomic::Ordering::SeqCst);Ok(())}));\nlet snapshot=||{\n    let b=h.store.balance();\n    (b.clone(),[b.used.to_bits(),b.free.to_bits(),b.total.to_bits(),b.upnl.to_bits()],h.store.orders().to_vec(),h.store.positions().to_vec(),h.store.markets().to_vec())\n};\nlet before=snapshot();\nlet logs=h.runtime.logs.borrow().len();\nlet reports=h.runtime.reports.borrow().len();\nlet now=h.runtime.now.get().to_bits();\nlet sockets=h.runtime.sockets.borrow().len();let error=h.drive(<$type as safe_cex_exchange::exchange::Exchange>::fetch_public_trades(venue,$value[\"symbol\"].as_str().unwrap().to_owned(),$value[\"limit\"].as_f64())).unwrap_err();let state_unchanged=before==snapshot();\nlet result=serde_json::json!({\"error\":error.message,\"error_name\":error.name,\"http\":h.http.count(),\"sockets_unchanged\":sockets==h.runtime.sockets.borrow().len(),\"notifications\":notifications.load(std::sync::atomic::Ordering::SeqCst),\"state_unchanged\":state_unchanged,\"logs_unchanged\":logs==h.runtime.logs.borrow().len(),\"reports_unchanged\":reports==h.runtime.reports.borrow().len(),\"now_unchanged\":now==h.runtime.now.get().to_bits()});\nunsubscribe();result }",
     "cases": [
