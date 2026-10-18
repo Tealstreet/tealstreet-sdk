@@ -1290,7 +1290,12 @@ fn ticker_frame_keeps_valid_rows(
             let expected = from_json(&rows[1][source]);
             store.subscribe_native(Box::new(move |state, _| {
                 let state = state.downcast_ref::<Js>().unwrap();
-                let tickers = state.get("tickers").unwrap().array_values().unwrap();
+                let tickers = state
+                    .get("tickers")
+                    .unwrap()
+                    .array_values()
+                    .expect("fixture array property reads")
+                    .unwrap();
                 let eth = tickers
                     .iter()
                     .find(|row| {

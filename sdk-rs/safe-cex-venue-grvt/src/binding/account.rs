@@ -91,42 +91,17 @@ impl AccountHost for Host {
             .ok_or_else(|| failure("virtual clock returned a non-number"))
     }
     fn for_of(&self, iterable: Js, visitor: &mut Iteration<'_, Js>) -> JsResult<Js, ()> {
-        match &iterable {
-            Js::Array(items) => {
-                let mut index = 0;
-                loop {
-                    let next = {
-                        let items = items.borrow();
-                        if index >= items.len() {
-                            None
-                        } else {
-                            Some(items[index].clone().unwrap_or(Js::Undefined))
-                        }
-                    };
-                    let Some(item) = next else {
-                        break;
-                    };
-                    if visitor(item)? {
-                        break;
-                    }
-                    index += 1;
-                }
-                Ok(())
-            }
-            _ => {
-                let values = self.global_call("Array.from", vec![iterable])?;
-                let values = values
-                    .array_values()
-                    .ok_or_else(|| Thrown::type_error("value is not iterable").value)?;
-                for item in values {
-                    if visitor(item)? {
-                        break;
-                    }
-                }
-                Ok(())
+        let iterator =
+            value(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&iterable))?;
+        while let Some(item) = value(iterator.step_value())? {
+            if visitor(item)? {
+                value(iterator.close())?;
+                break;
             }
         }
+        Ok(())
     }
+
     fn loop_after(&self, callback: Rc<dyn Fn() -> JsResult<Js>>, delay: f64) -> JsResult<Js, ()> {
         self.0
             .set_timeout(Rc::new(move || thrown(callback()).map(|_| ())), delay);

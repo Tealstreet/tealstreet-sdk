@@ -146,12 +146,12 @@ impl control::Host for Frame {
         };
         Ok(fields.borrow().iter().map(|(_, v)| v.clone()).collect())
     }
-    fn flattenable_values(&mut self, v: &V) -> Option<Vec<V>> {
-        if let Js::A(a) = v.as_ref() {
+    fn flattenable_values(&mut self, v: &V) -> Result<Option<Vec<V>>, E> {
+        Ok(if let Js::A(a) = v.as_ref() {
             Some(a.borrow().clone())
         } else {
             None
-        }
+        })
     }
     fn track_last_received(&mut self) -> Result<(), E> {
         self.own("trackLastReceived", vec![])?;

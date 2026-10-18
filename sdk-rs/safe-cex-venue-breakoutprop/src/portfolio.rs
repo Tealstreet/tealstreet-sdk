@@ -41,7 +41,7 @@ fn native_open_positions(
         if rows.is_nullish() {
             rows.get("map")?;
         }
-        let rows = rows.array_values().ok_or_else(|| {
+        let rows = rows.array_values()?.ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.positions.map is not a function")
         })?;
         let mut positions = Vec::with_capacity(rows.len());
@@ -159,7 +159,7 @@ pub fn format_balance(
         };
         let mut cash_balance = Js::Number(0.0);
         if !balances.is_nullish() {
-            let rows = balances.array_values().ok_or_else(|| {
+            let rows = balances.array_values()?.ok_or_else(|| {
                 Thrown::type_error("data.portfolios[0]?.balances?.find is not a function")
             })?;
             for balance in rows {
@@ -291,7 +291,7 @@ pub fn format_orders(
         if rows.is_nullish() {
             rows.get("map")?;
         }
-        let rows = rows.array_values().ok_or_else(|| {
+        let rows = rows.array_values()?.ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.orders.map is not a function")
         })?;
         let mut orders = Vec::with_capacity(rows.len());

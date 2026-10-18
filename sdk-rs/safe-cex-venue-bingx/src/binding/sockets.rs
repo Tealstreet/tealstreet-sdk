@@ -165,7 +165,7 @@ impl Host {
             let bytes = buffer
                 .get("bytes")
                 .map_err(error)?
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| ExchangeError::new("BingX binary frame has no byte buffer"))?
                 .iter()
                 .map(|byte| {

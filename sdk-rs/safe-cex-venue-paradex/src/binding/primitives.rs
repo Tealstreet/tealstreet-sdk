@@ -75,7 +75,7 @@ pub(super) fn call(rt: &Rt, n: &str, a: Vec<Js>) -> Result<Js, Thrown> {
 
         "null" => Js::Null,
         "text" => Js::utf16(
-            &x.array_values()
+            &x.array_values()?
                 .ok_or_else(|| Thrown::type_error("text units must be an array"))?
                 .iter()
                 .map(|v| v.to_number().map(|n| n as u16))
@@ -92,10 +92,10 @@ pub(super) fn call(rt: &Rt, n: &str, a: Vec<Js>) -> Result<Js, Thrown> {
         "spread" => x.spread_object()?,
         "spread.concat" => {
             let mut out = x
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
             out.extend(
-                y.array_values()
+                y.array_values()?
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?,
             );
             Js::array(out)
