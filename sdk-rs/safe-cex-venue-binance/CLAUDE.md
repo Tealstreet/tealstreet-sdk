@@ -588,3 +588,18 @@ zero and replacement generations before serialization. The separate
 updates independently, requires the named native assertion to fail, restores exact
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
+
+`public_rest::RestFuture` is the pinned request continuation returned by the live
+`RestContext::get`, with a reviewed `'static` compiler instantiation. Its specific
+non-decoder classification does not classify the resolved JSON or other lifetimes.
+The constructed native `private_classes` test
+`production_native_public_rest_future_waits_and_preserves_candles_and_rejection`
+holds terminal HTTP for Futures, PM and Spot, checks pending before release and
+real GET path/query, then reads both Candle rows' native field bits or the retained
+HTTP rejection status/data. Settlement must not resend. The scoped
+`scripts/public-rest-alias-contracts.mjs` authenticates compiler artifacts and
+source claims before running ordinary alias probes. Separate
+`scripts/public-rest-alias-controls.py` faults fulfilled and rejected continuation
+paths independently; both must compile and fail the named native test, then pass
+after exact source restoration. Other owners and generic instantiations remain
+outside this finite evidence.
