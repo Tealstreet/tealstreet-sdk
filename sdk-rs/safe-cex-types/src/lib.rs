@@ -8,10 +8,10 @@ mod info_record;
 pub use info_record::STORE_RECORD;
 pub mod query_value;
 pub mod retained_json;
-pub mod telemetry;
 pub mod store_access;
-pub use store_access::{StoreReadError, StoreReadPhase};
+pub mod telemetry;
 pub use query_value::QueryValue;
+pub use store_access::{StoreReadError, StoreReadPhase};
 pub mod validation_error;
 pub use validation_error::AccountValidationError;
 
