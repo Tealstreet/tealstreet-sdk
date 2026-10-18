@@ -1,4 +1,40 @@
-# WOO partial exchange class
+# WOO exchange class
+
+## Successful production reconciliation
+
+The earlier evidence below is an archived partial-port receipt. The production
+WooExchange now constructs the complete class graph and binds all 68 own arrow
+slots plus getPositionMode. The fresh reconciliation imports the maintained
+WOOXExchange and DefaultStore directly through tsx, constructs two complete source
+instances, and compares all 86 declared venue fields, 68 fresh arrow capabilities,
+five Maps/one Set and three constants against two real native exchanges.
+
+BaseExchange also owns overlapping fields. Its initialization affects private
+own-key enumeration; an Axios client is itself callable, so counting every
+function-valued instance field as a venue arrow incorrectly counts four clients.
+The reconciliation uses maintained arrow declarations and actual successful
+instances, rather than the old Base stub's factory-throw prefix. The original
+ordered-definition/client-rule tests remain unchanged. Native prototype/function
+capabilities are local host representations; the typed exchange API exports
+neither the private receiver nor its reflective field ordering.
+
+The three metadata declaration Maps are not live competing authorities. The only
+Rust references to their names are class initialization. Every bound metadata
+operation goes through binding/hosts/metadata.rs::receiver_state to one receiver-
+scoped legacy_metadata::State. The actual _accountPositionMode receiver property
+is synchronized on entry/exit; the cache/flight/backoff methods use that same State.
+The TS references are their owning metadata methods only; no production caller
+mutates these private fields from outside the class. This is the approved explicit
+host-composition and owned-snapshot representation, not a missing second cache.
+
+The actual signed cache witness reaches GET, observes native parent/child cache
+identity and negative-zero leverage, reuses the cache without another request,
+and performs setLeverage through signed POST before replacing cache rows. Its
+existing compiled symbol/cache-reuse/request-field controls remain. The separate
+binding_reads set-leverage witness retains the same no-extra-GET behavior. Eager
+public wrapper prefix/detached continuation behavior was repaired in #1066.
+
+## Archived partial-port receipt
 
 Gate SHA: `365dc811924167f45ef51afbde74e18e31c0eb20`.
 Branch: `feat/woo-exchange-class-layout`.
