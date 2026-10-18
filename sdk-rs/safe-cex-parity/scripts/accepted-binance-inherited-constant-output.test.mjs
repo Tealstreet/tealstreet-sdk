@@ -122,5 +122,6 @@ test('Binance exact-method and executable fixture checks reject removed-guard co
     result = run(changed, options); assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, new RegExp(options.label + ' must refuse'));
     result = run(changed, { ...options, remove: null }); assert.equal(result.status, 0, result.stderr);
+    console.log(`${options.label}: named assertion; process exit 1`);
   }
 });
