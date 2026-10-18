@@ -15222,5 +15222,647 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::signing::encode": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "encode",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::encode in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Percent-encodes an already typed UTF-8 string into request query bytes. It serializes wire text; it does not decode a JSON representation or admit a domain record."
+  },
+  "safe_cex_venue_binance::signing::entries": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "entries",
+      "signature": {
+        "inputs": [
+          [
+            "map",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::entries in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Borrows existing typed JSON-map entries and orders canonical numeric property names before the remaining keys. It returns a view for request serialization and header normalization, without decoding a record."
+  },
+  "safe_cex_venue_binance::signing::header_value": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "header_value",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::header_value in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Normalizes an existing request header value using Axios header formatting rules (control removal, trimming and recursive arrays). It prepares outbound header text rather than admitting a response or domain schema."
+  },
+  "safe_cex_venue_binance::signing::index": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "index",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u32"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::index in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Recognizes canonical non-2^32-1 unsigned property-name indices solely as the ordering key for object serialization. Its Option<u32> is a sort key, not a decoded domain owner or wire-shape admission decision."
+  },
+  "safe_cex_venue_binance::signing::numeric": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "numeric",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::numeric in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Formats a native f64 using JavaScript number spelling for outbound timestamp/recvWindow fields; nonfinite spellings remain strings in this typed JSON profile. It encodes an existing numeric argument rather than decoding one."
+  },
+  "safe_cex_venue_binance::signing::query_field": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "query_field",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::query_field in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Recursively serializes an existing request value into the supplied query-field accumulator, repeating arrays and applying bracket notation to maps. It emits outbound text and does not construct a decoded model."
+  },
+  "safe_cex_venue_binance::signing::serialize_query": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "serialize_query",
+      "signature": {
+        "inputs": [
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::serialize_query in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "The typed outbound request codec corresponding to qs repeat-array serialization. It walks the existing parameter graph and returns query bytes, without parsing a response or constructing a domain model."
+  },
+  "safe_cex_venue_binance::signing::sign_binance_request": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "sign_binance_request",
+      "signature": {
+        "inputs": [
+          [
+            "config",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_crypto::SigningOptions",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::ExchangeName",
+                "args": null
+              }
+            }
+          ],
+          [
+            "remote_signer_present",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "recv_window",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "clock",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_store::virtual_clock::VirtualClock",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::map::Map",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::sign_binance_request in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Asynchronous outbound signing orchestration over an existing structured request config and typed signer/clock capabilities. It computes authoritative params and headers; no deserializer or representation admission is exposed."
+  },
+  "safe_cex_venue_binance::signing::spread": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "spread",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::map::Map",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::spread in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Copies an existing optional JSON value using the source request-object spread profile, including indexed arrays/UTF-16 string units. It is an outbound config transformation, not a decoder or a record-admission boundary."
+  },
+  "safe_cex_venue_binance::signing::text": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::text in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Applies the existing query/header stringification profile to a typed JSON value, including array joining and object spelling. It produces outbound text rather than decoding a domain owner."
   }
 }

@@ -704,3 +704,10 @@ flat query, then checks one retained book through live updates and cleanup.
 the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
+
+The ten `signing` accepted-set owners are outbound codecs and request-signing
+transformations, with individual non-decoder role records and exact compiler APIs.
+Their classification receipts do not execute signing or establish arbitrary-JS
+parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
+signer against the actual TS signer with installed Axios, qs and create-hmac.
+Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
