@@ -74,6 +74,22 @@ fn root_fill_table_native_values_keys_and_prototype_kind() {
     assert_eq!(source["native"], 15);
     assert_eq!(source["base"], 7);
     assert_eq!(source["prototypeArity"], 0);
+    let venues = source["venues"].as_array().unwrap();
+    assert_eq!(venues.len(), 50);
+    for venue in venues {
+        let name = venue["name"].as_str().unwrap();
+        let expected = match venue["unit"].as_str() {
+            Some("native") => TableHit::Mapped(FillEventUnit::Native),
+            Some("base") => TableHit::Mapped(FillEventUnit::Base),
+            None => TableHit::Missing,
+            other => panic!("unexpected source fill unit {other:?}"),
+        };
+        assert_eq!(
+            fill_event_units(name),
+            expected,
+            "ROOT full venue fill unit {name}"
+        );
+    }
 }
 #[test]
 fn root_handler_aliases_native_presence_bits_and_callback_identity() {
