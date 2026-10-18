@@ -11,7 +11,8 @@ pub const BYBIT_GREEK_UNITS: &str = "Black-Scholes per 1 unit of the underlying,
 // ts: num — parseFloat(String(value ?? '')), 0 when not finite.
 fn num(value: Option<&Input>) -> Result<f64, String> {
     let value = value.filter(|value| !value.is_nullish());
-    let parsed = safe_cex_num::js_retained_parse_float(value).map_err(|error| error.to_string())?;
+    let parsed =
+        safe_cex_num::js_retained_parse_float(value).map_err(|error| error.message.to_owned())?;
     Ok(if parsed.is_finite() { parsed } else { 0. })
 }
 fn nested<'a>(raw: &'a Input, outer: &str, inner: &str) -> Option<&'a Input> {
