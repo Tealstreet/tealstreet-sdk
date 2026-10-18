@@ -1230,7 +1230,7 @@ fn constructed_private_ingress_keeps_surrogate_frames_neighbors_and_raw_info() {
                 safe_cex_transport::socket::SocketFrame::Text(case["raw"].as_str().unwrap().into()),
             ));
         h.runtime.pump();
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         assert_eq!(
             orders
                 .iter()
