@@ -1,48 +1,25 @@
 //! Binance-family public event bodies over decoded live event arrays.
-use crate::private_event_value::EventOps;
+use crate::private_event_value::{EventOps, EventValue};
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::get_key::{GetKeyUnknownValue, v_unknown};
-use serde_json::Value;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 pub type Failure = Rc<ExchangeError>;
-/// None is an undefined event; an Rc cell retains decoded JSON event identity.
-/// Own undefined-valued properties and non-JSON mutation/coercion hooks remain
-/// outside this decoded data boundary.
-pub type PublicEvent = Option<Rc<RefCell<Value>>>;
-pub type PublicEvents = Rc<RefCell<Vec<PublicEvent>>>;
-/// Common lossless frame access for standalone JSON adapters and composed owners.
-#[derive(Clone)]
-pub enum PublicPayload {
-    Json(PublicEvent),
-    Native(crate::private_event_value::EventValue),
-}
 pub trait PublicEventArray {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn event(&self, index: usize) -> PublicPayload;
-}
-impl PublicEventArray for PublicEvents {
-    fn len(&self) -> usize {
-        self.borrow().len()
-    }
-    fn event(&self, index: usize) -> PublicPayload {
-        PublicPayload::Json(self.borrow().get(index).cloned().unwrap_or(None))
-    }
+    fn event(&self, index: usize) -> EventValue;
 }
 impl PublicEventArray for crate::private_event_value::EventArray {
     fn len(&self) -> usize {
         self.borrow().len()
     }
-    fn event(&self, index: usize) -> PublicPayload {
-        PublicPayload::Native(
-            self.borrow()
-                .get(index)
-                .cloned()
-                .flatten()
-                .unwrap_or(crate::private_event_value::EventValue::Undefined),
-        )
+    fn event(&self, index: usize) -> EventValue {
+        self.borrow()
+            .get(index)
+            .cloned()
+            .flatten()
+            .unwrap_or(EventValue::Undefined)
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,60 +54,17 @@ impl TickerField {
 /// Ordered source object fields; None/omission is represented by no entry.
 /// Native f64 retains NaN/infinity/signed zero until the configured Store boundary.
 pub type TickerFields = Vec<(TickerField, f64)>;
-fn type_error(message: impl Into<String>) -> Failure {
-    let mut e = ExchangeError::new(message);
-    e.name = "TypeError".into();
-    Rc::new(e)
+pub(crate) fn symbol_key(event: &EventValue) -> Result<String, Failure> {
+    event.read("s")?.text()
 }
-fn json_symbol_key(event: &PublicEvent) -> Result<String, Failure> {
-    let Some(event) = event else {
-        return Err(type_error(
-            "Cannot read properties of undefined (reading 's')",
-        ));
-    };
-    let data = event.borrow();
-    if data.is_null() {
-        return Err(type_error("Cannot read properties of null (reading 's')"));
-    }
-    let symbol = data.as_object().and_then(|fields| fields.get("s"));
-    safe_cex_num::js_string(symbol).map_err(|e| type_error(e.message))
-}
-fn json_parse_field(event: &PublicEvent, key: &str) -> Result<f64, Failure> {
-    let data = event.as_ref().map(|event| event.borrow());
-    let value = v_unknown(data.as_deref(), key).map_err(|e| type_error(e.message))?;
-    let text = match value {
-        GetKeyUnknownValue::Undefined => "undefined".into(),
-        GetKeyUnknownValue::Json(value) => {
-            safe_cex_num::js_string(Some(value)).map_err(|e| type_error(e.message))?
-        }
-        GetKeyUnknownValue::Length(value) => value.to_string(),
-        GetKeyUnknownValue::ObjectInherited(member) => member.js_string().into(),
-        GetKeyUnknownValue::ArrayInherited(member) => member.js_string(),
-        GetKeyUnknownValue::ArrayPrototype => String::new(),
-    };
-    Ok(safe_cex_num::parse_float(&text))
-}
-
-pub(crate) fn symbol_key(event: &PublicPayload) -> Result<String, Failure> {
-    match event {
-        PublicPayload::Json(v) => json_symbol_key(v),
-        PublicPayload::Native(v) => v.read("s")?.text(),
-    }
-}
-pub(crate) fn parse_field(event: &PublicPayload, key: &str) -> Result<f64, Failure> {
-    match event {
-        PublicPayload::Json(v) => json_parse_field(v, key),
-        PublicPayload::Native(v) => crate::private_rest::keyed(v, key)?.float(),
-    }
+pub(crate) fn parse_field(event: &EventValue, key: &str) -> Result<f64, Failure> {
+    crate::private_rest::keyed(event, key)?.float()
 }
 
 // ts: BinanceMarketWebsocket.handleTickerStreamEvents
-/// capture snapshots the dictionary handle once, including for an empty array.
-/// lookup reads that live dictionary and normalizes all JavaScript-falsy entries to None.
-/// get_update captures the current Store method AND receiver before field reads.
-/// Decoded JSON data uses stock prototypes; executable hooks, symbol properties,
-/// concrete class/Store wiring and getter/lookup behavior beyond these configured
-/// callbacks remain pending. Live array length/entries are reread each iteration.
+/// Capture the dictionary once and retain live lookups.
+/// Capture the Store method and receiver before reading fields.
+/// Reread array length and entries after each callback.
 pub fn handle_futures_ticker_events<D, T, U>(
     events: &impl PublicEventArray,
     capture: impl FnOnce() -> Result<D, Failure>,
@@ -161,12 +95,9 @@ where
 }
 
 // ts: BinanceMarketWebsocket.handleMarkPriceStreamEvents
-/// capture snapshots the dictionary handle once, including for an empty array.
-/// lookup reads that live dictionary and normalizes all JavaScript-falsy entries to None.
-/// get_update captures the current Store method AND receiver before field reads.
-/// Decoded JSON data uses stock prototypes; executable hooks, symbol properties,
-/// concrete class/Store wiring and getter/lookup behavior beyond these configured
-/// callbacks remain pending. Live array length/entries are reread each iteration.
+/// Capture the dictionary once and retain live lookups.
+/// Capture the Store method and receiver before reading fields.
+/// Reread array length and entries after each callback.
 pub fn handle_futures_mark_events<D, T, U>(
     events: &impl PublicEventArray,
     capture: impl FnOnce() -> Result<D, Failure>,
@@ -197,12 +128,9 @@ where
 }
 
 // ts: BinancePublicWebsocket.handleBookTickersStreamEvents
-/// capture snapshots the dictionary handle once, including for an empty array.
-/// lookup reads that live dictionary and normalizes all JavaScript-falsy entries to None.
-/// get_update captures the current Store method AND receiver before field reads.
-/// Decoded JSON data uses stock prototypes; executable hooks, symbol properties,
-/// concrete class/Store wiring and getter/lookup behavior beyond these configured
-/// callbacks remain pending. Live array length/entries are reread each iteration.
+/// Capture the dictionary once and retain live lookups.
+/// Capture the Store method and receiver before reading fields.
+/// Reread array length and entries after each callback.
 pub fn handle_futures_book_events<D, T, U>(
     events: &impl PublicEventArray,
     capture: impl FnOnce() -> Result<D, Failure>,
@@ -231,12 +159,9 @@ where
 }
 
 // ts: BinancePMMarketWebsocket.handleTickerStreamEvents
-/// capture snapshots the dictionary handle once, including for an empty array.
-/// lookup reads that live dictionary and normalizes all JavaScript-falsy entries to None.
-/// get_update captures the current Store method AND receiver before field reads.
-/// Decoded JSON data uses stock prototypes; executable hooks, symbol properties,
-/// concrete class/Store wiring and getter/lookup behavior beyond these configured
-/// callbacks remain pending. Live array length/entries are reread each iteration.
+/// Capture the dictionary once and retain live lookups.
+/// Capture the Store method and receiver before reading fields.
+/// Reread array length and entries after each callback.
 pub fn handle_pm_ticker_events<D, T, U>(
     events: &impl PublicEventArray,
     capture: impl FnOnce() -> Result<D, Failure>,
@@ -267,12 +192,9 @@ where
 }
 
 // ts: BinancePMMarketWebsocket.handleMarkPriceStreamEvents
-/// capture snapshots the dictionary handle once, including for an empty array.
-/// lookup reads that live dictionary and normalizes all JavaScript-falsy entries to None.
-/// get_update captures the current Store method AND receiver before field reads.
-/// Decoded JSON data uses stock prototypes; executable hooks, symbol properties,
-/// concrete class/Store wiring and getter/lookup behavior beyond these configured
-/// callbacks remain pending. Live array length/entries are reread each iteration.
+/// Capture the dictionary once and retain live lookups.
+/// Capture the Store method and receiver before reading fields.
+/// Reread array length and entries after each callback.
 pub fn handle_pm_mark_events<D, T, U>(
     events: &impl PublicEventArray,
     capture: impl FnOnce() -> Result<D, Failure>,
@@ -303,12 +225,9 @@ where
 }
 
 // ts: BinancePMPublicWebsocket.handleBookTickersStreamEvents
-/// capture snapshots the dictionary handle once, including for an empty array.
-/// lookup reads that live dictionary and normalizes all JavaScript-falsy entries to None.
-/// get_update captures the current Store method AND receiver before field reads.
-/// Decoded JSON data uses stock prototypes; executable hooks, symbol properties,
-/// concrete class/Store wiring and getter/lookup behavior beyond these configured
-/// callbacks remain pending. Live array length/entries are reread each iteration.
+/// Capture the dictionary once and retain live lookups.
+/// Capture the Store method and receiver before reading fields.
+/// Reread array length and entries after each callback.
 pub fn handle_pm_book_events<D, T, U>(
     events: &impl PublicEventArray,
     capture: impl FnOnce() -> Result<D, Failure>,
