@@ -974,3 +974,14 @@ bridge and the generated wire-field presence helper. The real constructed
 UpdateOrder binding and public position-risk decoder must fail their named
 assertions, then pass after exact source restoration. Existing contracts and
 source declarations remain intact.
+
+The nine public listener functions have individual typed capability role reviews
+in PUBLIC_LISTENER_FUNCTION_REVIEW.md. Their classification receipts do not
+execute decoders. The native two-subscription witness constructs the actual
+Futures/PM/Spot owner and inspects the live ListenerHost handler accessor, parser
+identity/order, independent books, native topic counts and sibling-safe cleanup.
+Outbound fields are checked on the real socket wire. Keep all nine independent
+production-body controls in scripts/public-listener-function-controls.py, with
+named native failures and byte-exact restoration passes. The canonical scoped
+runner is scripts/public-listener-function-contracts.mjs; the seven existing
+alias reviews and separate Book decoder remain unchanged.
