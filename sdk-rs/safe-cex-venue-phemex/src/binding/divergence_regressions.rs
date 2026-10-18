@@ -169,18 +169,27 @@ fn reconciliation_retains_original_receiver_and_pending_store_commit() {
         2,
         "both actual settlement requests start through client interceptors"
     );
-    assert!(!h.store.loaded().balance);
+    assert!(!h.store.loaded().unwrap().balance);
     drop(promise);
     h.runtime.pump();
-    assert!(!h.store.loaded().balance, "account read remains pending");
+    assert!(
+        !h.store.loaded().unwrap().balance,
+        "account read remains pending"
+    );
     release.set(true);
     h.runtime.pump();
     assert!(
-        h.store.loaded().balance && h.store.loaded().positions,
+        h.store.loaded().unwrap().balance && h.store.loaded().unwrap().positions,
         "PHEMEX discarded reconciliation Promise retains Store continuation"
     );
-    assert_eq!(h.store.balance().total.to_bits(), 200.0_f64.to_bits());
-    assert_eq!(h.store.balance().used.to_bits(), 40.0_f64.to_bits());
+    assert_eq!(
+        h.store.balance().unwrap().total.to_bits(),
+        200.0_f64.to_bits()
+    );
+    assert_eq!(
+        h.store.balance().unwrap().used.to_bits(),
+        40.0_f64.to_bits()
+    );
     assert!(
         original.strict_equals(&socket(&h)),
         "receiver identity stays fixed"
@@ -240,10 +249,13 @@ fn reconciliation_checks_disposal_after_pending_account_read() {
     release.set(true);
     h.runtime.pump();
     assert!(
-        !h.store.loaded().balance && !h.store.loaded().positions,
+        !h.store.loaded().unwrap().balance && !h.store.loaded().unwrap().positions,
         "PHEMEX post-await disposal guard suppresses Store commit"
     );
-    assert_eq!(h.store.balance().total.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(
+        h.store.balance().unwrap().total.to_bits(),
+        0.0_f64.to_bits()
+    );
 }
 #[test]
 fn reconciliation_clears_queued_symbols_even_when_disposed() {
