@@ -1859,58 +1859,133 @@ fn eager_wrapper_live_source_prefix_and_detached_continuation() {
     assert_eq!(receipt["rejectionPrefix"], true);
 }
 
-
 #[test]
 fn historical_fill_ingress_keeps_valid_rows_with_unread_native_data() {
     use safe_cex_exchange::js_runtime::value::from_retained_input;
     use safe_cex_types::retained_json::RetainedJsonInput;
 
     let output = std::process::Command::new("node")
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fill-ingress-source.cjs"))
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fill-ingress-source.cjs"
+        ))
         .env("TZ", "UTC")
-        .output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let corpus: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(corpus["caseCount"], 12);
     let cases = corpus["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 12);
     let string = |value: &Value| {
-        String::from_utf16_lossy(&value["units"].as_array().unwrap().iter()
-            .map(|n| n.as_u64().unwrap() as u16).collect::<Vec<_>>())
+        String::from_utf16_lossy(
+            &value["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_u64().unwrap() as u16)
+                .collect::<Vec<_>>(),
+        )
     };
     for case in cases {
         let raw = case["raw"].as_str().unwrap();
-        let retained = RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
+        let retained =
+            RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
         let body = from_retained_input(retained);
         let h = futures(|http| {
             http.route_native("GET", "/v3/fills", 200.0, body);
             http.ok("GET", "/v3/fills", json!({"result":"success","fills":[]}));
         });
         loaded(&h);
-        let actual = h.drive(h.venue().fetch_historical_fills(
-            serde_json::from_value(json!({"from":1_699_999_998_000_f64,"to":1_700_000_000_000_f64})).unwrap()
-        )).unwrap();
+        let actual = h
+            .drive(
+                h.venue().fetch_historical_fills(
+                    serde_json::from_value(
+                        json!({"from":1_699_999_998_000_f64,"to":1_700_000_000_000_f64}),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
         let expected = case["output"].as_array().unwrap();
         assert_eq!(expected.len(), 2, "independent source row count");
-        assert_eq!(actual.len(), 2, "retained fill page {}: {:?}", case["label"], h.runtime.console.borrow());
+        assert_eq!(
+            actual.len(),
+            2,
+            "retained fill page {}: {:?}",
+            case["label"],
+            h.runtime.console.borrow()
+        );
         for (fill, expected) in actual.iter().zip(expected) {
-            assert_eq!(fill.id.as_deref(), Some(string(&expected["id"]).as_str()), "{}", case["label"]);
+            assert_eq!(
+                fill.id.as_deref(),
+                Some(string(&expected["id"]).as_str()),
+                "{}",
+                case["label"]
+            );
             assert_eq!(fill.symbol, string(&expected["symbol"]));
-            if expected["orderId"]["undefined"] == true { assert!(fill.order_id.is_none()); }
-            else { assert_eq!(fill.order_id.as_deref(), Some(string(&expected["orderId"]).as_str())); }
-            for (field, number) in [("timestamp",fill.timestamp),("price",fill.price),("qty",fill.qty)] {
-                assert_eq!(format!("{:016x}",number.to_bits()), expected[field]["bits"].as_str().unwrap(), "{} {field}",case["label"]);
+            if expected["orderId"]["undefined"] == true {
+                assert!(fill.order_id.is_none());
+            } else {
+                assert_eq!(
+                    fill.order_id.as_deref(),
+                    Some(string(&expected["orderId"]).as_str())
+                );
             }
-            if expected["realizedPnl"]["undefined"] == true { assert!(fill.realized_pnl.is_none()); }
-            else { assert_eq!(format!("{:016x}",fill.realized_pnl.unwrap().to_bits()),expected["realizedPnl"]["bits"].as_str().unwrap()); }
-            assert_eq!(fill.side, if string(&expected["side"]) == "buy" {OrderSide::Buy} else {OrderSide::Sell});
+            for (field, number) in [
+                ("timestamp", fill.timestamp),
+                ("price", fill.price),
+                ("qty", fill.qty),
+            ] {
+                assert_eq!(
+                    format!("{:016x}", number.to_bits()),
+                    expected[field]["bits"].as_str().unwrap(),
+                    "{} {field}",
+                    case["label"]
+                );
+            }
+            if expected["realizedPnl"]["undefined"] == true {
+                assert!(fill.realized_pnl.is_none());
+            } else {
+                assert_eq!(
+                    format!("{:016x}", fill.realized_pnl.unwrap().to_bits()),
+                    expected["realizedPnl"]["bits"].as_str().unwrap()
+                );
+            }
+            assert_eq!(
+                fill.side,
+                if string(&expected["side"]) == "buy" {
+                    OrderSide::Buy
+                } else {
+                    OrderSide::Sell
+                }
+            );
             assert_eq!(fill.maker, expected["maker"].as_bool());
-            assert!(fill.commission.is_none() && fill.commission_asset.is_none() && fill.position_side.is_none());
+            assert!(
+                fill.commission.is_none()
+                    && fill.commission_asset.is_none()
+                    && fill.position_side.is_none()
+            );
         }
-        let requests=h.http.calls("/v3/fills");
-        assert_eq!(requests.len(),2,"first complete page followed by empty terminator");
-        assert_eq!(requests[0].params,json!({}),"unwindowed newest page retains PnL");
-        assert_eq!(requests[1].params["lastFillTime"],"2023-11-14T22:13:19.001Z");
+        let requests = h.http.calls("/v3/fills");
+        assert_eq!(
+            requests.len(),
+            2,
+            "first complete page followed by empty terminator"
+        );
+        assert_eq!(
+            requests[0].params,
+            json!({}),
+            "unwindowed newest page retains PnL"
+        );
+        assert_eq!(
+            requests[1].url,
+            "/v3/fills?lastFillTime=2023-11-14T22%3A13%3A19.001Z"
+        );
         assert!(h.runtime.reports.borrow().is_empty());
         h.venue().dispose().unwrap();
     }

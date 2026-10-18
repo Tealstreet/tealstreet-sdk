@@ -36,7 +36,7 @@ add('zero-numbers',{price:'-0',size:'-0',realized_pnl:'-0'});
 add('nonfinite-fields',{price:'Infinity',size:'-Infinity',realized_pnl:'Infinity'});
 add('null-presence',{order_id:0,realized_pnl:null});
 add('empty-presence',{order_id:false,realized_pnl:''});
-add('primitive-row',{});
+add('baseline',{});
 // Keep numeric tokens before JSON.stringify's nonfinite projection.
 for(const [label,token] of [['ignored-overflow','1e400'],['ignored-negative-zero','-0']]) {
  const raw=JSON.stringify({result:'success',fills:[{...base,ignored:'TOKEN'},{...base,fill_id:'neighbor'}]}).replace('"TOKEN"',token);

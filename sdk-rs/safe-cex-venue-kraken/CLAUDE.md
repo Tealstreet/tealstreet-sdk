@@ -565,3 +565,16 @@ callback capabilities. `loop-socket-alias-contracts.mjs` runs authenticated nati
 alias probes; `accepted_loop_socket_aliases` drives the actual socket/Store and
 signed timer/HTTP paths. Three named compiled consumer faults and exact restored
 passes are required by `loop-socket-alias-controls.py`.
+
+
+Historical fill pages in the constructed ReadHost map directly over the canonical
+Js graph, using the shared map/filter and iterator operations. Only fields read
+by kraken.fills.ts are reached; never serialize or capture the whole row to
+produce a utility DTO first. Unrelated surrogates, nonfinite numbers and deep
+properties must not erase a page. Native IDs retain their exact units until the
+existing final Execution projection. tests/fill-ingress-source.cjs executes the
+maintained mapper for twelve wire cases; exchange_binding checks both surviving
+fills, every numeric bit and signed unwindowed/cursor requests. The constructed
+Scope test also checks exact native units and an unread throwing property.
+The standalone fills utility's separately documented profile is not broadened
+by this production binding fix.
