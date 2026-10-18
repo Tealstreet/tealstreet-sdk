@@ -12,7 +12,6 @@ use safe_cex_venue_blofin::{
     order_formatters::OrderPayload,
     order_rest::*,
     order_services::{ServiceError, ServiceHost},
-    utility::UtilityInput,
 };
 use serde_json::{Value, json};
 use std::{
