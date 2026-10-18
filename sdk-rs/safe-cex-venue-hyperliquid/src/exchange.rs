@@ -41,7 +41,7 @@ impl HyperliquidExchange {
         let candidates = self
             .base
             .store
-            .tickers_by_symbol()
+            .tickers_by_symbol()?
             .get(&market.symbol)
             .map(|ticker| {
                 if market.is_spot == Some(true) {
@@ -76,28 +76,29 @@ impl HyperliquidExchange {
         opts: &PlaceOrderOpts,
         market: &Market,
         order_size: f64,
-    ) -> bool {
+    ) -> Result<bool, safe_cex_exchange::runtime::ExchangeError> {
         if opts.amount == 0.0 {
-            return true;
+            return Ok(true);
         }
         if opts.reduce_only != Some(true) || !order_size.is_finite() || order_size <= 0.0 {
-            return false;
+            return Ok(false);
         }
         let target_side = if opts.side == OrderSide::Buy {
             PositionSide::Short
         } else {
             PositionSide::Long
         };
-        self.base
+        Ok(self
+            .base
             .store
-            .positions()
+            .positions()?
             .iter()
             .find(|position| {
                 position.symbol == market.symbol
                     && position.side == target_side
                     && position.contracts > 0.0
             })
-            .is_some_and(|position| order_size >= position.contracts)
+            .is_some_and(|position| order_size >= position.contracts))
     }
     pub fn is_public_data_only(&self) -> bool {
         self.base.options().public_data_only == Some(true) || !self.has_private_session_identity()
@@ -152,11 +153,11 @@ impl HyperliquidExchange {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_exchange::{
         exchange::{Exchange, ExchangeSettings},
         runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     };
-    use safe_cex_store::store::DefaultStore;
     use safe_cex_types::ExchangeName;
     use serde_json::{Value, json};
     use std::{cell::Cell, future::Future, pin::Pin, rc::Rc};
@@ -220,7 +221,9 @@ mod tests {
     }
     mod read_trace {
         include!("../tests/fixtures/store-read-observer.rs");
-        pub(super) fn new(inner: Rc<safe_cex_store::store::DefaultStore>) -> Rc<ReadTrace> {
+        pub(super) fn new(
+            inner: Rc<safe_cex_exchange::native_store::DefaultStore>,
+        ) -> Rc<ReadTrace> {
             Rc::new(ReadTrace {
                 inner,
                 position_reads: Cell::new(0),
@@ -309,7 +312,9 @@ mod tests {
                 let opts: PlaceOrderOpts=serde_json::from_value(json!({"symbol":"BTC","type":"market","side":"buy","amount":row["amount"],"reduceOnly":row["reduceOnly"]})).unwrap();
                 let size = safe_cex_num::number_from_string(row["size"].as_str().unwrap());
                 assert_eq!(
-                    state.should_use_position_tpsl(&opts, &market, size),
+                    state
+                        .should_use_position_tpsl(&opts, &market, size)
+                        .unwrap(),
                     row["result"].as_bool().unwrap(),
                     "source first position and TPSL guards"
                 );

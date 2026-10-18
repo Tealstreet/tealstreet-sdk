@@ -1,8 +1,9 @@
 #[path = "support/retained_assert.rs"]
 mod retained_assert;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::numeric_ingress::js_from_value;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
@@ -404,7 +405,7 @@ fn host<'a>(
     }
 }
 fn native_store(store: &DefaultStore, case: &Value) {
-    let positions = store.positions();
+    let positions = store.positions().unwrap();
     let expected = case["positions"].as_array().unwrap();
     assert_eq!(positions.len(), expected.len(), "native position count");
     for (p, e) in positions.iter().zip(expected) {
@@ -431,7 +432,7 @@ fn native_store(store: &DefaultStore, case: &Value) {
             "native margin type"
         );
     }
-    let fetched = store.fetched_leverage();
+    let fetched = store.fetched_leverage().unwrap();
     let expected = case["leverage"].as_object().unwrap();
     assert_eq!(
         fetched.len(),
@@ -468,7 +469,7 @@ fn native_store(store: &DefaultStore, case: &Value) {
             "native isFetching"
         );
     }
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let expected = case["orders"].as_array().unwrap();
     assert_eq!(orders.len(), expected.len(), "native remaining order count");
     for (o, e) in orders.iter().zip(expected) {
@@ -784,12 +785,12 @@ fn native_parallel_leverage_writes_start_before_settlement() {
             "native parallel independent two writes before settlement"
         );
         assert_eq!(
-            store.positions()[0].leverage,
+            store.positions().unwrap()[0].leverage,
             3.0,
             "native no optimistic mutation before response"
         );
         assert_eq!(
-            store.fetched_leverage().len(),
+            store.fetched_leverage().unwrap().len(),
             1,
             "native no cache mutation before response"
         );
@@ -813,12 +814,12 @@ fn native_parallel_leverage_writes_start_before_settlement() {
             );
         }
         assert_eq!(
-            store.positions()[0].leverage,
+            store.positions().unwrap()[0].leverage,
             3.0,
             "native failed response keeps leverage"
         );
         assert_eq!(
-            store.fetched_leverage().len(),
+            store.fetched_leverage().unwrap().len(),
             1,
             "native failed response keeps cache"
         );
@@ -839,7 +840,7 @@ fn native_signed_zero_leverage_clamp() {
         let input: Value =
             serde_json::from_str(corpus()["cases"][40]["inputRaw"].as_str().unwrap()).unwrap();
         let store = store(&input);
-        let mut market = store.markets()[0].clone();
+        let mut market = store.markets().unwrap()[0].clone();
         market.limits.leverage.min = zero(&witness["min"]);
         market.limits.leverage.max = zero(&witness["max"]);
         Store::update(
@@ -892,7 +893,7 @@ fn native_signed_zero_leverage_clamp() {
         ))
         .map_err(error)
         .unwrap();
-        let leverage = store.fetched_leverage();
+        let leverage = store.fetched_leverage().unwrap();
         let expected = if [false, true, true, false][index] {
             (-0.0_f64).to_bits()
         } else {

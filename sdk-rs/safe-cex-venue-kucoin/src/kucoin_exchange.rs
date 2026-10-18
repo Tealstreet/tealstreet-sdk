@@ -69,7 +69,7 @@ fn assemble(
     parts.settings.client_order_id_rule = Some(globals::client_order_id_rule(spot));
     let name = js(&parts.name)?;
     let options = js(&parts.options)?;
-    let store = store::facade(parts.store.clone());
+    let store = store::facade(parts.store.clone())?;
     let http = Rc::new_cyclic(|me| ApiHost {
         me: me.clone(),
         runtime: deps.runtime.clone(),

@@ -706,7 +706,7 @@
       },
       "UNKNOWN",
       "1m ",
-      "﻿1m"
+      "\ufeff1m"
     ]
   },
   "safe_cex_types::Balance": {
@@ -1422,7 +1422,7 @@
       },
       "LONG",
       " long",
-      "long﻿",
+      "long\ufeff",
       "unknown"
     ]
   },
@@ -7051,7 +7051,7 @@
       },
       {
         "input": [
-          "😀",
+          "\ud83d\ude00",
           "",
           "_"
         ],
@@ -8855,7 +8855,7 @@
     "cases": [
       {
         "input": {
-          "value": "﻿Close Long﻿"
+          "value": "\ufeffClose Long\ufeff"
         },
         "output": {
           "ok": true,
@@ -8873,7 +8873,7 @@
       },
       {
         "input": {
-          "value": "long"
+          "value": "\u0085long\u0085"
         },
         "output": {
           "ok": true,
@@ -9239,7 +9239,7 @@
     "cases": [
       {
         "input": {
-          "value": " ﻿x  "
+          "value": " \ufeffx\u00a0 "
         },
         "output": {
           "some": true,
@@ -9257,7 +9257,7 @@
       },
       {
         "input": {
-          "value": " ﻿ "
+          "value": " \ufeff "
         },
         "output": {
           "some": false,
@@ -9266,11 +9266,11 @@
       },
       {
         "input": {
-          "value": ""
+          "value": "\u0085"
         },
         "output": {
           "some": true,
-          "value": ""
+          "value": "\u0085"
         }
       },
       {
@@ -9351,7 +9351,7 @@
     "cases": [
       {
         "input": {
-          "value": " ﻿x  "
+          "value": " \ufeffx\u00a0 "
         },
         "output": {
           "some": true,
@@ -9369,7 +9369,7 @@
       },
       {
         "input": {
-          "value": " ﻿ "
+          "value": " \ufeff "
         },
         "output": {
           "some": false,
@@ -9378,11 +9378,11 @@
       },
       {
         "input": {
-          "value": ""
+          "value": "\u0085"
         },
         "output": {
           "some": true,
-          "value": ""
+          "value": "\u0085"
         }
       },
       {
@@ -57026,5 +57026,67 @@
         }
       ]
     }
+  },
+  "safe_cex_types::store_access::StoreReadError": {
+    "shape": "typed",
+    "evidence": "Constructs a typed phase and retains the supplied opaque native Rc cause. It never reads cause getters or parses a raw value. Actual canonical Store property/projection regressions exercise original-cause recovery, identity and diagnostics.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "phase",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::store_access::StoreReadPhase",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "cause",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::any::Any",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Constructs a typed phase and retains the supplied opaque native Rc cause. It never reads cause getters or parses a raw value. Actual canonical Store property/projection regressions exercise original-cause recovery, identity and diagnostics."
+      }
+    ]
   }
 }

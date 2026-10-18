@@ -104,7 +104,7 @@ impl OkxExchange {
         };
         let h = lifecycle_ops(&constructing);
         let (js_name, js_options) = (js(&name)?, js(&options)?);
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         let receiver = match shared.extra.variant() {
             Variant::Global | Variant::Eu => {
                 family_lifecycle::new_exchange(&h, js_name, js_options, js_store)

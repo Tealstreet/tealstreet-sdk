@@ -54,7 +54,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let symbol = text(&arg(&a, 0))?;
         let parent = venue(&rt)?;
         let missing = {
-            let markets = parent.base.store.markets();
+            let markets = parent.base.store.markets()?;
             !markets.is_empty() && !markets.iter().any(|m| m.symbol == symbol)
         };
         if missing {

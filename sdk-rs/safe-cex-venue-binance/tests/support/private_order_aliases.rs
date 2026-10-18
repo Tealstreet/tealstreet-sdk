@@ -110,7 +110,7 @@ fn owner(http: Arc<Http>, runtime: Rc<Runtime>) -> Rc<ExchangeOwner> {
         None,
         safe_cex_exchange::native::NativeHttpEvents::default(),
     );
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     safe_cex_store::Store::update(store.as_ref(), safe_cex_store::StoreUpdate {
         markets: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.1},"limits":{"amount":{"min":0.1,"max":100},"leverage":{"min":1,"max":100}}})).unwrap()]),
         tickers: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","bid":99,"ask":101,"last":100,"mark":100,"index":100,"percentage":0,"volume":0,"quoteVolume":0,"fundingRate":0,"fundingTime":0,"openInterest":0})).unwrap()]),
@@ -177,7 +177,7 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
     assert!(poll(&runtime, &mut call).is_pending());
     assert_eq!(http.count("/fapi/v1/order"), 1);
     assert_eq!(
-        owner.base.store.orders()[0].status,
+        owner.base.store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Open
     );
     let request = http.requests.lock().unwrap()[0].clone();
@@ -190,7 +190,7 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
         EventValue::Undefined
     ));
     assert_eq!(
-        owner.base.store.orders()[0].status,
+        owner.base.store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Canceled
     );
     owner.dispose().unwrap();
@@ -245,6 +245,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
                 .base
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|row| row.status == OrderStatus::Open)
         );
@@ -268,6 +269,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
                 .base
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|row| row.status == OrderStatus::Open)
         );
@@ -281,7 +283,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
             assert_eq!(response["status"], 500);
             assert_eq!(response["data"]["msg"], "algo refused");
         }
-        let rows = owner.base.store.orders();
+        let rows = owner.base.store.orders().unwrap();
         assert_eq!(rows.len(), 3);
         for row in rows.iter() {
             let expected =
@@ -524,7 +526,7 @@ fn native_private_handler_and_event_array_keep_numeric_fields_before_transport()
     ])
     .unwrap();
     assert_eq!(
-        owner.base.store.orders()[0].filled.to_bits(),
+        owner.base.store.orders().unwrap()[0].filled.to_bits(),
         (-0.0f64).to_bits()
     );
     let rows: EventArray = owner.private.parent.orders().unwrap();

@@ -481,7 +481,8 @@ fn run(kind: &str) -> Outcome {
     }
 }
 fn typed_leverage_snapshot_native_assertions() -> impl FnOnce() {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_types::FetchedLeverage;
     let store = DefaultStore::new();
     let record = |buy, sell| FetchedLeverage {
@@ -504,16 +505,17 @@ fn typed_leverage_snapshot_native_assertions() -> impl FnOnce() {
         false,
     )
     .unwrap();
-    let mut prior = store.fetched_leverage().clone();
+    let mut prior = store.fetched_leverage().unwrap().clone();
     safe_cex_venue_kucoin::spot_helpers::set_leverage(&store, "BTC-USDT", 97., None).unwrap();
     assert_eq!(
-        store.fetched_leverage().len(),
+        store.fetched_leverage().unwrap().len(),
         2,
         "KUCOIN-POLICY typed retained dictionary count"
     );
     assert_eq!(
         store
             .fetched_leverage()
+            .unwrap()
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
@@ -525,7 +527,7 @@ fn typed_leverage_snapshot_native_assertions() -> impl FnOnce() {
         77f64.to_bits(),
         "KUCOIN-POLICY typed prior value mutation"
     );
-    let current = store.fetched_leverage();
+    let current = store.fetched_leverage().unwrap();
     assert_eq!(
         current["old"].buy_leverage.to_bits(),
         11f64.to_bits(),

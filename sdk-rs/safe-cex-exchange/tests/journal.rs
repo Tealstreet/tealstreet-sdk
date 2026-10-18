@@ -246,14 +246,14 @@ fn journal_interval_native_source_parity() {
                     "INTERVAL native funding attributed"
                 );
             }
-            let mut currency = |s: &str| format!("settle:{s}");
+            let mut currency = |s: &str| Ok(format!("settle:{s}"));
             let mut resolve_funding = |i: &PositionInterval| attribute_funding(i, &funding, false);
             let mut deps = FoldPositionAdapterDeps {
                 account: "acct",
                 resolve_settle_currency: &mut currency,
                 resolve_funding: Some(&mut resolve_funding),
             };
-            let actual_record = map_folded_interval(actual, &mut deps);
+            let actual_record = map_folded_interval(actual, &mut deps).unwrap();
             let expected_record = &case["records"][n];
             if expected_record.is_null() {
                 assert!(actual_record.is_none(), "FOLD native refusal");
@@ -292,7 +292,7 @@ fn journal_interval_native_source_parity() {
             fees: decoded(&e["fees"]),
             fee_currencies: vec!["USDT".into()],
         };
-        let mut currency = |s: &str| format!("settle:{s}");
+        let mut currency = |s: &str| Ok(format!("settle:{s}"));
         let result = map_folded_interval(
             &actual,
             &mut FoldPositionAdapterDeps {
@@ -300,7 +300,8 @@ fn journal_interval_native_source_parity() {
                 resolve_settle_currency: &mut currency,
                 resolve_funding: None,
             },
-        );
+        )
+        .unwrap();
         if case["result"].is_null() {
             assert!(result.is_none(), "FOLD direct refusal");
         } else {
@@ -424,7 +425,7 @@ fn journal_build_native_source_parity() {
             trace
                 .borrow_mut()
                 .push(serde_json::json!(["currency", symbol]));
-            format!("settle:{symbol}")
+            Ok(format!("settle:{symbol}"))
         };
         let result = ready(build_folded_position_records(
             &mut FoldableExchange {

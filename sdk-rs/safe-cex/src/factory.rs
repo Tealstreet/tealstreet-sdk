@@ -3,7 +3,8 @@ use crate::options_patch::{
     ExchangeOptionsPatch, apply_extra_patch, apply_patch, empty_extra_options, empty_options,
 };
 use indexmap::IndexMap;
-use safe_cex_store::{Store, store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, virtual_clock::VirtualClock};
 use safe_cex_transport::{TransportProvider, TransportRegistry};
 use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_exchange_metadata};
 use std::{

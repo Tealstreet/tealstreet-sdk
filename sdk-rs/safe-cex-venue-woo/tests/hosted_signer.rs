@@ -3,12 +3,12 @@
 #[path = "support/binding_harness.rs"]
 #[allow(dead_code)]
 mod binding_harness;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::client::rest_http_host_signed,
     runtime::{Cleanup, ExchangeFuture},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody, TransportFuture,
     signing::{

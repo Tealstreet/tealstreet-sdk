@@ -53,7 +53,7 @@ fn txflow_native_registry_preserves_phase_zero_refusal_without_io() {
                 h.peers.borrow().is_empty(),
                 "Phase-0 must not dial a socket"
             );
-            assert!(h.store.markets().is_empty());
+            assert!(h.store.markets().unwrap().is_empty());
             h.exchange.dispose().expect("dispose scaffold");
         }
     });

@@ -647,7 +647,8 @@ impl HttpClient {
             }
         };
         if let Some(store) = &self.store {
-            store.record_request_outcome(outcome);
+            // safeCexAxiosCreate.ts219-222 catches counter failures explicitly.
+            let _ = store.record_request_outcome(outcome);
         }
     }
     fn failure<T>(&self, error: HttpFailure) -> Result<T, HttpFailure> {

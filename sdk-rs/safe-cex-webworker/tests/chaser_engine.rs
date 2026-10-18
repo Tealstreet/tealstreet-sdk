@@ -1,13 +1,14 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     client_order_id::{ClientOrderIdRule, ClientOrderLookup},
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Order, OrderTimeInForce, OrderType, PlaceOrderOpts};
 use safe_cex_webworker::chaser::ChaserOrderInstance;
 use safe_cex_webworker::chaser_engine::*;
@@ -260,7 +261,7 @@ fn fixture(
     let mut opts:ChaserOrderOptions=serde_json::from_value(json!({"symbol":"BTC","size":3,"side":"buy","maxAttempts":10,"delay":100,"reduceOnly":false})).unwrap();
     opts.size = size;
     *host.runtime.id.borrow_mut() = Some("i".into());
-    let instance = Rc::new(ChaserOrderInstance::new(ex, Rc::new(RefCell::new(opts))));
+    let instance = Rc::new(ChaserOrderInstance::new(ex, Rc::new(RefCell::new(opts))).unwrap());
     *host.instance.borrow_mut() = Rc::downgrade(&instance);
     let manager = ChaserOrderManager::new();
     manager.instances().borrow_mut().push(instance.clone());

@@ -37,7 +37,7 @@ pub(crate) fn resolve_order_symbol_for_fills(
         || {
             Ok(Rc::new(RefCell::new(
                 store
-                    .orders()
+                    .orders()?
                     .iter()
                     .map(|o| Rc::new(RefCell::new(o.clone())))
                     .collect(),

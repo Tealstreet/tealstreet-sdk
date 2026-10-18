@@ -262,7 +262,7 @@ impl PublicTopics {
                 || Ok(socket.is_disposed()),
                 || {
                     let store = socket.store();
-                    let markets = store.markets();
+                    let markets = store.markets()?;
                     Ok(Rc::new(RefCell::new(
                         markets
                             .iter()

@@ -1,9 +1,10 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, MarginType, Position, PositionMode};
 use safe_cex_venue_kucoin::position_metadata::{
     get_or_fetch_margin_type, get_or_fetch_position_mode,

@@ -8,8 +8,8 @@ use crate::{
     exchange::HyperliquidExchange,
     rate_limit::RateLimiter,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{runtime::ExchangeSigners, socket_lifecycle::SocketSlot};
-use safe_cex_store::store::DefaultStore;
 use serde_json::json;
 use std::{rc::Rc, sync::Arc};
 

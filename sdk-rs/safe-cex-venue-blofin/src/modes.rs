@@ -20,7 +20,7 @@ pub fn apply_confirmed_position_mode(
 ) -> Result<(), StoreMutationError> {
     modes.position_mode.set(Some(position_mode));
     // Observe the prepared update before Store normalization can mask helper errors.
-    match prepare_confirmed_mode_update(store, position_mode) {
+    match prepare_confirmed_mode_update(store, position_mode)? {
         Some(update) => store.update(update, false),
         None => Ok(()),
     }
@@ -29,10 +29,10 @@ pub fn apply_confirmed_position_mode(
 fn prepare_confirmed_mode_update(
     store: &dyn Store,
     position_mode: PositionMode,
-) -> Option<StoreUpdate> {
+) -> Result<Option<StoreUpdate>, safe_cex_types::StoreReadError> {
     let mut update = StoreUpdate::default();
     {
-        let leverage = store.fetched_leverage();
+        let leverage = store.fetched_leverage()?;
         if !leverage.is_empty() {
             update.fetched_leverage = Some(
                 leverage
@@ -47,7 +47,7 @@ fn prepare_confirmed_mode_update(
         }
     }
     {
-        let positions = store.positions();
+        let positions = store.positions()?;
         if !positions.is_empty() {
             let mut ids = HashSet::new();
             update.positions = Some(
@@ -70,9 +70,9 @@ fn prepare_confirmed_mode_update(
     }
     // All Store read guards have been released before returning to update/callbacks.
     if update.fetched_leverage.is_none() && update.positions.is_none() {
-        None
+        Ok(None)
     } else {
-        Some(update)
+        Ok(Some(update))
     }
 }
 
@@ -86,7 +86,7 @@ pub fn apply_confirmed_margin_type(
     modes.margin_type.set(Some(margin_type));
     let mut update = StoreUpdate::default();
     {
-        let leverage = store.fetched_leverage();
+        let leverage = store.fetched_leverage()?;
         if !leverage.is_empty() {
             update.fetched_leverage = Some(
                 leverage
@@ -101,7 +101,7 @@ pub fn apply_confirmed_margin_type(
         }
     }
     {
-        let positions = store.positions();
+        let positions = store.positions()?;
         let flat_update = positions
             .iter()
             .any(|position| position.contracts == 0.0 && position.margin_type != Some(margin_type));
@@ -200,8 +200,8 @@ pub async fn get_position_side<E, F: Future<Output = Result<Option<PositionMode>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_num::numeric_ingress::js_from_str;
-    use safe_cex_store::store::DefaultStore;
     #[test]
     fn native_prepared_mode_update_dedupes_before_store_normalization() {
         let store = DefaultStore::new();
@@ -218,9 +218,13 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(Store::positions(&store).len(), 2, "independent_input_floor");
+        assert_eq!(
+            Store::positions(&store).unwrap().len(),
+            2,
+            "independent_input_floor"
+        );
         let prepared = prepare_confirmed_mode_update(&store, PositionMode::OneWay).unwrap();
-        let native = prepared.positions.unwrap();
+        let native = prepared.unwrap().positions.unwrap();
         assert_eq!(native.len(), 1, "native_prepared_update_first_id_dedupe");
         assert_eq!(native[0].id, "BTCUSDT");
         assert_eq!(native[0].position_mode, Some(PositionMode::OneWay));
@@ -232,7 +236,7 @@ mod tests {
         assert_eq!(native[0].leverage, 3.0);
         assert_eq!(native[0].contracts, 1.0);
         assert_eq!(
-            Store::positions(&store).len(),
+            Store::positions(&store).unwrap().len(),
             2,
             "prepare_does_not_write_store"
         );

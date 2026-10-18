@@ -97,7 +97,7 @@ pub(super) fn invoke(rt: &Rt, name: &'static str, a: Vec<Js>) -> Result<Js, Thro
         }
         "getAccountPositionMode" => {
             return from_typed(&helpers::get_account_position_mode(
-                rt.base().store.options().is_hedged,
+                rt.base().store.options()?.is_hedged,
             ));
         }
         "getPositionStateVersion" => return rt.this.get("positionStateVersion"),
@@ -116,7 +116,7 @@ pub(super) fn invoke(rt: &Rt, name: &'static str, a: Vec<Js>) -> Result<Js, Thro
         "getOrderPositionSide" => {
             return Ok(Js::str(helpers::get_order_position_side(
                 &to_typed::<safe_cex_types::PreparedOrderOpts>(&value(0))?,
-                rt.base().store.options().is_hedged,
+                rt.base().store.options()?.is_hedged,
             )));
         }
         "assertV3Feature" => {

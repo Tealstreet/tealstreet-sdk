@@ -70,7 +70,7 @@ where
             .decode::<Options>()
             .map_err(|e| ExchangeError::new(e.to_string()))?;
         let pair = store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&options.symbol)
             .and_then(|market| market.info.as_ref())
             .and_then(|info| info.get("pairName"))

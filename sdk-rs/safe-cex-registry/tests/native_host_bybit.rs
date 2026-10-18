@@ -168,7 +168,7 @@ fn bybit_ticker_socket_preserves_coercion_type_errors_through_native_registry() 
             );
             assert_eq!(error.message, "Cannot convert object to primitive value");
             assert!(
-                h.store.tickers().is_empty(),
+                h.store.tickers().unwrap().is_empty(),
                 "coercion fails before ticker mutation"
             );
             h.exchange.dispose().unwrap();
@@ -249,7 +249,7 @@ fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
                 ))
                 .unwrap_err();
             assert_eq!(
-                h.store.tickers()[0].last,
+                h.store.tickers().unwrap()[0].last,
                 42.,
                 "mutation commits before rejection: {name:?}"
             );
@@ -618,7 +618,7 @@ fn registry_selects_demo_origin_before_any_transport_rewrite() {
                         "key":"origin-key", "secret":"origin-secret", "testnet":testnet
                     }))
                     .unwrap(),
-                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                    Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 )
                 .unwrap();
             assert_eq!(exchange.get_account().await.unwrap().user_id, "12345");
