@@ -822,9 +822,9 @@ note = "Snapshots the real get_all_sockets result, invokes every supplied contex
 ts = "BaseExchange.noteHttpResponse"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::note_http_response"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::note_http_response", "safe-cex-exchange/src/exchange.rs::BaseExchange::note_http_failure" ]
 status = "ported"
-note = ""
+note = "Split member `safe-cex-exchange/src/exchange.rs::BaseExchange::note_http_failure` assigns the same once-consumed correlation slot for typed native HTTP and the shared Js factory. The Js adapter preserves numeric status, including NaN, without serializing response bodies or coercing nonstring reasons. Existing URL/reason text and final exception-report JSON profiles remain unchanged."
 
 [[symbol]]
 ts = "BaseExchange.emitAndLogError"

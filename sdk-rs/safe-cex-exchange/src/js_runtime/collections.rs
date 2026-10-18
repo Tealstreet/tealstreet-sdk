@@ -159,8 +159,8 @@ pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
         if let Some(prop) = data.symbol_iterator.borrow().clone() {
             return match prop {
                 Prop::Data(value) | Prop::DataDescriptor { value, .. } => Ok(value),
-                Prop::Accessor(Some(get), _) => get(value),
-                Prop::Accessor(None, _) => Ok(Js::Undefined),
+                Prop::Accessor { get: Some(get), .. } => get.call(value.clone(), vec![]),
+                Prop::Accessor { get: None, .. } => Ok(Js::Undefined),
             };
         }
         if data.iterator_next.borrow().is_some() {

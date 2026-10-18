@@ -281,14 +281,14 @@ fn inherited_descriptor_fields_getter_order_and_readonly_prototypes() {
 }
 
 #[test]
-fn invalid_or_unbound_descriptors_leave_target_unchanged() {
+fn invalid_descriptors_leave_target_unchanged() {
     let define_property = intrinsic();
     let object = Js::object(vec![]);
     for descriptor in [
         Js::Undefined,
         Js::Null,
         Js::Number(1.0),
-        Js::object(vec![("get", Js::function("get", |_, _| Ok(Js::Undefined)))]),
+        Js::object(vec![("get", Js::Number(1.0))]),
     ] {
         assert!(define(&define_property, &object, descriptor).is_err());
         assert!(!object.has_own("x"));

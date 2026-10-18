@@ -25,6 +25,11 @@ pub trait ClientHost: ReadHost {
         function: &Self::Value,
         args: Vec<Self::Value>,
     ) -> Result<Self::Value, Self::Error>;
+    fn construct(
+        &self,
+        constructor: &Self::Value,
+        args: Vec<Self::Value>,
+    ) -> Result<Self::Value, Self::Error>;
     fn call_method(
         &self,
         receiver: &Self::Value,
@@ -824,7 +829,7 @@ pub fn send_raw_tx<H: ClientHost + 'static>(
         let typ = h.get(&serialized, "txType")?;
         let json = h.get(&serialized, "txInfoJson")?;
         let factory = h.url_search_params_factory()?;
-        let body = h.call(
+        let body = h.construct(
             &factory,
             vec![object(
                 h.as_ref(),
@@ -922,7 +927,7 @@ pub fn send_raw_tx_batch<H: ClientHost + 'static>(
         let infos = h.function(Rc::new(move |_, a| runtime.get(&a[0], "txInfoJson")));
         let infos = h.call_method(&serialized, "map", vec![infos])?;
         let infos = h.call(&stringifier, vec![infos])?;
-        let body = h.call(
+        let body = h.construct(
             &factory,
             vec![object(
                 h.as_ref(),

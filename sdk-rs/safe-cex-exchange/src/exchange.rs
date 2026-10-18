@@ -1007,8 +1007,13 @@ impl BaseExchange {
 
 impl BaseExchange {
     pub fn note_http_response(&self, response: &Value, url: Option<&str>) {
-        *self.last_http_failure.borrow_mut() =
-            record_http_failure(response, self.runtime.now_ms(), url);
+        self.note_http_failure(record_http_failure(response, self.runtime.now_ms(), url));
+    }
+    pub(crate) fn note_http_failure(
+        &self,
+        failure: Option<crate::error_reporting::HttpFailureRecord>,
+    ) {
+        *self.last_http_failure.borrow_mut() = failure;
     }
     pub fn emit_and_log_error(
         &self,

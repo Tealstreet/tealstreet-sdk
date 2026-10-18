@@ -259,7 +259,7 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         "construct" => {
             let ctor = x;
             let args = a.into_iter().skip(1).collect();
-            ctor.call(Js::Undefined, args)?
+            ctor.construct(args, None)?
         }
         // `opts?.symbol` / `opts?.from` / `opts?.to` / `opts?.limit`, `market?.id`
         "opts-optional-symbol"

@@ -292,7 +292,7 @@ impl SnapshotHost for Rt {
         match name {
             "null" => Ok(Js::Null),
             "globalThis" => Ok(self.shared.globals.clone()),
-            "Set" | "Map" => self.global(name)?.call(Js::Undefined, vec![]),
+            "Set" | "Map" => self.global(name)?.construct(vec![], None),
             "String" => self.global("String")?.call(Js::Undefined, args),
             "select:aggregateBybitClosedPnl" => {
                 Ok(Js::function("aggregateBybitClosedPnl", |_, args| {

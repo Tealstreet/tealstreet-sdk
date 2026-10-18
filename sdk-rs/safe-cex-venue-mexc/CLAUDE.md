@@ -374,10 +374,10 @@ read `name`/`message` before JSON projection, and compare the shared JS stringif
 separately against actual source `JSON.stringify`. Numeric reports compare IEEE
 bits rather than serde's integer/float storage variants. The 120 reporting cases
 and six throwing-listener cases retain their original call and fallback floors.
-`examples/reporting_worker_host.rs` constructs the real MEXC venue and drives
+`../safe-cex-parity/examples/mexc_reporting_worker_host.rs` constructs the real MEXC venue and drives
 all three failing REST readers through `install_exchange_event_bridge` and
-`WorkerDataPost::for_browser`. Build that example for wasm32, run wasm-bindgen
-with `--target nodejs`, then run `tests/reporting-worker-host.mjs <generated-js>`
+`WorkerDataPost::for_browser`. Build that tooling example for wasm32, run wasm-bindgen
+with `--target nodejs`, then run `../safe-cex-parity/tests/mexc-reporting-worker-host.mjs <generated-js>`
 with `SAFE_CEX_TYPESCRIPT_PATH` set. Its six cases compare actual source readers
 and worker registration to the native browser post and UI structured clone.
 A cloned Error keeps its message but resets a custom name, matching JavaScript.
@@ -392,3 +392,15 @@ Replacement amounts select the first non-nullish raw volume alias. Own undefined
 does not suppress quantity, while NaN, Infinity, empty text and signed zero keep
 their source branches. Six maintained-source cases drive real cancel and submit
 requests, including a numeric prefix followed by an unpaired UTF-16 unit.
+
+The cross-layer MEXC/worker proof lives in parity tooling. The venue has no
+worker dependency, including dev-dependencies; architectural layer checks include
+test-only edges. All six browser-post and UI-clone cases remain mandatory in the
+relocated witness.
+
+The 120-case reporting-values/worker bridge corpus lives in tooling at
+`safe-cex-parity/tests/mexc_reporting_worker.rs`, using the public MEXC constructor.
+The MEXC unit target retains the six throwing-listener observations and primitive
+reporting helpers. `venue-oracle:mexc` runs both targets; worker dependencies never
+belong in this venue. Browser Error/structuredClone proof remains in the tooling
+example and Node runner documented above.

@@ -298,3 +298,9 @@ Native account notifications use `native_account_event` for the outbound packet.
 The worker's `ws-reconnected` notification has no `data` property; other events
 retain their scalar/variadic NativeValue payload. The MEXC native-host socket
 witness exercises its source `onOpen` notification and packet construction.
+
+Fulfilled native HTTP failures populate BaseExchange's once-consumed recent-HTTP
+correlation slot before venue error reporting. The JS factory reads primitive
+status/reason metadata without serializing response bodies; signing captures do
+not replace the slot, and successful responses clear it. `native_host_tunnel`
+exercises real WOO/Bybit HOW 404 reports and cyclic/nonfinite metadata profiles.

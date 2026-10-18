@@ -143,15 +143,16 @@ impl PrivateWebsocketRealm<Realm> for Assembly {
         let assembly = self.clone();
         let slot: Rc<OnceCell<Js>> = Rc::default();
         let class_slot = slot.clone();
-        let class = Js::constructor(name, move |_, args| {
+        let class = Js::constructor(name, None, move |target, args| {
             let class = class_slot.get().cloned().unwrap_or(Js::Undefined);
             let class = to_account(&class);
             let args: Vec<_> = args.iter().map(to_account).collect();
-            body(&assembly, class.clone(), class, &args)
+            body(&assembly, class, to_account(&target), &args)
                 .map(|v| to_js(&v))
                 .map_err(to_thrown)
         });
         js(class.define("prototype", prototype))?;
+        js(class.set("__proto__", to_js(&base)))?;
         js(class.define("name", Js::str(name)))?;
         let _ = slot.set(class.clone());
         Ok(to_account(&class))
@@ -198,9 +199,9 @@ impl PrivateWebsocketRealm<Realm> for Assembly {
         new_target: AccountValue,
         args: &[AccountValue],
     ) -> SigningResult<AccountValue> {
-        let _ = class;
-        let base = js(self.0.realm.global("BaseWebSocket"))?;
-        let instance = js(base.call(Js::Undefined, args.iter().map(to_js).collect()))?;
+        let base = js(to_js(&class).super_constructor())?;
+        let instance =
+            js(base.construct(args.iter().map(to_js).collect(), Some(&to_js(&new_target))))?;
         let prototype = js(to_js(&new_target).get("prototype"))?;
         if let Js::Object(o) = &instance {
             *o.proto.borrow_mut() = Some(prototype);

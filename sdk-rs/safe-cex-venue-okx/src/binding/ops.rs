@@ -91,7 +91,7 @@ fn client_order_id_rule(shared: Weak<OkxShared>) -> ClientOrderIdRule {
 /// `super(name, opts, store)` inside OKXExchange's constructor: the JS BaseExchange.
 fn base_constructor(scope: &OkxScope) -> Js {
     let shared = scope.shared.clone();
-    Js::constructor("BaseExchange", move |_, a| {
+    Js::constructor("BaseExchange", None, move |_, a| {
         let options: ExchangeOptions = base_exchange::exchange_options(&arg(&a, 1))?;
         let parts = BaseExchangeParts {
             name: shared.extra.name.clone(),
@@ -123,7 +123,7 @@ fn base_constructor(scope: &OkxScope) -> Js {
 /// `super(...)` from a demo class: the OKXExchange (or OKXEUExchange) constructor.
 fn okx_constructor(scope: &OkxScope) -> Js {
     let scope = scope.with_this(Js::Undefined);
-    Js::constructor("OKXExchange", move |_, a| {
+    Js::constructor("OKXExchange", None, move |_, a| {
         family_lifecycle::new_exchange(&lifecycle_ops(&scope), arg(&a, 0), arg(&a, 1), arg(&a, 2))
             .map(|state| state.receiver)
     })
@@ -190,8 +190,18 @@ pub(crate) fn capture(scope: &OkxScope, name: &str) -> Result<Js, Thrown> {
         scope
     };
     match name {
-        "super" => return Ok(base_constructor(scope)),
-        "super:OKXExchange" | "super:OKXEUExchange" => return Ok(okx_constructor(scope)),
+        "super" => {
+            let class = base_constructor(scope);
+            return Ok(Js::function("super", move |_, args| {
+                class.construct(args, None)
+            }));
+        }
+        "super:OKXExchange" | "super:OKXEUExchange" => {
+            let class = okx_constructor(scope);
+            return Ok(Js::function("super", move |_, args| {
+                class.construct(args, None)
+            }));
+        }
         _ => {}
     }
     if name == "this" {
@@ -349,7 +359,7 @@ pub(crate) fn mutation_ops(scope: &OkxScope) -> Rc<OrderMutationOps<Js, Thrown>>
     let s = scope.clone();
     Rc::new(OrderMutationOps {
         value: market_ops(scope),
-        has: Rc::new(|k, v| Ok(v.has_own(k))),
+        has: Rc::new(|k, v| safe_cex_exchange::js_runtime::library::in_operator(v, k)),
         filter: Rc::new(|v, f| {
             let mut out = vec![];
             for x in items(&v)? {

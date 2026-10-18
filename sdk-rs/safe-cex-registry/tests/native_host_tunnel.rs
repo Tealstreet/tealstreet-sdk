@@ -567,3 +567,236 @@ fn okx_family_signed_rest_uses_the_authenticated_bigint_tunnel() {
         }
     });
 }
+#[test]
+fn fulfilled_tunnel_failure_reaches_the_native_venue_error_report() {
+    const CHILD: &str = "SAFE_CEX_HTTP_CORRELATION_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let venue = std::env::var(CHILD).unwrap();
+        run_local(async {
+            let name = match venue.as_str() {
+                "woo" => safe_cex_types::ExchangeName::Woo,
+                "bybit" => safe_cex_types::ExchangeName::Bybit,
+                other => panic!("unknown native HTTP witness {other}"),
+            };
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = format!("ws://{}", listener.local_addr().unwrap());
+            let tunnel = Rc::new(Tunnel::default());
+            tokio::task::spawn_local(serve_tunnel(listener, Rc::new(|_| None), tunnel.clone()));
+            let runtime = native_tealstreet_runtime_with(
+                Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+                Rc::new(LocalTunnel {
+                    inner: NativeTunnelHost,
+                    origin,
+                }),
+            );
+            let h = venue_harness(
+                name,
+                Rc::new(|_| None),
+                json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":true}),
+                None,
+                runtime,
+            )
+            .await;
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let captured = errors.clone();
+            h.exchange.base().on_args(
+                "error",
+                Rc::new(move |_, args| {
+                    captured.borrow_mut().push(args[0].to_display());
+                    Ok(())
+                }),
+            );
+            if venue == "woo" {
+                let markets = h.exchange.fetch_markets().await.unwrap();
+                assert!(
+                    markets.is_empty(),
+                    "source catch returns the current empty Store markets"
+                );
+            } else {
+                let result = h.exchange.validate_account().await.unwrap();
+                assert_ne!(result.error.as_value(), &json!(""));
+            }
+            assert_eq!(tunnel.seen.borrow().len(), 1, "one real HOW request");
+            let endpoint = if venue == "woo" {
+                "/v1/public/info"
+            } else {
+                "/v5/account/info"
+            };
+            assert!(tunnel.seen.borrow()[0].path.ends_with(endpoint));
+            assert!(h.seen.borrow().is_empty(), "no direct-origin HTTP request");
+            assert!(
+                !errors.borrow().is_empty(),
+                "the actual venue reports the failure"
+            );
+            if venue == "woo" {
+                assert!(
+                    errors.borrow()[0].contains("filter"),
+                    "{:?}",
+                    errors.borrow()
+                );
+            }
+            h.exchange.dispose().unwrap();
+        });
+        return;
+    }
+    for venue in ["woo", "bybit"] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "fulfilled_tunnel_failure_reaches_the_native_venue_error_report",
+                "--nocapture",
+            ])
+            .env(CHILD, venue)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            output.status.success(),
+            "native host child failed: {stderr}"
+        );
+        assert!(
+            stderr.contains("\"recentHttpStatus\":404"),
+            "fulfilled HTTP failure lost its native report context: {stderr}"
+        );
+        assert!(
+            stderr.contains("\"recentHttpUrl\":"),
+            "missing source request URL: {stderr}"
+        );
+        assert!(
+            stderr.contains("\"recentHttpAgeMs\":"),
+            "missing correlation age: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn native_factory_correlation_reads_only_primitive_metadata() {
+    const CHILD: &str = "SAFE_CEX_HTTP_METADATA_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        run_local(async {
+            use safe_cex_exchange::{
+                error_reporting::ExchangeErrorInput,
+                exchange::{BaseExchange, ExchangeSettings},
+                js_runtime::{client, promise::await_js, value::Js},
+            };
+            let runtime = safe_cex_exchange::native::native_runtime();
+            let owner = Rc::new(BaseExchange::new(
+                safe_cex_types::ExchangeName::Woo,
+                serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
+                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                runtime.clone(),
+                ExchangeSettings::default(),
+            ));
+            let host = client::rest_http_host(
+                runtime,
+                std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+            );
+            let xhr = client::factory::create(
+                host,
+                &safe_cex_transport::DirectTransport,
+                Js::object(vec![("baseURL", Js::str("https://venue"))]),
+                &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]),
+                &owner,
+            )
+            .unwrap();
+            let cyclic = Js::object(vec![]);
+            cyclic.define("self", cyclic.clone()).unwrap();
+            let body = cyclic.clone();
+            let adapter = Js::function("metadataSource", move |_, args| {
+                let config = args[0].clone();
+                Ok(Js::object(vec![
+                    ("status", config.get("testStatus")?),
+                    ("statusText", config.get("testReason")?),
+                    ("status_text", config.get("testAlternateReason")?),
+                    ("data", body.clone()),
+                    ("config", config),
+                ]))
+            });
+            for (label, status, reason, alternate, capture) in [
+                (
+                    "metadata-fallback",
+                    404.,
+                    Js::BigInt(Rc::new(123.into())),
+                    Js::str("fallback reason"),
+                    false,
+                ),
+                ("metadata-opaque", 404., cyclic.clone(), Js::Null, false),
+                (
+                    "metadata-nonfinite",
+                    f64::NAN,
+                    Js::str("nonfinite"),
+                    Js::Null,
+                    false,
+                ),
+                (
+                    "metadata-prime",
+                    404.,
+                    Js::str("old reason"),
+                    Js::Null,
+                    false,
+                ),
+                ("metadata-success", 200., cyclic.clone(), Js::Null, false),
+                ("metadata-capture", 404., Js::str("capture"), Js::Null, true),
+            ] {
+                let config = Js::object(vec![
+                    ("adapter", adapter.clone()),
+                    ("testStatus", Js::Number(status)),
+                    ("testReason", reason),
+                    ("testAlternateReason", alternate),
+                    ("__tealstreetSigningCapture", Js::Bool(capture)),
+                ]);
+                let response = await_js(
+                    xhr.call_method("get", vec![Js::str("/metadata?private=discard"), config])
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+                assert!(
+                    response.get("data").unwrap().same_reference(&cyclic),
+                    "native response body is retained"
+                );
+                if label == "metadata-prime" {
+                    continue;
+                }
+                owner
+                    .emit_and_log_error(ExchangeErrorInput::Message(label.into()), None, None)
+                    .unwrap();
+            }
+        });
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "native_factory_correlation_reads_only_primitive_metadata",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        output.status.success(),
+        "native metadata host failed: {stderr}"
+    );
+    let reports = stderr
+        .lines()
+        .filter(|line| line.starts_with("[safe-cex uncaught]"))
+        .map(|line| serde_json::from_str::<Value>(&line[line.find('{').unwrap()..]).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(reports.len(), 5, "{stderr}");
+    assert_eq!(
+        reports[0]["tags"]["recentHttpStatusText"],
+        "fallback reason"
+    );
+    assert_eq!(reports[0]["tags"]["recentHttpUrl"], "/metadata");
+    assert_eq!(reports[1]["tags"]["recentHttpStatus"], 404.);
+    assert!(reports[1]["tags"].get("recentHttpStatusText").is_none());
+    assert_eq!(
+        reports[2]["tags"].get("recentHttpStatus"),
+        Some(&Value::Null)
+    );
+    for report in &reports[3..] {
+        assert!(report["tags"].get("recentHttpStatus").is_none(), "{report}");
+    }
+}

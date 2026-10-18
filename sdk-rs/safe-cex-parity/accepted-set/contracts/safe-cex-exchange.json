@@ -24266,6 +24266,29 @@
               [
                 "call",
                 {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::NativeFn",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "construct",
+                {
                   "impl_trait": [
                     {
                       "trait_bound": {
@@ -24353,8 +24376,8 @@
           }
         },
         "input": "observed",
-        "reason": "Executes the actual callable constructor, invokes the returned native function, and observes its retained name and returned argument payload.",
-        "call": "{ let function=$type::constructor($value[\"name\"].as_str().unwrap(),|_,args|Ok(args[0].clone()));let result=function.call(super::Js::Undefined,vec![super::Js::Number($value[\"argument\"].as_f64().unwrap())]).unwrap().to_number().unwrap().to_bits().to_string();match function{super::Js::Function(data)=>serde_json::json!({\"nameUnits\":data.name.as_ref(),\"resultBits\":result}),_=>panic!(\"callable lost tag\")} }",
+        "reason": "Executes the explicit native construct callback, reads the returned own numeric field bits and the actual constructor name units. Ordinary class calls are separately proved to refuse before the body; no function-call fallback remains.",
+        "call": "{ let function=$type::constructor($value[\"name\"].as_str().unwrap(),None,|_,args|Ok(super::Js::object(vec![(\"argument\",args[0].clone())])));let result=function.construct(vec![super::Js::Number($value[\"argument\"].as_f64().unwrap())],None).unwrap().get(\"argument\").unwrap().to_number().unwrap().to_bits().to_string();match function{super::Js::Function(data)=>serde_json::json!({\"nameUnits\":data.name.as_ref(),\"resultBits\":result}),_=>panic!(\"constructor lost tag\")} }",
         "cases": [
           {
             "input": {
@@ -24378,6 +24401,278 @@
                 98
               ],
               "resultBits": "4619567317775286272"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "super_constructor",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Read the active native function parent directly, independently of an own __proto__ data shadow. Existing native constructor referents and their live parent/name identity are observed; no raw input is coerced or admitted. Node class construction proves the corresponding dynamic super operation.",
+        "call": "{ let child=super::Js::constructor(\"Child\",None,|target,_|target.allocate_instance());let name=if $value.as_str().unwrap()==\"first\"{\"Base\"}else{\"Other\"};let parent=super::Js::constructor(name,None,|target,_|target.allocate_instance());child.set(\"__proto__\",parent).unwrap();child.define(\"__proto__\",super::Js::Number(9.0)).unwrap();let actual=$type::super_constructor(&child).unwrap();serde_json::json!({\"parent\":actual.get(\"name\").unwrap().to_display(),\"shadow\":child.get(\"__proto__\").unwrap().as_f64()==Some(9.0)}) }",
+        "cases": [
+          {
+            "input": "first",
+            "output": {
+              "parent": "Base",
+              "shadow": true
+            }
+          },
+          {
+            "input": "second",
+            "output": {
+              "parent": "Other",
+              "shadow": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "construct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "args",
+                {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "new_target",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual native construct operation with default or explicit existing new.target. Read the resulting own native number bits, retained target referent name and inherited prototype field. Separate runtime/Node witnesses cover class-call refusal, dynamic super, bound targets, cross-realm fallback and original throws.",
+        "call": "{ let class=super::Js::constructor(\"NativeCtor\",None,|target,args|{let object=target.allocate_instance()?;object.define(\"value\",args[0].clone())?;object.define(\"target\",target)?;Ok(object)});class.define(\"prototype\",super::Js::object(vec![(\"tag\",super::Js::str(\"base\"))])).unwrap();let alternate=super::Js::constructor(\"AlternateCtor\",None,|target,_|target.allocate_instance());alternate.define(\"prototype\",super::Js::object(vec![(\"tag\",super::Js::str(\"alternate\"))])).unwrap();let number=f64::from_bits(u64::from_str_radix($value[\"bits\"].as_str().unwrap(),16).unwrap());let target=$value[\"alternate\"].as_bool().unwrap().then_some(&alternate);let result=$type::construct(&class,vec![super::Js::Number(number)],target).unwrap();serde_json::json!({\"bits\":format!(\"{:016x}\",result.get(\"value\").unwrap().as_f64().unwrap().to_bits()),\"target\":result.get(\"target\").unwrap().get(\"name\").unwrap().to_display(),\"prototype\":result.get(\"tag\").unwrap().to_display()}) }",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "bits": "8000000000000000"
+            },
+            "output": {
+              "bits": "8000000000000000",
+              "target": "NativeCtor",
+              "prototype": "base"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "bits": "401c000000000000"
+            },
+            "output": {
+              "bits": "401c000000000000",
+              "target": "AlternateCtor",
+              "prototype": "alternate"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "allocate_instance",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Allocate an actual native class receiver using its live object prototype or original realm Object.prototype fallback. Inspect the stored parent referent and inherited native signed-zero field, without serializing/reconstructing that object. The factory class owns its new.target capability; no raw DTO ingress is classified away.",
+        "call": "{ let realm=std::rc::Rc::new(safe_cex_num::PrototypeRealm::default());let _binding=realm.bind();let target=super::Js::constructor(\"AllocationTarget\",None,|target,_|target.allocate_instance());let prototype=if $value.as_str().unwrap()==\"custom\"{super::Js::object(vec![(\"tag\",super::Js::Number(-0.0))])}else{super::Js::Null};target.define(\"prototype\",prototype).unwrap();let object=$type::allocate_instance(&target).unwrap();let super::Js::Object(data)=&object else{panic!(\"allocation must return object\")};let parent_is_root=matches!(&*data.proto.borrow(),Some(super::Js::Builtin(reference)) if reference.member()==safe_cex_num::BuiltinIdentity::Object(safe_cex_num::ProtoMember::Prototype)&&std::rc::Rc::ptr_eq(reference.realm(),&realm));let tag=object.get(\"tag\").unwrap();serde_json::json!({\"hasTag\":!tag.is_undefined(),\"bits\":tag.as_f64().map(|v|format!(\"{:016x}\",v.to_bits())),\"parentIsRoot\":parent_is_root}) }",
+        "cases": [
+          {
+            "input": "custom",
+            "output": {
+              "hasTag": true,
+              "bits": "8000000000000000",
+              "parentIsRoot": false
+            }
+          },
+          {
+            "input": "fallback",
+            "output": {
+              "hasTag": false,
+              "bits": null,
+              "parentIsRoot": true
             }
           }
         ]
@@ -30026,6 +30321,133 @@
           "tasks": 0,
           "timer": 0,
           "runtime": true
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::iterator::IteratorRecord": {
+    "shape": "observed",
+    "evidence": "safe-cex-exchange/src/js_runtime/iterator.rs; actual compiler-selected get API constructs retained native IteratorRecord state. Five independently executed Node strict iterator cases in tests/js_iterator_records_source.cjs contract mode pin native values/bits/UTF16, terminal state and non-iterable refusals. Eleven additional native/Node abrupt-close, elision, cached-next and normal-close cases exercise the production helper/global consumer; no raw JSON decoder, full runtime or HL cutover claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "GetIterator over an already native Js retains the original iterator and next method. This exact constructor is executed before observing yielded tags, binary64 bits, UTF16 units, exhaustion and strict TypeError refusals; no borrowed-input echo or nondecoder exemption."
+      }
+    ],
+    "call": "{ use crate::js_runtime::value::{Js,from_json}; let input=from_json($value); match $type::get(&input) {\nOk(record)=>{let mut values=Vec::new();while let Some(value)=record.step_value().expect(\"reviewed builtin iterator\"){assert!(values.len()<8,\"fixture iterator must terminate\");values.push(match value{Js::Number(number)=>serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits())}),Js::String(units)=>serde_json::json!({\"units\":units.as_ref()}),Js::Null=>serde_json::json!({\"null\":true}),_=>panic!(\"unreviewed fixture value\")});}let exhausted=record.step().expect(\"terminal record\").is_none();let closed=record.close().is_ok();serde_json::json!({\"values\":values,\"exhausted\":exhausted,\"closed\":closed})},\nErr(error)=>serde_json::json!({\"error\":error.value.get(\"name\").expect(\"native rejection name\").to_display()})} }",
+    "cases": [
+      {
+        "input": [],
+        "output": {
+          "values": [],
+          "exhausted": true,
+          "closed": true
+        }
+      },
+      {
+        "input": [
+          7,
+          "😀",
+          null
+        ],
+        "output": {
+          "values": [
+            {
+              "bits": "401c000000000000"
+            },
+            {
+              "units": [
+                55357,
+                56832
+              ]
+            },
+            {
+              "null": true
+            }
+          ],
+          "exhausted": true,
+          "closed": true
+        }
+      },
+      {
+        "input": "A😀",
+        "output": {
+          "values": [
+            {
+              "units": [
+                65
+              ]
+            },
+            {
+              "units": [
+                55357,
+                56832
+              ]
+            }
+          ],
+          "exhausted": true,
+          "closed": true
+        }
+      },
+      {
+        "input": 7,
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "error": "TypeError"
         }
       }
     ]

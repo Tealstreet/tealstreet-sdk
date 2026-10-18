@@ -12,7 +12,7 @@ use crate::{
 use safe_cex_exchange::js_runtime::{
     promise::Promise,
     scope::scope_of,
-    value::{Js, Thrown, arg},
+    value::{FunctionData, Js, Thrown, arg},
 };
 use std::rc::Rc;
 
@@ -153,8 +153,7 @@ pub(crate) fn spot_body(weak: &W, receiver: &Js) -> Rc<SpotBodyOps<Js, Thrown>> 
     })
 }
 
-/// A class value: callable constructor whose `prototype` chains to the base's.
-/// The constructor receives the prototype as both active function and newTarget.
+/// A class constructor with its active function and original newTarget.
 pub(crate) fn derive_class(
     name: &str,
     base: Js,
@@ -165,17 +164,31 @@ pub(crate) fn derive_class(
     if let (Js::Object(o), true) = (&proto, base_proto.is_object()) {
         *o.proto.borrow_mut() = Some(base_proto);
     }
-    proto.define("__super", base)?;
-    let target = proto.clone();
-    let class = Js::constructor(name, move |_, a| ctor(target.clone(), target.clone(), a));
+    let superclass = base;
+    let own: Rc<std::cell::OnceCell<std::rc::Weak<FunctionData>>> = Rc::default();
+    let slot = own.clone();
+    let class = Js::constructor(name, None, move |target, a| {
+        let active = slot
+            .get()
+            .and_then(std::rc::Weak::upgrade)
+            .map(Js::Function)
+            .ok_or_else(|| Thrown::type_error("class not initialized"))?;
+        ctor(active, target, a)
+    });
+    let Js::Function(function) = &class else {
+        unreachable!()
+    };
+    own.set(Rc::downgrade(function))
+        .map_err(|_| Thrown::type_error("class already initialized"))?;
     class.define("prototype", proto)?;
+    class.set("__proto__", superclass)?;
     Ok(class)
 }
 
 pub(crate) fn super_construct(base: Js, target: Js, args: Vec<Js>) -> Result<Js, Thrown> {
-    let receiver = base.call(Js::Undefined, args)?;
+    let receiver = base.construct(args, Some(&target))?;
     match &receiver {
-        Js::Object(o) => *o.proto.borrow_mut() = Some(target),
+        Js::Object(o) => *o.proto.borrow_mut() = Some(target.get("prototype")?),
         other => {
             return Err(Thrown::type_error(&format!(
                 "super constructor returned {}",
@@ -189,9 +202,9 @@ pub(crate) fn super_construct(base: Js, target: Js, args: Vec<Js>) -> Result<Js,
 pub(crate) fn construction() -> Rc<ConstructionOps<Js, Thrown>> {
     Rc::new(ConstructionOps {
         derive: Rc::new(|name, base, _, ctor| derive_class(name, base, ctor)),
-        superclass: Rc::new(|active| active.get("__super")),
+        superclass: Rc::new(|active| active.super_constructor()),
         super_construct: Rc::new(super_construct),
-        construct: Rc::new(|ctor, args| ctor.call(Js::Undefined, args)),
+        construct: Rc::new(|ctor, args| ctor.construct(args, None)),
     })
 }
 
@@ -234,7 +247,7 @@ pub(crate) fn private_class(weak: &W) -> Rc<PrivateClassOps<Js, Thrown>> {
                 name,
                 base,
                 Rc::new(move |active, target, args| {
-                    let receiver = super_construct(active.get("__super")?, target, args)?;
+                    let receiver = super_construct(active.super_constructor()?, target, args)?;
                     init(receiver.clone())?;
                     Ok(receiver)
                 }),

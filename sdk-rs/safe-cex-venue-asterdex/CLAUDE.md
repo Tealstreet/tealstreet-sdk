@@ -78,9 +78,17 @@ their 173 raw-text/native observations and grouped String-frontdoor control.
 `DECISION_CONTRACT_REVIEW.md` records eight account/exchange decision contracts,
 their 98 fixed TS/native observations and five isolated compiled controls.
 
+
+`ACCOUNT_FUNCTION_CONTRACT_REVIEW.md` reviews eleven remaining account, signing
+and Serde/error adapter functions. The selected runner requires all 131 native
+observations and replays 68 maintained-source expectations. Its grouped compiled
+control must fail every real owner, then pass after exact restoration. Bootstrap
+rustdoc artifacts stay in the separate `target/accepted-inventory` directory.
+
 `EXCHANGE_HELPER_CONTRACT_REVIEW.md` records twelve further production helper
 contracts, direct native fields/effects and the source checks for their 48 cases.
 The selected runner covers those twelve owners; the other full-matrix obligations remain.
+
 
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,

@@ -96,7 +96,7 @@ fn build_option_chain(rt: &Rt, markets: Js, quotes: Js, query: Js) -> Result<Js,
             Ok(Js::array(vec![quote.get("symbol")?, quote]))
         })],
     )?;
-    let by_symbol = rt.global("Map")?.call(Js::Undefined, vec![entries])?;
+    let by_symbol = rt.global("Map")?.construct(vec![entries], None)?;
     let markets = markets.call_method(
         "filter",
         vec![Js::function("matchesOptionQuery", move |_, a| {
@@ -151,7 +151,7 @@ fn option_expiries(rt: &Rt, markets: Js, underlying: Js) -> Result<Js, Thrown> {
             arg(&a, 0).get("option")?.get("expiry")
         })],
     )?;
-    let distinct = rt.global("Set")?.call(Js::Undefined, vec![expiries])?;
+    let distinct = rt.global("Set")?.construct(vec![expiries], None)?;
     let values = rt.global("Array")?.call_method("from", vec![distinct])?;
     values.call_method(
         "sort",
