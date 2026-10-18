@@ -197,3 +197,134 @@ fn native_payload_stream_retains_numeric_bits_presence_and_serde_wrappers() {
         [serde_json::json!("Null"), serde_json::Value::Null]
     );
 }
+
+#[test]
+fn native_payload_tags_keep_string_and_utf8_byte_admission() {
+    use safe_cex_types::retained_json::deserialize_native_payload;
+    use serde::Deserializer;
+    use serde::de::{self, IntoDeserializer, Visitor};
+    enum Atom {
+        Text(&'static str),
+        Owned(String),
+        Bytes(&'static [u8]),
+        ByteBuf(Vec<u8>),
+        Unit,
+    }
+    impl<'de> IntoDeserializer<'de, serde_json::Error> for Atom {
+        type Deserializer = Self;
+        fn into_deserializer(self) -> Self {
+            self
+        }
+    }
+    impl<'de> Deserializer<'de> for Atom {
+        type Error = serde_json::Error;
+        fn deserialize_any<V: Visitor<'de>>(self, v: V) -> Result<V::Value, Self::Error> {
+            match self {
+                Self::Text(s) => v.visit_str(s),
+                Self::Owned(s) => v.visit_string(s),
+                Self::Bytes(b) => v.visit_bytes(b),
+                Self::ByteBuf(b) => v.visit_byte_buf(b),
+                Self::Unit => v.visit_unit(),
+            }
+        }
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf
+            option unit unit_struct newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
+        }
+    }
+    for tag in [
+        Atom::Text("Null"),
+        Atom::Owned("Null".into()),
+        Atom::Bytes(b"Null"),
+        Atom::ByteBuf(b"Null".to_vec()),
+    ] {
+        let decoded = deserialize_native_payload(de::value::SeqDeserializer::new(
+            [tag, Atom::Unit].into_iter(),
+        ))
+        .unwrap();
+        assert_eq!(decoded, Input::Null);
+    }
+    for tag in [
+        Atom::Text("unknown"),
+        Atom::Bytes(b"unknown"),
+        Atom::Bytes(b"\xff"),
+        Atom::ByteBuf(vec![0xff]),
+    ] {
+        assert!(
+            deserialize_native_payload(de::value::SeqDeserializer::new(
+                [tag, Atom::Unit].into_iter()
+            ))
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn native_field_identifiers_preserve_map_key_admission_and_utf16_projection() {
+    use serde::{
+        Deserialize,
+        de::{self},
+    };
+    use std::{collections::BTreeMap, fmt::Debug};
+    #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct Newtype(String);
+    #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum UnitKey {
+        A,
+    }
+    fn compare<K: de::DeserializeOwned + Ord + Debug>(key: Vec<u16>)
+    where
+        BTreeMap<K, bool>: PartialEq,
+    {
+        let expected = BTreeMap::<K, bool>::deserialize(de::value::MapDeserializer::<
+            _,
+            serde_json::Error,
+        >::new(
+            [(String::from_utf16_lossy(&key), true)].into_iter(),
+        ))
+        .map_err(|e| e.to_string());
+        let actual = Input::Object(vec![(key, Input::Bool(true))])
+            .decode_native::<BTreeMap<K, bool>>(false)
+            .map_err(|e| e.to_string());
+        assert_eq!(actual, expected);
+    }
+    for key in [
+        units("A"),
+        units("1"),
+        units("a"),
+        units("é"),
+        vec![0xd800],
+        units(&"x".repeat(65)),
+    ] {
+        compare::<String>(key.clone());
+        compare::<char>(key.clone());
+        compare::<bool>(key.clone());
+        compare::<u8>(key.clone());
+        compare::<Option<String>>(key.clone());
+        compare::<Newtype>(key.clone());
+        compare::<UnitKey>(key);
+    }
+    #[derive(Deserialize)]
+    struct Record {
+        short: f64,
+        #[serde(rename = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")]
+        bound: f64,
+        #[serde(rename = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")]
+        long: f64,
+        #[serde(rename = "é")]
+        unicode: f64,
+    }
+    let decoded: Record = Input::Object(vec![
+        (units("short"), Input::Float(-0.0)),
+        (units(&"x".repeat(64)), Input::Float(64.0)),
+        (units(&"x".repeat(65)), Input::Float(65.0)),
+        (units("é"), Input::Float(f64::INFINITY)),
+        (vec![0xd800], Input::Bool(true)),
+    ])
+    .decode_native(false)
+    .unwrap();
+    assert_eq!(decoded.short.to_bits(), (-0.0f64).to_bits());
+    assert_eq!(decoded.bound, 64.0);
+    assert_eq!(decoded.long, 65.0);
+    assert_eq!(decoded.unicode, f64::INFINITY);
+}
