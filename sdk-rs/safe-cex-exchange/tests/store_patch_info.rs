@@ -1,7 +1,8 @@
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
 use safe_cex_store::{
     StoreUpdate,
     model_patch::{ModelPatch, PatchSource},
-    store::DefaultStore,
 };
 use serde_json::{Map, Value, json};
 
@@ -105,7 +106,7 @@ fn native_info_patch_retains_reserved_key_object() {
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/patch_info_source.mjs"
+            "/../safe-cex-store/tests/patch_info_source.mjs"
         ))
         .output()
         .unwrap();

@@ -1,7 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{
-    Store, StoreMutationError, StoreUpdate, model_patch::ModelPatch, store::DefaultStore,
-};
+use safe_cex_store::{Store, StoreMutationError, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{Order, OrderStatus, OrderType, StoreSubscriberError};
 use safe_cex_venue_binance::cancel_symbol_orders::*;
 use serde_json::{Value, json};

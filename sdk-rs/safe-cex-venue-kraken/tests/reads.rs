@@ -1,11 +1,12 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
     JsJsonValue,
     numeric_ingress::{JsNumberInput, js_from_value},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     IncomeCategory, IncomeRecord, MarginType, Market, Position, PositionMode, PositionSide,
 };

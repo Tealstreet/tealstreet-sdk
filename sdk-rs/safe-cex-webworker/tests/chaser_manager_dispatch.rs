@@ -1,11 +1,12 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{StoreUpdate, store::DefaultStore};
+use safe_cex_store::StoreUpdate;
 use safe_cex_types::ExchangeName;
 use safe_cex_webworker::{
     chaser::ChaserOrderInstance, chaser_manager::*, task_types::ChaserOrderOptions,

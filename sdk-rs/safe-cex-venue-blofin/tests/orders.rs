@@ -1,7 +1,8 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType};
 use safe_cex_venue_blofin::orders::*;
 use serde_json::{Value, json};

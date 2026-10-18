@@ -1,7 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::js_number_string;
 use safe_cex_store::{
-    Store, StoreUpdate, model_patch::ModelPatch, store::DefaultStore,
-    ticker_lookup::TickerSymbolLookup,
+    Store, StoreUpdate, model_patch::ModelPatch, ticker_lookup::TickerSymbolLookup,
 };
 use safe_cex_types::{StoreSubscriberError, Ticker};
 use safe_cex_venue_bitget::ticker::{TickerHandlerError, handle_ticker_topic};

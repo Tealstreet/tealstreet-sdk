@@ -3,7 +3,8 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_json, from_typed},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use serde_json::json;
 use std::rc::Rc;
 

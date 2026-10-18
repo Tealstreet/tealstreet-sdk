@@ -55,7 +55,7 @@ pub trait PublicMarketReadHost {
         params: Option<PublicMarketQuery>,
     ) -> PublicReadAsync<ReadReply>;
     fn error_response_items(&self, error: &PortfolioFailure) -> Option<ReadItems>;
-    fn cached_markets(&self) -> CatalogMarkets;
+    fn cached_markets(&self) -> Result<CatalogMarkets, PortfolioFailure>;
     fn emit_and_log_error(&self, message: Option<Value>) -> Result<(), PortfolioFailure>;
     /// Imported dayjs(value) / dayjs(); None means omitted argument.
     fn dayjs_value_of(&self, value: Option<Value>) -> Result<f64, PortfolioFailure>;
@@ -347,7 +347,7 @@ pub fn fetch_markets<H: PublicMarketReadHost + 'static>(
                 Ok(v) => Ok(v),
                 Err(e) => {
                     r.host.emit_and_log_error(detail(&e))?;
-                    Ok(r.host.cached_markets())
+                    Ok(r.host.cached_markets()?)
                 }
             }
         }),
@@ -472,7 +472,7 @@ pub fn fetch_markets_from_intx_instruments<H: PublicMarketReadHost + 'static>(
                 Ok(v) => Ok(v),
                 Err(e) => {
                     r.host.emit_and_log_error(detail(&e))?;
-                    Ok(r.host.cached_markets())
+                    Ok(r.host.cached_markets()?)
                 }
             }
         }),

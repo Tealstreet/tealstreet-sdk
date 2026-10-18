@@ -481,7 +481,8 @@ fn run(kind: &str) -> Outcome {
     }
 }
 fn typed_leverage_snapshot_native_assertions() -> impl FnOnce() {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_types::FetchedLeverage;
     let store = DefaultStore::new();
     let record = |buy, sell| FetchedLeverage {

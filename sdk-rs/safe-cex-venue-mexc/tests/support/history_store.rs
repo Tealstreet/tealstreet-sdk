@@ -1,9 +1,9 @@
 // Native test observation delegates every Store operation to actual DefaultStore.
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::{
     PackedTickerDelta, Store, StoreMutationError, StoreUpdate,
     model_patch::{ModelPatch, PatchSource},
-    store::DefaultStore,
 };
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::*;

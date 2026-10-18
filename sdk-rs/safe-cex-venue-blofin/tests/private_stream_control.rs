@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_value, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Order, OrderSide, OrderStatus, OrderType, StoreDataLoaded};
 use safe_cex_venue_blofin::private_stream_control::*;
 use serde_json::{Value, json};

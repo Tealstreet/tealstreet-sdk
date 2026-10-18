@@ -1,7 +1,8 @@
 //! Admission witness through the current production shared Store facade.
 //! Granular writes preserve table and DTO referents; full replacement starts a new generation.
 use safe_cex_exchange::js_runtime::{store, value::Js};
-use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use serde_json::{Value, json};
 use std::{process::Command, rc::Rc};
 

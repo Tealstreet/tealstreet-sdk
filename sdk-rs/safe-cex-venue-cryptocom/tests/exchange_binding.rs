@@ -738,7 +738,7 @@ fn constructing_another_venue_name_is_refused() {
     let result = safe_cex_venue_cryptocom::binding::exchange::CryptocomExchange::new(
         ExchangeName::Kraken,
         opts,
-        std::rc::Rc::new(safe_cex_store::store::DefaultStore::new()),
+        std::rc::Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies {
             runtime,
             http,

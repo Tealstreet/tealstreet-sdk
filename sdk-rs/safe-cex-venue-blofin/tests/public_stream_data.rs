@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_value, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Candle, OHLCVOptions, OrderBook, StoreDataLoaded, Ticker};
 use safe_cex_venue_blofin::{
     public_stream_core::PublicStreamHost, public_stream_data::*, utility::UtilityInput,

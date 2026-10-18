@@ -1,9 +1,9 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, ExecutionsOptions};
 use safe_cex_venue_bitget::history_reads::fetch_historical_fills;
 use serde_json::{Value, json};

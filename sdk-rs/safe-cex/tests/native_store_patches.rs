@@ -1,5 +1,6 @@
 //! Production wiring: JSON is not the in-memory numeric patch representation.
-use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{ModelField, PositionExtra, StoreData};
 use serde_json::json;
 use std::rc::Rc;

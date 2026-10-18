@@ -1,3 +1,4 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
@@ -7,7 +8,6 @@ use safe_cex_exchange::{
     },
     ws_parent::WsExchangeParent,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_kucoin::ws_ping::*;

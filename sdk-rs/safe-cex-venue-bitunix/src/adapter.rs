@@ -371,3 +371,9 @@ impl BitunixVenue {
         )
     }
 }
+
+impl From<safe_cex_types::StoreReadError> for Fault {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self(ExchangeError::from(error))
+    }
+}

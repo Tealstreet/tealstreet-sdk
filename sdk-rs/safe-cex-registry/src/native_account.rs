@@ -260,7 +260,7 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
     };
     let constructor = rust_constructor(&name, host.clone())
         .ok_or_else(|| host_error(format!("no Rust constructor for {}", spec.exchange)))?;
-    let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = constructor
         .construct(name, options, store.clone())
         .map_err(|error| exchange_error(&error))?;
@@ -635,7 +635,8 @@ pub fn native_account_call(
             }
             "cancelAllOrders" => done(venue.cancel_all_orders().await).map(|_| NativeValue::Null),
             "mintClientOrderId" => {
-                encode(base.mint_client_order_id(&arg::<safe_cex_types::PlaceOrderOpts>(&args, 0)?))
+                done(base.mint_client_order_id(&arg::<safe_cex_types::PlaceOrderOpts>(&args, 0)?))
+                    .and_then(encode)
             }
             "placeOrderWithClientOrderId" => {
                 let order: PlaceOrderOpts = arg(&args, 0)?;

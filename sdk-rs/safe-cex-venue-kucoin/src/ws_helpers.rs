@@ -72,23 +72,26 @@ pub fn snapshot_shard_symbols(
     store: &dyn safe_cex_store::Store,
     shard_index: f64,
     shard_count: f64,
-) -> Vec<String> {
-    store
-        .markets()
+) -> Result<Vec<String>, safe_cex_types::StoreReadError> {
+    let symbols = store
+        .markets()?
         .iter()
         .map(|m| {
             if m.id.is_empty() {
                 crate::sizing::to_api_symbol(Some(&m.symbol), store)
             } else {
-                m.id.clone()
+                Ok(m.id.clone())
             }
         })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(symbols
+        .into_iter()
         .filter(|symbol| !symbol.is_empty())
         .enumerate()
         .filter_map(|(index, symbol)| {
             ((index as f64) % shard_count == shard_index).then_some(symbol)
         })
-        .collect()
+        .collect())
 }
 // ts: KucoinSpotPublicWebsocket.getCandleHandlerTopic
 pub fn get_candle_handler_topic(topic: &str) -> Result<String, String> {

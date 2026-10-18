@@ -172,6 +172,7 @@ impl Host {
                     .get("hostError")
                     .or_else(|| self.input.get("error"))
                     .cloned(),
+                native: None,
             })
         } else {
             Ok(())

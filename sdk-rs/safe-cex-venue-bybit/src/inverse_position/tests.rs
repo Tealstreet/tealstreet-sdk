@@ -1,5 +1,6 @@
 use super::*;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, Ticker};
 use serde_json::json;
 fn class(n: f64) -> &'static str {

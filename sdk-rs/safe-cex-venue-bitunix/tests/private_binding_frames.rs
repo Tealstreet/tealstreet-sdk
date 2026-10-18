@@ -2,8 +2,8 @@
 #[path = "support/venue_runtime.rs"]
 #[allow(dead_code)]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::Exchange, socket_lifecycle::SocketSlot, websocket::WsEvent};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::{OrderStatus, PositionSide};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;

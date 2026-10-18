@@ -1,4 +1,6 @@
-use safe_cex_store::{StoreUpdate, model_patch::ModelPatch, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
+use safe_cex_store::{StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::Ticker;
 
 #[test]

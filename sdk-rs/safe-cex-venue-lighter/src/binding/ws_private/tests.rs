@@ -5,6 +5,7 @@ use super::super::{
     value::Microtasks,
 };
 use crate::ws_policy::{calculate_lighter_private_reconnect_delay, classify_lighter_private_close};
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch},
@@ -20,7 +21,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VIRTUAL_CLOCK};
+use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{TransportProvider, socket::SocketFrame, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use serde_json::{Value, json};

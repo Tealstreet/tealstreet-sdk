@@ -1,4 +1,5 @@
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Ticker;
 use safe_cex_venue_bybit::ws_public::handle_tickers_event;
 use serde_json::Value;

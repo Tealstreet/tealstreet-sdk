@@ -1500,7 +1500,7 @@ impl ExchangeImports for Imports {
 }
 #[test]
 fn exchange_class_quiescent_ownership_releases_after_last_lease() {
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     for (venue, stem) in [
         (Venue::Futures, "binance"),
         (Venue::PM, "binancepm"),
@@ -1565,7 +1565,8 @@ fn exchange_class_quiescent_ownership_releases_after_last_lease() {
 
 #[test]
 fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
-    use safe_cex_store::{Store, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::Store;
     let mut native = vec![];
     for (venue, stem) in [
         (Venue::Futures, "binance"),
@@ -2099,7 +2100,7 @@ fn class_owner(venue: Venue, imports: Rc<Imports>, runtime: Rc<Runtime>) -> Rc<E
         venue,
         serde_json::from_value(json!(stem)).unwrap(),
         serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         ExchangeDependencies {
             runtime,
             imports,
@@ -2186,7 +2187,7 @@ fn exchange_class_ownership_keeps_child_and_running_operation_leases() {
             }))
             .unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             ExchangeDependencies {
                 runtime: runtime.clone(),
                 imports: imports.clone(),
@@ -2673,7 +2674,7 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
             };
             let name = serde_json::from_value(json!(stem)).unwrap();
             let options = serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap();
-            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
             let (exchange, owner): (Rc<dyn Exchange>, Rc<ExchangeOwner>) = match venue {
                 Venue::Futures => {
                     let v = Rc::new(BinanceExchange::new(name, options, store, deps).unwrap());
@@ -3123,7 +3124,7 @@ fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() 
         };
         let name = serde_json::from_value(json!(stem)).unwrap();
         let options = serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap();
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let exchange: Rc<dyn Exchange> = match venue {
             Venue::Futures => Rc::new(BinanceExchange::new(name, options, store, deps).unwrap()),
             Venue::PM => Rc::new(BinancePMExchange::new(name, options, store, deps).unwrap()),
@@ -3336,7 +3337,7 @@ fn production_native_owner(venue: Venue) -> Rc<ExchangeOwner> {
         Venue::PM => "binancepm",
         Venue::Spot => "binancespot",
     };
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     safe_cex_store::Store::update(
         store.as_ref(),
         safe_cex_store::StoreUpdate {
@@ -3841,7 +3842,7 @@ fn native_stop_limit_snapshot_case(venue: Venue) {
                 None,
                 safe_cex_exchange::native::NativeHttpEvents::default(),
             );
-            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
             let owner = ExchangeOwner::new(
                 venue,
                 serde_json::from_value(json!(if venue == Venue::Futures {
@@ -4330,7 +4331,7 @@ fn market_asset_refusal_case(venue: Venue) {
                     .unwrap(),
                     serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true}))
                         .unwrap(),
-                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                    Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                     deps,
                 )
                 .unwrap();
@@ -4466,7 +4467,7 @@ fn market_field_refusal_case(venue: Venue, leverage: bool) {
                 None,
                 safe_cex_exchange::native::NativeHttpEvents::default(),
             );
-            let owner=ExchangeOwner::new(venue,serde_json::from_value(json!(match venue{Venue::Futures=>"binance",Venue::PM=>"binancepm",Venue::Spot=>"binancespot"})).unwrap(),serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret","publicDataOnly":!leverage})).unwrap(),Rc::new(safe_cex_store::store::DefaultStore::new()),deps).unwrap();
+            let owner=ExchangeOwner::new(venue,serde_json::from_value(json!(match venue{Venue::Futures=>"binance",Venue::PM=>"binancepm",Venue::Spot=>"binancespot"})).unwrap(),serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret","publicDataOnly":!leverage})).unwrap(),Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),deps).unwrap();
             let errors = Rc::new(RefCell::new(Vec::new()));
             let capture = errors.clone();
             owner.base.on(
@@ -4641,7 +4642,7 @@ fn production_depth_binding_preserves_the_source_type_error_and_recovers() {
             venue,
             serde_json::from_value(json!(name)).unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             deps,
         )
         .unwrap();
@@ -4844,7 +4845,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             Venue::Futures,
             safe_cex_types::ExchangeName::Binance,
             serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();
@@ -4951,7 +4952,7 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
             None,
             safe_cex_exchange::native::NativeHttpEvents::default(),
         );
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let owner = ExchangeOwner::new(
             Venue::Futures,
             safe_cex_types::ExchangeName::Binance,
@@ -5065,7 +5066,7 @@ fn production_native_class_future_completes_store_after_held_http() {
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -5271,7 +5272,7 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
                 serde_json::from_value(json!(name)).unwrap(),
                 serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
                     .unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 dependencies,
             )
             .unwrap();
@@ -5424,7 +5425,7 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -5524,7 +5525,7 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
             None,
             safe_cex_exchange::native::NativeHttpEvents::default(),
         );
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let markets: Vec<safe_cex_types::Market> = ["BTCUSDT", "ETHUSDT", "SOLUSDT"].into_iter().map(|symbol|
             serde_json::from_value(json!({"id":symbol,"symbol":symbol,"base":symbol.trim_end_matches("USDT"),"quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.01},"limits":{"amount":{"min":0.01,"max":9},"leverage":{"min":1,"max":3},"price":{"min":0.1,"max":999999}}})).unwrap()
         ).collect();
@@ -5680,7 +5681,7 @@ fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
             }))
             .unwrap(),
             serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();

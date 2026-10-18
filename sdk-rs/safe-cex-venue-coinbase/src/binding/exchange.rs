@@ -299,6 +299,7 @@ impl Exchange for CoinbaseExchange {
                                             crate::public_stream_dispatch::PublicStreamFailure {
                                                 name: error.to_exchange_error().name,
                                                 message: error.to_exchange_error().message,
+                                                native: None,
                                             },
                                         )
                                     })?;
@@ -307,6 +308,7 @@ impl Exchange for CoinbaseExchange {
                                 Rc::new(crate::public_stream_dispatch::PublicStreamFailure {
                                     name: error.to_exchange_error().name,
                                     message: error.to_exchange_error().message,
+                                    native: None,
                                 })
                             })?
                         }

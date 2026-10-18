@@ -127,7 +127,7 @@ fn compare_ascending(a: &Js, b: &Js) -> Result<Ordering, Thrown> {
     Ok(Ordering::Equal)
 }
 
-fn uniq_by(values: Vec<Js>, by: &Js) -> Result<Js, Thrown> {
+pub(super) fn uniq_by(values: Vec<Js>, by: &Js) -> Result<Js, Thrown> {
     let mut seen: Vec<Js> = vec![];
     let mut out = vec![];
     for v in values {

@@ -118,7 +118,7 @@ fn live_socket_number_and_timestamp_helpers() {
     assert_eq!(reference["cases"].as_array().unwrap().len(), cases.len());
     for (c, expected) in cases.iter().zip(reference["cases"].as_array().unwrap()) {
         let value = c.get("value");
-        let store = safe_cex_store::store::DefaultStore::new();
+        let store = safe_cex_exchange::native_store::DefaultStore::new();
         safe_cex_store::Store::update(
             &store,
             safe_cex_store::StoreUpdate {
@@ -451,7 +451,7 @@ fn shard_cardinality_supplement_retains_each_native_symbol() {
         2,
         "KUCOIN-CARDINALITY shard source total"
     );
-    let store = safe_cex_store::store::DefaultStore::new();
+    let store = safe_cex_exchange::native_store::DefaultStore::new();
     safe_cex_store::Store::update(
         &store,
         safe_cex_store::StoreUpdate {

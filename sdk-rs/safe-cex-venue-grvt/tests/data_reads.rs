@@ -1,7 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_grvt::data_reads::*;
 use serde_json::{Value, json};

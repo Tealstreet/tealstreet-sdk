@@ -1,8 +1,9 @@
 //! Native observations supporting the four private-construction Clone reviews.
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
 use safe_cex_store::{
-    Store, StoreMutationError, StoreUpdate,
+    StoreMutationError, StoreUpdate,
     risk::{calculate_orders_risk, format_pnl},
-    store::DefaultStore,
     store_stub::STUB_STORE,
     virtual_clock::VirtualClock,
 };

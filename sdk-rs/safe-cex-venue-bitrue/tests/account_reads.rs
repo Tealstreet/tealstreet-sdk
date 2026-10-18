@@ -183,7 +183,8 @@ fn account_reads_match_actual_typescript() {
     assert_eq!(balances.len(), 12, "BITRUE-BALANCE-READ source total");
     for (i, raw) in balance_inputs.iter().enumerate() {
         for (j, reject) in [false, true].into_iter().enumerate() {
-            use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+            use safe_cex_exchange::native_store::DefaultStore;
+            use safe_cex_store::{Store, StoreUpdate};
             use safe_cex_types::Balance;
             let row = &balances[i * 2 + j];
             assert_eq!(

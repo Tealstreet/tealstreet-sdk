@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_json, from_typed, to_json},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use serde_json::Value;
 use std::{collections::BTreeSet, process::Command, rc::Rc};
 

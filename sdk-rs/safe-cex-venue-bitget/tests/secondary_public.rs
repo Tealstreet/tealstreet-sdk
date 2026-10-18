@@ -1,12 +1,13 @@
 #[path = "support/secondary_ws.rs"]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::ExchangeError,
     websocket::WsEvent,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::{ExchangeName, Market, PlaceOrderOpts, Ticker};
 use safe_cex_venue_bitget::secondary_public::BitgetSecondaryPublicWebsocket;

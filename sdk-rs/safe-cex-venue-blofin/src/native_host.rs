@@ -751,13 +751,14 @@ impl PublicStreamHost for PublicHost {
     fn is_testnet(&self) -> bool {
         self.context.options.testnet == Some(true)
     }
-    fn market_ids(&self) -> Vec<String> {
-        self.context
+    fn market_ids(&self) -> Result<Vec<String>, ExchangeError> {
+        Ok(self
+            .context
             .store
-            .markets()
+            .markets()?
             .iter()
             .map(|m| m.id.clone())
-            .collect()
+            .collect())
     }
     fn has_socket(&self) -> bool {
         self.socket.has_websocket()

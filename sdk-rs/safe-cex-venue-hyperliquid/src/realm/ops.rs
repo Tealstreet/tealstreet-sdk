@@ -89,7 +89,7 @@ impl Realm {
             }
             return Ok(());
         }
-        let mut keys = self.own_keys(source, true);
+        let mut keys = self.own_keys(source, true)?;
         if let Some(o) = source.object() {
             for p in &o.borrow().props {
                 if p.enumerable && matches!(p.key, PropKey::Symbol(_)) {
@@ -144,21 +144,21 @@ impl Realm {
     }
     /// for-in: enumerable string keys along the prototype chain, own first,
     /// skipping shadowed names. Snapshotted at loop entry.
-    pub(crate) fn for_in_keys(&mut self, value: &Value) -> Vec<Value> {
+    pub(crate) fn for_in_keys(&mut self, value: &Value) -> Result<Vec<Value>, Thrown> {
         let mut seen: Vec<PropKey> = vec![];
         let mut out = vec![];
         let mut current = value.object().cloned();
         if let Value::String(_) = value {
-            return self
-                .own_keys(value, true)
+            return Ok(self
+                .own_keys(value, true)?
                 .into_iter()
                 .map(|k| k.to_value())
-                .collect();
+                .collect());
         }
         while let Some(o) = current {
             let v = Value::Object(o.clone());
-            let all = self.own_keys(&v, false);
-            let enumerable = self.own_keys(&v, true);
+            let all = self.own_keys(&v, false)?;
+            let enumerable = self.own_keys(&v, true)?;
             for k in all {
                 if seen.iter().any(|s| s.same(&k)) {
                     continue;
@@ -170,7 +170,7 @@ impl Realm {
             }
             current = o.borrow().proto.clone();
         }
-        out
+        Ok(out)
     }
     /// `super.name` from a method whose home object's prototype is `home_proto`.
     pub(crate) fn super_get(

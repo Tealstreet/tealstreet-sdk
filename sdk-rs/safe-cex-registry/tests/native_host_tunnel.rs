@@ -685,7 +685,7 @@ fn native_factory_correlation_reads_only_primitive_metadata() {
             let owner = Rc::new(BaseExchange::new(
                 safe_cex_types::ExchangeName::Woo,
                 serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 runtime.clone(),
                 ExchangeSettings::default(),
             ));

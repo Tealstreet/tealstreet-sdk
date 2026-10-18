@@ -1,6 +1,7 @@
 //! Own-entry effects and post-await work are observed separately.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_types::PositionSide;
 use safe_cex_venue_bitrue::{
     account_helpers::AccountPositionSnapshot, account_reads, leverage_reads, position_metadata,

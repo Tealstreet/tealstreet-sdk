@@ -17,6 +17,7 @@ use exchange_data::script;
 
 #[test]
 fn constructed_aster_rejection_keeps_native_string_code_units() {
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_exchange::{
         js_runtime::{
             client::JsHttpHost,
@@ -25,7 +26,6 @@ fn constructed_aster_rejection_keeps_native_string_code_units() {
         },
         runtime::ExchangeRuntime,
     };
-    use safe_cex_store::store::DefaultStore;
     use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
     use std::cell::Cell;
     struct RejectingHost {
@@ -980,7 +980,7 @@ fn private_reopen_refreshes_orders_missed_during_disconnect() {
 fn stream_fixture() -> (
     Rc<safe_cex_venue_asterdex::native_exchange::AsterDEXExchange>,
     Rc<support::Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     std::sync::Arc<support::Wire>,
 ) {
     let (venue, rt, store, wire) =

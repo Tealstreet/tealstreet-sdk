@@ -201,7 +201,7 @@ fn submit_error(error: MexcOrderSubmitError, data: &Js) -> Thrown {
 type Member = fn(&Rc<Host>, Vec<Js>) -> Result<Js, Thrown>;
 
 impl Host {
-    pub(crate) fn new(venue: &Rc<MexcExchange>) -> Rc<Self> {
+    pub(crate) fn new(venue: &Rc<MexcExchange>) -> Result<Rc<Self>, Thrown> {
         let host = Rc::new_cyclic(|me| Self {
             me: me.clone(),
             venue: Rc::downgrade(venue),
@@ -209,9 +209,9 @@ impl Host {
             this: OnceCell::new(),
             timers: RefCell::default(),
         });
-        let this = host.facade(venue);
+        let this = host.facade(venue)?;
         let _ = host.this.set(this);
-        host
+        Ok(host)
     }
 
     fn venue(&self) -> Result<Rc<MexcExchange>, Thrown> {
@@ -262,20 +262,20 @@ impl Host {
             .set("regularOrderSubmitCooldownUntil", Js::Number(value))
     }
 
-    fn positions(venue: &MexcExchange) -> Vec<Position> {
-        venue.base.store.positions().to_vec()
+    fn positions(venue: &MexcExchange) -> Result<Vec<Position>, Thrown> {
+        Ok(venue.base.store.positions()?)
     }
 
     fn settings(venue: &MexcExchange, symbol: &str) -> Option<MexcSymbolConfig> {
         venue.symbol_settings.borrow().get(symbol).cloned()
     }
 
-    fn facade(&self, venue: &Rc<MexcExchange>) -> Js {
+    fn facade(&self, venue: &Rc<MexcExchange>) -> Result<Js, Thrown> {
         let this = Js::object_with_class("MexcExchange", vec![]);
         let def = |key: &str, value: Js| {
             let _ = this.define(key, value);
         };
-        def("store", store::facade(venue.base.store.clone()));
+        def("store", store::facade(venue.base.store.clone())?);
         def("xhr", self.xhr());
         def("publicWebsocket", self.socket(true));
         def("privateWebsocket", self.socket(false));
@@ -498,7 +498,7 @@ impl Host {
                 let symbol = text(&arg(&a, 0))?;
                 let config = derive_symbol_config(
                     &symbol,
-                    &Self::positions(&venue),
+                    &Self::positions(&venue)?,
                     Self::settings(&venue, &symbol).as_ref(),
                     *venue.account_position_mode.borrow(),
                 )?;
@@ -509,7 +509,7 @@ impl Host {
                 let opts: PlaceOrderOpts = to_typed(&arg(&a, 0))?;
                 Ok(Js::Number(get_leverage_for_order(
                     &opts,
-                    &Self::positions(&venue),
+                    &Self::positions(&venue)?,
                     Self::settings(&venue, &opts.symbol).as_ref(),
                     *venue.account_position_mode.borrow(),
                 )?))
@@ -541,7 +541,7 @@ impl Host {
                     arg(&a, 3).to_number()?,
                     to_typed(&arg(&a, 4))?,
                     include,
-                    &Self::positions(&venue),
+                    &Self::positions(&venue)?,
                 )?))
             }),
             ("assertCommonSuccess", |_, a| {
@@ -646,7 +646,7 @@ impl Host {
                 }),
             );
         }
-        this
+        Ok(this)
     }
 
     /// The Axios verbs the bodies call, over the venue's native REST adapter.

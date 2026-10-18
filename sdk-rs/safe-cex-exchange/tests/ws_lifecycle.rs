@@ -713,7 +713,7 @@ fn worker_and_socket_snapshot_entrypoints_dispatch_venue_overrides() {
         base: BaseExchange::new(
             ExchangeName::Bybit,
             serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             runtime,
             ExchangeSettings::default(),
         ),

@@ -89,8 +89,8 @@ impl BitunixVenue {
             venue: self.clone(),
         }
     }
-    fn store_orders(&self) -> Vec<Order> {
-        self.base.store.orders().to_vec()
+    fn store_orders(&self) -> Result<Vec<Order>, ExchangeError> {
+        Ok(self.base.store.orders()?)
     }
 }
 impl crate::order_models::OrderModelHost for OrderFrame {
@@ -105,19 +105,19 @@ impl crate::order_models::OrderModelHost for OrderFrame {
             .venue
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&symbol)
             .cloned();
         Ok(market.map(|m| to_input(&m)).transpose()?)
     }
     fn positions(&mut self) -> Result<Vec<Input>, Fault> {
-        let positions = self.venue.base.store.positions().to_vec();
+        let positions = self.venue.base.store.positions()?.to_vec();
         Ok(positions.iter().map(to_input).collect::<Result<_, _>>()?)
     }
     fn orders(&mut self) -> Result<Vec<Input>, Fault> {
         Ok(self
             .venue
-            .store_orders()
+            .store_orders()?
             .iter()
             .map(to_input)
             .collect::<Result<_, _>>()?)
@@ -312,14 +312,14 @@ impl crate::order_models::OrderModelHost for OrderFrame {
         Ok(self.venue.state.borrow().enable_fake_full_tpsl)
     }
     fn attached_leg(&mut self, order: &Input) -> Result<Option<&'static str>, Fault> {
-        let orders = self.venue.store_orders();
+        let orders = self.venue.store_orders()?;
         Ok(crate::order_links::get_attached_virtual_tpsl_leg(
             &order_of(order)?,
             &orders,
         ))
     }
     fn standalone(&mut self, order: &Input) -> Result<bool, Fault> {
-        let orders = self.venue.store_orders();
+        let orders = self.venue.store_orders()?;
         Ok(crate::order_links::is_standalone_tpsl_order(
             &order_of(order)?,
             &orders,
@@ -335,7 +335,7 @@ impl crate::order_models::OrderModelHost for OrderFrame {
         order: &Input,
         leg_name: &'static str,
     ) -> Result<Option<crate::order_state::TpslLegSnapshot>, Fault> {
-        let orders = self.venue.store_orders();
+        let orders = self.venue.store_orders()?;
         Ok(crate::order_state::get_tpsl_leg_snapshot(
             &order_of(order)?,
             leg(leg_name),
@@ -597,10 +597,10 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
         Ok(input.clone())
     }
     fn orders(&mut self) -> Result<Vec<Order>, ExchangeError> {
-        Ok(self.venue.store_orders())
+        Ok(self.venue.store_orders()?)
     }
     fn attached_leg(&mut self, order: &Order) -> Result<Option<&'static str>, ExchangeError> {
-        let orders = self.venue.store_orders();
+        let orders = self.venue.store_orders()?;
         Ok(crate::order_links::get_attached_virtual_tpsl_leg(
             order, &orders,
         ))
@@ -706,7 +706,7 @@ impl BitunixVenue {
         let opts = opts.into();
         let me = self.clone();
         Box::pin(async move {
-            let positions = me.base.store.positions().to_vec();
+            let positions = me.base.store.positions()?.to_vec();
             let cache: std::collections::HashMap<String, Value> = me
                 .state
                 .borrow()
@@ -803,7 +803,7 @@ impl BitunixVenue {
     ) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
         Box::pin(async move {
-            let orders = me.store_orders();
+            let orders = me.store_orders()?;
             crate::rest_writes::cancel_symbol_orders(
                 &symbol,
                 || Ok(orders.len()),

@@ -1,6 +1,7 @@
 #[path = "support/binding_runtime.rs"]
 #[allow(dead_code)]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -10,7 +11,7 @@ use safe_cex_exchange::{
     },
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_bitrue::{BitrueDependencies, BitrueExchange};
 use serde_json::json;

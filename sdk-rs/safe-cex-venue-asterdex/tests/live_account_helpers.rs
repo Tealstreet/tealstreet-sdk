@@ -187,7 +187,8 @@ fn account_helpers_match_typescript() {
 #[test]
 #[ignore = "requires live isolated TypeScript oracle"]
 fn production_store_currency_order_selects_first_margin_asset() {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),

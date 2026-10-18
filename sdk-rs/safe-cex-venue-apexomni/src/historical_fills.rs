@@ -132,13 +132,11 @@ impl ApexOmniExchange {
             let raw = executions::row_symbol(row);
             if !matches!(raw, J::Undefined | J::Null) && !text(raw)?.is_empty() {
                 let symbol = text(raw)?;
-                let resolved = self
-                    .base
-                    .store
-                    .markets_by_id()
-                    .get(&symbol)
-                    .cloned()
-                    .or_else(|| self.base.store.markets_by_symbol().get(&symbol).cloned());
+                let resolved = self.base.store.markets_by_id()?.get(&symbol).cloned();
+                let resolved = match resolved {
+                    Some(value) => Some(value),
+                    None => self.base.store.markets_by_symbol()?.get(&symbol).cloned(),
+                };
                 let symbol = resolved.as_ref().map_or(symbol, |m| {
                     if m.id.is_empty() {
                         m.symbol.clone()
@@ -349,7 +347,7 @@ impl ApexOmniExchange {
         let Some(symbol) = opts.symbol.as_ref().filter(|s| !s.is_empty()) else {
             return Ok(Vec::new());
         };
-        let Some(market) = self.base.store.markets_by_symbol().get(symbol).cloned() else {
+        let Some(market) = self.base.store.markets_by_symbol()?.get(symbol).cloned() else {
             return Ok(Vec::new());
         };
         let limit = math_min(math_max(opts.limit.unwrap_or(100.), 1.), 100.);

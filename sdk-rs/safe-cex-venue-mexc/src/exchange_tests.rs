@@ -1,10 +1,11 @@
 use super::*;
 use crate::utils::normalize_market;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::ExchangeSettings,
     runtime::{ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{RestFuture, RestResponse};
 use safe_cex_types::StoreSubscriberError;
 use safe_cex_types::{ExchangeName, ExchangeOptions, ExecutionsOptions};

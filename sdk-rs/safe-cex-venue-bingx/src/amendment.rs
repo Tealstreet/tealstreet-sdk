@@ -142,7 +142,7 @@ impl BingxAmendment {
         self.reads
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&order.symbol)
             .cloned()
             .ok_or_else(|| ExchangeError::new(format!("Market {} not found", order.symbol)))
@@ -439,7 +439,12 @@ impl BingxAmendment {
                 "BingX replacement trigger price must change after market-precision normalization",
             );
         }
-        if let Some(ticker) = self.reads.base.store.tickers_by_symbol().get(&order.symbol)
+        if let Some(ticker) = self
+            .reads
+            .base
+            .store
+            .tickers_by_symbol()?
+            .get(&order.symbol)
             && ticker.mark.is_finite()
             && ticker.mark > 0.0
         {
@@ -700,7 +705,7 @@ impl BingxAmendment {
             let raw = Input::Object(fields);
             let replacement = map_order(
                 &raw,
-                &self.reads.base.store.orders(),
+                &self.reads.base.store.orders()?,
                 safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )?;
             self.reads

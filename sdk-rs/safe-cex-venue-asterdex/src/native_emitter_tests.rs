@@ -1,7 +1,7 @@
 //! Actual venue assembly, native scheduler/HTTP and private-frame dispatcher.
 use super::*;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{js_runtime::client, native::native_runtime};
-use safe_cex_store::store::DefaultStore;
 use serde_json::{Value, json};
 use std::{cell::RefCell, sync::Arc};
 

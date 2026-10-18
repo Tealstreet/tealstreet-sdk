@@ -614,7 +614,7 @@ fn registry_selects_demo_origin_before_any_transport_rewrite() {
                         "key":"origin-key", "secret":"origin-secret", "testnet":testnet
                     }))
                     .unwrap(),
-                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                    Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 )
                 .unwrap();
             assert_eq!(exchange.get_account().await.unwrap().user_id, "12345");

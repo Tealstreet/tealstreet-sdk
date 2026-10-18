@@ -151,6 +151,13 @@ impl From<ExchangeError> for safe_cex_types::StoreSubscriberError {
         Self::new(error.message.clone()).with_cause(Rc::new(error))
     }
 }
+impl From<safe_cex_types::StoreReadError> for ExchangeError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        let mut result = Self::new(error.to_string());
+        result.origin = Some(ExchangeErrorOrigin::new(error));
+        result
+    }
+}
 impl From<safe_cex_store::StoreMutationError> for ExchangeError {
     fn from(error: safe_cex_store::StoreMutationError) -> Self {
         // Store's opaque cause retains the original listener error across the

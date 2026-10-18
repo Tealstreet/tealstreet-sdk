@@ -35,8 +35,8 @@ fn store(rt: &Rt) -> Result<Js, ExchangeError> {
     rt.this.get("store").map_err(ex)
 }
 
-fn loaded(rt: &Rt) -> StoreDataLoaded {
-    rt.shared.store.loaded().clone()
+fn loaded(rt: &Rt) -> Result<StoreDataLoaded, ExchangeError> {
+    Ok(rt.shared.store.loaded()?)
 }
 
 fn update(rt: &Rt, fields: Vec<(&str, Js)>) -> Result<(), ExchangeError> {
@@ -92,7 +92,7 @@ impl StartupHost for Rt {
         let f = call_future(self, "fetchTickers", vec![])?;
         Ok(Box::pin(async move { f.await.map(Rc::new) }))
     }
-    fn loaded(&self) -> StoreDataLoaded {
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError> {
         loaded(self)
     }
     fn update(&self, update: StartupUpdate<Js, Js>) -> Result<(), ExchangeError> {
@@ -170,7 +170,7 @@ impl TickHost for Rt {
     fn balance_truthy(&self, balance: &Js) -> bool {
         balance.truthy()
     }
-    fn loaded(&self) -> StoreDataLoaded {
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError> {
         loaded(self)
     }
     fn update(&self, update: TickUpdate<Js, Js, Js>) -> Result<(), ExchangeError> {

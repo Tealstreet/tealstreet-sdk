@@ -183,11 +183,11 @@ impl ApexOmniExchange {
                 "Balance response carried no account payload; keeping the last known balance",
                 "warning",
             )?;
-            return Ok(self.base.store.balance().clone());
+            return Ok(self.base.store.balance()?.clone());
         }
         let mut upnl = 0.0;
-        for position in self.base.store.positions().iter() {
-            if let Some(ticker) = self.base.store.tickers_by_symbol().get(&position.symbol) {
+        for position in self.base.store.positions()?.iter() {
+            if let Some(ticker) = self.base.store.tickers_by_symbol()?.get(&position.symbol) {
                 upnl += (if position.side == PositionSide::Long {
                     ticker.last - position.entry_price
                 } else {
@@ -210,7 +210,7 @@ impl ApexOmniExchange {
     pub async fn fetch_balance(&self) -> Result<Balance, ExchangeError> {
         let balance = self.fetch_raw_balance().await?;
         Ok(if self.base.is_disposed() {
-            self.base.store.balance().clone()
+            self.base.store.balance()?.clone()
         } else {
             balance
         })
@@ -241,7 +241,7 @@ impl ApexOmniExchange {
         };
         let unrealized_pnl = float(&or_zero(data::v(row, "unrealisedPnl")?))?;
         let symbol = text(get(row, "symbol"))?;
-        let Some(market) = self.base.store.markets_by_id().get(&symbol).cloned() else {
+        let Some(market) = self.base.store.markets_by_id()?.get(&symbol).cloned() else {
             log(&format!("Market not found for position symbol: {symbol}"))?;
             return Ok(None);
         };
@@ -261,7 +261,7 @@ impl ApexOmniExchange {
                 let previous = self
                     .base
                     .store
-                    .positions()
+                    .positions()?
                     .iter()
                     .find(|p| p.id == id)
                     .map(|p| p.leverage);
@@ -323,7 +323,7 @@ impl ApexOmniExchange {
             }
         };
         let symbol = text(property(row, "symbol")?)?;
-        let Some(market) = self.base.store.markets_by_id().get(&symbol).cloned() else {
+        let Some(market) = self.base.store.markets_by_id()?.get(&symbol).cloned() else {
             self.host.console(
                 "warn",
                 "[APEX OMNI] Market not found for order:",
@@ -555,37 +555,32 @@ impl ApexOmniExchange {
         }
         let row_symbol = crate::response::text(raw)?;
         let key = self.normalize_apex_symbol_key(raw)?;
-        let market = self
-            .base
-            .store
-            .markets_by_id()
-            .get(&row_symbol)
-            .cloned()
-            .or_else(|| {
-                self.base
-                    .store
-                    .markets_by_symbol()
-                    .get(&row_symbol)
-                    .cloned()
-            })
-            .or_else(|| {
-                self.base
-                    .store
-                    .markets()
-                    .iter()
-                    .find(|m| {
-                        self.normalize_apex_symbol_key(&R::Text(
-                            m.id.clone().encode_utf16().collect(),
-                        ))
+        let mut market = self.base.store.markets_by_id()?.get(&row_symbol).cloned();
+        if market.is_none() {
+            market = self
+                .base
+                .store
+                .markets_by_symbol()?
+                .get(&row_symbol)
+                .cloned();
+        }
+        if market.is_none() {
+            market = self
+                .base
+                .store
+                .markets()?
+                .iter()
+                .find(|m| {
+                    self.normalize_apex_symbol_key(&R::Text(m.id.clone().encode_utf16().collect()))
                         .is_ok_and(|s| s == key)
-                            || self
-                                .normalize_apex_symbol_key(&R::Text(
-                                    m.symbol.clone().encode_utf16().collect(),
-                                ))
-                                .is_ok_and(|s| s == key)
-                    })
-                    .cloned()
-            });
+                        || self
+                            .normalize_apex_symbol_key(&R::Text(
+                                m.symbol.clone().encode_utf16().collect(),
+                            ))
+                            .is_ok_and(|s| s == key)
+                })
+                .cloned();
+        }
         let Some(execution) = executions::map_ws_execution(
             row,
             market.as_ref().map_or(&row_symbol, |m| &m.symbol),
@@ -686,13 +681,7 @@ impl ApexOmniExchange {
                 }
             }
         }
-        let old = self
-            .base
-            .store
-            .zk_link_config()
-            .as_deref()
-            .cloned()
-            .unwrap_or(R::Null);
+        let old = self.base.store.zk_link_config()?.unwrap_or(R::Null);
         if !get(&old, "l2Key").is_truthy() {
             let mut config = old.as_object().map(Vec::from).unwrap_or_default();
             for (key, source) in [
@@ -716,7 +705,7 @@ impl ApexOmniExchange {
                 .store
                 .update_zk_link_config(Some(R::Object(config)))?;
         }
-        for market in self.base.store.markets().iter() {
+        for market in self.base.store.markets()?.iter() {
             let margin = market
                 .info
                 .as_ref()
@@ -768,8 +757,8 @@ impl ApexOmniExchange {
         let mut old = self
             .base
             .store
-            .zk_link_config()
-            .as_deref()
+            .zk_link_config()?
+            .as_ref()
             .and_then(R::as_object)
             .map(Vec::from)
             .unwrap_or_default();

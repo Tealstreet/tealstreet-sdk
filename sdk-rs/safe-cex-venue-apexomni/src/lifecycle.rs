@@ -102,7 +102,7 @@ impl ApexOmniExchange {
         positions: bool,
         orders: bool,
     ) -> Result<(), ExchangeError> {
-        let mut loaded = self.base.store.loaded().clone();
+        let mut loaded = self.base.store.loaded()?.clone();
         if balance {
             loaded.balance = true;
         }
@@ -122,7 +122,7 @@ impl ApexOmniExchange {
         Ok(())
     }
     fn set_balance_loaded(&self, balance: Balance) -> Result<(), ExchangeError> {
-        let mut loaded = self.base.store.loaded().clone();
+        let mut loaded = self.base.store.loaded()?.clone();
         loaded.balance = true;
         self.base.store.update(
             StoreUpdate {
@@ -167,7 +167,7 @@ impl ApexOmniExchange {
                         info: None,
                     })
                     .collect();
-                let mut loaded = self.base.store.loaded().clone();
+                let mut loaded = self.base.store.loaded()?.clone();
                 loaded.markets = true;
                 loaded.tickers = true;
                 self.base.store.update(
@@ -256,7 +256,7 @@ impl ApexOmniExchange {
                 .get()
                 .is_some_and(|t| now - t < 1000.)
             {
-                let existing = self.base.store.positions();
+                let existing = self.base.store.positions()?;
                 for p in &mut positions {
                     if let Some(old) = existing.iter().find(|old| {
                         old.id == p.id
@@ -413,14 +413,14 @@ impl ApexOmniExchange {
         let market = self
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(symbol)
             .cloned()
             .ok_or_else(|| failure(format!("Market {symbol} not found")))?;
         let mut positions = self
             .base
             .store
-            .positions()
+            .positions()?
             .iter()
             .filter(|p| p.symbol == symbol)
             .cloned()

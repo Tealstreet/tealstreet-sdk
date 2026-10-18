@@ -6,12 +6,13 @@ mod error_post_support;
 mod runtime;
 use indexmap::IndexMap;
 use runtime::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ListenerCleanup},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::object_map::JsObjectMap;
 use safe_cex_types::*;
 use safe_cex_webworker::{order_book_post::*, payload::*, subscriptions::*};

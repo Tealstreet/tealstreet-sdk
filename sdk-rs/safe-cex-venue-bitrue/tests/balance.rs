@@ -1,6 +1,7 @@
 include!("cardinality.rs.inc");
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Balance;
 use safe_cex_venue_bitrue::{balance::parse_balance, wire::OpaqueValue};
 use serde_json::{Value, json};

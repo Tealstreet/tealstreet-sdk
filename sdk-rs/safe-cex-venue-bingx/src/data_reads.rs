@@ -230,7 +230,7 @@ impl BingxDataReads {
             }
         }
     }
-    pub async fn fetch_balance(&self) -> Result<std::sync::Arc<Balance>, ExchangeError> {
+    pub async fn fetch_balance(&self) -> Result<safe_cex_store::BalanceHandle, ExchangeError> {
         let result = async {
             let data = self.primary_balance().await?;
             Ok::<_, ExchangeError>(Balance {
@@ -245,10 +245,13 @@ impl BingxDataReads {
         }
         .await;
         match result {
-            Ok(balance) => Ok(std::sync::Arc::new(balance)),
+            Ok(balance) => Ok(safe_cex_exchange::native_store::balance_reference(
+                safe_cex_exchange::js_runtime::value::from_typed(&balance)
+                    .map_err(|error| error.to_exchange_error())?,
+            )),
             Err(error) => {
                 self.report(error_message(&error)?, None)?;
-                Ok(self.base.store.balance_handle())
+                Ok(self.base.store.balance_handle()?)
             }
         }
     }
@@ -369,7 +372,7 @@ impl BingxDataReads {
             }
             Err(error) => {
                 self.report(error_message(&error)?, None)?;
-                Ok(self.base.store.markets().to_vec())
+                Ok(self.base.store.markets()?.to_vec())
             }
         }
     }
@@ -405,7 +408,7 @@ impl BingxDataReads {
         for daily in rows {
             let symbol = field(Some(daily), "symbol")?;
             let key = text(symbol)?;
-            let market = self.base.store.markets_by_id().get(&key).cloned();
+            let market = self.base.store.markets_by_id()?.get(&key).cloned();
             let prices = raw
                 .prices
                 .as_ref()
@@ -462,22 +465,24 @@ impl BingxDataReads {
             .map_err(ExchangeError::from)?;
         Ok(tickers)
     }
-    fn venue_symbol(&self, symbol: &str) -> String {
+    fn venue_symbol(&self, symbol: &str) -> Result<String, ExchangeError> {
         let by_symbol = self
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect::<Vec<_>>();
         let by_id = self
             .base
             .store
-            .markets_by_id()
+            .markets_by_id()?
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect::<Vec<_>>();
-        crate::market_utils::to_bingx_symbol(symbol, &by_symbol, &by_id)
+        Ok(crate::market_utils::to_bingx_symbol(
+            symbol, &by_symbol, &by_id,
+        ))
     }
     pub async fn fetch_leverage_for_symbol(
         &self,
@@ -487,7 +492,7 @@ impl BingxDataReads {
             let response = self
                 .request(
                     crate::constants::ENDPOINTS[3].1,
-                    Some(json!({"symbol": self.venue_symbol(symbol)})),
+                    Some(json!({"symbol": self.venue_symbol(symbol)?})),
                 )
                 .await?;
             if field(Some(&response), "code")?.and_then(Input::as_f64) != Some(0.0) {
@@ -501,7 +506,7 @@ impl BingxDataReads {
                 position_mode: None,
                 is_fetching: None,
             };
-            let mut values = self.base.store.fetched_leverage().clone();
+            let mut values = self.base.store.fetched_leverage()?.clone();
             values.insert(symbol.to_owned(), leverage.clone());
             self.base
                 .store
@@ -532,7 +537,7 @@ impl BingxDataReads {
             let response = self
                 .request(
                     crate::constants::ENDPOINTS[7].1,
-                    Some(json!({"symbol": self.venue_symbol(symbol)})),
+                    Some(json!({"symbol": self.venue_symbol(symbol)?})),
                 )
                 .await?;
             if field(Some(&response), "code")?.and_then(Input::as_f64) != Some(0.0) {
@@ -630,7 +635,7 @@ impl BingxDataReads {
             let response = self.request(crate::constants::ENDPOINTS[2].1, None).await?;
             if field(Some(&response), "code")?.and_then(Input::as_f64) != Some(0.0) {
                 self.report(text(response.get("msg"))?, None)?;
-                return Ok(self.base.store.positions().to_vec());
+                return Ok(self.base.store.positions()?.to_vec());
             }
             let rows = field(Some(&response), "data")?
                 .and_then(Input::as_array)
@@ -638,7 +643,7 @@ impl BingxDataReads {
             let mut supported = Vec::new();
             for row in rows {
                 // Array.some never evaluates the symbol expression when markets is empty.
-                for market in self.base.store.markets().iter() {
+                for market in self.base.store.markets()?.iter() {
                     let raw = strict_string(field(Some(row), "symbol")?, "position symbol")?;
                     if market.symbol == raw.replacen('-', "", 1) {
                         supported.push(row);
@@ -737,7 +742,7 @@ impl BingxDataReads {
             Ok(positions) => Ok(positions),
             Err(error) => {
                 self.report(error_message(&error)?, None)?;
-                Ok(self.base.store.positions().to_vec())
+                Ok(self.base.store.positions()?.to_vec())
             }
         }
     }
@@ -930,7 +935,7 @@ impl BingxDataReads {
             return Err(ExchangeError::new("Symbol is required"));
         };
         let result = async {
-            let response = self.post(crate::constants::ENDPOINTS[7].1, json!({"symbol":self.venue_symbol(symbol), "marginType":if isolated {"ISOLATED"} else {"CROSSED"}})).await?;
+            let response = self.post(crate::constants::ENDPOINTS[7].1, json!({"symbol":self.venue_symbol(symbol)?, "marginType":if isolated {"ISOLATED"} else {"CROSSED"}})).await?;
             Self::check_code(&response)?;
             self.get_or_fetch_position_mode(true).await?;
             let positions = self.fetch_positions(Some(&[symbol.to_owned()])).await?;
@@ -951,7 +956,7 @@ impl BingxDataReads {
             let market = self
                 .base
                 .store
-                .markets_by_symbol()
+                .markets_by_symbol()?
                 .get(symbol)
                 .cloned()
                 .ok_or_else(|| ExchangeError::new(format!("Market {symbol} not found")))?;
@@ -973,7 +978,7 @@ impl BingxDataReads {
                 safe_cex_num::math_max(input, market.limits.leverage.min),
                 market.limits.leverage.max,
             );
-            let mut body = json!({"symbol":self.venue_symbol(symbol),"side":position_side});
+            let mut body = json!({"symbol":self.venue_symbol(symbol)?,"side":position_side});
             body["leverage"] = safe_cex_types::retained_json::RetainedJsonInput::Float(leverage)
                 .into_value()
                 .map_err(|_| type_error("typed RestBody refuses NaN leverage"))?;
@@ -1017,8 +1022,8 @@ impl BingxDataReads {
             });
             let requests = groups
                 .into_iter()
-                .map(|(symbol, ids)| (self.venue_symbol(&symbol), ids))
-                .collect::<Vec<_>>();
+                .map(|(symbol, ids)| Ok::<_, ExchangeError>((self.venue_symbol(&symbol)?, ids)))
+                .collect::<Result<Vec<_>, _>>()?;
             for (symbol, ids) in requests {
                 let mut canceled = Vec::new();
                 for id in ids {
@@ -1078,14 +1083,14 @@ impl BingxDataReads {
             self.configured_request(RestRequest {
                 method: "DELETE".into(),
                 url: crate::constants::ENDPOINTS[10].1.into(),
-                params: Some(json!({"symbol":self.venue_symbol(symbol)})),
+                params: Some(json!({"symbol":self.venue_symbol(symbol)?})),
                 ..Default::default()
             })
             .await?;
             let ids = self
                 .base
                 .store
-                .orders()
+                .orders()?
                 .iter()
                 .filter(|order| order.symbol == symbol)
                 .map(|order| order.id.clone())

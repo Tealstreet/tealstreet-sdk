@@ -19,7 +19,8 @@ fn shared_risk_error_is_catchable() {
     assert_eq!(error.key(), Some("constructor"));
 }
 
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_webworker::postprocessors::OrdersRiskProfilePostprocessor;
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc};

@@ -65,7 +65,7 @@ fn public_and_private_pongs_record_latency_from_the_sent_ping() {
 struct Live {
     venue: std::rc::Rc<safe_cex_venue_blofin::native_exchange::BlofinNativeExchange>,
     rt: std::rc::Rc<support::Runtime>,
-    store: std::rc::Rc<safe_cex_store::store::DefaultStore>,
+    store: std::rc::Rc<safe_cex_exchange::native_store::DefaultStore>,
     socket: std::rc::Rc<support::Socket>,
 }
 impl Live {

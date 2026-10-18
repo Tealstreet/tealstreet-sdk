@@ -136,7 +136,7 @@ impl NativeStoreDelivery {
             && !exchange.base().is_disposed()
             && let Some(store) = self.store.upgrade()
         {
-            self.deliver(store.serialize(), true)?;
+            self.deliver(store.serialize()?, true)?;
         }
         Ok(())
     }

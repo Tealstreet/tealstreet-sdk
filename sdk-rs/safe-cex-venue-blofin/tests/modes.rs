@@ -1,7 +1,8 @@
 #[path = "support/retained_assert.rs"]
 mod retained_assert;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value};
-use safe_cex_store::{Store, StoreMutationError, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreMutationError, StoreUpdate};
 use safe_cex_types::{
     FetchedLeverage, MarginType, OrderSide, OrderType, PositionMode, StoreSubscriberError,
 };

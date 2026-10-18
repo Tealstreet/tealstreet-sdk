@@ -760,15 +760,19 @@ impl BaseExchange {
         self.assert_caller_client_order_id_unsplit(&opts)?;
         Ok(Some(id.clone()))
     }
-    fn would_split_order(&self, opts: &safe_cex_types::PreparedOrderOpts) -> bool {
-        self.store
-            .markets_by_symbol()
+    fn would_split_order(
+        &self,
+        opts: &safe_cex_types::PreparedOrderOpts,
+    ) -> Result<bool, ExchangeError> {
+        Ok(self
+            .store
+            .markets_by_symbol()?
             .get(&opts.symbol)
             .is_some_and(|market| {
                 market.limits.amount.max > 0.0
                     && safe_cex_num::adjust(opts.amount, market.precision.amount)
                         > market.limits.amount.max
-            })
+            }))
     }
     pub fn assert_single_native_client_order_id(
         &self,
@@ -792,7 +796,7 @@ impl BaseExchange {
         &self,
         opts: &safe_cex_types::PreparedOrderOpts,
     ) -> Result<(), ExchangeError> {
-        if opts.client_order_id.is_some() && self.would_split_order(opts) {
+        if opts.client_order_id.is_some() && self.would_split_order(opts)? {
             let name = serde_json::to_value(&self.name).expect("exchange name");
             let label = self
                 .settings
@@ -1374,31 +1378,35 @@ impl BaseExchange {
     pub fn mint_client_order_id(
         &self,
         options: impl Into<safe_cex_types::PreparedOrderOpts>,
-    ) -> Option<String> {
+    ) -> Result<Option<String>, ExchangeError> {
         let options = options.into();
-        let rule = self.settings.client_order_id_rule.as_ref()?;
+        let Some(rule) = self.settings.client_order_id_rule.as_ref() else {
+            return Ok(None);
+        };
         if !rule.is_honorable_shape.as_ref().map_or_else(
             || is_regular_client_order_shape(&options),
             |check| check(&options),
         ) {
-            return None;
+            return Ok(None);
         }
-        let markets = self.store.markets_by_symbol();
-        let market = markets.get(&options.symbol)?;
+        let markets = self.store.markets_by_symbol()?;
+        let Some(market) = markets.get(&options.symbol) else {
+            return Ok(None);
+        };
         if market.limits.amount.max > 0.0
             && safe_cex_num::adjust(options.amount, market.precision.amount)
                 > market.limits.amount.max
         {
-            return None;
+            return Ok(None);
         }
         drop(markets);
         let candidates = match &rule.mint {
             Some(mint) => vec![mint()],
             None => default_mint_candidates(self.runtime.as_ref()),
         };
-        candidates
+        Ok(candidates
             .into_iter()
-            .find(|candidate| (rule.is_valid)(candidate))
+            .find(|candidate| (rule.is_valid)(candidate)))
     }
 
     pub async fn place_order_with_client_order_id<
@@ -1440,7 +1448,7 @@ impl BaseExchange {
         if self.settings.client_order_id_rule.is_none() {
             return Ok(ClientOrderLookup::NotFound { definitive: false });
         }
-        for order in self.store.orders().iter() {
+        for order in self.store.orders()?.iter() {
             if order.symbol == symbol && order_carries_client_order_id(order, id)? {
                 return Ok(ClientOrderLookup::Found(Box::new(order.clone())));
             }
@@ -1461,7 +1469,7 @@ impl BaseExchange {
     ) -> Result<(), ExchangeError> {
         let orders: Vec<_> = self
             .store
-            .orders()
+            .orders()?
             .iter()
             .filter(|order| order.symbol == symbol)
             .cloned()
@@ -1479,7 +1487,7 @@ impl BaseExchange {
         let mut seen = HashSet::new();
         let symbols: Vec<_> = self
             .store
-            .orders()
+            .orders()?
             .iter()
             .filter_map(|order| {
                 seen.insert(order.symbol.clone())
@@ -1549,7 +1557,7 @@ impl BaseExchange {
                 let result: Result<(), ExchangeError> = async {
                     let positions: Vec<_> = self
                         .store
-                        .positions()
+                        .positions()?
                         .iter()
                         .filter(|position| position.contracts > 0.0)
                         .cloned()
@@ -1590,7 +1598,7 @@ impl BaseExchange {
             if tries >= 3
                 || !self
                     .store
-                    .positions()
+                    .positions()?
                     .iter()
                     .any(|position| position.contracts > 0.0)
             {
@@ -1633,7 +1641,7 @@ impl BaseExchange {
         &self,
         venue: &dyn Exchange,
     ) -> Result<MarketChanges, ExchangeError> {
-        let old = self.store.markets().to_vec();
+        let old = self.store.markets()?.to_vec();
         let new = venue.fetch_markets().await?;
         let changes = market_changes(&old, &new);
         // ts-bug: BaseExchange.refreshMarkets ignores changed fields when IDs stay equal.
@@ -1679,7 +1687,7 @@ impl BaseExchange {
                 position_mode: None,
                 is_fetching: None,
             };
-            let mut fetched = self.store.fetched_leverage().clone();
+            let mut fetched = self.store.fetched_leverage()?.clone();
             fetched.insert(symbol.into(), leverage.clone());
             self.store.update(
                 StoreUpdate {
@@ -1711,7 +1719,7 @@ impl BaseExchange {
         venue: &dyn Exchange,
         leverage: f64,
     ) -> Result<(), ExchangeError> {
-        let positions = self.store.positions().to_vec();
+        let positions = self.store.positions()?.to_vec();
         for position in positions {
             if !self.is_disposed() {
                 venue.set_leverage(position.symbol, leverage, None).await?;
@@ -1736,7 +1744,7 @@ impl BaseExchange {
                 self.store.set_orders_for_symbol(&symbol, scoped)?;
             }
         } else {
-            let mut loaded = self.store.loaded().clone();
+            let mut loaded = self.store.loaded()?.clone();
             loaded.orders = true;
             self.store.update(
                 StoreUpdate {
@@ -1775,7 +1783,7 @@ impl BaseExchange {
                 if self.is_disposed() {
                     return Ok(());
                 }
-                let mut loaded = self.store.loaded().clone();
+                let mut loaded = self.store.loaded()?.clone();
                 loaded.orders = true;
                 self.store.update(
                     StoreUpdate {
@@ -1818,7 +1826,7 @@ impl BaseExchange {
         }
         let found: Vec<_> = self
             .store
-            .positions()
+            .positions()?
             .iter()
             .filter(|position| position.symbol == symbol)
             .cloned()
@@ -1830,7 +1838,7 @@ impl BaseExchange {
         if let Some(existing) = existing {
             return existing.wait().await;
         }
-        if !self.store.loaded().positions {
+        if !self.store.loaded()?.positions {
             return Ok(vec![]);
         }
         let name = serde_json::to_value(&self.name).unwrap();
@@ -1898,7 +1906,7 @@ impl BaseExchange {
             if self.is_disposed() {
                 return Ok(());
             }
-            let markets = self.store.markets().to_vec();
+            let markets = self.store.markets()?.to_vec();
             if markets.is_empty() {
                 return Ok(());
             }
@@ -1936,7 +1944,7 @@ impl BaseExchange {
     }
 
     pub async fn wait_for_external_public_data_loaded(&self) -> Result<(), ExchangeError> {
-        if self.store.loaded().markets && self.store.loaded().tickers {
+        if self.store.loaded()?.markets && self.store.loaded()?.tickers {
             return Ok(());
         }
         let deadline = self.runtime.now_ms() + 30_000.0;
@@ -1952,7 +1960,7 @@ impl BaseExchange {
             if self.is_disposed() {
                 return Ok(());
             }
-            let loaded = self.store.loaded();
+            let loaded = self.store.loaded()?;
             if loaded.markets && loaded.tickers {
                 drop(loaded);
                 self.log("External public data loaded (markets + tickers)", "info")?;
@@ -2483,7 +2491,7 @@ impl BaseExchange {
         };
         let mut merged = self
             .store
-            .socket_health()
+            .socket_health()?
             .and_then(|old| old.as_object().cloned())
             .unwrap_or_default();
         // TS object spread writes undefined for cleared optional scalar diagnostics.

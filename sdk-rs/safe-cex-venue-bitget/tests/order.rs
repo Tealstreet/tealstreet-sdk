@@ -1412,8 +1412,8 @@ fn check(oracle: Value, field_identity: bool) {
     }
 
     for c in oracle["storePositionCases"].as_array().unwrap() {
+        use safe_cex_exchange::native_store::DefaultStore;
         use safe_cex_store::model_patch::ModelPatch;
-        use safe_cex_store::store::DefaultStore;
         let price = number(&c["input"]);
         assert_eq!(
             c["patched"], c["input"],

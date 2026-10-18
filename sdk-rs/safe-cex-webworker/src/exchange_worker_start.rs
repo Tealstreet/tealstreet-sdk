@@ -319,7 +319,7 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                 }
                 worker.throttled_store_update.cancel();
                 worker.store_update(
-                    Rc::new(RefCell::new(worker.store().serialize())),
+                    Rc::new(RefCell::new(worker.store().serialize()?)),
                     Some(true),
                 )?;
                 Ok(true)
@@ -395,7 +395,7 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     .is_some_and(|v| safe_cex_num::js_truthy(Some(v)))
                 {
                     if let Some(e) = self.exchange() {
-                        let mut loaded = serde_json::to_value(e.base().store.loaded().clone())
+                        let mut loaded = serde_json::to_value(e.base().store.loaded()?.clone())
                             .map_err(|e| ExchangeError::new(e.to_string()))?;
                         if let (Some(a), Some(b)) = (
                             loaded.as_object_mut(),
@@ -425,7 +425,7 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                         let mut stats = e
                             .base()
                             .store
-                            .message_handler_stats()
+                            .message_handler_stats()?
                             .map(|v| v.clone())
                             .unwrap_or(json!({}));
                         if !stats.is_object() {

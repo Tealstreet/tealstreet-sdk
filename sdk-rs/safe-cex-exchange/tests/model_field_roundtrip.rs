@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     globals, store,
     value::{Js, from_json, from_typed, to_typed},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_types::{Order, Position};
 use serde_json::{Value, json};
 use std::{

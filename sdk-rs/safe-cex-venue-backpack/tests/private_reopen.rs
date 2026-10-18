@@ -33,7 +33,7 @@ fn drive<T>(runtime: &support::Runtime, future: impl Future<Output = T>) -> T {
 struct PrivateFixture {
     owner: Rc<safe_cex_venue_backpack::adapter::BackpackExchange>,
     runtime: Rc<support::Runtime>,
-    store: Rc<safe_cex_store::store::DefaultStore>,
+    store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     wire: Arc<support::Wire>,
     socket: Rc<private_socket::Socket>,
 }

@@ -1,10 +1,11 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::*,
     socket_lifecycle::SocketSlot,
     websocket::*,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     DirectTransport, RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider,

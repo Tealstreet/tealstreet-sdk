@@ -85,7 +85,7 @@ pub trait PrivateDataHost: core::PrivateStreamHost {
             self.store(),
             || self.timestamp_ms(),
         )
-        .map_err(PrivateDataError::Coercion)
+        .map_err(PrivateDataError::from)
     }
     fn map_position_rows(
         &self,
@@ -97,6 +97,7 @@ pub trait PrivateDataHost: core::PrivateStreamHost {
         {
             PositionMapError::Coercion(e) => PrivateDataError::Coercion(e),
             PositionMapError::Emitter(e) => PrivateDataError::Host(e),
+            PositionMapError::Store(e) => PrivateDataError::Store(e.into()),
         })
     }
 }
@@ -178,7 +179,7 @@ pub fn handle_order_topic<H: PrivateDataHost>(
             }
             if matches!(raw_state, Some("filled" | "partially_filled")) {
                 let key = js_string(field(row, "instId")?)?;
-                let market = host.store().markets_by_id().get(&key).cloned();
+                let market = host.store().markets_by_id()?.get(&key).cloned();
                 let contract = if let Some(size) = market
                     .as_ref()
                     .and_then(|m| m.contract_size)
@@ -271,7 +272,7 @@ pub fn handle_position_topic<H: PrivateDataHost>(
         };
         let used = sum("maintenanceMargin")?;
         let upnl = sum("unrealizedPnl")?;
-        let mut balance = host.store().balance().clone();
+        let mut balance = host.store().balance()?.clone();
         balance.used = if num_truth(used) { used } else { 0.0 };
         balance.upnl = if num_truth(upnl) { upnl } else { 0.0 };
         host.store()
@@ -296,9 +297,9 @@ pub fn handle_account_topic<H: PrivateDataHost>(
         )
     })?;
     let total = round_usd(float(field(data, "totalEquity")?)?);
-    let mut balance = host.store().balance().clone();
-    balance.free = subtract(total, host.store().balance().used);
-    balance.total = subtract(total, host.store().balance().upnl);
+    let mut balance = host.store().balance()?.clone();
+    balance.free = subtract(total, host.store().balance()?.used);
+    balance.total = subtract(total, host.store().balance()?.upnl);
     balance.info = Some(data.clone().into());
     host.store()
         .update(
@@ -558,6 +559,22 @@ impl<H: PrivateDataHost> PrivateDataHost for PrivateBridge<H> {
         match f {
             Some(f) => f(rows),
             None => self.host.map_position_rows(rows),
+        }
+    }
+}
+
+impl<E> From<safe_cex_types::StoreReadError> for PrivateDataError<E> {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error.into())
+    }
+}
+
+impl<E> From<crate::reads::MappingError> for PrivateDataError<E> {
+    fn from(error: crate::reads::MappingError) -> Self {
+        match error {
+            crate::reads::MappingError::Coercion(error) => Self::Coercion(error),
+            crate::reads::MappingError::Store(error) => Self::Store(error.into()),
+            crate::reads::MappingError::Input(error) => Self::Shape(error),
         }
     }
 }

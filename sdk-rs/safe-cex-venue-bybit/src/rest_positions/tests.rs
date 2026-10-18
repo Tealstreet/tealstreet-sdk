@@ -221,7 +221,8 @@ fn inverse_outer_fanout_preserves_later_errors_and_requests() {
 }
 
 fn assert_inverse_composition(fanout: bool) {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_types::{MarginType, Market, Ticker};
     let output = std::process::Command::new("node")
         .arg(concat!(
@@ -462,7 +463,7 @@ fn inverse_fanout_drop_releases_request_without_later_category() {
         let drops = Rc::new(Cell::new(0));
         let categories = RefCell::new(Vec::new());
         let reinit = Cell::new(false);
-        let store = safe_cex_store::store::DefaultStore::new();
+        let store = safe_cex_exchange::native_store::DefaultStore::new();
         let mut future = Box::pin(fetch_inverse_position_fanout(
             None,
             || Ok(vec!["linear".into(), "inverse".into()]),

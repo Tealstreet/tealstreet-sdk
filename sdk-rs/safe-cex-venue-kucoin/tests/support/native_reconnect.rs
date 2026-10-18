@@ -1,12 +1,13 @@
 //! Actual KuCoin receiver, native scheduler, signed HTTP and loopback sockets.
 use super::*;
 use futures_util::StreamExt;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::ExchangeSettings,
     native::{NativeHttpHost, native_runtime},
     socket_lifecycle::SocketSlot,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{RestRequest, TransportError, TransportFuture};
 use safe_cex_types::{ExchangeName, OrderStatus};
 use serde_json::{Value, json};

@@ -1,4 +1,5 @@
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::StoreSubscriberError;
 use safe_cex_venue_mexc::{
     utils::{normalize_market, normalize_ticker},

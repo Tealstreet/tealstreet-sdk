@@ -1,6 +1,7 @@
 //! Real core/Store native assertions precede the actual-source comparison.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::BaseExchange, runtime::*, websocket::*};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions, StoreSubscriberError};
 use safe_cex_venue_binance::{private_open::*, private_ping::*, public_open::*, spot_open::*};

@@ -1,6 +1,7 @@
 use super::CoinbasePrivateUserStreamHealth;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreMutationError, store::DefaultStore};
+use safe_cex_store::{Store, StoreMutationError};
 use safe_cex_types::StoreSubscriberError;
 use serde_json::{Map, Value, json};
 use std::{cell::RefCell, error::Error, process::Command, rc::Rc};

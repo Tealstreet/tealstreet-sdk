@@ -146,7 +146,7 @@ fn typed_projection_keeps_enum_and_optional_object_shapes() {
 #[test]
 fn currency_rows_keep_source_shapes_through_typed_store_updates() {
     use safe_cex_exchange::js_runtime::{store, value::from_json};
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_types::CurrencyBalance;
     use serde_json::json;
     use std::rc::Rc;

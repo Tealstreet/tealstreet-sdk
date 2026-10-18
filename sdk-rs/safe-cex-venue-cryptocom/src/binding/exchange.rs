@@ -130,7 +130,7 @@ impl CryptocomExchange {
         let class = define_classes(&weak, &shared.globals).map_err(err)?;
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         let receiver =
             ops::construct(&weak, class, vec![js_name, js_options, js_store]).map_err(err)?;
         *shared.exchange.borrow_mut() = receiver.clone();

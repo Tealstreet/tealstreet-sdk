@@ -3,7 +3,8 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_typed},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Order, OrderStatus, StoreSubscriberError};
 use serde_json::json;
 use std::{cell::Cell, rc::Rc};

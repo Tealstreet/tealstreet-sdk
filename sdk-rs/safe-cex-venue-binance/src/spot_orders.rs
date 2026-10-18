@@ -17,7 +17,7 @@ pub fn format_spot_create_order(
     }
     let market = base
         .store
-        .markets_by_symbol()
+        .markets_by_symbol()?
         .get(&opts.symbol)
         .cloned()
         .ok_or_else(|| ExchangeError::new(format!("Market {} not found", opts.symbol)))?;

@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{MarginType, OrderType, PlaceOrderOpts, Position};
 use safe_cex_venue_orderly::{margin::resolve_margin_type_for_order, utils::is_algo_order};
 use serde_json::Value;

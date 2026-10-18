@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 #[path = "support/subscription_runtime.rs"]
 mod host;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask, LogSeverity},
@@ -9,7 +10,7 @@ use safe_cex_exchange::{
         WsSocket,
     },
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     TransportProvider,
     socket::{SocketFrame, TunnelHost},

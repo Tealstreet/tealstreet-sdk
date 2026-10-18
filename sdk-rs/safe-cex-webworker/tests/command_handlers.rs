@@ -4,12 +4,13 @@ mod error_trace;
 mod runtime;
 use indexmap::IndexMap;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::*,
 };
-use safe_cex_store::{StoreUpdate, store::DefaultStore};
+use safe_cex_store::StoreUpdate;
 use safe_cex_types::{ExchangeName, FetchedLeverage, PlaceOrderOpts};
 use safe_cex_webworker::chaser::ChaserOrderInstance;
 use safe_cex_webworker::command_handlers::*;

@@ -26,11 +26,12 @@ fn units(s: &str) -> JsString {
 #[test]
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn native_market_frames_reach_sdk_tickers_books_and_candles() {
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_exchange::{
         exchange::{BaseExchange, ExchangeSettings},
         websocket::WsEvent,
     };
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_transport::{RestResponseBody, socket::SocketFrame};
     use std::sync::Arc;
     let runtime = Rc::new(support::Runtime::default());

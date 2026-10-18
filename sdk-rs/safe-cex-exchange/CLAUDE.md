@@ -4,6 +4,18 @@ Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
 
+## Canonical Store owner
+
+`native_store::DefaultStore` owns one material `Js` graph. State arrays, rows and
+all four dictionaries expose their actual referents through the native facade;
+granular writes mutate existing rows, while full replacement and reset publish
+new generations. Retained values have no back-reference to the Store owner.
+Native mutations use the shared property/iterator algorithms and notify the live
+ordered listener registry. Typed subscribers project only at their reached slot.
+Graph-backed typed reads return `StoreReadError` with property/projection phase
+and the opaque original cause; conversion recovers that cause before diagnostics.
+The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
+
 ## Abstract venue hooks
 
 `Exchange` is the object-safe venue protocol surface. Venue implementations

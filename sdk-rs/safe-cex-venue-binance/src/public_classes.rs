@@ -326,11 +326,14 @@ impl PublicState {
         let captured = if let Some(existing) = existing {
             existing
         } else {
-            let capture = crate::ticker_capture::Capture::new(store);
+            let capture = crate::ticker_capture::Capture::new(store)
+                .map_err(|error| Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error)))?;
             self.ticker_captures.borrow_mut().push(capture.clone());
             capture
         };
-        let dictionary = captured.dictionary();
+        let dictionary = captured
+            .dictionary()
+            .map_err(|error| Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error)))?;
         let capture = || Ok(dictionary);
         let lookup = |dictionary: &crate::ticker_capture::Dictionary, symbol: &str| {
             Ok(crate::ticker_capture::lookup(dictionary, symbol))

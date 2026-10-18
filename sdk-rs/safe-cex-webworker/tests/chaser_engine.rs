@@ -1,13 +1,14 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     client_order_id::{ClientOrderIdRule, ClientOrderLookup},
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Order, OrderTimeInForce, OrderType, PlaceOrderOpts};
 use safe_cex_webworker::chaser::ChaserOrderInstance;
 use safe_cex_webworker::chaser_engine::*;

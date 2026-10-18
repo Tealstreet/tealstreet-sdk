@@ -1315,7 +1315,7 @@ fn assemble_with_fields(
     let parts = base_exchange::BaseExchangeParts {
         name: safe_cex_types::ExchangeName::Okx,
         options: serde_json::from_value(options.clone()).unwrap(),
-        store: Rc::new(safe_cex_store::store::DefaultStore::new()),
+        store: Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         settings,
         external_public_data: None,
     };
@@ -1809,7 +1809,7 @@ fn clear_timeout_cancels_and_fired_timers_are_released() {
             sent: RefCell::default(),
         });
         let store: Rc<dyn safe_cex_store::Store> =
-            Rc::new(safe_cex_store::store::DefaultStore::new());
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let scope = Scope {
             shared: Rc::new(ScopeShared::new(
                 runtime.clone(),
@@ -1854,7 +1854,8 @@ fn clear_timeout_cancels_and_fired_timers_are_released() {
 
 #[test]
 fn store_facade_mutators_key_on_the_entity_id() {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     let store = Rc::new(DefaultStore::new());
     Store::update(
         &*store,
@@ -1898,7 +1899,7 @@ fn scoped_globals() -> (
     let shared = Rc::new(ScopeShared::new(
         runtime.clone(),
         http,
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         Js::object(vec![]),
         (),
     ));
@@ -2224,7 +2225,7 @@ fn order(id: &str, symbol: &str) -> safe_cex_types::Order {
 
 #[test]
 fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
     let g = library();
     assert_eq!(json_of(&g, facade.get("fetchedLeverage").unwrap()), "{}");
@@ -2646,7 +2647,7 @@ fn create_xhr_with_secondary_key_proxy_precedence() {
 
 #[test]
 fn store_facade_update_positions_patches_each_pair_by_position_id() {
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     let store = Rc::new(DefaultStore::new());
     let position = |id: &str| {
         serde_json::from_value(json!({"id":id,"symbol":id,"side":"long","entryPrice":1,
@@ -3768,7 +3769,7 @@ fn factory_owner(
     Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
         safe_cex_types::ExchangeName::Polymarket,
         serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         runtime,
         safe_cex_exchange::exchange::ExchangeSettings::default(),
     ))

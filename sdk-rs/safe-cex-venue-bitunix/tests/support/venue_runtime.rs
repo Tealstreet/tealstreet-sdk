@@ -6,13 +6,14 @@ mod virtual_time {
 }
 // Virtual-clock runtime and scripted REST transport for the concrete Bitunix venue.
 // Kept include-compatible for native accepted-set probes of concrete host adapters.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     http::{HttpClientOptions, HttpFuture, HttpHost, safe_cex_axios_create_no_proxy},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider, socket::TunnelHost,

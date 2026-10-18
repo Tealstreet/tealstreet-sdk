@@ -1,6 +1,7 @@
 use super::{BingxDependencies, BingxExchange};
 use crate::listen_key::{ListenKeyHost, PrivateListener};
 use futures_util::SinkExt;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -9,7 +10,6 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, ExchangeOptions, OrderStatus};
 use std::{
     io::Write,

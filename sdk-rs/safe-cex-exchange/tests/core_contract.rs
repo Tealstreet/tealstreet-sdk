@@ -894,7 +894,7 @@ fn dynamic_leverage_hook_preserves_venue_override_and_default_store_commit() {
             base: BaseExchange::new(
                 ExchangeName::Binance,
                 serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 Rc::new(Runtime(Cell::new(0))),
                 ExchangeSettings::default(),
             ),

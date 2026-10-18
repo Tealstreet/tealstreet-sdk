@@ -86,7 +86,7 @@ fn startup_continuation_case(disposed: bool) {
         first_account: gate.clone(),
         account_requests: std::cell::Cell::new(0),
     });
-    let store = std::rc::Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = std::rc::Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let mut opts = options();
     opts.passphrase = Some("fixture-passphrase".into());
     opts.omni_key_seed = Some(format!("0x{}1b", "01".repeat(64)));

@@ -91,7 +91,7 @@ impl GrvtExchange {
             &host,
             from_typed(&name).map_err(err)?,
             from_typed(&options).map_err(err)?,
-            store::facade(store),
+            store::facade(store)?,
         ))?
         .base;
         *shared.exchange.borrow_mut() = receiver.clone();

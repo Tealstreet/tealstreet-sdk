@@ -414,15 +414,68 @@ impl ExchangeState {
     fn store_field(&self, name: &str) -> Result<EventValue, Failure> {
         let store = self.base.store.as_ref();
         match name {
-            "orders" => decoded(store.orders().to_vec()),
-            "positions" => decoded(store.positions().to_vec()),
-            "balance" => decoded(store.balance().clone()),
-            "markets" => decoded(store.markets().to_vec()),
-            "tickers" => decoded(store.tickers().to_vec()),
-            "tickersBySymbol" => decoded(&*store.tickers_by_symbol()),
-            "marketsBySymbol" => decoded(&*store.markets_by_symbol()),
-            "loaded" => decoded(store.loaded().clone()),
-            "fetchedLeverage" => decoded(store.fetched_leverage().clone()),
+            "orders" => decoded(
+                store
+                    .orders()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .to_vec(),
+            ),
+            "positions" => decoded(
+                store
+                    .positions()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .to_vec(),
+            ),
+            "balance" => decoded(
+                store
+                    .balance()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .clone(),
+            ),
+            "markets" => decoded(
+                store
+                    .markets()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .to_vec(),
+            ),
+            "tickers" => decoded(
+                store
+                    .tickers()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .to_vec(),
+            ),
+            "tickersBySymbol" => decoded(&store.tickers_by_symbol().map_err(|error| {
+                std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+            })?),
+            "marketsBySymbol" => decoded(&store.markets_by_symbol().map_err(|error| {
+                std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+            })?),
+            "loaded" => decoded(
+                store
+                    .loaded()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .clone(),
+            ),
+            "fetchedLeverage" => decoded(
+                store
+                    .fetched_leverage()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .clone(),
+            ),
             _ => Err(failure(format!("unknown Store field {name}"))),
         }
     }
@@ -1153,7 +1206,7 @@ impl crate::private_rest::SnapshotBindings for Context {
         self.0.store_field("positions")
     }
     fn asset_price(&mut self, asset: EventValue) -> Result<f64, Failure> {
-        Ok(self.0.asset_price(&asset.text()?))
+        self.0.asset_price(&asset.text()?)
     }
     fn market(&mut self, symbol: &str) -> Result<EventValue, Failure> {
         self.0.store_field("marketsBySymbol")?.read(symbol)
@@ -1197,7 +1250,14 @@ impl crate::position_snapshots::PositionSnapshotBindings for ExchangeState {
         self.store_field("tickersBySymbol")
     }
     fn hedged(&self) -> Result<bool, Failure> {
-        Ok(self.base.store.options().is_hedged)
+        Ok(self
+            .base
+            .store
+            .options()
+            .map_err(|error| {
+                std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+            })?
+            .is_hedged)
     }
     fn id(
         &self,
@@ -1626,6 +1686,9 @@ impl crate::public_rest::RestBindings for RestContext {
                 .base
                 .store
                 .markets_by_symbol()
+                .map_err(|error| {
+                    std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                })?
                 .iter()
                 .map(|(key, m)| {
                     (
@@ -1663,6 +1726,9 @@ impl crate::public_rest::RestBindings for RestContext {
                 .base
                 .store
                 .markets()
+                .map_err(|error| {
+                    std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                })?
                 .iter()
                 .map(|m| crate::public_rest::RestMarket {
                     id: m.id.clone(),
@@ -1680,7 +1746,16 @@ impl crate::public_rest::RestBindings for RestContext {
         ))
     }
     fn fallback_tickers(&mut self) -> Result<Rc<Vec<safe_cex_types::Ticker>>, Failure> {
-        Ok(Rc::new(self.0.base.store.tickers().to_vec()))
+        Ok(Rc::new(
+            self.0
+                .base
+                .store
+                .tickers()
+                .map_err(|error| {
+                    std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                })?
+                .to_vec(),
+        ))
     }
     fn dayjs(&mut self, v: Option<f64>) -> Result<f64, Failure> {
         self.0.imports.dayjs(v)
@@ -1757,13 +1832,15 @@ impl ExchangeState {
             Ok(EventValue::Bool(used))
         }))
     }
-    pub fn asset_price(&self, asset: &str) -> f64 {
+    pub fn asset_price(&self, asset: &str) -> Result<f64, Failure> {
         crate::spot_valuation::get_asset_usd_price(asset, |symbol| {
-            self.base
+            Ok(self
+                .base
                 .store
                 .tickers_by_symbol()
+                .map_err(|error| Rc::new(ExchangeError::from(error)))?
                 .get(symbol)
-                .map(|t| t.last)
+                .map(|t| t.last))
         })
     }
     pub fn format_order(&self, opts: EventValue) -> Result<EventValue, Failure> {
@@ -2097,7 +2174,7 @@ impl PrivateParent for ExchangeState {
         self.base.emit("fill", payload).map_err(Rc::new)
     }
     fn asset_price(&self, asset: &EventValue) -> Result<f64, Failure> {
-        Ok(self.asset_price(&asset.text()?))
+        self.asset_price(&asset.text()?)
     }
     fn mark_position(&self) -> Result<(), Failure> {
         self.mark_position_state_updated();
@@ -2196,7 +2273,14 @@ impl WsParent for ExchangeState {
                     if owner.base.is_disposed() {
                         return Ok(());
                     }
-                    let mut loaded = owner.base.store.loaded().clone();
+                    let mut loaded = owner
+                        .base
+                        .store
+                        .loaded()
+                        .map_err(|error| {
+                            std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                        })?
+                        .clone();
                     loaded.orders = true;
                     owner.update_store(record([("orders", orders), ("loaded", decoded(loaded)?)]))
                 }
@@ -2273,7 +2357,16 @@ impl ExchangeState {
                 owner.update_store(record([("orders", orders), ("loaded", decoded(loaded)?)]))
             })
         };
-        let loaded = || Ok(self.base.store.loaded().clone());
+        let loaded = || {
+            Ok(self
+                .base
+                .store
+                .loaded()
+                .map_err(|error| {
+                    std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                })?
+                .clone())
+        };
         let now = || Ok(self.runtime.now_ms());
         if self.venue == Venue::PM {
             crate::orders_retry::retry_pm_orders_snapshot(&state, now, fetch, update, loaded).await
@@ -2426,13 +2519,14 @@ impl ExchangeState {
     }
     pub async fn cancel_symbol(self: &Rc<Self>, symbol: String) -> Result<(), Failure> {
         let view = || {
-            self.base
+            Ok(self
+                .base
                 .store
-                .orders()
+                .orders()?
                 .iter()
                 .cloned()
                 .map(|order| Rc::new(RefCell::new(order)))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>())
         };
         let delete = |path, request: crate::cancel_symbol_orders::CancelSymbolRequest| {
             let response = self.http(
@@ -2528,15 +2622,18 @@ fn emit_json(base: &BaseExchange, value: &Value) -> Result<(), ExchangeError> {
 }
 
 impl ExchangeState {
-    pub fn get_order_position_side(&self, opts: &safe_cex_types::PlaceOrderOpts) -> &'static str {
-        if self.venue == Venue::PM {
+    pub fn get_order_position_side(
+        &self,
+        opts: &safe_cex_types::PlaceOrderOpts,
+    ) -> Result<&'static str, ExchangeError> {
+        Ok(if self.venue == Venue::PM {
             crate::pm_order_logic::get_order_position_side(
-                self.base.store.options().is_hedged,
+                self.base.store.options()?.is_hedged,
                 opts,
             )
         } else {
-            crate::order_logic::get_order_position_side(self.base.store.options().is_hedged, opts)
-        }
+            crate::order_logic::get_order_position_side(self.base.store.options()?.is_hedged, opts)
+        })
     }
     pub fn format_trailing(
         &self,
@@ -2546,22 +2643,41 @@ impl ExchangeState {
             .base
             .store
             .markets_by_symbol()
+            .map_err(|error| {
+                std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+            })?
             .get(&opts.symbol)
             .cloned();
         let ticker = self
             .base
             .store
             .tickers_by_symbol()
+            .map_err(|error| {
+                std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+            })?
             .get(&opts.symbol)
             .cloned();
-        let positions = self.base.store.positions().to_vec();
+        let positions = self
+            .base
+            .store
+            .positions()
+            .map_err(|error| {
+                std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+            })?
+            .to_vec();
         let result = if self.venue == Venue::PM {
             crate::trailing_orders::format_pm_create_trailing_stop_loss_order(
                 opts,
                 market.as_ref(),
                 ticker.as_ref(),
                 &positions,
-                self.base.store.options().is_hedged,
+                self.base
+                    .store
+                    .options()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .is_hedged,
                 || self.imports.uuid(),
             )
         } else {
@@ -2570,7 +2686,13 @@ impl ExchangeState {
                 market.as_ref(),
                 ticker.as_ref(),
                 &positions,
-                self.base.store.options().is_hedged,
+                self.base
+                    .store
+                    .options()
+                    .map_err(|error| {
+                        std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?
+                    .is_hedged,
                 || self.imports.uuid(),
             )
         }

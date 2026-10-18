@@ -2,7 +2,7 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_json, from_typed, to_retained_input, to_typed},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{process::Command, rc::Rc, sync::OnceLock};

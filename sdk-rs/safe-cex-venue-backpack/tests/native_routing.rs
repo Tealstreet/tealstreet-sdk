@@ -2,11 +2,11 @@
 #[path = "support/adapter_runtime.rs"]
 #[allow(dead_code)]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::ExchangeError,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestAdapterRegion, RestRequest, RestResponseBody, TransportFuture,
     TransportProvider,

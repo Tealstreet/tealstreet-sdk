@@ -1,3 +1,4 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -6,7 +7,7 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, ExchangeOptions, Market};
 use safe_cex_venue_coinbase::{
     CoinbaseDependencies, CoinbaseExchange, cdp_signing::CdpSigningCache,

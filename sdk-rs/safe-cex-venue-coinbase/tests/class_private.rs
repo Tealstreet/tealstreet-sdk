@@ -1,5 +1,6 @@
 use indexmap::IndexMap;
-use safe_cex_store::{Store, StoreMutationError, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreMutationError, StoreUpdate};
 use safe_cex_types::{Market, OrderSide, OrderStatus, OrderType, StoreSubscriberError};
 use safe_cex_venue_coinbase::{
     classes::{CoinbasePrivateClassHost, CoinbasePrivateWebsocket},

@@ -1,5 +1,6 @@
 #[path = "support/binding_runtime.rs"]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -9,7 +10,6 @@ use safe_cex_exchange::{
     },
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts, UpdateOrderOpts};
 use safe_cex_venue_bitrue::{BitrueDependencies, BitrueExchange};
 use serde_json::{Value, json};

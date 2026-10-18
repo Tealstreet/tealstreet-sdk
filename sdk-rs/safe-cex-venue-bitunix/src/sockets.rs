@@ -30,7 +30,7 @@ use std::{
 };
 
 pub(crate) type OwnerSlot = Rc<RefCell<Weak<BitunixVenue>>>;
-type Parser = Rc<dyn Fn(&Value) -> Result<(), String>>;
+type Parser = Rc<dyn Fn(&Value) -> Result<(), ExchangeError>>;
 type Timer = Rc<OwnedOperation>;
 enum Kind {
     Public(PublicSocket<(), bool, u64, Timer, bool, String>),
@@ -643,7 +643,7 @@ impl Socket {
         let venue = self.venue()?;
         crate::websocket_public::subscribe_markets_to_channel(
             channel,
-            || Ok(venue.base.store.markets().to_vec()),
+            || Ok(venue.base.store.markets()?.to_vec()),
             |m| Ok(self.allowed(&m.symbol)),
             |m| Ok(m.symbol),
             |symbol, channel| Ok(Self::arg(&symbol, channel)),
@@ -860,7 +860,7 @@ impl Socket {
                 |id, rows: Rc<Vec<Rc<Value>>>| {
                     let parser = self.parsers.borrow().get(&id).cloned();
                     match (parser, rows.first()) {
-                        (Some(parser), Some(row)) => parser(row).map_err(ExchangeError::new),
+                        (Some(parser), Some(row)) => parser(row),
                         _ => Ok(()),
                     }
                 },
@@ -882,7 +882,7 @@ impl Socket {
             Ok(venue
                 .base
                 .store
-                .tickers_by_symbol()
+                .tickers_by_symbol()?
                 .get(&symbol)
                 .map(|t| t.id.clone()))
         };
@@ -993,7 +993,7 @@ impl Socket {
                 |id, p: &Value| {
                     let parser = self.parsers.borrow().get(&id).cloned();
                     match parser {
-                        Some(parser) => parser(p).map_err(ExchangeError::new),
+                        Some(parser) => parser(p),
                         None => Ok(()),
                     }
                 },
@@ -1050,17 +1050,14 @@ impl Socket {
             socket: self.me(),
             resubscribe: Resubscribe::Candles(slot.clone()),
         };
-        let sub = Rc::new(
-            crate::ohlcv_subscription::listen_ohlcv(
-                &mut host,
-                Rc::new(RefCell::new(crate::ohlcv_subscription::OhlcvOptions {
-                    symbol,
-                    interval,
-                })),
-                callback,
-            )
-            .map_err(ExchangeError::new)?,
-        );
+        let sub = Rc::new(crate::ohlcv_subscription::listen_ohlcv(
+            &mut host,
+            Rc::new(RefCell::new(crate::ohlcv_subscription::OhlcvOptions {
+                symbol,
+                interval,
+            })),
+            callback,
+        )?);
         *slot.borrow_mut() = Some(sub.clone());
         let weak = self.self_ref.clone();
         let parse_sub = Rc::downgrade(&sub);
@@ -1085,7 +1082,6 @@ impl Socket {
                 socket: socket.clone(),
                 resubscribe: Resubscribe::None,
             })
-            .map_err(ExchangeError::new)
         }))
     }
     pub(crate) fn listen_order_book(
@@ -1104,8 +1100,7 @@ impl Socket {
             resubscribe: Resubscribe::Book(slot.clone()),
         };
         let sub = Rc::new(RefCell::new(
-            crate::orderbook_subscription::listen_order_book(&mut host, &symbol, callback)
-                .map_err(ExchangeError::new)?,
+            crate::orderbook_subscription::listen_order_book(&mut host, &symbol, callback)?,
         ));
         *slot.borrow_mut() = Some(sub.clone());
         let parser = sub.borrow().parser;
@@ -1135,9 +1130,7 @@ impl Socket {
                 socket: socket.clone(),
                 resubscribe: Resubscribe::None,
             };
-            sub.borrow_mut()
-                .cancel(&mut host)
-                .map_err(ExchangeError::new)
+            sub.borrow_mut().cancel(&mut host)
         }))
     }
 }
@@ -1173,51 +1166,45 @@ struct Feed {
     resubscribe: Resubscribe,
 }
 impl Feed {
-    fn retry(&self, delay: f64) -> Result<OwnedOperation, String> {
+    fn retry(&self, delay: f64) -> Result<OwnedOperation, ExchangeError> {
         let socket = Rc::downgrade(&self.socket);
         let retry = match &self.resubscribe {
             Resubscribe::None => {
-                return Err("waitForConnectedAndSubscribe has no subscription".into());
+                return Err(ExchangeError::new(
+                    "waitForConnectedAndSubscribe has no subscription",
+                ));
             }
             Resubscribe::Candles(slot) => Resubscribe::Candles(slot.clone()),
             Resubscribe::Book(slot) => Resubscribe::Book(slot.clone()),
         };
-        self.socket
-            .base
-            .start_timeout(delay as u64, move || {
-                let Some(socket) = socket.upgrade() else {
-                    return Ok(());
-                };
-                match &retry {
-                    Resubscribe::Candles(slot) => {
-                        let sub = slot.borrow().clone();
-                        match sub {
-                            Some(sub) => sub
-                                .subscribe(&mut Feed {
-                                    socket,
-                                    resubscribe: Resubscribe::Candles(slot.clone()),
-                                })
-                                .map_err(ExchangeError::new),
-                            None => Ok(()),
-                        }
+        self.socket.base.start_timeout(delay as u64, move || {
+            let Some(socket) = socket.upgrade() else {
+                return Ok(());
+            };
+            match &retry {
+                Resubscribe::Candles(slot) => {
+                    let sub = slot.borrow().clone();
+                    match sub {
+                        Some(sub) => sub.subscribe(&mut Feed {
+                            socket,
+                            resubscribe: Resubscribe::Candles(slot.clone()),
+                        }),
+                        None => Ok(()),
                     }
-                    Resubscribe::Book(slot) => {
-                        let sub = slot.borrow().clone();
-                        match sub {
-                            Some(sub) => sub
-                                .borrow_mut()
-                                .subscribe(&mut Feed {
-                                    socket,
-                                    resubscribe: Resubscribe::Book(slot.clone()),
-                                })
-                                .map_err(ExchangeError::new),
-                            None => Ok(()),
-                        }
-                    }
-                    Resubscribe::None => Ok(()),
                 }
-            })
-            .map_err(|e| e.message)
+                Resubscribe::Book(slot) => {
+                    let sub = slot.borrow().clone();
+                    match sub {
+                        Some(sub) => sub.borrow_mut().subscribe(&mut Feed {
+                            socket,
+                            resubscribe: Resubscribe::Book(slot.clone()),
+                        }),
+                        None => Ok(()),
+                    }
+                }
+                Resubscribe::None => Ok(()),
+            }
+        })
     }
 }
 impl crate::ohlcv_subscription::OhlcvHost<Rc<dyn Fn(Candle)>> for Feed {
@@ -1226,57 +1213,54 @@ impl crate::ohlcv_subscription::OhlcvHost<Rc<dyn Fn(Candle)>> for Feed {
     fn allocate_parser(&mut self) -> u64 {
         self.socket.allocate()
     }
-    fn connected(&mut self) -> Result<bool, String> {
+    fn connected(&mut self) -> Result<bool, ExchangeError> {
         Ok(self.socket.base.is_connected())
     }
-    fn handlers(&mut self, handler: &str) -> Result<Vec<u64>, String> {
+    fn handlers(&mut self, handler: &str) -> Result<Vec<u64>, ExchangeError> {
         Ok(self.socket.handlers(handler).unwrap_or_default())
     }
-    fn set_handlers(&mut self, handler: &str, handlers: Vec<u64>) -> Result<(), String> {
+    fn set_handlers(&mut self, handler: &str, handlers: Vec<u64>) -> Result<(), ExchangeError> {
         self.socket.set_handlers(handler, handlers);
         Ok(())
     }
-    fn topic_count(&mut self, topic: &str) -> Result<f64, String> {
+    fn topic_count(&mut self, topic: &str) -> Result<f64, ExchangeError> {
         Ok(self.socket.topic_count(topic))
     }
-    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), String> {
+    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), ExchangeError> {
         self.socket.set_topic_count(topic, count);
         Ok(())
     }
-    fn send(&mut self, frame: &JsJsonValue) -> Result<(), String> {
-        self.socket.send(frame).map_err(|e| e.message)
+    fn send(&mut self, frame: &JsJsonValue) -> Result<(), ExchangeError> {
+        self.socket.send(frame)
     }
-    fn wait(&mut self, delay: f64) -> Result<(), String> {
+    fn wait(&mut self, delay: f64) -> Result<(), ExchangeError> {
         self.retry(delay).map(drop)
     }
-    fn cleanup_stats(&mut self, handler: &str) -> Result<(), String> {
-        self.socket
-            .base
-            .cleanup_message_handler_stats(handler)
-            .map_err(|e| e.message)
+    fn cleanup_stats(&mut self, handler: &str) -> Result<(), ExchangeError> {
+        self.socket.base.cleanup_message_handler_stats(handler)
     }
-    fn ticker(&mut self, symbol: &str) -> Result<Option<String>, String> {
-        let venue = self.socket.venue().map_err(|e| e.message)?;
+    fn ticker(&mut self, symbol: &str) -> Result<Option<String>, ExchangeError> {
+        let venue = self.socket.venue()?;
         let ticker = venue
             .base
             .store
-            .tickers()
+            .tickers()?
             .iter()
             .find(|t| t.symbol == symbol)
             .map(|t| t.id.clone());
         Ok(ticker)
     }
-    fn update_last(&mut self, ticker: String, last: f64) -> Result<(), String> {
-        let venue = self.socket.venue().map_err(|e| e.message)?;
+    fn update_last(&mut self, ticker: String, last: f64) -> Result<(), ExchangeError> {
+        let venue = self.socket.venue()?;
         let mut patch = ModelPatch::default();
         patch.set_number("last", last);
         venue
             .base
             .store
             .update_ticker(&ticker, &patch)
-            .map_err(text)
+            .map_err(ExchangeError::from)
     }
-    fn call(&mut self, callback: &Rc<dyn Fn(Candle)>, candle: Candle) -> Result<(), String> {
+    fn call(&mut self, callback: &Rc<dyn Fn(Candle)>, candle: Candle) -> Result<(), ExchangeError> {
         callback(candle);
         Ok(())
     }
@@ -1284,63 +1268,58 @@ impl crate::ohlcv_subscription::OhlcvHost<Rc<dyn Fn(Candle)>> for Feed {
 impl crate::orderbook_subscription::OrderBookHost<Rc<dyn Fn(OrderBook)>> for Feed {
     type Parser = u64;
     type Timer = OwnedOperation;
-    fn precision(&mut self, symbol: &str) -> Result<Option<Value>, String> {
-        let venue = self.socket.venue().map_err(|e| e.message)?;
+    fn precision(&mut self, symbol: &str) -> Result<Option<Value>, ExchangeError> {
+        let venue = self.socket.venue()?;
         let market = venue
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == symbol)
             .cloned();
-        market
-            .map(|m| to_value(&m.precision.price).map_err(|e| e.message))
-            .transpose()
+        market.map(|m| to_value(&m.precision.price)).transpose()
     }
     fn allocate_parser(&mut self) -> u64 {
         self.socket.allocate()
     }
-    fn connected(&mut self) -> Result<bool, String> {
+    fn connected(&mut self) -> Result<bool, ExchangeError> {
         Ok(self.socket.base.is_connected())
     }
-    fn handlers(&mut self, handler: &str) -> Result<Vec<u64>, String> {
+    fn handlers(&mut self, handler: &str) -> Result<Vec<u64>, ExchangeError> {
         Ok(self.socket.handlers(handler).unwrap_or_default())
     }
-    fn set_handlers(&mut self, handler: &str, parsers: Vec<u64>) -> Result<(), String> {
+    fn set_handlers(&mut self, handler: &str, parsers: Vec<u64>) -> Result<(), ExchangeError> {
         self.socket.set_handlers(handler, parsers);
         Ok(())
     }
-    fn topic_count(&mut self, topic: &str) -> Result<f64, String> {
+    fn topic_count(&mut self, topic: &str) -> Result<f64, ExchangeError> {
         Ok(self.socket.topic_count(topic))
     }
-    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), String> {
+    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), ExchangeError> {
         self.socket.set_topic_count(topic, count);
         Ok(())
     }
-    fn send(&mut self, frame: &JsJsonValue) -> Result<(), String> {
-        self.socket.send(frame).map_err(|e| e.message)
+    fn send(&mut self, frame: &JsJsonValue) -> Result<(), ExchangeError> {
+        self.socket.send(frame)
     }
-    fn wait(&mut self, delay: f64) -> Result<OwnedOperation, String> {
+    fn wait(&mut self, delay: f64) -> Result<OwnedOperation, ExchangeError> {
         self.retry(delay)
     }
     fn timer_truthy(&mut self, timer: &OwnedOperation) -> bool {
         timer.is_active()
     }
-    fn clear(&mut self, timer: OwnedOperation) -> Result<(), String> {
+    fn clear(&mut self, timer: OwnedOperation) -> Result<(), ExchangeError> {
         timer.cancel();
         Ok(())
     }
-    fn cleanup_stats(&mut self, handler: &str) -> Result<(), String> {
-        self.socket
-            .base
-            .cleanup_message_handler_stats(handler)
-            .map_err(|e| e.message)
+    fn cleanup_stats(&mut self, handler: &str) -> Result<(), ExchangeError> {
+        self.socket.base.cleanup_message_handler_stats(handler)
     }
     fn call(
         &mut self,
         callback: &Rc<dyn Fn(OrderBook)>,
         book: Rc<RefCell<crate::orderbook_subscription::OrderBook>>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ExchangeError> {
         let side = |levels: &[crate::orderbook_subscription::BookLevel]| {
             levels
                 .iter()
@@ -1664,7 +1643,7 @@ impl Socket {
                 socket.private_state(|s| *Self::throttle_slot(s, field) = None)
             };
             let disposed = || Ok(socket.disposed());
-            let loaded = || Ok(venue.base.store.loaded().clone());
+            let loaded = || Ok(venue.base.store.loaded()?.clone());
             match name {
                 "fetchThrottledBalance" => {
                     crate::websocket_private::fetch_throttled_balance(
@@ -1783,14 +1762,14 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
         Ok(self.socket.refresh(kind)?)
     }
     fn orders(&mut self) -> Result<Vec<Input>, Fault> {
-        let orders = self.venue()?.base.store.orders().to_vec();
+        let orders = self.venue()?.base.store.orders()?.to_vec();
         Ok(orders
             .iter()
             .map(crate::adapter::to_input)
             .collect::<Result<_, _>>()?)
     }
     fn positions(&mut self) -> Result<Vec<Input>, Fault> {
-        let positions = self.venue()?.base.store.positions().to_vec();
+        let positions = self.venue()?.base.store.positions()?.to_vec();
         Ok(positions
             .iter()
             .map(crate::adapter::to_input)

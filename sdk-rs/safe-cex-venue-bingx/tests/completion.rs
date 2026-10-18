@@ -3,13 +3,14 @@ mod oracle_clock;
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
 use safe_cex_num::{JsRootCollator, js_string};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestBody, RestRequest,
     retry::{ClassifiedRequest, ReadClassification},

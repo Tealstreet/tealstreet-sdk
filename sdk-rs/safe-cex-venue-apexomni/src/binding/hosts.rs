@@ -58,7 +58,11 @@ pub(super) struct Host {
     initialization: SdkInitialization,
 }
 impl Host {
-    pub fn new(options: ExchangeOptions, store: Rc<dyn Store>, deps: ApexDependencies) -> Rc<Self> {
+    pub fn new(
+        options: ExchangeOptions,
+        store: Rc<dyn Store>,
+        deps: ApexDependencies,
+    ) -> Result<Rc<Self>, ExchangeError> {
         let scope = Rc::new(ScopeShared::new(
             deps.runtime,
             deps.http,
@@ -73,7 +77,10 @@ impl Host {
                 "options",
                 safe_cex_exchange::js_runtime::value::from_typed(&options).expect("options"),
             ),
-            ("store", safe_cex_exchange::js_runtime::store::facade(store)),
+            (
+                "store",
+                safe_cex_exchange::js_runtime::store::facade(store).map_err(error)?,
+            ),
         ]);
         let weak = Rc::downgrade(&scope);
         parent
@@ -89,7 +96,7 @@ impl Host {
             .expect("fresh extensible accessor target");
         let public = sockets::base_websocket(&scope.sockets, parent.clone());
         let private = sockets::base_websocket(&scope.sockets, parent);
-        Rc::new(Self {
+        Ok(Rc::new(Self {
             sdk: NativeSigner::module(),
             scope,
             public,
@@ -100,7 +107,7 @@ impl Host {
             next: Cell::new(0),
             tasks: Rc::default(),
             initialization: SdkInitialization::default(),
-        })
+        }))
     }
     pub fn base(&self) -> &Rc<BaseExchange> {
         self.scope

@@ -1,6 +1,7 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Ticker;
 use safe_cex_venue_okx::public_socket::{
     handle_funding_rate_events, handle_index_ticker_events, handle_mark_price_events,

@@ -1,11 +1,12 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::provider::{RestBody, RestRequest};
 use safe_cex_types::{ExchangeName, OHLCVOptions, OrderBook, Ticker};
 use safe_cex_venue_breakoutprop::{lifecycle::*, polling::*};

@@ -299,12 +299,13 @@ pub(crate) fn base_exchange_class(
                         >
                 };
                 let mut settle = move |symbol: &str| {
-                    base.store
-                        .markets_by_symbol()
+                    Ok(base
+                        .store
+                        .markets_by_symbol()?
                         .get(symbol)
                         .map(|market| market.quote.clone())
                         .filter(|quote| !quote.is_empty())
-                        .unwrap_or_else(|| "USDT".into())
+                        .unwrap_or_else(|| "USDT".into()))
                 };
                 let result = build_folded_position_records(
                     &mut FoldableExchange {

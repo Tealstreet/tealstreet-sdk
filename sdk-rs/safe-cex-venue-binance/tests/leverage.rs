@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{js_number_string, number_from_string};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, Position};
 use safe_cex_venue_binance::leverage::{
     BinanceLeverageRequest, set_binance_leverage, set_binance_pm_leverage,

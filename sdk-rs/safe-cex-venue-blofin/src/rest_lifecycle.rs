@@ -244,7 +244,7 @@ pub async fn fetch_markets<E: std::fmt::Display>(
         Ok(v) => Ok(v),
         Err(e) => {
             emit(host, Some(&error_value(&e, false, None)))?;
-            Ok(store.markets().to_vec())
+            Ok(store.markets()?.to_vec())
         }
     }
 }
@@ -312,7 +312,7 @@ pub async fn fetch_ohlcv<E: std::fmt::Display>(
         };
         date_clip(end + delta)
     };
-    let market = store.markets_by_symbol().get(&opts.symbol).cloned();
+    let market = store.markets_by_symbol()?.get(&opts.symbol).cloned();
     let Some(market) = market else {
         emit(
             host,
@@ -578,7 +578,7 @@ pub async fn start<H: LifecycleHost>(host: &H) -> Result<(), ServiceError<H::Err
         let market_task = async {
             let markets = markets.await?;
             later().await;
-            let mut loaded = host.store().loaded().clone();
+            let mut loaded = host.store().loaded()?.clone();
             loaded.markets = true;
             host.store()
                 .update(
@@ -599,7 +599,7 @@ pub async fn start<H: LifecycleHost>(host: &H) -> Result<(), ServiceError<H::Err
             return Ok(());
         }
         let tickers = host.format_tickers(raw)?;
-        let mut loaded = host.store().loaded().clone();
+        let mut loaded = host.store().loaded()?.clone();
         loaded.tickers = true;
         host.store()
             .update(
@@ -622,7 +622,7 @@ pub async fn start<H: LifecycleHost>(host: &H) -> Result<(), ServiceError<H::Err
         async {
             let (balance, positions) = host.fetch_balance_positions().await?;
             later().await;
-            let mut loaded = host.store().loaded().clone();
+            let mut loaded = host.store().loaded()?.clone();
             loaded.balance = true;
             loaded.positions = true;
             host.store()
@@ -640,7 +640,7 @@ pub async fn start<H: LifecycleHost>(host: &H) -> Result<(), ServiceError<H::Err
         async {
             let orders = host.fetch_orders().await?;
             later().await;
-            let mut loaded = host.store().loaded().clone();
+            let mut loaded = host.store().loaded()?.clone();
             loaded.orders = true;
             host.store()
                 .update(
@@ -673,7 +673,7 @@ pub async fn tick<H: LifecycleHost>(host: &H, count: f64) -> Result<(), ServiceE
             host.store()
                 .add_or_update_positions_full(positions)
                 .map_err(ServiceError::Store)?;
-            let mut loaded = host.store().loaded().clone();
+            let mut loaded = host.store().loaded()?.clone();
             loaded.balance = true;
             loaded.positions = true;
             host.store()
@@ -700,7 +700,7 @@ pub async fn tick<H: LifecycleHost>(host: &H, count: f64) -> Result<(), ServiceE
             if host.disposed() {
                 return Ok(true);
             }
-            if !orders.is_empty() || host.store().orders().is_empty() {
+            if !orders.is_empty() || host.store().orders()?.is_empty() {
                 host.store()
                     .update(
                         StoreUpdate {

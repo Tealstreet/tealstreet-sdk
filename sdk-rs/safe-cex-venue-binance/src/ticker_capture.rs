@@ -45,7 +45,7 @@ pub struct Capture {
     stop: RefCell<Option<Box<dyn Fn()>>>,
 }
 impl Capture {
-    pub fn new(store: Rc<dyn Store>) -> Rc<Self> {
+    pub fn new(store: Rc<dyn Store>) -> Result<Rc<Self>, safe_cex_types::StoreReadError> {
         let capture = Rc::new(Self {
             store: Rc::downgrade(&store),
             generation: Cell::new(f64::NAN),
@@ -53,23 +53,26 @@ impl Capture {
             rows: Default::default(),
             stop: Default::default(),
         });
-        capture.refresh();
+        capture.refresh()?;
         let weak = Rc::downgrade(&capture);
         let stop = store.subscribe(Box::new(move |_, _| {
             if let Some(capture) = weak.upgrade() {
-                capture.refresh();
+                capture.refresh().map_err(|error| {
+                    safe_cex_types::StoreSubscriberError::new("Store ticker projection failed")
+                        .with_cause(Rc::new(error))
+                })?;
             }
             Ok(())
         }));
         *capture.stop.borrow_mut() = Some(stop);
-        capture
+        Ok(capture)
     }
-    fn refresh(&self) {
+    fn refresh(&self) -> Result<(), safe_cex_types::StoreReadError> {
         let Some(store) = self.store.upgrade() else {
-            return;
+            return Ok(());
         };
         let generation = store.get_tickers_version();
-        let tickers = store.tickers();
+        let tickers = store.tickers()?;
         if self.generation.get() != generation {
             let rows: Vec<_> = tickers
                 .iter()
@@ -93,21 +96,22 @@ impl Capture {
                 .collect();
             let dictionary = self.dictionary.borrow();
             let mut dictionary = dictionary.borrow_mut();
-            for (symbol, ticker) in store.tickers_by_symbol().iter() {
+            for (symbol, ticker) in store.tickers_by_symbol()?.iter() {
                 if let Some(reference) = by_id.get(&ticker.id) {
                     dictionary.insert(symbol.clone(), reference.clone());
                 }
             }
         }
+        Ok(())
     }
     pub fn belongs_to(&self, store: &Rc<dyn Store>) -> bool {
         self.store
             .upgrade()
             .is_some_and(|original| Rc::ptr_eq(&original, store))
     }
-    pub fn dictionary(&self) -> Dictionary {
-        self.refresh();
-        self.dictionary.borrow().clone()
+    pub fn dictionary(&self) -> Result<Dictionary, safe_cex_types::StoreReadError> {
+        self.refresh()?;
+        Ok(self.dictionary.borrow().clone())
     }
 }
 impl Drop for Capture {

@@ -1,10 +1,10 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::{CapabilityBinding, ExchangeCapabilities},
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     journal::{HistoricalPositionOptions, JournalFolder},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_bitget::history_reads::fetch_historical_positions;
 use serde_json::{Value, json};

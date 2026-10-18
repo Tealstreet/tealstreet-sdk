@@ -3,8 +3,8 @@
 #[path = "support/binding_runtime.rs"]
 mod host;
 use host::{Host, Routes};
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js, runtime::ExchangeSigners};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_venue_hyperliquid::{
     binding::{HyperliquidDependencies, RuntimeClock},
     rate_limit::RateLimiter,

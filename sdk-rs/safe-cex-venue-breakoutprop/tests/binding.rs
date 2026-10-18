@@ -8,6 +8,7 @@ mod clock {
         "/../safe-cex-exchange/tests/support/runtime.rs"
     ));
 }
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -18,7 +19,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::*;

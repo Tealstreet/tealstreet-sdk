@@ -29,7 +29,7 @@ fn actual_private_order_throttle_waits_then_publishes_loaded_snapshot() {
             None,
             safe_cex_exchange::native::NativeHttpEvents::default(),
         );
-        let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let mut loaded = store.loaded().clone();
         loaded.tickers = true;
         store

@@ -133,12 +133,13 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
 
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Position, StoreData};
 use safe_cex_webworker::{
     call_method::CallMethodHandler, positions::UpdatePositionsHandler,

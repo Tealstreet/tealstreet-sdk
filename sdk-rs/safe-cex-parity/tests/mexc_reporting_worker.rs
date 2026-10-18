@@ -1,12 +1,13 @@
 //! Real MEXC readers -> native emitter -> installed worker bridge, all120 source cases.
 #![cfg(not(target_arch = "wasm32"))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider, socket::TunnelHost,

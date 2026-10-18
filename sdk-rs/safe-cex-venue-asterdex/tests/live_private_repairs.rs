@@ -1,11 +1,12 @@
 #[path = "support/repair_runtime.rs"]
 mod host;
 use host::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Order, Position, StoreDataLoaded, StoreSubscriberError};
 use safe_cex_venue_asterdex::private_repairs::{PrivateRepairs, RepairParent, RepairState};
 use serde_json::{Value, json};

@@ -1,8 +1,9 @@
 // Native values and observers shared by individually reviewed Store/helper adapters.
 // This fixture never invokes or redirects a production function under review.
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeErrorOrigin, LogSeverity};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     Candle, FetchedLeverage, Market, Order, OrderBook, OrderBookOrders, PlaceOrderOpts, Position,
     StoreSubscriberError, Ticker,

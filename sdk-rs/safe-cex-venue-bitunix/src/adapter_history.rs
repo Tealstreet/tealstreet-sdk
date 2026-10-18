@@ -186,7 +186,7 @@ impl BitunixVenue {
                 |from, to| me.fetch_closed_position_rows(from, to, None),
                 || Ok(o.account.clone()),
                 |symbol: String| {
-                    let markets = quotes.base.store.markets_by_symbol();
+                    let markets = quotes.base.store.markets_by_symbol()?;
                     Ok(markets.get(&symbol).map(|m| units(&m.quote)))
                 },
                 |row: Value, account: String, resolve: &mut dyn FnMut(String) -> Result<Vec<u16>, ExchangeError>| {

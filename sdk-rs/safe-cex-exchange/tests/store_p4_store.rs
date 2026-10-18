@@ -1,4 +1,6 @@
-use safe_cex_store::{StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
+use safe_cex_store::StoreUpdate;
 use serde_json::{Map, Value, json};
 use std::sync::{Arc, Mutex};
 fn equal(a: &Value, b: &Value) {
@@ -33,7 +35,7 @@ fn full_store_typescript_differential() {
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/p4_store_oracle.mjs"
+            "/../safe-cex-store/tests/p4_store_oracle.mjs"
         ))
         .output()
         .unwrap();
@@ -202,7 +204,8 @@ fn packed_masks_with_no_known_bits_do_not_dereference_an_invalid_index() {
 
 #[test]
 fn populated_stub_is_lossless_through_the_shared_store_model() {
-    let original: Value = serde_json::from_str(include_str!("../src/store_stub.json")).unwrap();
+    let original: Value =
+        serde_json::from_str(include_str!("../../safe-cex-store/src/store_stub.json")).unwrap();
     equal(
         &serde_json::to_value(&*safe_cex_store::store_stub::STUB_STORE).unwrap(),
         &original,

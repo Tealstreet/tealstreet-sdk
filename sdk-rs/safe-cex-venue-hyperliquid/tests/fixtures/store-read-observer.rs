@@ -12,7 +12,7 @@ use std::{
     rc::Rc,
 };
 pub(super) struct ReadTrace {
-    inner: Rc<safe_cex_store::store::DefaultStore>,
+    inner: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub(super) position_reads: Cell<usize>,
     pub(super) ticker_reads: Cell<usize>,
 }

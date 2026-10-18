@@ -75,7 +75,7 @@ pub(crate) fn assemble(
     let version = crate::helpers::resolve_aster_dex_api_version(&parts.options);
     let name = safe_cex_exchange::js_runtime::value::from_typed(&parts.name)?;
     let options = safe_cex_exchange::js_runtime::value::from_typed(&parts.options)?;
-    let store = safe_cex_exchange::js_runtime::store::facade(parts.store.clone());
+    let store = safe_cex_exchange::js_runtime::store::facade(parts.store.clone())?;
     // Module-level axios (the clock) has no account signing or private route.
     // createAPI separately asks the factory for each lane's real options.
     let mut raw_options = parts.options.clone();

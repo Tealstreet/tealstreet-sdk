@@ -3,7 +3,8 @@ mod capture_bits;
 use super::{
     handle_bbo_stream_events, handle_mark_prices_stream_events, handle_tickers_stream_events,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 

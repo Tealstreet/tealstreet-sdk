@@ -1,9 +1,9 @@
 //! Test-only implementation of the actual shared Store contract.
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::{
     PackedTickerDelta, Store, StoreMutationError, StoreNotificationError, StoreUpdate,
     model_patch::{ModelPatch, PatchSource},
-    store::DefaultStore,
 };
 use safe_cex_types::*;
 use serde_json::{Map, Value, json};
