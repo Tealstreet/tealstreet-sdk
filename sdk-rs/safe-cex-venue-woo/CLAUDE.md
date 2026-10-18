@@ -517,4 +517,8 @@ were audit facades. See WS_STATE_GATES.md for the complete caller and native pro
 
 The inactive V3 account/private-order/write closure and orphan request DTO are
 retired after TS/Rust caller checks. All 12 remaining inactive assigned rows are
-ACCEPT; the ten live rows remain OPEN. See ACCOUNT_WRITE_REVIEW.md.
+ACCEPT; the live rows are tracked in FIX_AUDIT_LEDGER.md. See ACCOUNT_WRITE_REVIEW.md.
+
+The three order tables and mapLimitOrder FIX-audit leads are accepted against the
+constructed exchange, including inherited referent identity and live info aliases.
+See LIVE_ORDER_REVIEW.md; typed own-entry slices do not replace runtime lookup.
