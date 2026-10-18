@@ -1679,6 +1679,10 @@ pub struct ExchangeAccountConfig {
     )]
     pub proxy_region: Option<String>,
     /// @ts-mutable
+    #[serde(rename = "hyrotraderDemo")]
+    #[serde(default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
+    pub hyrotrader_demo: Option<bool>,
+    /// @ts-mutable
     #[serde(rename = "useExtensionDirect")]
     #[serde(
         default,
@@ -1903,15 +1907,6 @@ pub enum ExchangeOptionsExtraHyrotraderMode {
 #[ts(optional_fields)]
 pub struct ExchangeOptionsExtra {
     /// @ts-mutable
-    #[serde(rename = "hyrotraderMode")]
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[ts(inline)]
-    pub hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
-    /// @ts-mutable
     #[serde(rename = "tickInterval")]
     #[serde(
         default,
@@ -1985,6 +1980,15 @@ pub struct ExchangeOptionsExtra {
         skip_serializing_if = "Option::is_none"
     )]
     pub lighter_stop_slippage_pct: Option<f64>,
+    /// @ts-mutable
+    #[serde(rename = "hyrotraderMode")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
     /// @ts-mutable
     #[serde(rename = "kucoinBroker")]
     #[serde(
@@ -5085,6 +5089,9 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         proxy_region: Option<String>,
+        #[serde(rename = "hyrotraderDemo")]
+        #[serde(default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
+        hyrotrader_demo: Option<bool>,
         #[serde(rename = "useExtensionDirect")]
         #[serde(
             default,
@@ -5404,13 +5411,6 @@ mod strict_codecs {
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::ExchangeOptionsExtra")]
     struct WireExchangeOptionsExtra {
-        #[serde(rename = "hyrotraderMode")]
-        #[serde(
-            default,
-            deserialize_with = "deserialize_present",
-            skip_serializing_if = "Option::is_none"
-        )]
-        hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
         #[serde(rename = "tickInterval")]
         #[serde(
             default,
@@ -5474,6 +5474,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         lighter_stop_slippage_pct: Option<f64>,
+        #[serde(rename = "hyrotraderMode")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
         #[serde(rename = "kucoinBroker")]
         #[serde(
             default,
