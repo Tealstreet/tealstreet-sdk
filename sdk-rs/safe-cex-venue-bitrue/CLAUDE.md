@@ -16,8 +16,13 @@ through owned, borrowed, text and qualified decoders. Run
 compile and fail its named tagged-object assertion, and exact restoration must
 pass. The two numeric trigger enums retain their separate numeric domains.
 The two accepted-set contracts do not classify other Bitrue owners or aliases.
-The ordinary inventory still refuses 32 unreviewed trait methods on
-`Scope<binding::Extra>`; selected owner receipts do not clear that receiver boundary.
+The 32 concrete `Scope<binding::Extra>` receiver methods now have individual
+role reviews and compiler impl-item pins in the receiver-traits policy.
+`RECEIVER_REVIEW.md` maps each method to actual constructed-exchange native
+witnesses; `scripts/receiver-controls.py` independently faults all nine reviewed
+impls and requires compiled named failures plus byte-exact restored passes.
+The canonical inventory advances beyond the receiver guard to seven separately
+unclassified public aliases; these receiver records do not complete those aliases.
 
 `wire.rs` mirrors declared response shapes, not unchecked Axios runtime values.
 Numbers are binary64. Record Deserialize implementations capture `JsNumberInput`
