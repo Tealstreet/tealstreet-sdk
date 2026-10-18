@@ -25,7 +25,8 @@ for (const secondaryKey of ['read-key', '', undefined]) {
     });
     id = await native.nativeAccountOpen({ exchange: 'mexc', options: {
       key: 'primary-key', secret: 'primary-secret', overrideProxyUrl: `${origin}/primary`,
-      secondary_key: secondaryKey, secondary_secret: 'read-secret', secondaryProxyUrl: `${origin}/secondary`,
+      ...(secondaryKey === undefined ? {} : { secondary_key: secondaryKey }),
+      secondary_secret: 'read-secret', secondaryProxyUrl: `${origin}/secondary`,
     } }, () => {}, () => {});
     const account = await native.nativeAccountCallMethod(id, 'getAccount', []);
     assert.equal(account.userId, `mexc:${createHash('sha256').update('primary-key').digest('hex').slice(0, 24)}`);
