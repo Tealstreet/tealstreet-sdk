@@ -290,10 +290,11 @@ async fn run_request(
             let rejected = signature
                 && !signature_retried
                 && match &error.response {
-                    Some(response) => is_binance_style_signature_rejection(&response_data(
-                        response,
-                        client.transform.get(),
-                    ))
+                    Some(response) => is_binance_style_signature_rejection(
+                        &response_data(response, client.transform.get())
+                            .into_value()
+                            .map_err(|error| failure(error.to_string()))?,
+                    )
                     .map_err(|error| exchange_failure(error.into()))?,
                     None => false,
                 };
@@ -395,7 +396,10 @@ fn config_value(request: &RestRequest) -> Result<EventValue, Failure> {
     }
     if let Some(body) = &request.body {
         let data = body.untransformed().map_err(|e| failure(e.to_string()))?;
-        config.write("data", EventValue::from_json(data.clone()));
+        config.write(
+            "data",
+            safe_cex_exchange::js_runtime::value::from_retained_input(data.clone()),
+        );
     }
     Ok(config)
 }
@@ -430,7 +434,10 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
     request.body = if matches!(data, EventValue::Undefined) {
         None
     } else {
-        Some(RestBody::Untransformed(to_json(&data)?))
+        Some(RestBody::Untransformed(
+            safe_cex_exchange::js_runtime::value::to_retained_input(&data)
+                .map_err(|error| exchange_failure(error.to_exchange_error()))?,
+        ))
     };
     let timeout = config.read("timeout")?;
     if !timeout.nullish() {
@@ -439,7 +446,10 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
     request.skip_remote_signing = config.read("safeCexSkipRemoteSigning")?.truthy();
     Ok(request)
 }
-fn response_data(response: &RestResponse, transform: ResponseTransform) -> Value {
+fn response_data(
+    response: &RestResponse,
+    transform: ResponseTransform,
+) -> safe_cex_types::retained_json::RetainedJsonInput {
     let text = match &response.body {
         safe_cex_transport::RestResponseBody::Encoded(bytes) => {
             String::from_utf8_lossy(bytes).into_owned()
@@ -450,7 +460,9 @@ fn response_data(response: &RestResponse, transform: ResponseTransform) -> Value
     let trimmed = text.trim_start_matches('\u{feff}');
     // Axios keeps unparseable text as the string body.
     if serde_json::from_str::<serde::de::IgnoredAny>(trimmed).is_err() {
-        return Value::String(text);
+        return safe_cex_types::retained_json::RetainedJsonInput::Text(
+            text.encode_utf16().collect(),
+        );
     }
     match transform {
         ResponseTransform::BigInt => safe_cex_transport::how::big_int_as_string_json_parse(trimmed),
@@ -469,7 +481,9 @@ fn response_value(
     Ok(record([
         (
             "data",
-            EventValue::from_json(response_data(response, transform)),
+            safe_cex_exchange::js_runtime::value::from_retained_input(response_data(
+                response, transform,
+            )),
         ),
         ("status", number(response.status as f64)),
         (
@@ -485,13 +499,7 @@ fn error_value(error: &Failure) -> EventValue {
         ("message", string(&error.message)),
         ("name", string(&error.name)),
     ]);
-    value.write(
-        "code",
-        error
-            .code
-            .clone()
-            .map_or(EventValue::Undefined, EventValue::from_json),
-    );
+    value.write("code", error.code.clone().unwrap_or(EventValue::Undefined));
     value.write(
         "response",
         error
@@ -513,7 +521,11 @@ async fn respond(
         Err(Dispatch::Transport(error, raised)) => Err(raised.unwrap_or_else(|| {
             let mut projected: ExchangeError = error.clone().into();
             if let (Some(response), Some(view)) = (&error.response, projected.response.as_mut()) {
-                view["data"] = response_data(response, transform);
+                view["data"] = safe_cex_exchange::runtime::response_json_view(
+                    &safe_cex_transport::RestResponseBody::Transformed(response_data(
+                        response, transform,
+                    )),
+                );
             }
             Rc::new(projected)
         })),
@@ -573,7 +585,7 @@ fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<Even
         }) => {
             let mut error = ExchangeError::new(message);
             error.name = name.into();
-            error.code = to_json(&code).ok().filter(|v| !v.is_null());
+            error.code = (!code.is_undefined()).then_some(code);
             error.response = to_json(&response).ok().filter(|v| !v.is_null());
             Err(Rc::new(error))
         }

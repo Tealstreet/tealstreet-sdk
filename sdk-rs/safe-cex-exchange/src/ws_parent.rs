@@ -82,7 +82,9 @@ impl WsParent for WsExchangeParent {
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
         if let Some(venue) = self.venue.upgrade() {
-            venue.base().emit(event, Value::String(message.into()))?;
+            venue
+                .base()
+                .emit(event, crate::js_runtime::value::Js::str(message))?;
         }
         Ok(())
     }

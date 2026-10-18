@@ -913,7 +913,13 @@ fn dispose_sets_source_flag_without_removing_inherited_listeners() {
         h.venue().base().is_disposed(),
         "source assignment reaches shared state"
     );
-    h.venue().base().emit("update", json!({})).unwrap();
+    h.venue()
+        .base()
+        .emit(
+            "update",
+            safe_cex_exchange::js_runtime::value::from_json(&json!({})),
+        )
+        .unwrap();
     assert_eq!(
         observed.get(),
         1,
@@ -962,7 +968,10 @@ fn create_api_routes_through_the_provider_and_tunnel_adapter() {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(balance()),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(balance())
+                            .unwrap(),
+                    ),
                 })
             })
         }
@@ -1338,6 +1347,38 @@ fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates()
 }
 
 #[test]
+fn releasing_shared_http_gate_resumes_both_native_market_reads() {
+    use std::task::{Context, Poll, Waker};
+    let h = venue(|_| {});
+    let released = h.http.hold("/public/get-instruments");
+    let mut first = h.venue().fetch_markets();
+    let mut second = h.venue().fetch_markets();
+    for _ in 0..64 {
+        for future in [&mut first, &mut second] {
+            assert!(matches!(
+                future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop())),
+                Poll::Pending
+            ));
+        }
+        h.runtime.advance(50.0);
+        if h.http.calls("/public/get-instruments").len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(h.http.calls("/public/get-instruments").len(), 2);
+    h.runtime.pump();
+    released.set(true);
+    let first = h.drive(first).expect("first native market read resumes");
+    let second = h.drive(second).expect("second native market read resumes");
+    for rows in [first, second] {
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].symbol, SYMBOL);
+    }
+}
+
+#[test]
 fn order_book_rows_require_iterable_pairs_through_real_socket() {
     use std::{cell::RefCell, rc::Rc};
     let output = std::process::Command::new("node")
@@ -1389,10 +1430,10 @@ fn order_book_rows_require_iterable_pairs_through_real_socket() {
             case["side"]
         );
         assert!(
-            errors
-                .borrow()
-                .iter()
-                .any(|e| e.to_string().contains("TypeError")),
+            errors.borrow().iter().any(|e| {
+                e.as_str()
+                    .is_some_and(|text| String::from_utf16_lossy(text).contains("TypeError"))
+            }),
             "pair refusal must retain a visible TypeError cause: {:?}",
             errors.borrow()
         );
@@ -1409,4 +1450,73 @@ fn order_book_rows_require_iterable_pairs_through_real_socket() {
         cleanup().unwrap();
         h.venue().dispose().unwrap();
     }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("cryptocom");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 96);
+    let mut opts = serde_json::to_value(options()).unwrap();
+    opts["publicDataOnly"] = json!(true);
+    let h = harness(serde_json::from_value(opts).unwrap(), |http| {
+        http.ok("GET", "/public/get-instruments", instruments());
+        http.ok("GET", "/public/get-tickers", tickers());
+    });
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let template = h.store.markets()[0].clone();
+    let markets = ticker_coercion::seed("cryptocom")
+        .into_iter()
+        .map(|ticker| {
+            let mut market = template.clone();
+            market.info = Some(json!({"underlyingSymbol": ticker.id.split('-').next().unwrap()}));
+            market.id = ticker.id;
+            market.symbol = ticker.symbol;
+            market
+        })
+        .collect();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let socket = market_socket(&h);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("cryptocom")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            h.runtime.now.set(h.runtime.now.get() + 1_100.0);
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
 }

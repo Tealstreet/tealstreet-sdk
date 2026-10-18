@@ -37,7 +37,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("HTTP must not spawn")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -47,7 +47,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -186,7 +190,11 @@ fn factory_wire_matches_actual_axios_captures() {
         let request = RestRequest {
             url: input["url"].as_str().unwrap().into(),
             method: input["method"].as_str().unwrap_or("get").into(),
-            body: input.get("data").cloned().map(RestBody::Untransformed),
+            body: input.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             params: input.get("params").cloned(),
             ..Default::default()
         };
@@ -241,9 +249,11 @@ fn signing_retains_core_transformed_body_phase() {
         Arc::new(Runtime),
     )
     .unwrap();
-    let body = RestBody::Untransformed(json!(" 1 "))
-        .transform(None)
-        .unwrap();
+    let body = RestBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(json!(" 1 ")).unwrap(),
+    )
+    .transform(None)
+    .unwrap();
     assert!(matches!(body, RestBody::Transformed(_)));
     run(api.execute(RestRequest {
         method: "get".into(),

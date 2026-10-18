@@ -440,3 +440,148 @@ fn signature_retry_does_not_replay_unrelated_http_or_resolved_errors() {
         );
     }
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitget");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 720);
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        let mut opts = options();
+        opts.public_data_only = Some(true);
+        let quote = match name {
+            ExchangeName::Bitgetusdc => "USDC",
+            ExchangeName::Bitgetinverse => "USD",
+            _ => "USDT",
+        };
+        let h = harness(name, opts, |http| {
+            let market_rows: Vec<_> = ["BTC", "ETH", "ADA"]
+                .iter()
+                .map(|asset| {
+                    let mut row = market_row();
+                    row["symbol"] = json!(format!("{asset}USDT"));
+                    row["quoteCoin"] = json!(quote);
+                    row
+                })
+                .collect();
+            let ticker_rows: Vec<_> = ["BTC", "ETH", "ADA"]
+                .iter()
+                .map(|asset| {
+                    let mut row = ticker_row();
+                    row["symbol"] = json!(format!("{asset}USDT"));
+                    row
+                })
+                .collect();
+            http.ok("GET", MARKETS, json!(market_rows));
+            http.ok("GET", TICKERS, json!(ticker_rows));
+        });
+        h.drive(h.venue().start()).unwrap();
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        let seed = ticker_coercion::seed("bitget");
+        let markets = seed
+            .iter()
+            .map(|ticker| {
+                serde_json::from_value(serde_json::json!({
+            "id":ticker.id,"symbol":ticker.symbol,"base":"fixture","quote":"USDT","active":true,
+            "precision":{"amount":0.01,"price":0.25},
+            "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+        })).unwrap()
+            })
+            .collect();
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        h.runtime.advance(1000.0);
+        let sockets = h.runtime.sockets.borrow().clone();
+        assert_eq!(
+            sockets.len(),
+            3,
+            "actual public startup opens all three shards"
+        );
+        let shards: Vec<_> = seed
+            .iter()
+            .map(|ticker| {
+                sockets
+                    .iter()
+                    .find(|(_, socket)| {
+                        socket.sent.borrow().iter().any(|frame| {
+                            serde_json::from_str::<Value>(frame)
+                                .ok()
+                                .is_some_and(|frame| frame["args"][0]["instId"] == ticker.symbol)
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "each actual ticker shard subscribes to {}: {:?}",
+                            ticker.symbol,
+                            sockets
+                                .iter()
+                                .map(|(_, s)| s.sent.borrow().clone())
+                                .collect::<Vec<_>>()
+                        )
+                    })
+                    .1
+                    .clone()
+            })
+            .collect();
+        for first in 0..shards.len() {
+            for second in first + 1..shards.len() {
+                assert!(
+                    !std::rc::Rc::ptr_eq(&shards[first], &shards[second]),
+                    "each ticker shard must be a distinct production socket"
+                );
+            }
+        }
+        for case in source["cases"].as_array().unwrap() {
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(seed.clone()),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            let shard = match case["channel"].as_str().unwrap() {
+                "secondary" => 1,
+                "third" => 2,
+                _ => 0,
+            };
+            let socket = &shards[shard];
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .events
+                    .borrow_mut()
+                    .push_back(WsEvent::Message(SocketFrame::Text(
+                        frame.as_str().unwrap().into(),
+                    )));
+                h.runtime.pump();
+            }
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+        }
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
+    }
+}

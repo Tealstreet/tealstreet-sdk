@@ -239,7 +239,9 @@ impl WsProtocol for PrivateProtocol {
             SocketFrame::Binary(bytes) => String::from_utf8_lossy(bytes).into_owned(),
             SocketFrame::Close { .. } => return Ok(()),
         };
-        let value = safe_cex_transport::how::big_int_as_string_json_parse(&raw);
+        let value = safe_cex_transport::how::big_int_as_string_json_parse(&raw)
+            .into_value()
+            .map_err(|error| ExchangeError::new(error.to_string()))?;
         if !safe_cex_num::js_truthy(Some(&value)) {
             return Ok(());
         }

@@ -746,7 +746,12 @@ impl Host for Harness {
             "account-orders"
             | "inverse-account-positions"
             | "spot-account-positions"
-            | "account-tick-again" => api::dispatch(self, owner, code, args),
+            | "account-tick-again" => api::dispatch(
+                self,
+                owner,
+                api::Callback::from_name(code).expect("source callback selector"),
+                args,
+            ),
             _ => panic!("unused native dependency {code}"),
         }
     }

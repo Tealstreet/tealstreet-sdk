@@ -224,6 +224,12 @@ raw for the private order-event `Date.now()` fallback. Registry
 `native_host_bitrue_clock` proves the distinction with a 90-second server offset
 and independently verifies the HMAC on a real native signed account request.
 
+Public depth rows use the shared iterator protocol for the source two-entry
+array pattern, including early close after two entries. Numeric-keyed objects
+and scalar rows must not be published as books. The constructed raw-socket
+regression compares actual source refusals and verifies a later valid snapshot
+still reaches its callback; it does not claim an async rejection diagnostic sink.
+
 
 `exchange_binding::production_ticker_coercion_matches_constructed_typescript` exercises
 32 field-independent cases through the constructed venue's actual socket and

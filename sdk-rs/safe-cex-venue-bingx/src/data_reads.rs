@@ -157,7 +157,10 @@ impl BingxDataReads {
         self.configured_request(RestRequest {
             method: "POST".into(),
             url: endpoint.into(),
-            body: Some(safe_cex_transport::RestBody::Untransformed(body)),
+            body: Some(safe_cex_transport::RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            )),
             ..Default::default()
         })
         .await

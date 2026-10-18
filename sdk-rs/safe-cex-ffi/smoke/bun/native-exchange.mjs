@@ -35,39 +35,40 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 
 const signed = [];
 // The browser's side of remote signing: Binance's local signer over the config.
-const sign = async (requestJson) => {
-  const request = JSON.parse(requestJson);
+const sign = async (request) => {
   signed.push(request);
   const params = { ...(request.config.params ?? {}), ...(request.config.data ?? {}), timestamp: 1700000000000 };
   const query = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
-  return JSON.stringify({ id: request.id, config: { params: { ...params, signature: hmac(query) }, headers: request.config.headers } });
+  return { id: request.id, config: { params: { ...params, signature: hmac(query) }, headers: request.config.headers } };
 };
 const events = [];
 const stores = [];
 const id = await native.nativeAccountOpen(
-  { exchange: 'binance', optionsJson: JSON.stringify({ key: 'smoke-key', secret: '', overrideProxyUrl: origin }), accountName: 'smoke-account' },
-  (event) => events.push(JSON.parse(event)),
-  (slices) => stores.push(JSON.parse(slices)),
+  { exchange: 'binance', options: { key: 'smoke-key', secret: '', overrideProxyUrl: origin }, accountName: 'smoke-account' },
+  (event) => events.push(event),
+  (slices) => stores.push(slices),
   sign,
 );
 
-const orders = JSON.parse(await native.nativeAccountCallMethod(id, 'fetchAndSetOrders', '[null]'));
+const orders = await native.nativeAccountCallMethod(id, 'fetchAndSetOrders', [null]);
 assert.deepEqual(orders.map((order) => order.id), ['77', '78', '79', '80']);
 assert.equal(orders[0].type, 'limit');
 assert.equal(orders[0].side, 'buy');
 for (const index of [1, 2]) {
-  assert.equal(Object.hasOwn(orders[index], 'type'), false, 'undefined order type is omitted through napi JSON');
+  assert.equal(Object.hasOwn(orders[index], 'type'), true, 'undefined order type stays an own property');
+  assert.equal(orders[index].type, undefined);
   assert.equal(orders[index].info.type, index === 1 ? 'STOP' : 'TAKE_PROFIT');
 }
-assert.equal(Object.hasOwn(orders[3], 'side'), false, 'undefined order side is omitted through napi JSON');
+assert.equal(Object.hasOwn(orders[3], 'side'), true, 'undefined order side stays an own property');
+assert.equal(orders[3].side, undefined);
 for (const order of orders) {
   assert.equal(order.price, 10, 'present price stays present');
   assert.equal(Object.hasOwn(order, 'parentId'), false, 'absent optional property stays absent');
 }
 await new Promise((resolve) => setTimeout(resolve, 50));
-assert.ok(stores.some((s) => s.orders.length === 4 && s.orders.some((o) => o.id === '78' && !Object.hasOwn(o, 'type'))), 'the Store slice reached JS');
+assert.ok(stores.some((s) => s.orders.length === 4 && s.orders.some((o) => o.id === '78' && Object.hasOwn(o, 'type') && o.type === undefined)), 'the Store slice reached JS');
 
-const validated = JSON.parse(await native.nativeAccountCallMethod(id, 'validateAccount', '[]'));
+const validated = await native.nativeAccountCallMethod(id, 'validateAccount', []);
 assert.equal(validated.balance.total, 100, 'validateAccount over the signed private client');
 const account = seen.findLast((s) => s.key === 'GET /fapi/v3/account');
 const [payload, signature] = account.query.split('&signature=');
@@ -77,14 +78,14 @@ const accountSign = signed.find((r) => r.config.url.endsWith('/fapi/v3/account')
 assert.equal(accountSign.type, 'http');
 assert.equal(accountSign.accountName, 'smoke-account');
 
-const history = JSON.parse(await native.nativeAccountCallMethod(id, 'fetchHistoricalPositions', JSON.stringify([{ account: 'smoke-account', from: 1700000000000, to: 1700000060000 }])));
-assert.deepEqual(history, [], 'native journal method is available through the JSON account surface');
+const history = await native.nativeAccountCallMethod(id, 'fetchHistoricalPositions', [{ account: 'smoke-account', from: 1700000000000, to: 1700000060000 }]);
+assert.deepEqual(history, [], 'native journal method is available through the native account surface');
 assert.ok(seen.some((s) => s.key === 'GET /fapi/v1/income'), 'journal reads reach the native signed income pager');
 assert.ok(seen.every((s) => s.key in routes), `every request had a local route: ${JSON.stringify(seen)}`);
 
-await assert.rejects(native.nativeAccountCallMethod(id, 'noSuchMethod', '[]'), /Unknown method noSuchMethod/);
+await assert.rejects(native.nativeAccountCallMethod(id, 'noSuchMethod', []), /Unknown method noSuchMethod/);
 await native.nativeAccountClose(id);
-await assert.rejects(native.nativeAccountClose(id), /no native account/);
-await assert.rejects(native.nativeAccountCallMethod(id, 'fetchMarkets', '[]'), /no native account/);
+await assert.doesNotReject(native.nativeAccountClose(id));
+await assert.rejects(native.nativeAccountCallMethod(id, 'fetchMarkets', []), { name: 'AccountClosedError', code: 'ACCOUNT_CLOSED' });
 server.close();
 console.log(`native exchange smoke passed: ${signed.length} remote signatures, ${stores.length} store slices, ${events.length} events`);

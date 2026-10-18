@@ -13,23 +13,23 @@ pub enum AsterDEXAPIVersion {
     #[serde(rename = "v3")]
     V3,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXAPIVersionWire {
+    #[serde(rename = "v1")]
+    V1,
+    #[serde(rename = "v3")]
+    V3,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAPIVersion {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "v1")]
-            V1,
-            #[serde(rename = "v3")]
-            V3,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXAPIVersionWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V1 => Self::V1,
-            Wire::V3 => Self::V3,
+            AsterDEXAPIVersionWire::V1 => Self::V1,
+            AsterDEXAPIVersionWire::V3 => Self::V3,
         })
     }
 }
@@ -43,26 +43,26 @@ pub enum AsterDEXFapiVersion {
     #[serde(rename = "v4")]
     V4,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXFapiVersionWire {
+    #[serde(rename = "v1")]
+    V1,
+    #[serde(rename = "v3")]
+    V3,
+    #[serde(rename = "v4")]
+    V4,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXFapiVersion {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "v1")]
-            V1,
-            #[serde(rename = "v3")]
-            V3,
-            #[serde(rename = "v4")]
-            V4,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXFapiVersionWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V1 => Self::V1,
-            Wire::V3 => Self::V3,
-            Wire::V4 => Self::V4,
+            AsterDEXFapiVersionWire::V1 => Self::V1,
+            AsterDEXFapiVersionWire::V3 => Self::V3,
+            AsterDEXFapiVersionWire::V4 => Self::V4,
         })
     }
 }
@@ -76,26 +76,26 @@ pub enum AsterDEXStpMode {
     #[serde(rename = "EXPIRE_BOTH")]
     V2,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXStpModeWire {
+    #[serde(rename = "EXPIRE_TAKER")]
+    V0,
+    #[serde(rename = "EXPIRE_MAKER")]
+    V1,
+    #[serde(rename = "EXPIRE_BOTH")]
+    V2,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStpMode {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "EXPIRE_TAKER")]
-            V0,
-            #[serde(rename = "EXPIRE_MAKER")]
-            V1,
-            #[serde(rename = "EXPIRE_BOTH")]
-            V2,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXStpModeWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
-            Wire::V1 => Self::V1,
-            Wire::V2 => Self::V2,
+            AsterDEXStpModeWire::V0 => Self::V0,
+            AsterDEXStpModeWire::V1 => Self::V1,
+            AsterDEXStpModeWire::V2 => Self::V2,
         })
     }
 }
@@ -124,34 +124,36 @@ pub struct AsterDEXV3AuthContext {
     )]
     pub signer_private_key: Option<String>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXV3AuthContextWire {
+    #[serde(rename = "userAddress")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    user_address: Option<String>,
+    #[serde(rename = "signerAddress")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    signer_address: Option<String>,
+    #[serde(rename = "signerPrivateKey")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    signer_private_key: Option<String>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXV3AuthContext {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "userAddress")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            user_address: Option<String>,
-            #[serde(rename = "signerAddress")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            signer_address: Option<String>,
-            #[serde(rename = "signerPrivateKey")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            signer_private_key: Option<String>,
-        }
-        let w =
-            <Wire as serde::Deserialize>::deserialize(safe_cex_types::strict_decode::object(d))?;
+        let w = <AsterDEXV3AuthContextWire as serde::Deserialize>::deserialize(
+            safe_cex_types::strict_decode::object(d),
+        )?;
         Ok(Self {
             user_address: w.user_address,
             signer_address: w.signer_address,
@@ -244,96 +246,97 @@ pub struct AsterDEXMarketResponseFiltersItem {
     )]
     pub multiplier_decimal: Option<String>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXMarketResponseFiltersItemWire {
+    #[serde(flatten, deserialize_with = "opaque_fields")]
+    extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(rename = "filterType")]
+    filter_type: String,
+    #[serde(rename = "maxPrice")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    max_price: Option<String>,
+    #[serde(rename = "minPrice")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    min_price: Option<String>,
+    #[serde(rename = "tickSize")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    tick_size: Option<String>,
+    #[serde(rename = "maxQty")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    max_qty: Option<String>,
+    #[serde(rename = "minQty")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    min_qty: Option<String>,
+    #[serde(rename = "stepSize")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    step_size: Option<String>,
+    #[serde(rename = "limit")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    limit: Option<f64>,
+    #[serde(rename = "notional")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    notional: Option<String>,
+    #[serde(rename = "multiplierUp")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    multiplier_up: Option<String>,
+    #[serde(rename = "multiplierDown")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    multiplier_down: Option<String>,
+    #[serde(rename = "multiplierDecimal")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    multiplier_decimal: Option<String>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXMarketResponseFiltersItem {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(flatten, deserialize_with = "opaque_fields")]
-            extra: serde_json::Map<String, serde_json::Value>,
-            #[serde(rename = "filterType")]
-            filter_type: String,
-            #[serde(rename = "maxPrice")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            max_price: Option<String>,
-            #[serde(rename = "minPrice")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            min_price: Option<String>,
-            #[serde(rename = "tickSize")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            tick_size: Option<String>,
-            #[serde(rename = "maxQty")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            max_qty: Option<String>,
-            #[serde(rename = "minQty")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            min_qty: Option<String>,
-            #[serde(rename = "stepSize")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            step_size: Option<String>,
-            #[serde(rename = "limit")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            limit: Option<f64>,
-            #[serde(rename = "notional")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            notional: Option<String>,
-            #[serde(rename = "multiplierUp")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            multiplier_up: Option<String>,
-            #[serde(rename = "multiplierDown")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            multiplier_down: Option<String>,
-            #[serde(rename = "multiplierDecimal")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            multiplier_decimal: Option<String>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXMarketResponseFiltersItemWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -430,86 +433,87 @@ pub struct AsterDEXMarketResponse {
     #[serde(rename = "marketTakeBound")]
     pub market_take_bound: String,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXMarketResponseWire {
+    #[serde(flatten, deserialize_with = "opaque_fields")]
+    extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "baseAsset")]
+    base_asset: String,
+    #[serde(rename = "quoteAsset")]
+    quote_asset: String,
+    #[serde(rename = "contractType")]
+    contract_type: String,
+    #[serde(rename = "deliveryDate")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    delivery_date: Option<f64>,
+    #[serde(rename = "onboardDate")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    onboard_date: Option<f64>,
+    #[serde(rename = "status")]
+    status: String,
+    #[serde(rename = "maintMarginPercent")]
+    maint_margin_percent: String,
+    #[serde(rename = "requiredMarginPercent")]
+    required_margin_percent: String,
+    #[serde(rename = "pricePrecision")]
+    price_precision: f64,
+    #[serde(rename = "quantityPrecision")]
+    quantity_precision: f64,
+    #[serde(rename = "baseAssetPrecision")]
+    base_asset_precision: f64,
+    #[serde(rename = "quotePrecision")]
+    quote_precision: f64,
+    #[serde(rename = "underlyingType")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    underlying_type: Option<String>,
+    #[serde(rename = "underlyingSubType")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    underlying_sub_type: Option<Vec<String>>,
+    #[serde(rename = "settlePlan")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    settle_plan: Option<f64>,
+    #[serde(rename = "triggerProtect")]
+    trigger_protect: String,
+    #[serde(rename = "filters")]
+    filters: Vec<AsterDEXMarketResponseFiltersItem>,
+    #[serde(rename = "orderTypes")]
+    order_types: Vec<String>,
+    #[serde(rename = "timeInForce")]
+    time_in_force: Vec<String>,
+    #[serde(rename = "liquidationFee")]
+    liquidation_fee: String,
+    #[serde(rename = "marketTakeBound")]
+    market_take_bound: String,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXMarketResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(flatten, deserialize_with = "opaque_fields")]
-            extra: serde_json::Map<String, serde_json::Value>,
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "baseAsset")]
-            base_asset: String,
-            #[serde(rename = "quoteAsset")]
-            quote_asset: String,
-            #[serde(rename = "contractType")]
-            contract_type: String,
-            #[serde(rename = "deliveryDate")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            delivery_date: Option<f64>,
-            #[serde(rename = "onboardDate")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            onboard_date: Option<f64>,
-            #[serde(rename = "status")]
-            status: String,
-            #[serde(rename = "maintMarginPercent")]
-            maint_margin_percent: String,
-            #[serde(rename = "requiredMarginPercent")]
-            required_margin_percent: String,
-            #[serde(rename = "pricePrecision")]
-            price_precision: f64,
-            #[serde(rename = "quantityPrecision")]
-            quantity_precision: f64,
-            #[serde(rename = "baseAssetPrecision")]
-            base_asset_precision: f64,
-            #[serde(rename = "quotePrecision")]
-            quote_precision: f64,
-            #[serde(rename = "underlyingType")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            underlying_type: Option<String>,
-            #[serde(rename = "underlyingSubType")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            underlying_sub_type: Option<Vec<String>>,
-            #[serde(rename = "settlePlan")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            settle_plan: Option<f64>,
-            #[serde(rename = "triggerProtect")]
-            trigger_protect: String,
-            #[serde(rename = "filters")]
-            filters: Vec<AsterDEXMarketResponseFiltersItem>,
-            #[serde(rename = "orderTypes")]
-            order_types: Vec<String>,
-            #[serde(rename = "timeInForce")]
-            time_in_force: Vec<String>,
-            #[serde(rename = "liquidationFee")]
-            liquidation_fee: String,
-            #[serde(rename = "marketTakeBound")]
-            market_take_bound: String,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXMarketResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -573,43 +577,44 @@ pub struct AsterDEXAccountResponseAssetsItem {
     #[serde(rename = "updateTime")]
     pub update_time: f64,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXAccountResponseAssetsItemWire {
+    #[serde(rename = "asset")]
+    asset: String,
+    #[serde(rename = "walletBalance")]
+    wallet_balance: String,
+    #[serde(rename = "unrealizedProfit")]
+    unrealized_profit: String,
+    #[serde(rename = "marginBalance")]
+    margin_balance: String,
+    #[serde(rename = "maintMargin")]
+    maint_margin: String,
+    #[serde(rename = "initialMargin")]
+    initial_margin: String,
+    #[serde(rename = "positionInitialMargin")]
+    position_initial_margin: String,
+    #[serde(rename = "openOrderInitialMargin")]
+    open_order_initial_margin: String,
+    #[serde(rename = "maxWithdrawAmount")]
+    max_withdraw_amount: String,
+    #[serde(rename = "crossWalletBalance")]
+    cross_wallet_balance: String,
+    #[serde(rename = "crossUnPnl")]
+    cross_un_pnl: String,
+    #[serde(rename = "availableBalance")]
+    available_balance: String,
+    #[serde(rename = "marginAvailable")]
+    margin_available: bool,
+    #[serde(rename = "updateTime")]
+    update_time: f64,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountResponseAssetsItem {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "asset")]
-            asset: String,
-            #[serde(rename = "walletBalance")]
-            wallet_balance: String,
-            #[serde(rename = "unrealizedProfit")]
-            unrealized_profit: String,
-            #[serde(rename = "marginBalance")]
-            margin_balance: String,
-            #[serde(rename = "maintMargin")]
-            maint_margin: String,
-            #[serde(rename = "initialMargin")]
-            initial_margin: String,
-            #[serde(rename = "positionInitialMargin")]
-            position_initial_margin: String,
-            #[serde(rename = "openOrderInitialMargin")]
-            open_order_initial_margin: String,
-            #[serde(rename = "maxWithdrawAmount")]
-            max_withdraw_amount: String,
-            #[serde(rename = "crossWalletBalance")]
-            cross_wallet_balance: String,
-            #[serde(rename = "crossUnPnl")]
-            cross_un_pnl: String,
-            #[serde(rename = "availableBalance")]
-            available_balance: String,
-            #[serde(rename = "marginAvailable")]
-            margin_available: bool,
-            #[serde(rename = "updateTime")]
-            update_time: f64,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXAccountResponseAssetsItemWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -694,51 +699,53 @@ pub struct AsterDEXAccountResponsePositionsItem {
     #[serde(rename = "askNotional")]
     pub ask_notional: String,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXAccountResponsePositionsItemWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "initialMargin")]
+    initial_margin: String,
+    #[serde(rename = "maintMargin")]
+    maint_margin: String,
+    #[serde(rename = "unrealizedProfit")]
+    unrealized_profit: String,
+    #[serde(rename = "positionInitialMargin")]
+    position_initial_margin: String,
+    #[serde(rename = "openOrderInitialMargin")]
+    open_order_initial_margin: String,
+    #[serde(rename = "leverage")]
+    leverage: String,
+    #[serde(rename = "isolated")]
+    isolated: bool,
+    #[serde(rename = "entryPrice")]
+    entry_price: String,
+    #[serde(rename = "maxNotional")]
+    max_notional: String,
+    #[serde(rename = "positionSide")]
+    position_side: String,
+    #[serde(rename = "positionAmt")]
+    position_amt: String,
+    #[serde(rename = "notional")]
+    notional: String,
+    #[serde(rename = "isolatedWallet")]
+    isolated_wallet: String,
+    #[serde(rename = "updateTime")]
+    update_time: f64,
+    #[serde(rename = "bidNotional")]
+    bid_notional: String,
+    #[serde(rename = "askNotional")]
+    ask_notional: String,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountResponsePositionsItem {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "initialMargin")]
-            initial_margin: String,
-            #[serde(rename = "maintMargin")]
-            maint_margin: String,
-            #[serde(rename = "unrealizedProfit")]
-            unrealized_profit: String,
-            #[serde(rename = "positionInitialMargin")]
-            position_initial_margin: String,
-            #[serde(rename = "openOrderInitialMargin")]
-            open_order_initial_margin: String,
-            #[serde(rename = "leverage")]
-            leverage: String,
-            #[serde(rename = "isolated")]
-            isolated: bool,
-            #[serde(rename = "entryPrice")]
-            entry_price: String,
-            #[serde(rename = "maxNotional")]
-            max_notional: String,
-            #[serde(rename = "positionSide")]
-            position_side: String,
-            #[serde(rename = "positionAmt")]
-            position_amt: String,
-            #[serde(rename = "notional")]
-            notional: String,
-            #[serde(rename = "isolatedWallet")]
-            isolated_wallet: String,
-            #[serde(rename = "updateTime")]
-            update_time: f64,
-            #[serde(rename = "bidNotional")]
-            bid_notional: String,
-            #[serde(rename = "askNotional")]
-            ask_notional: String,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
-                    safe_cex_types::strict_decode::object(d),
-                )?;
+                let w =
+                    <AsterDEXAccountResponsePositionsItemWire as serde::Deserialize>::deserialize(
+                        safe_cex_types::strict_decode::object(d),
+                    )?;
                 Ok(Self {
                     symbol: w.symbol,
                     initial_margin: w.initial_margin,
@@ -831,53 +838,54 @@ pub struct AsterDEXAccountResponse {
     #[serde(rename = "positions")]
     pub positions: Vec<AsterDEXAccountResponsePositionsItem>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXAccountResponseWire {
+    #[serde(rename = "accountAlias")]
+    account_alias: String,
+    #[serde(rename = "feeTier")]
+    fee_tier: f64,
+    #[serde(rename = "canTrade")]
+    can_trade: bool,
+    #[serde(rename = "canDeposit")]
+    can_deposit: bool,
+    #[serde(rename = "canWithdraw")]
+    can_withdraw: bool,
+    #[serde(rename = "updateTime")]
+    update_time: f64,
+    #[serde(rename = "totalInitialMargin")]
+    total_initial_margin: String,
+    #[serde(rename = "totalMaintMargin")]
+    total_maint_margin: String,
+    #[serde(rename = "totalWalletBalance")]
+    total_wallet_balance: String,
+    #[serde(rename = "totalUnrealizedProfit")]
+    total_unrealized_profit: String,
+    #[serde(rename = "totalMarginBalance")]
+    total_margin_balance: String,
+    #[serde(rename = "totalPositionInitialMargin")]
+    total_position_initial_margin: String,
+    #[serde(rename = "totalOpenOrderInitialMargin")]
+    total_open_order_initial_margin: String,
+    #[serde(rename = "totalCrossWalletBalance")]
+    total_cross_wallet_balance: String,
+    #[serde(rename = "totalCrossUnPnl")]
+    total_cross_un_pnl: String,
+    #[serde(rename = "availableBalance")]
+    available_balance: String,
+    #[serde(rename = "maxWithdrawAmount")]
+    max_withdraw_amount: String,
+    #[serde(rename = "assets")]
+    assets: Vec<AsterDEXAccountResponseAssetsItem>,
+    #[serde(rename = "positions")]
+    positions: Vec<AsterDEXAccountResponsePositionsItem>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "accountAlias")]
-            account_alias: String,
-            #[serde(rename = "feeTier")]
-            fee_tier: f64,
-            #[serde(rename = "canTrade")]
-            can_trade: bool,
-            #[serde(rename = "canDeposit")]
-            can_deposit: bool,
-            #[serde(rename = "canWithdraw")]
-            can_withdraw: bool,
-            #[serde(rename = "updateTime")]
-            update_time: f64,
-            #[serde(rename = "totalInitialMargin")]
-            total_initial_margin: String,
-            #[serde(rename = "totalMaintMargin")]
-            total_maint_margin: String,
-            #[serde(rename = "totalWalletBalance")]
-            total_wallet_balance: String,
-            #[serde(rename = "totalUnrealizedProfit")]
-            total_unrealized_profit: String,
-            #[serde(rename = "totalMarginBalance")]
-            total_margin_balance: String,
-            #[serde(rename = "totalPositionInitialMargin")]
-            total_position_initial_margin: String,
-            #[serde(rename = "totalOpenOrderInitialMargin")]
-            total_open_order_initial_margin: String,
-            #[serde(rename = "totalCrossWalletBalance")]
-            total_cross_wallet_balance: String,
-            #[serde(rename = "totalCrossUnPnl")]
-            total_cross_un_pnl: String,
-            #[serde(rename = "availableBalance")]
-            available_balance: String,
-            #[serde(rename = "maxWithdrawAmount")]
-            max_withdraw_amount: String,
-            #[serde(rename = "assets")]
-            assets: Vec<AsterDEXAccountResponseAssetsItem>,
-            #[serde(rename = "positions")]
-            positions: Vec<AsterDEXAccountResponsePositionsItem>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXAccountResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -942,23 +950,24 @@ pub enum AsterDEXPositionModeResponseDualSidePositionString {
     #[serde(rename = "false")]
     V1,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXPositionModeResponseDualSidePositionStringWire {
+    #[serde(rename = "true")]
+    V0,
+    #[serde(rename = "false")]
+    V1,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXPositionModeResponseDualSidePositionString {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "true")]
-            V0,
-            #[serde(rename = "false")]
-            V1,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
         let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
+            <AsterDEXPositionModeResponseDualSidePositionStringWire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
                 D::Error,
             >::new(text))?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
-            Wire::V1 => Self::V1,
+            AsterDEXPositionModeResponseDualSidePositionStringWire::V0 => Self::V0,
+            AsterDEXPositionModeResponseDualSidePositionStringWire::V1 => Self::V1,
         })
     }
 }
@@ -975,15 +984,17 @@ pub struct AsterDEXPositionModeResponse {
     #[serde(rename = "dualSidePosition")]
     pub dual_side_position: AsterDEXPositionModeResponseDualSidePosition,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXPositionModeResponseWire {
+    #[serde(rename = "dualSidePosition")]
+    dual_side_position: AsterDEXPositionModeResponseDualSidePosition,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXPositionModeResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "dualSidePosition")]
-            dual_side_position: AsterDEXPositionModeResponseDualSidePosition,
-        }
-        let w =
-            <Wire as serde::Deserialize>::deserialize(safe_cex_types::strict_decode::object(d))?;
+        let w = <AsterDEXPositionModeResponseWire as serde::Deserialize>::deserialize(
+            safe_cex_types::strict_decode::object(d),
+        )?;
         Ok(Self {
             dual_side_position: w.dual_side_position,
         })
@@ -1027,49 +1038,50 @@ pub struct AsterDEXPositionResponse {
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXPositionResponseWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "positionAmt")]
+    position_amt: String,
+    #[serde(rename = "entryPrice")]
+    entry_price: String,
+    #[serde(rename = "breakEvenPrice")]
+    break_even_price: String,
+    #[serde(rename = "markPrice")]
+    mark_price: String,
+    #[serde(rename = "unRealizedProfit")]
+    un_realized_profit: String,
+    #[serde(rename = "liquidationPrice")]
+    liquidation_price: String,
+    #[serde(rename = "leverage")]
+    leverage: String,
+    #[serde(rename = "maxNotionalValue")]
+    max_notional_value: String,
+    #[serde(rename = "marginType")]
+    margin_type: String,
+    #[serde(rename = "isolatedMargin")]
+    isolated_margin: String,
+    #[serde(rename = "isAutoAddMargin")]
+    is_auto_add_margin: String,
+    #[serde(rename = "positionSide")]
+    position_side: String,
+    #[serde(rename = "notional")]
+    notional: String,
+    #[serde(rename = "isolatedWallet")]
+    isolated_wallet: String,
+    #[serde(rename = "updateTime")]
+    update_time: f64,
+    #[serde(flatten, deserialize_with = "opaque_fields")]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXPositionResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "positionAmt")]
-            position_amt: String,
-            #[serde(rename = "entryPrice")]
-            entry_price: String,
-            #[serde(rename = "breakEvenPrice")]
-            break_even_price: String,
-            #[serde(rename = "markPrice")]
-            mark_price: String,
-            #[serde(rename = "unRealizedProfit")]
-            un_realized_profit: String,
-            #[serde(rename = "liquidationPrice")]
-            liquidation_price: String,
-            #[serde(rename = "leverage")]
-            leverage: String,
-            #[serde(rename = "maxNotionalValue")]
-            max_notional_value: String,
-            #[serde(rename = "marginType")]
-            margin_type: String,
-            #[serde(rename = "isolatedMargin")]
-            isolated_margin: String,
-            #[serde(rename = "isAutoAddMargin")]
-            is_auto_add_margin: String,
-            #[serde(rename = "positionSide")]
-            position_side: String,
-            #[serde(rename = "notional")]
-            notional: String,
-            #[serde(rename = "isolatedWallet")]
-            isolated_wallet: String,
-            #[serde(rename = "updateTime")]
-            update_time: f64,
-            #[serde(flatten, deserialize_with = "opaque_fields")]
-            extra: serde_json::Map<String, serde_json::Value>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXPositionResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1189,105 +1201,106 @@ pub struct AsterDEXOrderResponse {
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXOrderResponseWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "orderId")]
+    order_id: f64,
+    #[serde(rename = "clientOrderId")]
+    client_order_id: String,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "origQty")]
+    orig_qty: String,
+    #[serde(rename = "executedQty")]
+    executed_qty: String,
+    #[serde(rename = "cummulativeQuoteQty")]
+    cummulative_quote_qty: String,
+    #[serde(rename = "status")]
+    status: String,
+    #[serde(rename = "timeInForce")]
+    time_in_force: String,
+    #[serde(rename = "type")]
+    r#type: String,
+    #[serde(rename = "side")]
+    side: String,
+    #[serde(rename = "stopPrice")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    stop_price: Option<String>,
+    #[serde(rename = "icebergQty")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    iceberg_qty: Option<String>,
+    #[serde(rename = "time")]
+    time: f64,
+    #[serde(rename = "updateTime")]
+    update_time: f64,
+    #[serde(rename = "isWorking")]
+    is_working: bool,
+    #[serde(rename = "workingTime")]
+    working_time: f64,
+    #[serde(rename = "origQuoteOrderQty")]
+    orig_quote_order_qty: String,
+    #[serde(rename = "positionSide")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    position_side: Option<String>,
+    #[serde(rename = "closePosition")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    close_position: Option<bool>,
+    #[serde(rename = "reduceOnly")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    reduce_only: Option<bool>,
+    #[serde(rename = "activatePrice")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    activate_price: Option<String>,
+    #[serde(rename = "priceRate")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    price_rate: Option<String>,
+    #[serde(rename = "priceProtect")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    price_protect: Option<bool>,
+    #[serde(flatten, deserialize_with = "opaque_fields")]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXOrderResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "orderId")]
-            order_id: f64,
-            #[serde(rename = "clientOrderId")]
-            client_order_id: String,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "origQty")]
-            orig_qty: String,
-            #[serde(rename = "executedQty")]
-            executed_qty: String,
-            #[serde(rename = "cummulativeQuoteQty")]
-            cummulative_quote_qty: String,
-            #[serde(rename = "status")]
-            status: String,
-            #[serde(rename = "timeInForce")]
-            time_in_force: String,
-            #[serde(rename = "type")]
-            r#type: String,
-            #[serde(rename = "side")]
-            side: String,
-            #[serde(rename = "stopPrice")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            stop_price: Option<String>,
-            #[serde(rename = "icebergQty")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            iceberg_qty: Option<String>,
-            #[serde(rename = "time")]
-            time: f64,
-            #[serde(rename = "updateTime")]
-            update_time: f64,
-            #[serde(rename = "isWorking")]
-            is_working: bool,
-            #[serde(rename = "workingTime")]
-            working_time: f64,
-            #[serde(rename = "origQuoteOrderQty")]
-            orig_quote_order_qty: String,
-            #[serde(rename = "positionSide")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            position_side: Option<String>,
-            #[serde(rename = "closePosition")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            close_position: Option<bool>,
-            #[serde(rename = "reduceOnly")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            reduce_only: Option<bool>,
-            #[serde(rename = "activatePrice")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            activate_price: Option<String>,
-            #[serde(rename = "priceRate")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            price_rate: Option<String>,
-            #[serde(rename = "priceProtect")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            price_protect: Option<bool>,
-            #[serde(flatten, deserialize_with = "opaque_fields")]
-            extra: serde_json::Map<String, serde_json::Value>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXOrderResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1359,49 +1372,50 @@ pub struct AsterDEXTickerResponse {
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXTickerResponseWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "priceChange")]
+    price_change: String,
+    #[serde(rename = "priceChangePercent")]
+    price_change_percent: String,
+    #[serde(rename = "weightedAvgPrice")]
+    weighted_avg_price: String,
+    #[serde(rename = "lastPrice")]
+    last_price: String,
+    #[serde(rename = "lastQty")]
+    last_qty: String,
+    #[serde(rename = "openPrice")]
+    open_price: String,
+    #[serde(rename = "highPrice")]
+    high_price: String,
+    #[serde(rename = "lowPrice")]
+    low_price: String,
+    #[serde(rename = "volume")]
+    volume: String,
+    #[serde(rename = "quoteVolume")]
+    quote_volume: String,
+    #[serde(rename = "openTime")]
+    open_time: f64,
+    #[serde(rename = "closeTime")]
+    close_time: f64,
+    #[serde(rename = "firstId")]
+    first_id: f64,
+    #[serde(rename = "lastId")]
+    last_id: f64,
+    #[serde(rename = "count")]
+    count: f64,
+    #[serde(flatten, deserialize_with = "opaque_fields")]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXTickerResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "priceChange")]
-            price_change: String,
-            #[serde(rename = "priceChangePercent")]
-            price_change_percent: String,
-            #[serde(rename = "weightedAvgPrice")]
-            weighted_avg_price: String,
-            #[serde(rename = "lastPrice")]
-            last_price: String,
-            #[serde(rename = "lastQty")]
-            last_qty: String,
-            #[serde(rename = "openPrice")]
-            open_price: String,
-            #[serde(rename = "highPrice")]
-            high_price: String,
-            #[serde(rename = "lowPrice")]
-            low_price: String,
-            #[serde(rename = "volume")]
-            volume: String,
-            #[serde(rename = "quoteVolume")]
-            quote_volume: String,
-            #[serde(rename = "openTime")]
-            open_time: f64,
-            #[serde(rename = "closeTime")]
-            close_time: f64,
-            #[serde(rename = "firstId")]
-            first_id: f64,
-            #[serde(rename = "lastId")]
-            last_id: f64,
-            #[serde(rename = "count")]
-            count: f64,
-            #[serde(flatten, deserialize_with = "opaque_fields")]
-            extra: serde_json::Map<String, serde_json::Value>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXTickerResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1442,26 +1456,27 @@ pub struct AsterDEXOpenInterestResponse {
     )]
     pub time: Option<f64>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXOpenInterestResponseWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "openInterest")]
+    open_interest: String,
+    #[serde(rename = "time")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    time: Option<f64>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXOpenInterestResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "openInterest")]
-            open_interest: String,
-            #[serde(rename = "time")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            time: Option<f64>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXOpenInterestResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1493,25 +1508,26 @@ pub struct AsterDEXDepthResponse {
     #[serde(rename = "asks")]
     pub asks: Vec<(String, String)>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXDepthResponseWire {
+    #[serde(rename = "lastUpdateId")]
+    last_update_id: f64,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "T")]
+    capital_t: f64,
+    #[serde(rename = "bids")]
+    bids: Vec<(String, String)>,
+    #[serde(rename = "asks")]
+    asks: Vec<(String, String)>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXDepthResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "lastUpdateId")]
-            last_update_id: f64,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "T")]
-            capital_t: f64,
-            #[serde(rename = "bids")]
-            bids: Vec<(String, String)>,
-            #[serde(rename = "asks")]
-            asks: Vec<(String, String)>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXDepthResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1541,27 +1557,28 @@ pub struct AsterDEXTradeResponse {
     #[serde(rename = "isBuyerMaker")]
     pub is_buyer_maker: bool,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXTradeResponseWire {
+    #[serde(rename = "id")]
+    id: f64,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "qty")]
+    qty: String,
+    #[serde(rename = "quoteQty")]
+    quote_qty: String,
+    #[serde(rename = "time")]
+    time: f64,
+    #[serde(rename = "isBuyerMaker")]
+    is_buyer_maker: bool,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXTradeResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "id")]
-            id: f64,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "qty")]
-            qty: String,
-            #[serde(rename = "quoteQty")]
-            quote_qty: String,
-            #[serde(rename = "time")]
-            time: f64,
-            #[serde(rename = "isBuyerMaker")]
-            is_buyer_maker: bool,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXTradeResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1659,78 +1676,79 @@ pub struct AsterDEXUserTradeResponse {
     #[serde(rename = "time")]
     pub time: f64,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXUserTradeResponseWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "id")]
+    id: f64,
+    #[serde(rename = "orderId")]
+    order_id: f64,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "qty")]
+    qty: String,
+    #[serde(rename = "quoteQty")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    quote_qty: Option<String>,
+    #[serde(rename = "realizedPnl")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    realized_pnl: Option<String>,
+    #[serde(rename = "side")]
+    side: String,
+    #[serde(rename = "positionSide")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    position_side: Option<String>,
+    #[serde(rename = "buyer")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    buyer: Option<bool>,
+    #[serde(rename = "maker")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    maker: Option<bool>,
+    #[serde(rename = "commission")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    commission: Option<String>,
+    #[serde(rename = "commissionAsset")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    commission_asset: Option<String>,
+    #[serde(rename = "time")]
+    time: f64,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXUserTradeResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "id")]
-            id: f64,
-            #[serde(rename = "orderId")]
-            order_id: f64,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "qty")]
-            qty: String,
-            #[serde(rename = "quoteQty")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            quote_qty: Option<String>,
-            #[serde(rename = "realizedPnl")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            realized_pnl: Option<String>,
-            #[serde(rename = "side")]
-            side: String,
-            #[serde(rename = "positionSide")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            position_side: Option<String>,
-            #[serde(rename = "buyer")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            buyer: Option<bool>,
-            #[serde(rename = "maker")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            maker: Option<bool>,
-            #[serde(rename = "commission")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            commission: Option<String>,
-            #[serde(rename = "commissionAsset")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            commission_asset: Option<String>,
-            #[serde(rename = "time")]
-            time: f64,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXUserTradeResponseWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1793,26 +1811,27 @@ pub struct AsterDEXKlineResponse(
     pub String,
     pub String,
 );
+#[derive(serde::Deserialize)]
+struct AsterDEXKlineResponseWire(
+    f64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    f64,
+    String,
+    f64,
+    String,
+    String,
+    String,
+);
+
 impl<'de> serde::Deserialize<'de> for AsterDEXKlineResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire(
-            f64,
-            String,
-            String,
-            String,
-            String,
-            String,
-            f64,
-            String,
-            f64,
-            String,
-            String,
-            String,
-        );
         safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?
             .decode_with(|d| {
-                let w = Wire::deserialize(d)?;
+                let w = AsterDEXKlineResponseWire::deserialize(d)?;
                 Ok(Self(
                     w.0, w.1, w.2, w.3, w.4, w.5, w.6, w.7, w.8, w.9, w.10, w.11,
                 ))
@@ -1845,28 +1864,29 @@ pub struct AsterDEXWebSocketMessage {
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXWebSocketMessageWire {
+    #[serde(rename = "e")]
+    e: String,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "s")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    s: Option<String>,
+    #[serde(flatten, deserialize_with = "opaque_fields")]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXWebSocketMessage {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "e")]
-            e: String,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "s")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            s: Option<String>,
-            #[serde(flatten, deserialize_with = "opaque_fields")]
-            extra: serde_json::Map<String, serde_json::Value>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXWebSocketMessageWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -1885,20 +1905,20 @@ pub enum AsterDEXStreamTickerE {
     #[serde(rename = "ticker")]
     V0,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXStreamTickerEWire {
+    #[serde(rename = "ticker")]
+    V0,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamTickerE {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "ticker")]
-            V0,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXStreamTickerEWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
+            AsterDEXStreamTickerEWire::V0 => Self::V0,
         })
     }
 }
@@ -1942,51 +1962,52 @@ pub struct AsterDEXStreamTicker {
     #[serde(rename = "n")]
     pub n: f64,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXStreamTickerWire {
+    #[serde(rename = "e")]
+    e: AsterDEXStreamTickerE,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "p")]
+    p: String,
+    #[serde(rename = "P")]
+    capital_p: String,
+    #[serde(rename = "w")]
+    w: String,
+    #[serde(rename = "c")]
+    c: String,
+    #[serde(rename = "Q")]
+    capital_q: String,
+    #[serde(rename = "o")]
+    o: String,
+    #[serde(rename = "h")]
+    h: String,
+    #[serde(rename = "l")]
+    l: String,
+    #[serde(rename = "v")]
+    v: String,
+    #[serde(rename = "q")]
+    q: String,
+    #[serde(rename = "O")]
+    capital_o: f64,
+    #[serde(rename = "C")]
+    capital_c: f64,
+    #[serde(rename = "F")]
+    capital_f: f64,
+    #[serde(rename = "L")]
+    capital_l: f64,
+    #[serde(rename = "n")]
+    n: f64,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamTicker {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "e")]
-            e: AsterDEXStreamTickerE,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "p")]
-            p: String,
-            #[serde(rename = "P")]
-            capital_p: String,
-            #[serde(rename = "w")]
-            w: String,
-            #[serde(rename = "c")]
-            c: String,
-            #[serde(rename = "Q")]
-            capital_q: String,
-            #[serde(rename = "o")]
-            o: String,
-            #[serde(rename = "h")]
-            h: String,
-            #[serde(rename = "l")]
-            l: String,
-            #[serde(rename = "v")]
-            v: String,
-            #[serde(rename = "q")]
-            q: String,
-            #[serde(rename = "O")]
-            capital_o: f64,
-            #[serde(rename = "C")]
-            capital_c: f64,
-            #[serde(rename = "F")]
-            capital_f: f64,
-            #[serde(rename = "L")]
-            capital_l: f64,
-            #[serde(rename = "n")]
-            n: f64,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXStreamTickerWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2019,20 +2040,20 @@ pub enum AsterDEXStreamDepthE {
     #[serde(rename = "depthUpdate")]
     V0,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXStreamDepthEWire {
+    #[serde(rename = "depthUpdate")]
+    V0,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamDepthE {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "depthUpdate")]
-            V0,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXStreamDepthEWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
+            AsterDEXStreamDepthEWire::V0 => Self::V0,
         })
     }
 }
@@ -2058,33 +2079,34 @@ pub struct AsterDEXStreamDepth {
     #[serde(rename = "a")]
     pub a: Vec<(String, String)>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXStreamDepthWire {
+    #[serde(rename = "e")]
+    e: AsterDEXStreamDepthE,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "T")]
+    capital_t: f64,
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "U")]
+    capital_u: f64,
+    #[serde(rename = "u")]
+    u: f64,
+    #[serde(rename = "pu")]
+    pu: f64,
+    #[serde(rename = "b")]
+    b: Vec<(String, String)>,
+    #[serde(rename = "a")]
+    a: Vec<(String, String)>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamDepth {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "e")]
-            e: AsterDEXStreamDepthE,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "T")]
-            capital_t: f64,
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "U")]
-            capital_u: f64,
-            #[serde(rename = "u")]
-            u: f64,
-            #[serde(rename = "pu")]
-            pu: f64,
-            #[serde(rename = "b")]
-            b: Vec<(String, String)>,
-            #[serde(rename = "a")]
-            a: Vec<(String, String)>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXStreamDepthWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2108,20 +2130,20 @@ pub enum AsterDEXStreamTradeE {
     #[serde(rename = "aggTrade")]
     V0,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXStreamTradeEWire {
+    #[serde(rename = "aggTrade")]
+    V0,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamTradeE {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "aggTrade")]
-            V0,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXStreamTradeEWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
+            AsterDEXStreamTradeEWire::V0 => Self::V0,
         })
     }
 }
@@ -2149,35 +2171,36 @@ pub struct AsterDEXStreamTrade {
     #[serde(rename = "m")]
     pub m: bool,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXStreamTradeWire {
+    #[serde(rename = "e")]
+    e: AsterDEXStreamTradeE,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "a")]
+    a: f64,
+    #[serde(rename = "p")]
+    p: String,
+    #[serde(rename = "q")]
+    q: String,
+    #[serde(rename = "f")]
+    f: f64,
+    #[serde(rename = "l")]
+    l: f64,
+    #[serde(rename = "T")]
+    capital_t: f64,
+    #[serde(rename = "m")]
+    m: bool,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamTrade {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "e")]
-            e: AsterDEXStreamTradeE,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "a")]
-            a: f64,
-            #[serde(rename = "p")]
-            p: String,
-            #[serde(rename = "q")]
-            q: String,
-            #[serde(rename = "f")]
-            f: f64,
-            #[serde(rename = "l")]
-            l: f64,
-            #[serde(rename = "T")]
-            capital_t: f64,
-            #[serde(rename = "m")]
-            m: bool,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXStreamTradeWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2202,20 +2225,20 @@ pub enum AsterDEXStreamMarkPriceE {
     #[serde(rename = "markPriceUpdate")]
     V0,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXStreamMarkPriceEWire {
+    #[serde(rename = "markPriceUpdate")]
+    V0,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamMarkPriceE {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "markPriceUpdate")]
-            V0,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXStreamMarkPriceEWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
+            AsterDEXStreamMarkPriceEWire::V0 => Self::V0,
         })
     }
 }
@@ -2239,31 +2262,32 @@ pub struct AsterDEXStreamMarkPrice {
     #[serde(rename = "T")]
     pub capital_t: f64,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXStreamMarkPriceWire {
+    #[serde(rename = "e")]
+    e: AsterDEXStreamMarkPriceE,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "p")]
+    p: String,
+    #[serde(rename = "i")]
+    i: String,
+    #[serde(rename = "P")]
+    capital_p: String,
+    #[serde(rename = "r")]
+    r: String,
+    #[serde(rename = "T")]
+    capital_t: f64,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXStreamMarkPrice {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "e")]
-            e: AsterDEXStreamMarkPriceE,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "p")]
-            p: String,
-            #[serde(rename = "i")]
-            i: String,
-            #[serde(rename = "P")]
-            capital_p: String,
-            #[serde(rename = "r")]
-            r: String,
-            #[serde(rename = "T")]
-            capital_t: f64,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXStreamMarkPriceWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2286,20 +2310,20 @@ pub enum AsterDEXAccountUpdateE {
     #[serde(rename = "ACCOUNT_UPDATE")]
     V0,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXAccountUpdateEWire {
+    #[serde(rename = "ACCOUNT_UPDATE")]
+    V0,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountUpdateE {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "ACCOUNT_UPDATE")]
-            V0,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXAccountUpdateEWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
+            AsterDEXAccountUpdateEWire::V0 => Self::V0,
         })
     }
 }
@@ -2315,23 +2339,24 @@ pub struct AsterDEXAccountUpdateABItem {
     #[serde(rename = "bc")]
     pub bc: String,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXAccountUpdateABItemWire {
+    #[serde(rename = "a")]
+    a: String,
+    #[serde(rename = "wb")]
+    wb: String,
+    #[serde(rename = "cw")]
+    cw: String,
+    #[serde(rename = "bc")]
+    bc: String,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountUpdateABItem {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "a")]
-            a: String,
-            #[serde(rename = "wb")]
-            wb: String,
-            #[serde(rename = "cw")]
-            cw: String,
-            #[serde(rename = "bc")]
-            bc: String,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXAccountUpdateABItemWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2364,31 +2389,32 @@ pub struct AsterDEXAccountUpdateAPItem {
     #[serde(rename = "ps")]
     pub ps: String,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXAccountUpdateAPItemWire {
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "pa")]
+    pa: String,
+    #[serde(rename = "ep")]
+    ep: String,
+    #[serde(rename = "cr")]
+    cr: String,
+    #[serde(rename = "up")]
+    up: String,
+    #[serde(rename = "mt")]
+    mt: String,
+    #[serde(rename = "iw")]
+    iw: String,
+    #[serde(rename = "ps")]
+    ps: String,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountUpdateAPItem {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "pa")]
-            pa: String,
-            #[serde(rename = "ep")]
-            ep: String,
-            #[serde(rename = "cr")]
-            cr: String,
-            #[serde(rename = "up")]
-            up: String,
-            #[serde(rename = "mt")]
-            mt: String,
-            #[serde(rename = "iw")]
-            iw: String,
-            #[serde(rename = "ps")]
-            ps: String,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXAccountUpdateAPItemWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2415,21 +2441,22 @@ pub struct AsterDEXAccountUpdateA {
     #[serde(rename = "P")]
     pub capital_p: Vec<AsterDEXAccountUpdateAPItem>,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXAccountUpdateAWire {
+    #[serde(rename = "m")]
+    m: String,
+    #[serde(rename = "B")]
+    capital_b: Vec<AsterDEXAccountUpdateABItem>,
+    #[serde(rename = "P")]
+    capital_p: Vec<AsterDEXAccountUpdateAPItem>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountUpdateA {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "m")]
-            m: String,
-            #[serde(rename = "B")]
-            capital_b: Vec<AsterDEXAccountUpdateABItem>,
-            #[serde(rename = "P")]
-            capital_p: Vec<AsterDEXAccountUpdateAPItem>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXAccountUpdateAWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2453,23 +2480,24 @@ pub struct AsterDEXAccountUpdate {
     #[serde(rename = "a")]
     pub a: AsterDEXAccountUpdateA,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXAccountUpdateWire {
+    #[serde(rename = "e")]
+    e: AsterDEXAccountUpdateE,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "T")]
+    capital_t: f64,
+    #[serde(rename = "a")]
+    a: AsterDEXAccountUpdateA,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXAccountUpdate {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "e")]
-            e: AsterDEXAccountUpdateE,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "T")]
-            capital_t: f64,
-            #[serde(rename = "a")]
-            a: AsterDEXAccountUpdateA,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXAccountUpdateWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2488,20 +2516,20 @@ pub enum AsterDEXOrderUpdateE {
     #[serde(rename = "ORDER_TRADE_UPDATE")]
     V0,
 }
+#[derive(serde::Deserialize)]
+enum AsterDEXOrderUpdateEWire {
+    #[serde(rename = "ORDER_TRADE_UPDATE")]
+    V0,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXOrderUpdateE {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "ORDER_TRADE_UPDATE")]
-            V0,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterDEXOrderUpdateEWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::V0 => Self::V0,
+            AsterDEXOrderUpdateEWire::V0 => Self::V0,
         })
     }
 }
@@ -2575,81 +2603,82 @@ pub struct AsterDEXOrderUpdateO {
     #[serde(rename = "rp")]
     pub rp: String,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXOrderUpdateOWire {
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "c")]
+    c: String,
+    #[serde(rename = "S")]
+    capital_s: String,
+    #[serde(rename = "o")]
+    o: String,
+    #[serde(rename = "f")]
+    f: String,
+    #[serde(rename = "q")]
+    q: String,
+    #[serde(rename = "p")]
+    p: String,
+    #[serde(rename = "ap")]
+    ap: String,
+    #[serde(rename = "sp")]
+    sp: String,
+    #[serde(rename = "x")]
+    x: String,
+    #[serde(rename = "X")]
+    capital_x: String,
+    #[serde(rename = "i")]
+    i: f64,
+    #[serde(rename = "l")]
+    l: String,
+    #[serde(rename = "z")]
+    z: String,
+    #[serde(rename = "L")]
+    capital_l: String,
+    #[serde(rename = "N")]
+    capital_n: String,
+    #[serde(rename = "n")]
+    n: String,
+    #[serde(rename = "T")]
+    capital_t: f64,
+    #[serde(rename = "t")]
+    t: f64,
+    #[serde(rename = "b")]
+    b: String,
+    #[serde(rename = "a")]
+    a: String,
+    #[serde(rename = "m")]
+    m: bool,
+    #[serde(rename = "R")]
+    capital_r: bool,
+    #[serde(rename = "wt")]
+    wt: String,
+    #[serde(rename = "ot")]
+    ot: String,
+    #[serde(rename = "ps")]
+    ps: String,
+    #[serde(rename = "cp")]
+    cp: bool,
+    #[serde(rename = "AP")]
+    capital_ap: String,
+    #[serde(rename = "cr")]
+    cr: String,
+    #[serde(rename = "pP")]
+    p_p: bool,
+    #[serde(rename = "si")]
+    si: f64,
+    #[serde(rename = "ss")]
+    ss: f64,
+    #[serde(rename = "rp")]
+    rp: String,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXOrderUpdateO {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "c")]
-            c: String,
-            #[serde(rename = "S")]
-            capital_s: String,
-            #[serde(rename = "o")]
-            o: String,
-            #[serde(rename = "f")]
-            f: String,
-            #[serde(rename = "q")]
-            q: String,
-            #[serde(rename = "p")]
-            p: String,
-            #[serde(rename = "ap")]
-            ap: String,
-            #[serde(rename = "sp")]
-            sp: String,
-            #[serde(rename = "x")]
-            x: String,
-            #[serde(rename = "X")]
-            capital_x: String,
-            #[serde(rename = "i")]
-            i: f64,
-            #[serde(rename = "l")]
-            l: String,
-            #[serde(rename = "z")]
-            z: String,
-            #[serde(rename = "L")]
-            capital_l: String,
-            #[serde(rename = "N")]
-            capital_n: String,
-            #[serde(rename = "n")]
-            n: String,
-            #[serde(rename = "T")]
-            capital_t: f64,
-            #[serde(rename = "t")]
-            t: f64,
-            #[serde(rename = "b")]
-            b: String,
-            #[serde(rename = "a")]
-            a: String,
-            #[serde(rename = "m")]
-            m: bool,
-            #[serde(rename = "R")]
-            capital_r: bool,
-            #[serde(rename = "wt")]
-            wt: String,
-            #[serde(rename = "ot")]
-            ot: String,
-            #[serde(rename = "ps")]
-            ps: String,
-            #[serde(rename = "cp")]
-            cp: bool,
-            #[serde(rename = "AP")]
-            capital_ap: String,
-            #[serde(rename = "cr")]
-            cr: String,
-            #[serde(rename = "pP")]
-            p_p: bool,
-            #[serde(rename = "si")]
-            si: f64,
-            #[serde(rename = "ss")]
-            ss: f64,
-            #[serde(rename = "rp")]
-            rp: String,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXOrderUpdateOWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2703,23 +2732,24 @@ pub struct AsterDEXOrderUpdate {
     #[serde(rename = "o")]
     pub o: AsterDEXOrderUpdateO,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXOrderUpdateWire {
+    #[serde(rename = "e")]
+    e: AsterDEXOrderUpdateE,
+    #[serde(rename = "E")]
+    capital_e: f64,
+    #[serde(rename = "T")]
+    capital_t: f64,
+    #[serde(rename = "o")]
+    o: AsterDEXOrderUpdateO,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXOrderUpdate {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "e")]
-            e: AsterDEXOrderUpdateE,
-            #[serde(rename = "E")]
-            capital_e: f64,
-            #[serde(rename = "T")]
-            capital_t: f64,
-            #[serde(rename = "o")]
-            o: AsterDEXOrderUpdateO,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXOrderUpdateWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {
@@ -2738,15 +2768,17 @@ pub struct AsterDEXListenKeyResponse {
     #[serde(rename = "listenKey")]
     pub listen_key: String,
 }
+#[derive(serde::Deserialize)]
+struct AsterDEXListenKeyResponseWire {
+    #[serde(rename = "listenKey")]
+    listen_key: String,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXListenKeyResponse {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "listenKey")]
-            listen_key: String,
-        }
-        let w =
-            <Wire as serde::Deserialize>::deserialize(safe_cex_types::strict_decode::object(d))?;
+        let w = <AsterDEXListenKeyResponseWire as serde::Deserialize>::deserialize(
+            safe_cex_types::strict_decode::object(d),
+        )?;
         Ok(Self {
             listen_key: w.listen_key,
         })
@@ -2837,19 +2869,20 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for AsterDEXPlaceOrderOpts {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct AsterDEXPlaceOrderOptsWire {
+    #[serde(flatten)]
+    order: safe_cex_types::PlaceOrderOpts,
+    #[serde(rename = "stpMode", default, deserialize_with = "present")]
+    stp_mode: Option<AsterDEXStpMode>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterDEXPlaceOrderOpts {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(flatten)]
-            order: safe_cex_types::PlaceOrderOpts,
-            #[serde(rename = "stpMode", default, deserialize_with = "present")]
-            stp_mode: Option<AsterDEXStpMode>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|d| {
-                let w = <Wire as serde::Deserialize>::deserialize(
+                let w = <AsterDEXPlaceOrderOptsWire as serde::Deserialize>::deserialize(
                     safe_cex_types::strict_decode::object(d),
                 )?;
                 Ok(Self {

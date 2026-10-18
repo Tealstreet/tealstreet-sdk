@@ -455,7 +455,10 @@ fn http_failure_preserves_axios_code_and_config() {
         }))
         .unwrap_err();
     assert_eq!(failure.name, "AxiosError");
-    assert_eq!(failure.code, Some(json!("ECONNABORTED")));
+    assert_eq!(
+        observed_error_code(&failure.code),
+        Some(json!("ECONNABORTED"))
+    );
     assert!(failure.is_axios_error);
     assert_eq!(failure.config.as_ref().unwrap()["url"], "instruments/query");
 }
@@ -764,6 +767,7 @@ fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
     f.exchange.base.on(
         "error",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -1192,6 +1196,19 @@ fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
     f.exchange.dispose().unwrap();
 }
 
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
+}
+
 #[test]
 fn ticker_reads_ignore_missing_unused_declaration_fields() {
     let f = fixture();
@@ -1236,7 +1253,7 @@ fn malformed_ticker_fallback(prefix: Value) {
     )
     .unwrap();
     let cached = f.store.tickers().to_vec();
-    let errors = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let errors = Rc::new(RefCell::new(Vec::<Js>::new()));
     let observed = errors.clone();
     f.exchange.base.on(
         "error",
@@ -1253,9 +1270,13 @@ fn malformed_ticker_fallback(prefix: Value) {
     assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'symbol')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'symbol')")
     );
 }
 
@@ -1437,7 +1458,7 @@ fn ticker_reads_defer_scalar_projection_until_source_mapping_completes() {
     );
 }
 
-fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
+fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Js>>> {
     let errors = Rc::new(RefCell::new(Vec::new()));
     let observed = errors.clone();
     f.exchange.base.on(
@@ -1465,9 +1486,13 @@ fn portfolio_orders_defer_projection_until_source_mapping_completes() {
     assert!(rows.is_empty());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'orderCode')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'orderCode')")
     );
 }
 
@@ -1486,9 +1511,13 @@ fn portfolio_positions_defer_projection_until_source_mapping_completes() {
     assert!(rows.is_empty());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'side')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'side')")
     );
 }
 
@@ -1691,8 +1720,7 @@ fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
             let emitted = emitted.borrow();
             assert_eq!(emitted.len(), 1, "one visible refusal {label}");
             assert!(
-                emitted[0][0]
-                    .as_str()
+                String::from_utf16(emitted[0][0].as_str().unwrap().as_ref())
                     .unwrap()
                     .contains(case["result"]["error"].as_str().unwrap()),
                 "visible caller-ID refusal {label}: {emitted:?}"

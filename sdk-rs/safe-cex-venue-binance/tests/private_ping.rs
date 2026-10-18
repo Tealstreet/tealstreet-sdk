@@ -40,7 +40,9 @@ impl WsSocket for Socket {
         self.sent.borrow_mut().push(message.into());
         if self.fail.get() {
             let mut e = ExchangeError::new("fixture socket send");
-            e.metadata.code = Some(json!("fixture-code"));
+            e.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "fixture-code"
+            )));
             Err(e)
         } else {
             Ok(())
@@ -73,7 +75,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -83,7 +85,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -245,7 +251,7 @@ fn private_ping_matches_live_source_through_core() {
         };
         let error = result
             .err()
-            .map(|e| json!({"name":e.name,"message":e.message,"code":e.metadata.code}));
+            .map(|e| json!({"name":e.name,"message":e.message,"code":observed_error_code(&e.metadata.code)}));
         assert_eq!(json!(error), c["error"], "ping error case {index}");
         assert_eq!(
             json!(*native.sent.borrow()),
@@ -272,4 +278,17 @@ fn private_ping_matches_live_source_through_core() {
             "ping stored timestamp case {index}"
         );
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

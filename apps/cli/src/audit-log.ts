@@ -17,6 +17,7 @@ import {
 import { homedir } from 'os';
 import { join } from 'path';
 import { logger } from './logger';
+import { BRAND, brandEnv } from './brand';
 
 /**
  * Durable, append-only audit log of write-op COMMANDS for the standalone
@@ -65,7 +66,7 @@ import { logger } from './logger';
  * the rotated backup only when a recent rotation left the live file
  * short), never slurping the whole file.
  */
-const CONFIG_DIR = process.env.TEALSTREET_CONFIG_DIR || join(homedir(), '.tealstreet');
+const CONFIG_DIR = brandEnv('CONFIG_DIR') || join(homedir(), BRAND.configDirName);
 const AUDIT_FLAG_FILE = join(CONFIG_DIR, 'audit.json');
 const AUDIT_LOG_FILE = join(CONFIG_DIR, 'audit.log');
 const ROTATED_LOG_FILE = AUDIT_LOG_FILE + '.1';

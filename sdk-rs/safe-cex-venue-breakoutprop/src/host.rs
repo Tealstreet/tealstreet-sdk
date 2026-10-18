@@ -467,12 +467,18 @@ impl ApiWire for Wire {
             let result = async {
                 let body = match request.body {
                     None => Js::Undefined,
-                    Some(RestBody::Untransformed(value)) => from_json(&value),
+                    Some(RestBody::Untransformed(value)) => {
+                        safe_cex_exchange::js_runtime::value::from_retained_input(value)
+                    }
                     Some(RestBody::Encoded(bytes)) => Js::str(
                         &String::from_utf8(bytes)
                             .map_err(|e| Thrown::type_error(&e.to_string()))?,
                     ),
-                    Some(RestBody::Transformed(value)) => from_json(value.value()),
+                    Some(RestBody::Transformed(value)) => {
+                        safe_cex_exchange::js_runtime::value::from_retained_input(
+                            value.value().clone(),
+                        )
+                    }
                 };
                 let mut fields = vec![
                     ("method", Js::str(&request.method)),
@@ -506,8 +512,7 @@ impl ApiWire for Wire {
                     native.response = to_json(&response).ok();
                 }
                 if let Ok(code) = error.value.get("code")
-                    && !code.is_undefined()
-                    && let Ok(code) = to_json(&code)
+                    && (error.value.has_own("code") || !code.is_undefined())
                 {
                     native.code = Some(code);
                 }

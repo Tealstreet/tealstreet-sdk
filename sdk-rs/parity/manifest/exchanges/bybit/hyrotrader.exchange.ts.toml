@@ -30,9 +30,9 @@ note = "CHOSEN: retained inert JSON numbers/strings and UTF-8 strings exclude ex
 ts = "HyrotraderExchange.fetchRawBalance"
 kind = "field-fn"
 layer = "mirror"
-rs = [ "safe-cex-venue-bybit/src/hyro_private_reads.rs::fetch_raw_balance", "safe-cex-venue-bybit/src/hyro_private_reads.rs::dispatch" ]
+rs = [ "safe-cex-venue-bybit/src/hyro_private_reads.rs::fetch_raw_balance", "safe-cex-venue-bybit/src/hyro_private_reads.rs::dispatch", "safe-cex-venue-bybit/src/hyro_private_reads.rs::Callback", "safe-cex-venue-bybit/src/hyro_private_reads.rs::Callback::from_name" ]
 status = "ported"
-note = "Renamed target safe-cex-venue-bybit/src/hyro_private_reads.rs::fetch_raw_balance. Split: safe-cex-venue-bybit/src/hyro_private_reads.rs::dispatch expands this member's owned lexical validation/map callbacks; the shared dispatcher is also claimed by the other callback-owning members in this same eight-row unit. Original private REST read/validation body over the unchanged venue-local AccountRefreshHost/SessionHost value, error, Promise, spread, operator and iterable capabilities. Native fields, raw aliases, calls, request defaults and failure effects precede all supplemental source comparisons. Original response-meta, finite-numeric, mapper/dedupe and transport dependencies remain separate rows; full concrete SDK/host composition and cancellation are not claimed."
+note = "Closed callback selectors extracted as safe-cex-venue-bybit/src/hyro_private_reads.rs::Callback and safe-cex-venue-bybit/src/hyro_private_reads.rs::Callback::from_name; only the enumerated internal factory names reach this lexical body, so its former unknown-callback intrinsic is unreachable and removed. Renamed target safe-cex-venue-bybit/src/hyro_private_reads.rs::fetch_raw_balance. Split: safe-cex-venue-bybit/src/hyro_private_reads.rs::dispatch expands this member's owned lexical validation/map callbacks; the shared dispatcher is also claimed by the other callback-owning members in this same eight-row unit. Original private REST read/validation body over the unchanged venue-local AccountRefreshHost/SessionHost value, error, Promise, spread, operator and iterable capabilities. Native fields, raw aliases, calls, request defaults and failure effects precede all supplemental source comparisons. Original response-meta, finite-numeric, mapper/dedupe and transport dependencies remain separate rows; full concrete SDK/host composition and cancellation are not claimed."
 
 [[symbol]]
 ts = "HyrotraderExchange.validateAccount"
@@ -110,9 +110,9 @@ note = "Renamed target safe-cex-venue-bybit/src/hyro_private_reads.rs::fetch_pos
 ts = "HyrotraderExchange.reconcilePrivateState"
 kind = "field-fn"
 layer = "mirror"
-rs = [ "safe-cex-venue-bybit/src/hyro_snapshot.rs::reconcile_private_state", "safe-cex-venue-bybit/src/hyro_snapshot.rs::dispatch" ]
+rs = [ "safe-cex-venue-bybit/src/hyro_snapshot.rs::reconcile_private_state", "safe-cex-venue-bybit/src/hyro_snapshot.rs::dispatch", "safe-cex-venue-bybit/src/hyro_snapshot.rs::Callback", "safe-cex-venue-bybit/src/hyro_snapshot.rs::Callback::from_name" ]
 status = "ported"
-note = "Renamed target safe-cex-venue-bybit/src/hyro_snapshot.rs::reconcile_private_state. Original simulator read/publication body over the unchanged venue-local AccountRefreshHost/SessionHost value, error, Promise, property/call, spread, operator and iterator capabilities. Native state, raw aliases, decoded fields and failures are asserted before all supplemental source comparisons. Existing transport, store, formatting, fetch dependencies and full class composition remain separate rows; a complete Promise scheduler, cancellation and network integration are not claimed. Split: safe-cex-venue-bybit/src/hyro_snapshot.rs::dispatch expands this member's owned lexical callback bodies; the shared dispatcher is also claimed by the other callback-owning members in this eight-row unit."
+note = "Closed callback selectors extracted as safe-cex-venue-bybit/src/hyro_snapshot.rs::Callback and safe-cex-venue-bybit/src/hyro_snapshot.rs::Callback::from_name; only the enumerated internal factory names reach this lexical body, so its former unknown-callback intrinsic is unreachable and removed. Renamed target safe-cex-venue-bybit/src/hyro_snapshot.rs::reconcile_private_state. Original simulator read/publication body over the unchanged venue-local AccountRefreshHost/SessionHost value, error, Promise, property/call, spread, operator and iterator capabilities. Native state, raw aliases, decoded fields and failures are asserted before all supplemental source comparisons. Existing transport, store, formatting, fetch dependencies and full class composition remain separate rows; a complete Promise scheduler, cancellation and network integration are not claimed. Split: safe-cex-venue-bybit/src/hyro_snapshot.rs::dispatch expands this member's owned lexical callback bodies; the shared dispatcher is also claimed by the other callback-owning members in this eight-row unit."
 
 [[symbol]]
 ts = "HyrotraderExchange.fetchAndSetPrivateSnapshot"
@@ -291,6 +291,22 @@ status = "ported"
 note = "Returns a fresh linear-only vector on each call. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_supported_categories."
 
 [[symbol]]
+ts = "HyrotraderExchange#hyrotraderMode"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyrotraderExchange#getConfiguredUrls"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "HyrotraderExchange.getBybitRestBaseUrl"
 kind = "method"
 layer = "mirror"
@@ -345,3 +361,11 @@ layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::hyro_requires_order_link_id"
 status = "ported"
 note = "Exact true capability method. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_requires_order_link_id."
+
+[[symbol]]
+ts = "HyrotraderExchange.shouldUseLocalRestOrderLifecycleFallback"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

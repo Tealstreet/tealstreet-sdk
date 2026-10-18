@@ -77,7 +77,12 @@ impl Client {
                     req.params = Some(wire(&config.params)?);
                 }
                 if !matches!(&*config.data, JsJsonValue::Undefined) {
-                    req.body = Some(RestBody::Untransformed(wire(&config.data)?));
+                    req.body = Some(RestBody::Untransformed(
+                        safe_cex_exchange::js_runtime::value::to_retained_input(
+                            &Native::from_prepared((*config.data).clone()),
+                        )
+                        .map_err(|error| error.to_exchange_error())?,
+                    ));
                 }
                 let executor = client.executor.borrow().clone();
                 let response = executor.execute(req.clone()).await;
@@ -99,7 +104,9 @@ impl Client {
                             .unwrap_or_else(|_| {
                                 Value::String(String::from_utf8_lossy(&bytes).into_owned())
                             }),
-                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v,
+                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v
+                            .into_value()
+                            .map_err(|error| ExchangeError::new(error.to_string()))?,
                     };
                     let response = Rc::new(api::Response {
                         data: data.into(),
@@ -118,9 +125,11 @@ impl Client {
                     let mut e = ExchangeError::new(error.message);
                     e.metadata.is_axios_error = true;
                     e.metadata.config = Some(json!({"url":req.url,"method":req.method}));
-                    e.metadata.code = error.code.map(Value::String);
+                    e.metadata.code = error
+                        .code
+                        .map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
                     if let Some(response) = error.response {
-                        let data = response.body.clone().into_data();
+                        let data = safe_cex_exchange::runtime::response_json_view(&response.body);
                         let data = if let Value::String(s) = &data {
                             serde_json::from_str(s).unwrap_or(data.clone())
                         } else {
@@ -359,8 +368,19 @@ impl api::Host for Factory {
         )
     }
     fn emit_error(&mut self, message: String) -> Result<(), ExchangeError> {
-        self.base
-            .emit("error", json!({"name":"Error","message":message}))
+        self.base.emit(
+            "error",
+            safe_cex_exchange::js_runtime::value::Js::object(vec![
+                (
+                    "name",
+                    safe_cex_exchange::js_runtime::value::Js::str("Error"),
+                ),
+                (
+                    "message",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                ),
+            ]),
+        )
     }
     fn append_http_failure(
         &mut self,

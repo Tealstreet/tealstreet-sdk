@@ -19,7 +19,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_num::JsJsonValue as J;
 use safe_cex_store::Store;
-use safe_cex_types::*;
+use safe_cex_types::{Candle, ExchangeOptions, OHLCVOptions, OrderBook};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -43,7 +43,6 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
     native.response = field("response");
     native.config = field("config");
     native.request = field("request");
-    native.code = field("code");
     native
 }
 // Conversion between the existing prepared-data carrier and shared JS heap.

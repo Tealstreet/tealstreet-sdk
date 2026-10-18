@@ -172,7 +172,18 @@ impl<Token: AsRef<str> + 'static> TelegramWorker<Token, Result<Rc<dyn Exchange>,
                     {
                         Ok(future) => future,
                         Err(error) => {
-                            let result = self.exchange().and_then(|exchange| exchange.base().emit("exec-log", serde_json::json!({"message":format!("Command failed: {}",error.message)})));
+                            let result = self.exchange().and_then(|exchange| {
+                                exchange.base().emit(
+                                    "exec-log",
+                                    safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                                        "message",
+                                        safe_cex_exchange::js_runtime::value::Js::str(&format!(
+                                            "Command failed: {}",
+                                            error.message
+                                        )),
+                                    )]),
+                                )
+                            });
                             if let Err(error) = result {
                                 detach(
                                     host.clone(),
@@ -188,7 +199,16 @@ impl<Token: AsRef<str> + 'static> TelegramWorker<Token, Result<Rc<dyn Exchange>,
                         let result = future.await;
                         if let Err(error) = result {
                             // The catch re-reads the live exchange, rather than the one used to execute.
-                            worker.exchange()?.base().emit("exec-log", serde_json::json!({"message":format!("Command failed: {}",error.message)}))?;
+                            worker.exchange()?.base().emit(
+                                "exec-log",
+                                safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                                    "message",
+                                    safe_cex_exchange::js_runtime::value::Js::str(&format!(
+                                        "Command failed: {}",
+                                        error.message
+                                    )),
+                                )]),
+                            )?;
                         }
                         Ok(())
                     });

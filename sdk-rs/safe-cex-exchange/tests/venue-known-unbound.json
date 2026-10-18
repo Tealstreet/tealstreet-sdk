@@ -9,10 +9,7 @@
   "safe-cex-venue-bitunix": [],
   "safe-cex-venue-blofin": [],
   "safe-cex-venue-breakoutprop": [],
-  "safe-cex-venue-bybit": [
-    "intrinsic super.dispose",
-    "intrinsic unknown callback"
-  ],
+  "safe-cex-venue-bybit": [],
   "safe-cex-venue-coinbase": [],
   "safe-cex-venue-cryptocom": [],
   "safe-cex-venue-grvt": [],

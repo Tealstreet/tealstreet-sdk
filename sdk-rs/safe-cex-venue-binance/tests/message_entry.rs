@@ -42,7 +42,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -52,7 +52,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {
@@ -227,7 +231,9 @@ const DELEGATE_CASES: [&str; 6] = [
 fn failure(message: &str) -> Failure {
     let mut e = ExchangeError::new(message);
     e.name = "RangeError".into();
-    e.metadata.code = Some(json!("original-code"));
+    e.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "original-code"
+    )));
     Rc::new(e)
 }
 fn data(value: Value) -> MessageData {
@@ -330,7 +336,7 @@ fn error_fields(
             let original_error = e.message == original.message;
             if original_error {
                 assert_eq!(
-                    e.metadata.code,
+                    observed_error_code(&e.metadata.code),
                     Some(json!("original-code")),
                     "MESSAGE native error metadata"
                 );
@@ -1021,3 +1027,16 @@ source_test!(futures_private_message, private);
 source_test!(pm_private_message, private);
 source_test!(futures_candle_delegate, delegate);
 source_test!(pm_candle_delegate, delegate);
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
+}

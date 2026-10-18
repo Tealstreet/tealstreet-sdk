@@ -12,7 +12,7 @@ fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({
   packageManager: manifest.packageManager,
   dependencies: {
     vite: JSON.parse(fs.readFileSync(path.join(root, 'packages/safe-cex/package.json'), 'utf8')).devDependencies.vite,
-    vitest: JSON.parse(fs.readFileSync(path.join(root, 'packages/safe-cex/package.json'), 'utf8')).devDependencies.vitest, "tiny-emitter": sdk.dependencies["tiny-emitter"], nanoid: sdk.dependencies.nanoid, axios: sdk.dependencies.axios, typescript: manifest.devDependencies.typescript, jsonwebtoken: sdk.dependencies.jsonwebtoken, "axios-retry": sdk.dependencies["axios-retry"], lodash: sdk.dependencies.lodash },
+    vitest: JSON.parse(fs.readFileSync(path.join(root, 'packages/safe-cex/package.json'), 'utf8')).devDependencies.vitest, "tiny-emitter": sdk.dependencies["tiny-emitter"], nanoid: sdk.dependencies.nanoid, axios: sdk.dependencies.axios, typescript: manifest.devDependencies.typescript, jsonwebtoken: sdk.dependencies.jsonwebtoken, "axios-retry": sdk.dependencies["axios-retry"], lodash: sdk.dependencies.lodash, qs: sdk.dependencies.qs },
 }, null, 2) + '\n');
 // Repository selectors and frozen lockfile pin the actual dependency graph.
 fs.copyFileSync(path.join(root, 'yarn.lock'), path.join(target, 'yarn.lock'));

@@ -2,8 +2,45 @@ use safe_cex_transport::signature_rejection::{
     IsSignatureRejection, SignatureRetry, resend_on_rejected_data, signature_rejected_response,
 };
 use safe_cex_transport::{RestBody, RestFailure, RestRequest, RestResponse, RestResponseBody};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 use std::{cell::Cell, collections::BTreeMap, rc::Rc};
+
+#[test]
+fn reviewed_transport_error_origin_clones_preserve_the_same_native_cause() {
+    use safe_cex_transport::provider::{TransportError, TransportErrorOrigin};
+    use std::error::Error;
+
+    let original = TransportErrorOrigin::new(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "signer refused",
+    ));
+    let copied = original.clone();
+    assert_eq!(original, copied);
+    assert!(std::ptr::eq(original.error(), copied.error()));
+    let unrelated = TransportErrorOrigin::new(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "signer refused",
+    ));
+    assert_ne!(original, unrelated);
+    drop(original);
+    let failure = TransportError::Rejected(copied);
+    let cloned_failure = failure.clone();
+    assert!(std::ptr::eq(
+        failure.source().unwrap(),
+        cloned_failure.source().unwrap()
+    ));
+    drop(failure);
+    let cause = cloned_failure
+        .source()
+        .unwrap()
+        .downcast_ref::<std::io::Error>()
+        .unwrap();
+    assert_eq!(cause.kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(cause.to_string(), "signer refused");
+    assert_eq!(cloned_failure.to_string(), "signer refused");
+}
+
 #[test]
 fn reviewed_transformed_data_clone_preserves_payload_and_completed_phase() {
     for (input, header, expected, bytes) in [
@@ -33,7 +70,10 @@ fn reviewed_transformed_data_clone_preserves_payload_and_completed_phase() {
             b"\"left\"".to_vec(),
         ),
     ] {
-        let original = RestBody::Untransformed(input).transform(header).unwrap();
+        let expected = Input::from_value(expected).unwrap();
+        let original = RestBody::Untransformed(Input::from_value(input).unwrap())
+            .transform(header)
+            .unwrap();
         let RestBody::Transformed(data) = &original else {
             panic!("TRANSFORM CLONE requires actual completed phase")
         };
@@ -44,7 +84,7 @@ fn reviewed_transformed_data_clone_preserves_payload_and_completed_phase() {
         );
         let copied = data.clone();
         assert_eq!(copied.value(), &expected);
-        if let (Some(left), Some(right)) = (data.value().as_str(), copied.value().as_str()) {
+        if let (Input::Text(left), Input::Text(right)) = (data.value(), copied.value()) {
             if !left.is_empty() {
                 assert_ne!(
                     left.as_ptr(),
