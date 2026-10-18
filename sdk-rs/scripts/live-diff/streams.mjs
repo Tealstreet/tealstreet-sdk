@@ -47,7 +47,14 @@ const report = {
   ],
   runs: [],
 };
-report.addonSha256 = hash(readFileSync(report.addon));
+
+// Pin the exact loaded bytes even if a collaborating lane rebuilds its path.
+const frozenAddon = join(directory, 'safe_cex_ffi.node');
+{
+  const bytes = readFileSync(report.addon);
+  report.addonSha256 = hash(bytes);
+  writeFileSync(frozenAddon, bytes, { mode: 0o600 });
+}
 const options = {
   key: '',
   secret: '',
@@ -96,7 +103,7 @@ async function session(implementation, mode, tape, label) {
       SSL_CERT_FILE: ca.cert,
       NODE_EXTRA_CA_CERTS: ca.cert,
       TSX_TSCONFIG_PATH: join(root, 'packages/safe-cex/tsconfig.json'),
-      LIVE_DIFF_ADDON: report.addon,
+      LIVE_DIFF_ADDON: frozenAddon,
       ...connectHookEnvironment(hook, relay.ports),
     },
   });

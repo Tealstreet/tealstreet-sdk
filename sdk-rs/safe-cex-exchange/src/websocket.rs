@@ -62,6 +62,10 @@ pub trait WsRuntime: ExchangeRuntime {
     fn library_min_reconnection_delay_ms(&self) -> f64;
     fn diagnostics_enabled(&self) -> bool;
     fn lifecycle_logs_enabled(&self) -> bool;
+    /// Explicit replay-host instrumentation; ordinary hosts retain no dial history.
+    fn frame_receipts_enabled(&self) -> bool {
+        false
+    }
 }
 pub trait WsParent {
     fn name(&self) -> &str;
@@ -1359,11 +1363,13 @@ impl BaseWebSocket {
             relay,
             reconnecting,
         } = connection;
-        self.frame_receipts.borrow_mut().push(FrameDrainReceipt {
-            url: descriptor.url.clone(),
-            generation,
-            ..FrameDrainReceipt::default()
-        });
+        if self.runtime.frame_receipts_enabled() {
+            self.frame_receipts.borrow_mut().push(FrameDrainReceipt {
+                url: descriptor.url.clone(),
+                generation,
+                ..FrameDrainReceipt::default()
+            });
+        }
         self.grouped_listener_dispatch.set(reconnecting);
         // The core has already activated a dormant wrapper; do not nest another one.
         if reconnecting && descriptor.options.start_closed == Some(true) {
@@ -3028,6 +3034,9 @@ mod tests {
         }
     }
     impl WsRuntime for Runtime {
+        fn frame_receipts_enabled(&self) -> bool {
+            true
+        }
         fn transport(&self) -> Arc<dyn TransportProvider> {
             if self.relaying.get() {
                 Arc::new(Relaying)

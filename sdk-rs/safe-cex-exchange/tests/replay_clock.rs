@@ -13,6 +13,12 @@ fn controlled_clock_drives_actual_native_timers_and_virtual_clock_in_order() {
         .unwrap();
     tokio::task::LocalSet::new().block_on(&host, async {
         let runtime = native_replay_runtime(1_800_000_000_000.0);
+        assert!(
+            !safe_cex_exchange::websocket::WsRuntime::frame_receipts_enabled(
+                safe_cex_exchange::native::native_runtime().as_ref()
+            )
+        );
+        assert!(safe_cex_exchange::websocket::WsRuntime::frame_receipts_enabled(runtime.as_ref()));
         let clock = runtime.replay_clock.as_ref().unwrap();
         safe_cex_exchange::replay_clock::activate(clock).unwrap();
         let events = Rc::new(RefCell::new(Vec::new()));

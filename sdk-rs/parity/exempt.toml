@@ -7640,3 +7640,7 @@ reason = "Host-time injection seam for isolated native replay, analogous to supp
 [[exempt]]
 rs = "safe-cex-transport/src/native.rs::NativeFrameCounts"
 reason = "Native physical WebSocket reader diagnostic counters for replay drain validation, not a maintained exchange model. Native transport regression receives text, binary, ping, pong and close over a real loopback WebSocket and checks exact counts."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::frame_receipts_enabled"
+reason = "Explicit Rust replay-host instrumentation switch, default false. Ordinary hosts retain no per-dial parser history; only the diagnostic host enables consumed/processed receipts. No TS exchange tuning or source behavior is added. The frame_receipts and compiled replay regressions exercise the enabled path."

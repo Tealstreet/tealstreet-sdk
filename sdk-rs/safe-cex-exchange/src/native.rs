@@ -362,6 +362,9 @@ impl ExchangeRuntime for NativeRuntime {
     }
 }
 impl WsRuntime for NativeRuntime {
+    fn frame_receipts_enabled(&self) -> bool {
+        self.replay_clock.is_some()
+    }
     fn transport(&self) -> Arc<dyn TransportProvider> {
         self.transport.clone()
     }
