@@ -74,5 +74,55 @@ byte restoration passed the same test after each fault. The pending-I/O fault
 fails with owner count 2 instead of 1 at `BYBIT-DIAL-CANCEL`; the lazy fault fails
 at `BYBIT-EAGER-DIAL`. Logs: `target/bybit-eager-dial-controls/`.
 
-Final gate results are recorded below once executed. No production source, source mapping, alias guard or identity policy is
-changed by this sweep.
+No production source, source mapping, alias guard or identity policy is changed
+by this sweep.
+
+## Inherited exceptions
+
+The full Bybit replay exposes two unchanged factory-probe failures:
+`api_factory::native_environment_probe_lifecycle` and
+`api_factory::source_and_native_factory_surface` both stop at
+`tests/support/api_factory_probe.rs:59`,
+`factory_probe_native_same_waker_observers`, actual wake count 4 versus expected
+3. Running the first compiled integration test alone reproduces the same result.
+The integration library excludes this PR's `#[cfg(test)] ws_public::tests`
+module; the factory, shared production sources and probe fixtures are unchanged.
+Coordinator claude-ddi2il confirmed the inherited exception and routed it to
+Bybit owner codex-0w5ohi. Its exact wake-count assertions remain intact.
+
+`corepack yarn parity:extract:check` reports only the inherited Lighter
+`transaction-client.ts` manifest drift (0 added, 0 orphaned, 7,563 symbols).
+Coordinator routed that separate repair to codex-kxakrb. No extractor policy or
+Lighter source changes are included here.
+
+## Checked gates
+
+Normally merged master `b973046b66` before the final gates. All Cargo calls use
+the pinned workspace toolchain, `CARGO_INCREMENTAL=0`, `--locked --jobs 2`.
+Formatting uses the scoped `cargo fmt -p safe-cex-venue-bybit -- --check`.
+
+| Gate | Measured result |
+| --- | --- |
+| Original compiled Bybit fixture | Named RED at the old empty-dial expectation |
+| Independent core controls | Lazy-prefix RED → exact restore GREEN; cancelled-I/O leak RED → exact restore GREEN |
+| Bybit source/native dial comparison | 720 original source cases × both scheduler modes; all original guards retained |
+| Full parity index | GREEN: 7,563 rows / 16,342 public Rust items |
+| All-features cancellation | GREEN: 6 tests; Node controls 11/11 |
+| Binance public-connect target | GREEN: 9/9, including merged #1150's reported fixture |
+| Full Bybit all-targets/all-features replay | All 73 executables: 462 passed, only the 2 inherited probe failures above; 0 ignored |
+| Scoped fmt | GREEN |
+| Strict host Clippy | GREEN: `--all-targets --all-features -- -D warnings` |
+| Strict Wasm Clippy | GREEN: `--target wasm32-unknown-unknown --lib --all-features -- -D warnings` |
+| Override contract | GREEN: 8/8, including existing no-super/chosen-base rejection controls |
+| CI wiring | GREEN: 376/376 after the master merge; no registered test-file additions |
+
+The full venue replay compiled every test executable using Cargo's
+`--all-targets --all-features --no-run --message-format=json`, then ran every
+artifact from its crate directory with `--include-ignored --test-threads=2`.
+This keeps the configured Hyro nested Cargo builds outside a parent build step;
+no test was filtered out. The full native source and identity corpus stays enabled.
+
+Local receipts: `/tmp/eager-dial-original-red.log`, `/tmp/eager-dial-sweep-controls.log`,
+`/tmp/eager-dial-sweep-final-{index,cancel,cancel-node,binance-public,suite,clippy,wasm,override,wiring}.log`
+and `/tmp/eager-dial-sweep-remaining-gates.log`. The optional parity CI job
+117784892524 independently reports only the same Lighter extractor drift.
