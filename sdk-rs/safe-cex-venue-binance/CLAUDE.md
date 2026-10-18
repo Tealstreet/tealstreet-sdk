@@ -962,6 +962,21 @@ immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
 requires four independent compiled faults to fail actual constructed native
 socket/HTTP tests, with exact source restoration and a passing rerun after each.
 
+`inherited_refusal_binding --features native -- --include-ignored` executes the
+three actual native classes and compares 16 genuine inherited refusal profiles
+with the full maintained TS constructors. `INHERITED_REFUSAL_REVIEW.md` records
+its finite scope; `scripts/inherited-refusal-controls.py` requires eight compiled
+method-specific failures and exact-restoration passes. Keep these execution
+witnesses separate from decoder classification and constant-output permission.
+
+The inherited-refusal proof constructs the actual Futures/PM/Spot classes with
+native_dependencies and compares eight methods/two genuine argument profiles
+against maintained constructors. Native name/message and zero HTTP/events/reports
+are read before projection. inherited-refusal-controls.py independently faults
+each actual Exchange method and requires a named runtime failure plus exact
+restoration. The exact-method constant-output gate support is preparatory: no
+partial class contract or Binance constant-policy permission is installed.
+
 The nine public listener functions have individual typed capability role reviews
 in PUBLIC_LISTENER_FUNCTION_REVIEW.md. Their classification receipts do not
 execute decoders. The native two-subscription witness constructs the actual
