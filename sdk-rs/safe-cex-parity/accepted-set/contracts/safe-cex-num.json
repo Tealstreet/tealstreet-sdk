@@ -3840,7 +3840,7 @@
         "reason": "Actual From<Value> receives the separately parsed typed operand, and resulting native variant payloads are matched directly."
       }
     ],
-    "call": "{ fn observe(v: super::JsJsonValue)->serde_json::Value { use super::JsJsonValue as J; match v { J::Null=>serde_json::json!([\"null\"]),J::Bool(v)=>serde_json::json!([\"bool\",v]),J::Number(v)=>serde_json::json!([\"number\",format!(\"{:016x}\",v.to_bits())]),J::String(v)=>serde_json::json!([\"text\",v]),J::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),J::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([String::from_utf16(&k).expect(\"native UTF8 fixture key\"),observe(v)])).collect::<Vec<_>>()]),J::Undefined|J::BigInt(_)=>panic!(\"Value conversion produced a non-JSON native variant\") } } let source:serde_json::Value=serde_json::from_str($value.as_str().expect(\"typed Value source text\")).expect(\"valid native source fixture\"); observe($type::from(source)) }",
+    "call": "{ fn observe(v: super::JsJsonValue)->serde_json::Value { use super::JsJsonValue as J; match v { J::Null=>serde_json::json!([\"null\"]),J::Bool(v)=>serde_json::json!([\"bool\",v]),J::Number(v)=>serde_json::json!([\"number\",format!(\"{:016x}\",v.to_bits())]),J::String(v)=>serde_json::json!([\"text\",v]),J::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),J::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]),J::Undefined|J::BigInt(_)=>panic!(\"Value conversion produced a non-JSON native variant\") } } let source:serde_json::Value=serde_json::from_str($value.as_str().expect(\"typed Value source text\")).expect(\"valid native source fixture\"); observe($type::from(source)) }",
     "cases": [
       {
         "input": "null",
@@ -3902,6 +3902,36 @@
               "a",
               [
                 "null"
+              ]
+            ]
+          ]
+        ]
+      },
+      {
+        "input": "{\"雪\\u0000\":{\"\\ud83d\\ude00\":-0},\"\":[]}",
+        "output": [
+          "object",
+          [
+            [
+              "雪\u0000",
+              [
+                "object",
+                [
+                  [
+                    "😀",
+                    [
+                      "number",
+                      "8000000000000000"
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "",
+              [
+                "array",
+                []
               ]
             ]
           ]
