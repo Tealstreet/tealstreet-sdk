@@ -82,7 +82,7 @@ fn private_frame_info_keeps_opaque_utf16_and_wire_numbers() {
         );
     };
     {
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         let order = orders
             .iter()
             .find(|o| o.id == "private-retained-order")
@@ -90,7 +90,7 @@ fn private_frame_info_keeps_opaque_utf16_and_wire_numbers() {
         check(order.info.value().unwrap());
     }
     {
-        let positions = h.store.positions();
+        let positions = h.store.positions().unwrap();
         let position = positions
             .iter()
             .find(|p| p.contracts == 4.0)
@@ -212,8 +212,8 @@ fn rest_market_info_and_stored_config_keep_opaque_utf16() {
     assert_eq!(markets.len(), 2);
     // Inspect the actual committed config before checking the returned model.
     {
-        let config = h.store.zk_link_config();
-        let config = config.as_deref().unwrap().get("contractConfig").unwrap();
+        let config = h.store.zk_link_config().unwrap();
+        let config = config.as_ref().unwrap().get("contractConfig").unwrap();
         assert_opaque_info(config.get("opaque").unwrap());
         assert_opaque_info(
             config.get("perpetualContract").unwrap().as_array().unwrap()[0]
@@ -236,7 +236,7 @@ fn rest_market_info_and_stored_config_keep_opaque_utf16() {
     )
     .unwrap();
     assert_opaque_info(
-        h.store.markets_by_id()["BTC-USDC"]
+        h.store.markets_by_id().unwrap()["BTC-USDC"]
             .info
             .as_ref()
             .unwrap()
@@ -269,7 +269,7 @@ fn rest_balance_info_keeps_opaque_utf16() {
         Js::object(vec![("code", Js::Number(0.)), ("data", row)]),
     );
     h.drive(h.venue().start()).unwrap();
-    let balance = h.store.balance();
+    let balance = h.store.balance().unwrap();
     assert_eq!(balance.total, 100.);
     assert_eq!(balance.free, 90.);
     assert_eq!(balance.used, 2.);

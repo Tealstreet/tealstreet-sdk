@@ -189,7 +189,7 @@ fn native_payload_provider_signs_real_paradex_order_modify_and_jwt() {
         let host=client::rest_http_host_with_signers(runtime.clone(),adapter,None,Some(signer.clone()));
         let venue=ParadexExchange::new(ExchangeName::Paradex,
             serde_json::from_value(json!({"key":"hosted-key-reference","secret":"","paradexAddress":"0x1234","subkeyAddress":"0x456"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             ParadexDependencies {runtime,http:Rc::new(move |_|Ok(host.clone())),external_public_data:None,local_wall_time_to_utc:Rc::new(|v|v)}).unwrap();
         let options=venue.rt.this.get("options").unwrap();
         assert_eq!(options.get("key").unwrap().to_js_string().unwrap().as_ref(),"hosted-key-reference".encode_utf16().collect::<Vec<_>>());

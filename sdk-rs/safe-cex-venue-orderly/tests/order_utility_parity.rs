@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{MarginType, OrderType, PlaceOrderOpts, Position};
 use safe_cex_venue_orderly::{margin::resolve_margin_type_for_order, utils::is_algo_order};
 use serde_json::Value;
@@ -58,7 +59,8 @@ fn actual_typescript_order_utility_corpus() {
             false,
         )
         .expect("populate fixture Store");
-        let result = resolve_margin_type_for_order(&opts, &cache, &store);
+        let result =
+            resolve_margin_type_for_order(&opts, &cache, &store).map_err(|error| error.message);
         if row["expected"].get("margin").is_some() {
             assert_eq!(
                 result,

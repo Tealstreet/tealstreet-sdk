@@ -19,19 +19,21 @@ pub fn num(value: Option<&Value>) -> Result<f64, String> {
 }
 pub struct BlofinPositionAdapterDeps<'a> {
     pub account: &'a str,
-    pub resolve_symbol: &'a mut dyn FnMut(&str) -> Option<String>,
-    pub resolve_settle_currency: &'a mut dyn FnMut(&str) -> Option<String>,
+    pub resolve_symbol:
+        &'a mut dyn FnMut(&str) -> Result<Option<String>, safe_cex_types::StoreReadError>,
+    pub resolve_settle_currency:
+        &'a mut dyn FnMut(&str) -> Result<Option<String>, safe_cex_types::StoreReadError>,
     pub contract_size: Option<&'a mut dyn FnMut(&str) -> f64>,
 }
 pub fn map_blofin_position_history(
     row: &Value,
     deps: &mut BlofinPositionAdapterDeps<'_>,
-) -> Result<Option<PositionRecord>, String> {
+) -> Result<Option<PositionRecord>, crate::reads::MappingError> {
     if row.is_null() {
         return Err("Cannot read properties of null (reading 'instId')".into());
     }
     let instrument = nullish(row.get("instId"))?;
-    let Some(symbol) = (deps.resolve_symbol)(&instrument).filter(|s| !s.is_empty()) else {
+    let Some(symbol) = (deps.resolve_symbol)(&instrument)?.filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
     let side = match nullish(row.get("positionSide"))?.to_lowercase().as_str() {
@@ -75,7 +77,7 @@ pub fn map_blofin_position_history(
         "short"
     };
     let key = format!("{}|{symbol}|{side_name}|{identity}", deps.account);
-    let settle_currency = (deps.resolve_settle_currency)(&instrument)
+    let settle_currency = (deps.resolve_settle_currency)(&instrument)?
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "USDT".into());
     let leverage = num(row.get("leverage"))?;

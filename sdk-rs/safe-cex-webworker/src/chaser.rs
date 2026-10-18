@@ -51,7 +51,10 @@ pub struct ChaserOrderInstance {
     last_partial_fill_at: Cell<f64>,
 }
 impl ChaserOrderInstance {
-    pub fn new(exchange: Rc<dyn Exchange>, options: Rc<RefCell<ChaserOrderOptions>>) -> Self {
+    pub fn new(
+        exchange: Rc<dyn Exchange>,
+        options: Rc<RefCell<ChaserOrderOptions>>,
+    ) -> Result<Self, ExchangeError> {
         let input = options.borrow();
         let target_position_contracts = if input.reduce_only == Some(true) {
             None
@@ -61,7 +64,7 @@ impl ChaserOrderInstance {
             } else {
                 PositionSide::Short
             };
-            let positions = exchange.base().store.positions();
+            let positions = exchange.base().store.positions()?;
             let existing = positions
                 .iter()
                 .find(|p| p.symbol == input.symbol && p.side == side)
@@ -76,7 +79,7 @@ impl ChaserOrderInstance {
         };
         let size = input.size;
         drop(input);
-        Self {
+        Ok(Self {
             id: exchange.base().runtime.unique_id(),
             exchange,
             options,
@@ -91,7 +94,7 @@ impl ChaserOrderInstance {
             complete_emitted: Cell::new(false),
             ever_tracked_order_ids: Rc::new(RefCell::new(IndexSet::new())),
             last_partial_fill_at: Cell::new(0.0),
-        }
+        })
     }
     pub fn register_disposer(&self, disposer: Disposer) {
         self.disposers.borrow_mut().push(disposer);

@@ -1,9 +1,4 @@
 {
-  "safe-cex-venue-woo/src/v3_public.rs::LOCAL_FUNCTION:sorted": {
-    "category": "non-decoder",
-    "reason": "Inside map_woo_v3_candles: stable top-down merge sort of already typed Candle rows by timestamp, preserving source comparator semantics. No raw input. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",
-    "sourceSha256": "a89cf4ff179acbb8f6e91f9c5d0adc94e8622f15a07dc8e38cb1664f74c192e8"
-  },
   "safe-cex-venue-woo/src/binding/hosts/order_writes.rs::LOCAL_FUNCTION:has_in": {
     "category": "non-decoder",
     "reason": "Inside the native order-write host in-operator: checks existing own/prototype properties and array length presence. It returns a bool and does not map raw order fields into a typed order. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",

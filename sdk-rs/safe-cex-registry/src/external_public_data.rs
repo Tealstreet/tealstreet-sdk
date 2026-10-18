@@ -319,7 +319,7 @@ impl ExternalPublicDataProvider {
         Ok(())
     }
     fn handle_tickers(&self, tickers: TickerBatch) -> Result<(), ExchangeError> {
-        let mut loaded = self.parent.loaded();
+        let mut loaded = self.parent.loaded()?;
         loaded.tickers = true;
         self.parent.update(PublicDataUpdate {
             tickers: Some(tickers),
@@ -328,7 +328,7 @@ impl ExternalPublicDataProvider {
         })
     }
     fn handle_ticker(&self, ticker: safe_cex_types::Ticker) -> Result<(), ExchangeError> {
-        let mut tickers = self.parent.tickers().borrow().clone();
+        let mut tickers = self.parent.tickers()?.borrow().clone();
         if let Some(index) = tickers
             .iter()
             .position(|value| value.symbol == ticker.symbol)
@@ -391,7 +391,7 @@ impl ExternalPublicDataProvider {
     }
     fn handle_markets(&self, markets: MarketBatch) -> Result<(), ExchangeError> {
         let markets = self.parent.adapt_markets(markets)?;
-        let mut loaded = self.parent.loaded();
+        let mut loaded = self.parent.loaded()?;
         loaded.markets = true;
         self.parent.update(PublicDataUpdate {
             tickers: None,

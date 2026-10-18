@@ -46,7 +46,7 @@ corpus, including native bits and alias/freeze observations, stays unchanged.
 | 9 | `WooV3CancelAllAfterResponse` | ACCEPT | No production caller/registration; descriptor/response module and exact facade tail retired; native/source inherited scheduleCancel rejection agrees and signed cancelAllOrders still works. |
 | 10 | `WooV3OrderBookRecoveryCoordinator.pushUpdate` | ACCEPT | No production caller or runtime registration; isolated recovery port and facade tail retired; real legacy orderbook probe retained. |
 | 11 | `WooPrivateWebscoket.ping` | ACCEPT | Constructed socket members match maintained TS across 24 native-first profiles: disposal truthiness, lexical receiver, live sender lookup, setter/clock/send/JSON failures, signed zero and retained UTF16. The three typed core-socket facades have no production callers and are retired with their exact test/control tail. See HEARTBEAT_REVIEW.md. |
-| 12 | `mapWooV3Candles` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
+| 12 | `mapWooV3Candles` | ACCEPT | Only TS audit/comparison facades and Rust oracle tests call this mapper; the constructed class imports no V3 modules and installs no V3 member. The unused Rust mapper, nested sort, its reviewed local-function row and exact facade/control tail are retired. The independent kline decoder/record remain. Actual signed legacy recent/proxy candle reads and source/native registration probes pass before and after; all-target compiler checks the remaining callers. |
 | 13 | `WooV3SetLeverageInput` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 14 | `WOO_V3_ACCOUNT_WRITE_PARITY` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 15 | `requirePerpetualSymbol` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
@@ -106,6 +106,7 @@ corpus, including native bits and alias/freeze observations, stays unchanged.
 - All-target compiler checking covers the remaining WOO consumers; the full parity
   index checks that no removed Rust target or obsolete exemption is left behind.
 
-The recovery, cancel-all-after, request-preparer and heartbeat batches accept 8 of 60
-assigned rows; the remaining 52 stay OPEN. Of those, 42 are other inactive V3
+The recovery, cancel-all-after, request-preparer, heartbeat and candle-mapper
+batches accept 9 of 60 assigned rows; the remaining 51 stay OPEN. Of those, 41
+are other inactive V3
 rows whose Rust caller closures still need retirement.

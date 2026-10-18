@@ -364,7 +364,11 @@ pub fn fetch_throttled_orders<H: PrivateStreamHost>(
             return;
         };
         after_await().await;
-        let mut loaded = host.store().loaded().clone();
+        // Source fetchThrottledOrders catches the entire fetch/update block
+        // (blofin.ws-private.ts:273-287), including a loaded getter failure.
+        let Ok(mut loaded) = host.store().loaded() else {
+            return;
+        };
         loaded.orders = true;
         let _ = host.store().update(
             StoreUpdate {

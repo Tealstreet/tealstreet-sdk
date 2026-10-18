@@ -6,6 +6,7 @@ use crate::binding::{
     value::Microtasks,
 };
 use num_bigint::BigInt;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     js_runtime::{
         client::JsHttpHost,
@@ -18,7 +19,6 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use serde_json::{Value, json};
 use std::{

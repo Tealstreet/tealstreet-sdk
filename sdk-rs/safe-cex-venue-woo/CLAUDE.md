@@ -76,14 +76,13 @@ companions provide serialization and deserialization from one canonical set of
 wire field names. External qualified-call tests exercise `Type::deserialize`
 as well as the trait path: adding a permissive inherent decoder must fail.
 
-`v3_public` now contains the strict unknown-input public decoders and book/candle
+`v3_public` now contains the strict unknown-input public decoders and book
 mappers. These remain inert, with no live transport binding. Decimal validation
 uses shared JS Number conversion, including radix prefixes and FEFF whitespace;
 book normalization uses the shared sort and accumulator. Six new records are
-map-only and have external qualified-call rejection coverage. Candle sorting
-matches finite timestamps and stable ties. A declared NaN-comparator divergence
-uses stable merge rather than Rust's total-order-assuming sort; live TypeScript
-pins the engine-dependent permutation. Market mapping retains the filtered row index, validation order, original info
+map-only and have external qualified-call rejection coverage. The unused V3 candle
+mapper and its private sort are retired; legacy candle reads retain their actual
+signed-client regression. Market mapping retains the filtered row index, validation order, original info
 and leverage overflow. Futures-stat mapping uses shared Math.round. Prototype-property hits retain the
 source row with absent id/symbol on output; declaration decoding still requires
 non-null strings. Market lookup does not iterate the map, so output order is
@@ -439,9 +438,9 @@ checks; it does not classify the remaining Woo owners or aliases.
 
 The next accepted-set batch reviews 27 retained concrete declaration records, with
 native views of all fields and separate raw/owned/borrowed/qualified ingress.
-The V3 public mapper's five numeric validations are expanded from their former
-local macro so source discovery can inspect ordinary Rust. Its existing typed
-candle-sort helper retains its reviewed local role and exact source pin. See
+The V3 public numeric validations use ordinary Rust so source discovery can inspect
+them. The retired candle mapper's nested sort and its exact local-function pin are
+removed together; independent kline decoder contracts remain. See
 [record review and focused controls](ACCEPTED_RECORD_REVIEW.md).
 
 The [validator contract review](ACCEPTED_VALIDATOR_REVIEW.md) documents 30

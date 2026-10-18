@@ -262,13 +262,11 @@ impl BreakoutRuntime {
         if let Err(error) = preflight {
             return Box::pin(async move { Err(error) });
         }
-        let market = self
-            .exchange
-            .base
-            .store
-            .markets_by_symbol()
-            .get(&opts.symbol)
-            .cloned();
+        let markets = match self.exchange.base.store.markets_by_symbol() {
+            Ok(markets) => markets,
+            Err(error) => return Box::pin(async move { Err(error.into()) }),
+        };
+        let market = markets.get(&opts.symbol).cloned();
         if market.is_none() {
             let error = ExchangeError::new("Market not found");
             let result = self.report(&error, true).and(Err(error));
@@ -338,7 +336,7 @@ impl BreakoutRuntime {
         let balance = portfolio::format_balance(input, store, &utc, &report)?;
         let positions = portfolio::format_positions(input, store, None, &utc, &report)?;
         let orders = portfolio::format_orders(input, store, &utc, &report)?;
-        let mut loaded = store.loaded().clone();
+        let mut loaded = store.loaded()?.clone();
         loaded.balance = true;
         loaded.positions = true;
         loaded.orders = true;
@@ -368,7 +366,7 @@ impl BreakoutRuntime {
                 if ctx.exchange.base.is_disposed() {
                     return Ok(());
                 }
-                let mut loaded = ctx.exchange.base.store.loaded().clone();
+                let mut loaded = ctx.exchange.base.store.loaded()?.clone();
                 loaded.markets = true;
                 ctx.update(StoreUpdate {
                     markets: Some(markets),
@@ -379,7 +377,7 @@ impl BreakoutRuntime {
                 if ctx.exchange.base.is_disposed() {
                     return Ok(());
                 }
-                let mut loaded = ctx.exchange.base.store.loaded().clone();
+                let mut loaded = ctx.exchange.base.store.loaded()?.clone();
                 loaded.tickers = true;
                 ctx.update(StoreUpdate {
                     tickers,
@@ -388,7 +386,7 @@ impl BreakoutRuntime {
                 })?;
             }
             if ctx.public_only() {
-                let mut loaded = ctx.exchange.base.store.loaded().clone();
+                let mut loaded = ctx.exchange.base.store.loaded()?.clone();
                 loaded.balance = true;
                 loaded.positions = true;
                 loaded.orders = true;
@@ -445,7 +443,7 @@ impl BreakoutRuntime {
                 if ctx.exchange.base.is_disposed() {
                     return Ok(());
                 }
-                let mut loaded = ctx.exchange.base.store.loaded().clone();
+                let mut loaded = ctx.exchange.base.store.loaded()?.clone();
                 loaded.tickers = true;
                 ctx.update(StoreUpdate {
                     tickers: tickers.clone(),

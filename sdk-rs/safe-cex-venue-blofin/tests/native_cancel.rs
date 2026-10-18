@@ -96,6 +96,7 @@ fn already_gone_normal_ids_use_store_property_keys_while_algo_roots_stay_strict(
         );
         let actual: Vec<_> = store
             .orders()
+            .unwrap()
             .iter()
             .map(|order| order.id.clone())
             .collect();

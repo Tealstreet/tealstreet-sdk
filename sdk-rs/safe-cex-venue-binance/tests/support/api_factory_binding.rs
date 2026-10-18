@@ -68,7 +68,7 @@ fn native_factory_retries_unsigned_listen_post_and_encodes_signed_query() {
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"factory-key","secret":"factory-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         deps,
     )
     .unwrap();

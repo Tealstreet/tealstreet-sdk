@@ -96,7 +96,7 @@ pub fn map_orders(
     data: &OrdersInput,
     store: &dyn Store,
     now: impl FnMut() -> f64,
-) -> Result<Vec<Order>, JsCoercionError> {
+) -> Result<Vec<Order>, crate::reads::MappingError> {
     map_orders_with_projection(data, store, now, false)
 }
 /// The private consumer reconciles terminal status immediately and never commits
@@ -106,7 +106,7 @@ pub fn map_orders_for_private_topic(
     data: &OrdersInput,
     store: &dyn Store,
     now: impl FnMut() -> f64,
-) -> Result<Vec<Order>, JsCoercionError> {
+) -> Result<Vec<Order>, crate::reads::MappingError> {
     map_orders_with_projection(data, store, now, true)
 }
 fn map_orders_with_projection(
@@ -114,7 +114,7 @@ fn map_orders_with_projection(
     store: &dyn Store,
     mut now: impl FnMut() -> f64,
     private_topic: bool,
-) -> Result<Vec<Order>, JsCoercionError> {
+) -> Result<Vec<Order>, crate::reads::MappingError> {
     let rows = data.value.as_array().ok_or_else(|| {
         error(
             "TypeError",
@@ -133,7 +133,7 @@ fn map_orders_with_projection(
             continue;
         }
         let key = js_string(row.get("instId"))?;
-        let markets = store.markets_by_id();
+        let markets = store.markets_by_id()?;
         let Some(market) = markets.get(&key) else {
             if matches!(
                 js_table_lookup::<&str, ()>(&[], &key),
@@ -146,7 +146,8 @@ fn map_orders_with_projection(
                 return Err(error(
                     "TypeError",
                     "Cannot read properties of undefined (reading 'contractValue')",
-                ));
+                )
+                .into());
             }
             continue;
         };
@@ -186,7 +187,8 @@ fn map_orders_with_projection(
                     } else {
                         "Cannot read properties of undefined (reading 'contractValue')"
                     },
-                ));
+                )
+                .into());
             }
             let parsed = safe_cex_num::js_retained_parse_float(info.get("contractValue"))?;
             if parsed != 0.0 && !parsed.is_nan() {

@@ -1,10 +1,11 @@
 //! Public regression witnesses for core-owned waiter cancellation repairs.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Position};
 use std::{
     cell::RefCell,
@@ -97,7 +98,7 @@ impl Wake for Sentinel {
 #[test]
 fn dropped_position_waiter_releases_waker_before_shared_task_finishes() {
     let store = Rc::new(DefaultStore::new());
-    let mut loaded = store.loaded().clone();
+    let mut loaded = store.loaded().unwrap().clone();
     loaded.positions = true;
     Store::update(
         store.as_ref(),

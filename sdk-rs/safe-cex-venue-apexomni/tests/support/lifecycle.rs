@@ -222,25 +222,31 @@ fn ticker(t: &Ticker) -> J {
     ])
 }
 fn state(store: &DefaultStore) -> J {
-    let loaded = Store::loaded(store);
+    let loaded = Store::loaded(store).unwrap();
     obj(vec![
         (
             "markets",
-            J::Array(Store::markets(store).iter().map(market).collect()),
+            J::Array(Store::markets(store).unwrap().iter().map(market).collect()),
         ),
         (
             "tickers",
-            J::Array(Store::tickers(store).iter().map(ticker).collect()),
+            J::Array(Store::tickers(store).unwrap().iter().map(ticker).collect()),
         ),
         (
             "positions",
-            J::Array(Store::positions(store).iter().map(position).collect()),
+            J::Array(
+                Store::positions(store)
+                    .unwrap()
+                    .iter()
+                    .map(position)
+                    .collect(),
+            ),
         ),
         (
             "orders",
-            J::Array(Store::orders(store).iter().map(order).collect()),
+            J::Array(Store::orders(store).unwrap().iter().map(order).collect()),
         ),
-        ("balance", balance(&Store::balance(store))),
+        ("balance", balance(&Store::balance(store).unwrap())),
         (
             "loaded",
             obj(vec![
@@ -312,10 +318,10 @@ fn run_lifecycle(name: &str) {
             Store::update(
                 store.as_ref(),
                 StoreUpdate {
-                    markets: Some(Store::markets(old.as_ref()).to_vec()),
-                    tickers: Some(Store::tickers(old.as_ref()).to_vec()),
-                    positions: Some(Store::positions(old.as_ref()).to_vec()),
-                    balance: Some(Store::balance(old.as_ref()).clone()),
+                    markets: Some(Store::markets(old.as_ref()).unwrap().to_vec()),
+                    tickers: Some(Store::tickers(old.as_ref()).unwrap().to_vec()),
+                    positions: Some(Store::positions(old.as_ref()).unwrap().to_vec()),
+                    balance: Some(Store::balance(old.as_ref()).unwrap().clone()),
                     zk_link_config: Some(json!({"id":"old","l2Key":"old-key"}).into()),
                     ..Default::default()
                 },
@@ -327,7 +333,7 @@ fn run_lifecycle(name: &str) {
             let stamp = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms() - 500.;
             FIXTURE_STAMPS.with(|stamps| stamps.borrow_mut().push((stamp, 1700001234067.)));
             venue.last_websocket_positions_update.set(Some(stamp));
-            let mut p = Store::positions(store.as_ref()).to_vec();
+            let mut p = Store::positions(store.as_ref()).unwrap().to_vec();
             p[0].last_update = Some(stamp).into();
             p[0].id = "BTC-USDC:short".into();
             p[0].side = safe_cex_types::ModelField::Value(PositionSide::Short);

@@ -99,7 +99,7 @@ fn update_public_tickers(
         // Source uppercasing prevents inherited-member spellings. Drop the
         // read borrow before the mutation or a synchronous callback can fail.
         let id = store
-            .tickers_by_symbol()
+            .tickers_by_symbol()?
             .get(&symbol)
             .map(|ticker| ticker.id.clone());
         let Some(id) = id else {
