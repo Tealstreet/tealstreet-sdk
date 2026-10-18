@@ -1258,15 +1258,15 @@ incorrect rounding and base-two refusal; each must compile, fail the named sourc
 comparison and pass again after exact restoration. No venue-local radix shim is
 required.
 
-The JS Store facade constructs scalar model patches with the existing native
-number carrier and typed-value bridge. All declared numeric fields of Position,
-Order, Ticker and Market retain NaN, infinities and signed zero through partial
-updates. Opaque `info` crosses the same production facade as retained native data,
-including nested undefined and UTF-16 units; nested option terms retain their
-separate typed decoder. Other field admission, omission and atomic patch
-validation retain [the Store patch choice](../parity/MANIFEST-SPEC.md#store-typed-patch-choice).
-`tests/js_store_patch_numbers.rs` exercises all five model patch methods, with
-compiled projection and signed-zero controls in the adjacent Python runner.
+The raw JS Store facade assigns native properties directly, retaining numeric
+bits, opaque info, own undefined, null, callable values and unknown fields as the
+maintained source does. A later typed read can refuse that raw state; it does not
+retroactively reject or roll back the raw assignment. Typed PatchSource admission
+separately retains [its atomic model policy](../parity/MANIFEST-SPEC.md#store-typed-patch-choice).
+`tests/js_store_patch_numbers.rs` covers all five raw patch methods and typed
+numeric-bit projections. The maintained Store oracle additionally checks raw
+invalid-field retention and recovery after a valid patch; current graph controls
+live in scripts/store-correctness-controls.py.
 
 `BaseWebSocket::last_received` and `set_last_received` expose the raw source
 `lastReceived` scalar without normalization or side effects. Subclasses that
@@ -1517,8 +1517,8 @@ keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
 production native runtime and BaseExchange facade against installed tiny-emitter.
 
 Singular JS Store order/position/market mutators read the selector's `id` and
-compare it strictly with native string IDs. Non-string IDs and bare primitives
-do not identify those rows; nullish selectors and throwing getters propagate
+compare it strictly with stored native ID values. For ordinary string-ID rows,
+non-string IDs and bare primitives do not identify those rows; nullish selectors and throwing getters propagate
 when the source actually reads them. Empty order/position arrays retain their
 findIndex short circuit. Ticker mutation follows its distinct object-key lookup
 with property-key coercion. `tests/js_store_id_matching.rs` compares132 actual
