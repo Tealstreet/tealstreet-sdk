@@ -360,7 +360,7 @@ pub fn native_account_replay_control(
         runtime.sleep(0).await.map_err(|e| exchange_error(&e))?;
         safe_cex_exchange::native::replay_checkpoint(runtime);
         encode(
-            json!({"atMs": safe_cex_exchange::replay_clock::elapsed(clock), "pendingJobs": safe_cex_exchange::native::replay_pending_jobs(runtime), "transport": safe_cex_exchange::native::native_frame_receipts(runtime), "sockets": account.exchange.base().get_all_sockets().iter().flat_map(|socket| socket.frame_drain_receipts()).collect::<Vec<_>>() }),
+            json!({"atMs": safe_cex_exchange::replay_clock::elapsed(clock), "pendingJobs": safe_cex_exchange::native::replay_pending_jobs(runtime), "transport": safe_cex_exchange::native::native_frame_receipts(runtime), "sockets": safe_cex_exchange::native::native_parser_receipts(runtime) }),
         )
     })
 }
