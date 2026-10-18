@@ -92,6 +92,7 @@ for (const type of found.types.filter(owner => owner.deserialize)) {
   const kind = item.inner.struct.kind;
   const ids = kind.plain?.fields ?? kind.tuple;
   const fields = ids.map((id, index) => doc.index[String(id)].name ?? String(index));
+  if (contracts[type.name].observation) assert.deepEqual(contracts[type.name].observation.nativeFields, fields);
   assert.deepEqual(contracts[type.name].nativeObservation.nativeFields, fields,
     `${type.name}: native projection must name every actual compiler field in declaration order`);
 }

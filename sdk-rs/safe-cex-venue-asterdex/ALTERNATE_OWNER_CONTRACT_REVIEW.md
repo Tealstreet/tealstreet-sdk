@@ -16,19 +16,18 @@ DTOs; the kline tuple requires its twelve declared slots. Raw account/stream
 responses continue through their existing production methods, independently of
 these declared DTO contracts.
 
-`ExecutionOrder` observes its flattened options and nullable `postOnly` through
-owned and borrowed Value decoders and Clone. Direct and qualified text decoders
-explicitly refuse these inputs: Serde flatten buffers the arbitrary-precision
-number shim before the nested numeric capture. Each receipt records both text
-refusals separately. A repository-wide `rg -n ExecutionOrder sdk-rs --glob '*.rs'`
-caller audit finds only production native `to_typed` reads at
-`binding/members.rs` (single/batch placement), construction and From conversions;
-no production caller decodes this carrier from serde_json text. This cohort
-preserves that visible refusal rather than claiming four-route equivalence.
-`CheckParams` and `ApproveParams` are ordinary parameter Serde carriers: their
-union cases explicitly expose optional null and full positional-sequence
-acceptance, rather than misclassifying them as strict map-only JS input guards.
-Their actual fields and Clone are observed through all four Deserialize routes.
+Newer master independently classified the same eleven decoders and repaired
+three workflow ingress paths (70102111f5). Its primary contracts and complete
+native corpora are retained unchanged. This cohort's additional cases execute
+through the existing Deserialize `observation` hook, preserving exact compiler
+entrypoints rather than inventing a method for a second corpus. ExecutionOrder
+now agrees through owned, borrowed, text and qualified text decoders after the
+outer numeric capture repair. CheckParams and ApproveParams now refuse complete
+positional arrays through their object-only decoders, while preserving the
+individually reviewed nullable tooling fields. Those three obsolete assertions
+were migrated with overseer approval; every other field/case is retained.
+A prior caller audit found only production native to_typed placement reads;
+that historical unused text refusal is superseded by the master repair.
 
 Twenty-two additional source cases execute the maintained public/private socket
 classes, real TypeScript DefaultStore and native Map operations against the same
@@ -90,3 +89,7 @@ passes six tests with the one explicit discovery export ignored
 `git diff --check` pass. The first CI parity failure was the independently owned
 MEXC reporting observer pair fixed by #873; the overseer accepted that exception.
 This record makes no claim that the complete workspace or WASM cohort passed.
+
+The later master merge retains all eleven primary decoder records and all eleven
+supplemental corpora. The local marker-bearing merge commit was corrected in a
+new commit before push; no history was rewritten. Refreshed gate receipts follow.

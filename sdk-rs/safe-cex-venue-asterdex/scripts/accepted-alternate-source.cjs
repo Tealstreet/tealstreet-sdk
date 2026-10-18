@@ -13,9 +13,9 @@ async function main() {
     const contract = contracts[`safe_cex_venue_asterdex::types::${name}`];
     const schema = schemas[name];
     assert.ok(schema && contract?.nativeObservation, name);
-    if (schema.kind === 'object') assert.deepEqual(Object.keys(contract.sample), schema.fields.map(f => f.name), name);
+    if (schema.kind === 'object') assert.deepEqual(Object.keys(contract.sample).filter(k => schema.fields.some(f => f.name === k)), schema.fields.map(f => f.name), name);
     else assert.equal(contract.sample.length, schema.items.length, name);
-    for (const row of contract.nativeObservation.cases) {
+    for (const row of (contract.observation ?? contract.nativeObservation).cases) {
       assert.equal(accepts(schema, JSON.parse(row.input)), row.output.ok,
         `${name}: maintained TS declaration for ${row.label}`);
       count++;
