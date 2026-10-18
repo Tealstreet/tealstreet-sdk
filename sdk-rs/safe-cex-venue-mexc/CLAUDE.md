@@ -374,10 +374,15 @@ read `name`/`message` before JSON projection, and compare the shared JS stringif
 separately against actual source `JSON.stringify`. Numeric reports compare IEEE
 bits rather than serde's integer/float storage variants. The 120 reporting cases
 and six throwing-listener cases retain their original call and fallback floors.
-`examples/reporting_worker_host.rs` constructs the real MEXC venue and drives
+`../safe-cex-parity/examples/mexc_reporting_worker_host.rs` constructs the real MEXC venue and drives
 all three failing REST readers through `install_exchange_event_bridge` and
-`WorkerDataPost::for_browser`. Build that example for wasm32, run wasm-bindgen
-with `--target nodejs`, then run `tests/reporting-worker-host.mjs <generated-js>`
+`WorkerDataPost::for_browser`. Build that tooling example for wasm32, run wasm-bindgen
+with `--target nodejs`, then run `../safe-cex-parity/tests/mexc-reporting-worker-host.mjs <generated-js>`
 with `SAFE_CEX_TYPESCRIPT_PATH` set. Its six cases compare actual source readers
 and worker registration to the native browser post and UI structured clone.
 A cloned Error keeps its message but resets a custom name, matching JavaScript.
+
+The cross-layer MEXC/worker proof lives in parity tooling. The venue has no
+worker dependency, including dev-dependencies; architectural layer checks include
+test-only edges. All six browser-post and UI-clone cases remain mandatory in the
+relocated witness.
