@@ -1,10 +1,46 @@
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
 #[test]
+fn maintained_private_frame_info_capture() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/retained-private-info.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows,
+        json!([
+            {"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true},
+            {"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true}
+        ])
+    );
+}
+
+#[test]
 fn private_frame_info_keeps_opaque_utf16_and_wire_numbers() {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
     let h = fixture();
+    // Start with an existing REST position so the source's partial
+    // updatePositions operation has a matching row to update.
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/v3/account");
+    h.http.ok("GET", "/v3/account", json!({"id":"16909060","l2key":"fixture-l2","positions":[{"symbol":"BTC-USDC","side":"LONG","size":"1","entryPrice":"100","customImr":"0.1"}],"contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"}}));
     let private = started_private(&h);
     let mut order = raw_order();
     order["id"] = json!("private-retained-order");
@@ -58,7 +94,7 @@ fn private_frame_info_keeps_opaque_utf16_and_wire_numbers() {
         let position = positions
             .iter()
             .find(|p| p.contracts == 4.0)
-            .expect("private position with opaque metadata must reach actual Store");
+            .unwrap_or_else(|| panic!("private position with opaque metadata must reach actual Store: reports={:?}, console={:?}", h.runtime.reports.borrow(),h.runtime.console.borrow()));
         check(position.info.value().unwrap());
     }
     done(&h);

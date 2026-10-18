@@ -18,6 +18,35 @@ use std::{
 mod retained_native_support;
 
 #[test]
+fn maintained_ticker_info_capture() {
+    let output = Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/retained_ticker_source.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows,
+        json!([
+            {"native":false,"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true,"ownUndefined":false,"nan":false},
+            {"native":true,"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true,"ownUndefined":true,"nan":true}
+        ])
+    );
+}
+
+#[test]
 fn native_ticker_fetch_retains_opaque_info_before_projection() {
     use safe_cex_exchange::exchange::Exchange;
     use safe_cex_types::retained_json::RetainedJsonInput as Input;

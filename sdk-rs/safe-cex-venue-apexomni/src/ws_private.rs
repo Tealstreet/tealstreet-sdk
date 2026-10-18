@@ -1,7 +1,7 @@
 //! Private login, keepalive, reconciliation and account-frame handlers.
 use crate::{
-    data::{get, truthy},
-    exchange::{ApexOmniExchange, failure, float, numeric, text},
+    data::truthy,
+    exchange::{ApexOmniExchange, failure, text},
     protocol,
     socket_host::{ApexSocketHost, SocketListener, endpoint, object, property, send},
 };
@@ -9,12 +9,24 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{JsJsonValue as J, js_number_string, math_max};
 use safe_cex_store::model_patch::ModelPatch;
-use safe_cex_types::OrderStatus;
+use safe_cex_types::{OrderStatus, retained_json::RetainedJsonInput as Input};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
 };
+
+fn retained_text(value: impl AsRef<str>) -> Input {
+    Input::Text(value.as_ref().encode_utf16().collect())
+}
+fn retained_object(values: impl IntoIterator<Item = (&'static str, Input)>) -> Input {
+    Input::Object(
+        values
+            .into_iter()
+            .map(|(key, value)| (key.encode_utf16().collect(), value))
+            .collect(),
+    )
+}
 
 pub struct ApexOmniPrivateWebsocket {
     pub parent: Rc<ApexOmniExchange>,
@@ -197,16 +209,14 @@ impl ApexOmniPrivateWebsocket {
     }
     // ts: ApexOmniPrivateWebsocket.onMessage
     pub fn on_message(self: &Rc<Self>, raw: &str) -> Result<(), ExchangeError> {
+        use crate::response::{get, text, truthy};
+        use Input as J;
         if self.host.is_disposed() {
             return Ok(());
         }
         self.host.track_last_received()?;
         self.host.diagnostic_receive(raw)?;
-        let json = J::from(
-            safe_cex_transport::how::json_parse(raw)
-                .into_value()
-                .map_err(|error| ExchangeError::new(error.to_string()))?,
-        );
+        let json = safe_cex_transport::how::json_parse(raw);
         if get(&json, "success") == &J::Bool(false) && truthy(get(&json, "ret_msg")) {
             self.parent.base.log(
                 &format!(
@@ -216,25 +226,25 @@ impl ApexOmniPrivateWebsocket {
                 "warning",
             )?;
         }
-        if get(&json, "topic") == &J::String("ws_zk_accounts_v3".into()) {
+        if get(&json, "topic") == &retained_text("ws_zk_accounts_v3") {
             self.host.record_stats("ws_zk_accounts_v3")?;
             self.handle_ws_accounts_v2_topic(&json)?;
         }
-        if get(&json, "op") == &J::String("ping".into())
-            || !matches!(get(&json, "ping"), J::Undefined)
+        if get(&json, "op") == &retained_text("ping") || !matches!(get(&json, "ping"), J::Undefined)
         {
             let args = match get(&json, "args") {
                 J::Array(values) if !values.is_empty() => J::Array(values.clone()),
-                _ => J::Array(vec![J::String(js_number_string(self.host.now_ms()))]),
+                _ => J::Array(vec![retained_text(js_number_string(self.host.now_ms()))]),
             };
-            send(
-                self.host.as_ref(),
-                object([("op", J::String("pong".into())), ("args", args)]),
-                false,
-            )?;
+            let pong = retained_object([("op", retained_text("pong")), ("args", args)]);
+            let frame = pong
+                .json_stringify()
+                .map_err(ExchangeError::from)?
+                .ok_or_else(|| failure("socket frame did not stringify".into()))?;
+            self.host.send(&frame, false)?;
         }
-        if get(&json, "op") == &J::String("pong".into())
-            || get(&json, "ret_msg") == &J::String("pong".into())
+        if get(&json, "op") == &retained_text("pong")
+            || get(&json, "ret_msg") == &retained_text("pong")
             || !matches!(get(&json, "pong"), J::Undefined)
         {
             self.host.handle_pong(Some(5000))?;
@@ -255,7 +265,8 @@ impl ApexOmniPrivateWebsocket {
         self.host.schedule_ping(5000)
     }
     // ts: ApexOmniPrivateWebsocket.handleWsAccountsV2Topic
-    pub fn handle_ws_accounts_v2_topic(self: &Rc<Self>, json: &J) -> Result<(), ExchangeError> {
+    pub fn handle_ws_accounts_v2_topic(self: &Rc<Self>, json: &Input) -> Result<(), ExchangeError> {
+        use crate::response::{property, truthy};
         let contents = property(json, "contents")?;
         for key in ["fills", "orders", "positions"] {
             let data = property(contents, key)?;
@@ -270,25 +281,26 @@ impl ApexOmniPrivateWebsocket {
         Ok(())
     }
     // ts: ApexOmniPrivateWebsocket.handleFillTopic
-    pub fn handle_fill_topic(&self, data: &J) -> Result<(), ExchangeError> {
-        for fill in crate::data::array(data).map_err(failure)? {
-            self.parent
-                .record_ws_execution(&crate::exchange::retained_info(fill)?)?;
+    pub fn handle_fill_topic(&self, data: &Input) -> Result<(), ExchangeError> {
+        for fill in crate::response::array(data).map_err(failure)? {
+            self.parent.record_ws_execution(fill)?;
         }
         Ok(())
     }
     // ts: ApexOmniPrivateWebsocket.handleOrderTopic
-    pub fn handle_order_topic(self: &Rc<Self>, data: &J) -> Result<(), ExchangeError> {
+    pub fn handle_order_topic(self: &Rc<Self>, data: &Input) -> Result<(), ExchangeError> {
+        use crate::response::{float, get, numeric, property, text, truthy};
+        use Input as J;
         property(data, "some")?;
-        let data = crate::data::array(data).map_err(|_| {
+        let data = crate::response::array(data).map_err(|_| {
             let mut error = failure("data.some is not a function".into());
             error.name = "TypeError".into();
             error
         })?;
-        let zero = J::String("0".into());
+        let zero = retained_text("0");
         let mut has_canceled = false;
         for row in data {
-            if property(row, "status")? == &J::String("CANCELED".into()) {
+            if property(row, "status")? == &retained_text("CANCELED") {
                 has_canceled = true;
                 break;
             }
@@ -298,18 +310,18 @@ impl ApexOmniPrivateWebsocket {
         }
         for row in data {
             let raw_id = property(row, "id")?;
-            if let J::String(id) = raw_id
+            if let Some(id) = raw_id
+                .as_text()
+                .and_then(|units| String::from_utf16(units).ok())
                 && self
                     .parent
                     .recently_cancelled_orders
                     .borrow()
-                    .contains_key(id)
+                    .contains_key(&id)
             {
                 continue;
             }
-            let orders = self
-                .parent
-                .map_order(&crate::exchange::retained_info(row)?)?;
+            let orders = self.parent.map_order(row)?;
             if orders.is_empty() {
                 continue;
             }
@@ -319,8 +331,8 @@ impl ApexOmniPrivateWebsocket {
             let fresh = self.host.date_now_ms() - numeric(get(row, "updatedAt"))? <= 5000.;
             let notify = self.host.now_ms() - self.last_connect_time.get() > 5000. && fresh;
             let status = get(row, "status");
-            let filled = status == &J::String("FILLED".into());
-            let canceled = status == &J::String("CANCELED".into());
+            let filled = status == &retained_text("FILLED");
+            let canceled = status == &retained_text("CANCELED");
             if filled {
                 if price <= 0. && amount <= 0. {
                     continue;
@@ -351,7 +363,7 @@ impl ApexOmniPrivateWebsocket {
                         if fee.is_finite() {
                             self.cumulative_fees.borrow_mut().insert(id.clone(), fee);
                         }
-                        let execution = object([
+                        let execution = retained_object([
                             ("symbol", get(row, "symbol").clone()),
                             ("side", get(row, "side").clone()),
                             ("orderId", get(row, "id").clone()),
@@ -364,8 +376,8 @@ impl ApexOmniPrivateWebsocket {
                                     .unwrap_or(&J::Undefined)
                                     .clone(),
                             ),
-                            ("size", J::String(js_number_string(delta))),
-                            ("fee", J::String(js_number_string(fee_delta))),
+                            ("size", retained_text(js_number_string(delta))),
+                            ("fee", retained_text(js_number_string(fee_delta))),
                             ("token", get(row, "token").clone()),
                             ("feeCurrency", get(row, "feeCurrency").clone()),
                             (
@@ -377,8 +389,7 @@ impl ApexOmniPrivateWebsocket {
                                 },
                             ),
                         ]);
-                        self.parent
-                            .record_ws_execution(&crate::exchange::retained_info(&execution)?)?;
+                        self.parent.record_ws_execution(&execution)?;
                     } else if delta == 0. && previous == 0. {
                         self.cumulative_filled
                             .borrow_mut()
@@ -435,7 +446,7 @@ impl ApexOmniPrivateWebsocket {
                         "USER_CANCELED",
                     ]
                     .iter()
-                    .any(|v| reason == &J::String((*v).into()))
+                    .any(|v| reason == &retained_text(*v))
                 {
                     self.host.report_error(failure(text(reason)?))?;
                 }
@@ -462,9 +473,7 @@ impl ApexOmniPrivateWebsocket {
                         .add_or_update_orders(closed)
                         .map_err(|e| failure(e.to_string()))?;
                 }
-            } else if status == &J::String("OPEN".into())
-                || status == &J::String("UNTRIGGERED".into())
-            {
+            } else if status == &retained_text("OPEN") || status == &retained_text("UNTRIGGERED") {
                 self.parent
                     .base
                     .store
@@ -475,25 +484,30 @@ impl ApexOmniPrivateWebsocket {
         Ok(())
     }
     // ts: ApexOmniPrivateWebsocket.handlePositionTopic
-    pub fn handle_position_topic(self: &Rc<Self>, data: &J) -> Result<(), ExchangeError> {
+    pub fn handle_position_topic(self: &Rc<Self>, data: &Input) -> Result<(), ExchangeError> {
         let mut updates = Vec::new();
-        for row in crate::data::array(data).map_err(failure)? {
+        for row in crate::response::array(data).map_err(failure)? {
             // TS binds the mapper to this socket, whose receiver has no `log`.
             // Preserve the mapper's evaluation order before the missing log call.
-            if let Some(position) =
-                self.parent
-                    .map_position_with_log(&crate::exchange::retained_info(row)?, |_| {
-                        let mut error = failure("this.log is not a function".into());
-                        error.name = "TypeError".into();
-                        Err(error)
-                    })?
-            {
+            if let Some(mut position) = self.parent.map_position_with_log(row, |_| {
+                let mut error = failure("this.log is not a function".into());
+                error.name = "TypeError".into();
+                Err(error)
+            })? {
+                // Info goes directly into the existing native patch slot. The
+                // remaining strict fields keep their established patch admission.
+                let info = std::mem::take(&mut position.info);
                 let serde_json::Value::Object(fields) =
                     serde_json::to_value(&position).map_err(|e| failure(e.to_string()))?
                 else {
                     unreachable!()
                 };
                 let mut patch = ModelPatch::from(fields);
+                match info {
+                    safe_cex_types::ModelField::Value(info) => patch.set_native("info", info),
+                    safe_cex_types::ModelField::Undefined => patch.set_undefined("info"),
+                    safe_cex_types::ModelField::Absent => (),
+                }
                 for (key, value) in [
                     ("entryPrice", position.entry_price),
                     ("notional", position.notional),

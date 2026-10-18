@@ -1,3 +1,8 @@
+fn private_input(value: &J) -> safe_cex_types::retained_json::RetainedJsonInput {
+    let native = safe_cex_exchange::js_runtime::value::from_typed(value).unwrap();
+    safe_cex_exchange::js_runtime::value::to_retained_input(&native).unwrap()
+}
+
 use super::*;
 use safe_cex_venue_apexomni::{
     socket_host::{ApexSocketHost, SocketListener, SocketTask},
@@ -401,22 +406,24 @@ fn run(privacy: &str, name: &str) {
                     })
                     .unwrap(),
                 "auth" => result = J::Bool(futures::executor::block_on(socket.auth()).unwrap()),
-                "fills" => socket.handle_fill_topic(&input).unwrap(),
+                "fills" => socket.handle_fill_topic(&private_input(&input)).unwrap(),
                 "orders" => {
-                    socket.handle_order_topic(&input).unwrap();
+                    socket.handle_order_topic(&private_input(&input)).unwrap();
                     if variant == 0 {
-                        socket.handle_order_topic(&input).unwrap();
+                        socket.handle_order_topic(&private_input(&input)).unwrap();
                     }
                 }
                 "positions" => {
-                    if let Err(error) = socket.handle_position_topic(&input) {
+                    if let Err(error) = socket.handle_position_topic(&private_input(&input)) {
                         result = obj(vec![
                             ("errorName", s(error.name)),
                             ("errorMessage", s(error.message)),
                         ]);
                     }
                 }
-                "accounts" => socket.handle_ws_accounts_v2_topic(&input).unwrap(),
+                "accounts" => socket
+                    .handle_ws_accounts_v2_topic(&private_input(&input))
+                    .unwrap(),
                 "ordersThrottle" | "positionsThrottle" => {
                     if variant == 1 {
                         runtime.request_errors.borrow_mut().insert(
@@ -840,7 +847,7 @@ fn canceled_prefix_effects_precede_later_order_faults() {
             .set(row["lastConnect"].as_f64().unwrap());
         runtime.operations.borrow_mut().clear();
         runtime.now_calls.set(0);
-        let actual = socket.handle_order_topic(&native::input(&row["input"]));
+        let actual = socket.handle_order_topic(&private_input(&native::input(&row["input"])));
         if label == "cached-numeric" {
             let error = actual.expect_err(&format!("{marker} native whole mapped-order refusal"));
             assert_eq!(error.name, "Error", "{marker} native refusal kind");

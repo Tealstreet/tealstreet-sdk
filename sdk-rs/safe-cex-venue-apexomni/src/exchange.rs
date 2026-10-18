@@ -87,30 +87,6 @@ pub(crate) fn text(value: &J) -> Result<String, ExchangeError> {
     })
 }
 
-pub(crate) fn retained_info(
-    value: &J,
-) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
-    use safe_cex_types::retained_json::RetainedJsonInput as R;
-    Ok(match value {
-        J::Undefined => R::Undefined,
-        J::Null => R::Null,
-        J::Bool(v) => R::Bool(*v),
-        J::Number(v) => R::Float(*v),
-        J::String(v) => R::Text(v.encode_utf16().collect()),
-        J::Array(v) => R::Array(v.iter().map(retained_info).collect::<Result<_, _>>()?),
-        J::Object(v) => R::Object(
-            v.iter()
-                .map(|(k, v)| Ok((k.encode_utf16().collect(), retained_info(v)?)))
-                .collect::<Result<_, ExchangeError>>()?,
-        ),
-        _ => {
-            return Err(failure(
-                "shared retained JSON refuses this prepared value".into(),
-            ));
-        }
-    })
-}
-
 impl ApexOmniExchange {
     // ts: ApexOmniExchange.constructor
     pub fn new(mut base: BaseExchange, host: Rc<dyn ApexHost>) -> Result<Rc<Self>, ExchangeError> {
