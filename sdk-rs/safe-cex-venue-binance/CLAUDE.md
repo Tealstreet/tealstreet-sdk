@@ -1040,3 +1040,14 @@ only to the canonical order_logic/request_weight helpers. The actual interceptor
 and post-only classifier bindings already call those helpers directly. Keep the
 native signed-client and batch-rejection canaries in DEAD_STATE_FORWARDER_REVIEW.md
 when changing either live binding. The complete State receipt remains separate.
+
+The three concrete exchange classes and ExchangeState have exact accepted-set
+contracts in CLASS_STATE_CONTRACT_REVIEW.md. All 16 raw State APIs execute actual
+native observations; do not replace State with an exemption. The class contracts
+retain seven typed capability input roles and execute every raw compiler entry.
+Eight source-inherited refusals have exact-method guarded constant output records;
+that permission does not extend to State or neighboring methods. Preserve native
+number/code-unit observations, actual NativeImports/client/Store wiring, and the
+compiled body controls in scripts/class-state-controls.py. The ordinary
+class_state_binding target checks real constructors and worker Store confirmation;
+its ignored oracle executes maintained whole constructors and terminal Axios IO.

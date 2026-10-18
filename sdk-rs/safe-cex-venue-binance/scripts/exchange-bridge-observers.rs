@@ -51,7 +51,7 @@ pub fn diagnostic(input: &Value, function: impl FnOnce(String) -> Failure) -> Va
     let value = function(source.clone());
     assert!(value.code.is_none());
     assert!(value.original_error.is_none());
-    assert!(value.response.is_none());
+    assert!(value.retained_response_input().is_none());
     json!({"name":value.name,"units":value.message.encode_utf16().collect::<Vec<_>>()})
 }
 pub fn markets(input: &Value, function: impl FnOnce(&Js) -> Result<Vec<Market>, Failure>) -> Value {
