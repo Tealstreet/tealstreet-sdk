@@ -25,11 +25,24 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
         .into_iter()
         .map(|asset| {
             let (id, symbol) = match venue {
+                "bingx" => (format!("{asset}-USDT"), format!("{asset}USDT")),
+                "bitget" => (format!("{asset}-bitget-market"), format!("{asset}USDT")),
+                "grvt" => (format!("{asset}_USDT_Perp"), format!("{asset}_USDT_PERP")),
+                "kraken" => (
+                    format!("{asset}/USD"),
+                    format!("PF_{}USD", if asset == "BTC" { "XBT" } else { asset }),
+                ),
+                "krakenspot" => (format!("{asset}-spot-pair"), format!("{asset}/USD")),
+                "mexc" => (format!("{asset}_USDT"), format!("{asset}USDT")),
+                "okx" => (format!("{asset}-USDT-SWAP"), format!("{asset}USDT")),
+                "backpack" => (format!("{asset}_USDC_PERP"), format!("{asset}_USDC_PERP")),
+                "paradex" => (format!("{asset}-USD-PERP"), format!("{asset}-USD-PERP")),
                 "polymarket" => (format!("{asset}-token"), format!("{asset}-Yes")),
                 "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
                 "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),
                 "apexomni" => (format!("{asset}-USDC"), format!("{asset}USDC")),
-                "weex" | "phemex" | "binance" | "binancepm" | "binancespot" => {
+                "weex" | "phemex" | "binance" | "binancepm" | "binancespot" | "bybit"
+                | "bybitdemo" | "bybitspot" | "hyrotrader" => {
                     (format!("{asset}USDT"), format!("{asset}USDT"))
                 }
                 "kucoin" => (
@@ -37,6 +50,7 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
                     format!("{asset}USDT"),
                 ),
                 "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
+                "bybitinverse" => (format!("{asset}USD"), format!("{asset}USD")),
                 "blofin" => (format!("{asset}-USDT"), format!("{asset}USDT")),
                 "cryptocom" => (format!("{asset}USD-PERP"), format!("{asset}USD-PERP")),
                 "coinbase" => (format!("{asset}-USDC"), format!("{asset}-USDC")),

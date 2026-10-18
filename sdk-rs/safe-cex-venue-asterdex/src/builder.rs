@@ -103,19 +103,21 @@ pub struct AsterBuilderFeeConfig {
     #[serde(rename = "feeRateTaker")]
     pub fee_rate_taker: String,
 }
+#[derive(serde::Deserialize)]
+struct AsterBuilderFeeConfigWire {
+    #[serde(rename = "builderAddress")]
+    builder_address: String,
+    #[serde(rename = "feeRateMaker")]
+    fee_rate_maker: String,
+    #[serde(rename = "feeRateTaker")]
+    fee_rate_taker: String,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterBuilderFeeConfig {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "builderAddress")]
-            builder_address: String,
-            #[serde(rename = "feeRateMaker")]
-            fee_rate_maker: String,
-            #[serde(rename = "feeRateTaker")]
-            fee_rate_taker: String,
-        }
-        let w =
-            <Wire as serde::Deserialize>::deserialize(safe_cex_types::strict_decode::object(d))?;
+        let w = <AsterBuilderFeeConfigWire as serde::Deserialize>::deserialize(
+            safe_cex_types::strict_decode::object(d),
+        )?;
         Ok(Self {
             builder_address: w.builder_address,
             fee_rate_maker: w.fee_rate_maker,
@@ -147,33 +149,35 @@ pub struct AsterBuilderApprovalCheckResult {
     )]
     pub max_fee_rate: Option<String>,
 }
+#[derive(serde::Deserialize)]
+struct AsterBuilderApprovalCheckResultWire {
+    #[serde(rename = "approved")]
+    approved: bool,
+    #[serde(rename = "approvalStatus")]
+    approval_status: AsterBuilderApprovalStatus,
+    #[serde(rename = "builderAddress")]
+    builder_address: String,
+    #[serde(rename = "error")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    error: Option<String>,
+    #[serde(rename = "maxFeeRate")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    max_fee_rate: Option<String>,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterBuilderApprovalCheckResult {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "approved")]
-            approved: bool,
-            #[serde(rename = "approvalStatus")]
-            approval_status: AsterBuilderApprovalStatus,
-            #[serde(rename = "builderAddress")]
-            builder_address: String,
-            #[serde(rename = "error")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            error: Option<String>,
-            #[serde(rename = "maxFeeRate")]
-            #[serde(
-                default,
-                deserialize_with = "present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            max_fee_rate: Option<String>,
-        }
-        let w =
-            <Wire as serde::Deserialize>::deserialize(safe_cex_types::strict_decode::object(d))?;
+        let w = <AsterBuilderApprovalCheckResultWire as serde::Deserialize>::deserialize(
+            safe_cex_types::strict_decode::object(d),
+        )?;
         Ok(Self {
             approved: w.approved,
             approval_status: w.approval_status,
@@ -191,17 +195,19 @@ pub struct AsterBuilderApprovalResult {
     #[serde(rename = "success")]
     pub success: bool,
 }
+#[derive(serde::Deserialize)]
+struct AsterBuilderApprovalResultWire {
+    #[serde(rename = "message")]
+    message: String,
+    #[serde(rename = "success")]
+    success: bool,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterBuilderApprovalResult {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "message")]
-            message: String,
-            #[serde(rename = "success")]
-            success: bool,
-        }
-        let w =
-            <Wire as serde::Deserialize>::deserialize(safe_cex_types::strict_decode::object(d))?;
+        let w = <AsterBuilderApprovalResultWire as serde::Deserialize>::deserialize(
+            safe_cex_types::strict_decode::object(d),
+        )?;
         Ok(Self {
             message: w.message,
             success: w.success,
@@ -220,29 +226,29 @@ pub enum AsterBuilderApprovalStatus {
     #[serde(rename = "unverified")]
     Unverified,
 }
+#[derive(serde::Deserialize)]
+enum AsterBuilderApprovalStatusWire {
+    #[serde(rename = "approved")]
+    Approved,
+    #[serde(rename = "missing")]
+    Missing,
+    #[serde(rename = "insufficient_fee_cap")]
+    InsufficientFeeCap,
+    #[serde(rename = "unverified")]
+    Unverified,
+}
+
 impl<'de> serde::Deserialize<'de> for AsterBuilderApprovalStatus {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "approved")]
-            Approved,
-            #[serde(rename = "missing")]
-            Missing,
-            #[serde(rename = "insufficient_fee_cap")]
-            InsufficientFeeCap,
-            #[serde(rename = "unverified")]
-            Unverified,
-        }
         let text = <String as serde::Deserialize>::deserialize(d)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
+        let wire = <AsterBuilderApprovalStatusWire as serde::Deserialize>::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )?;
         Ok(match wire {
-            Wire::Approved => Self::Approved,
-            Wire::Missing => Self::Missing,
-            Wire::InsufficientFeeCap => Self::InsufficientFeeCap,
-            Wire::Unverified => Self::Unverified,
+            AsterBuilderApprovalStatusWire::Approved => Self::Approved,
+            AsterBuilderApprovalStatusWire::Missing => Self::Missing,
+            AsterBuilderApprovalStatusWire::InsufficientFeeCap => Self::InsufficientFeeCap,
+            AsterBuilderApprovalStatusWire::Unverified => Self::Unverified,
         })
     }
 }

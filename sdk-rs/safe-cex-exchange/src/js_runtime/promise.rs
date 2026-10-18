@@ -17,6 +17,7 @@ pub type JsFuture<'a> = Pin<Box<dyn Future<Output = Result<Js, Thrown>> + 'a>>;
 
 struct State {
     result: Option<Result<Js, Thrown>>,
+    handled: bool,
     /// One entry per pending `PromiseWait`, removed by that wait's Drop.
     waiters: Vec<(u64, Waker)>,
     next_waiter: u64,
@@ -33,12 +34,13 @@ impl Promise {
     }
     pub fn settled(runtime: &Rc<dyn ExchangeRuntime>, result: Result<Js, Thrown>) -> Self {
         let promise = Self::pending(runtime);
-        promise.0.borrow_mut().result = Some(result);
+        promise.settle(result);
         promise
     }
     pub fn pending(runtime: &Rc<dyn ExchangeRuntime>) -> Self {
         Self(Rc::new(RefCell::new(State {
             result: None,
+            handled: false,
             waiters: vec![],
             next_waiter: 0,
             jobs: jobs::for_runtime(runtime),
@@ -50,16 +52,44 @@ impl Promise {
     }
     /// Settle once; later settlements are ignored like a resolved promise's.
     pub fn settle(&self, result: Result<Js, Thrown>) {
-        let waiters = {
+        let (waiters, jobs, rejected) = {
             let mut state = self.0.borrow_mut();
             if state.result.is_some() {
                 return;
             }
+            let rejected = result.is_err();
             state.result = Some(result);
-            std::mem::take(&mut state.waiters)
+            (
+                std::mem::take(&mut state.waiters),
+                state.jobs.clone(),
+                rejected,
+            )
         };
         for (_, waiter) in waiters {
             waiter.wake();
+        }
+        if rejected {
+            let owner = self.0.clone();
+            jobs.after_checkpoint(Box::new(move || {
+                let report = {
+                    let state = owner.borrow();
+                    if state.handled {
+                        None
+                    } else {
+                        state
+                            .result
+                            .as_ref()
+                            .and_then(|result| result.as_ref().err())
+                            .map(|error| (state.runtime.clone(), error.clone()))
+                    }
+                };
+                if let Some((runtime, error)) = report {
+                    runtime.report_exception(
+                        &error.to_exchange_error(),
+                        &serde_json::json!({"source":"unhandledRejection"}),
+                    );
+                }
+            }));
         }
     }
     pub fn result(&self) -> Option<Result<Js, Thrown>> {
@@ -82,6 +112,7 @@ impl Promise {
         wait
     }
     pub(super) fn reaction(&self) -> PromiseWait {
+        self.0.borrow_mut().handled = true;
         PromiseWait {
             state: self.0.clone(),
             registration: None,

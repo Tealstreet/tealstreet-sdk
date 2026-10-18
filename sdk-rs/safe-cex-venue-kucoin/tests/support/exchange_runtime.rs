@@ -107,7 +107,9 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((f, c.clone()));
         Box::new(Task(c))
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.console
             .borrow_mut()
             .push((severity.into(), message.into()));
@@ -121,8 +123,10 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.375
     }
-    fn report_raw_exception(&self, value: &Value, _: &Value) {
-        self.errors.borrow_mut().push(value.to_string());
+    fn report_raw_exception(&self, value: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+        self.errors
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(value));
     }
     fn report_exception(&self, e: &ExchangeError, _: &Value) {
         self.errors.borrow_mut().push(e.message.clone());
@@ -237,7 +241,9 @@ impl RestAdapter for Wire {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(body),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+                ),
             })
         })
     }
@@ -276,8 +282,12 @@ impl Wire {
                     .body
                     .as_ref()
                     .and_then(|b| match b {
-                        safe_cex_transport::RestBody::Transformed(v) => Some(v.value().clone()),
-                        safe_cex_transport::RestBody::Untransformed(v) => Some(v.clone()),
+                        safe_cex_transport::RestBody::Transformed(v) => {
+                            Some(v.value().clone().into_value().unwrap())
+                        }
+                        safe_cex_transport::RestBody::Untransformed(v) => {
+                            Some(v.clone().into_value().unwrap())
+                        }
                         safe_cex_transport::RestBody::Encoded(bytes) => {
                             serde_json::from_slice(bytes).ok()
                         }

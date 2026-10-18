@@ -7,7 +7,8 @@ use std::{cell::RefCell, rc::Rc};
 type ExpiryCallback = Rc<dyn Fn(&str) -> Result<bool, TransportError>>;
 type ClockCallback = Rc<dyn Fn(f64)>;
 type DomainsCallback = Rc<dyn Fn() -> Vec<String>>;
-pub(crate) type JsonParser = Rc<dyn Fn(&str) -> Result<Value, TransportError>>;
+pub(crate) type JsonParser =
+    Rc<dyn Fn(&str) -> Result<safe_cex_types::retained_json::RetainedJsonInput, TransportError>>;
 
 #[derive(Clone)]
 pub struct HOWConfig {

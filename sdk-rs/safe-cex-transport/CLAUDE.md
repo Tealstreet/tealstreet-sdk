@@ -70,17 +70,29 @@ rebuffer lexical -0 into +0 before RestResponseBody even sees it. Keep the paylo
 outside that decoder; this is preservation of current adapter data, not a second
 numeric parser or a typed-f64 ingress implementation.
 
-**Remote signer JSON replay.** `try_parse_json` normalizes only a successfully
-parsed object/array STRING using HOW's canonical numeric/own-key projection.
-Finite numbers collapse to binary64 spelling before reaching a signing consumer;
-negative zero and overflow retain their lexemes for shared String/Boolean/number
-coercion. Existing non-string values remain untouched, matching TypeScript's
-identity passthrough. The live-source corpus observes number bits, String and
-truthiness BEFORE serialization, because JSON null would hide overflow loss.
-The helper's inherited parse-refusal fallback matters: valid lone-surrogate JSON
-and over-depth objects remain the original String where TypeScript returns an
-object. Its manifest row declares these independently from numeric normalization;
-`PARSER_NUMERIC_EVIDENCE.md` records the raw source witnesses and positive Unicode.
+**Native adapter bodies.** `RestBody`, transformed data, response data, custom
+parser results and remote signer `.data` use the canonical `RetainedJsonInput`.
+Text and object keys retain UTF-16; native numbers, own undefined and phase
+provenance survive until the actual JSON wire boundary. Typed model consumers
+use an explicit fallible `into_value` view, never a silent substitute. The core
+legacy Error response view is deliberately lossy while its original RestFailure
+retains the complete native body.
+
+HOW diagnostic redaction matches ASCII sensitive substrings directly over UTF-16
+key units, with the source regex's case-insensitive, non-Unicode semantics. A lone
+surrogate beside `apiKey` cannot bypass redaction; one inside the substring stays
+a match barrier. `tunnel::production_how_logs_redact_sensitive_utf16_keys_without_changing_delivery`
+compares actual HOW request/response logs with the maintained sanitizer across 23
+cases and checks the original native response remains intact. The compiled old
+UTF-8-gated predicate fails the `apiKey` plus high-surrogate case.
+
+**Remote signer JSON replay.** `try_parse_json` parses only object/array STRING
+results with the shared UTF-16 parser. It retains native binary64 values, key
+order, duplicate-key assignment and lone surrogates; non-string values pass
+through unchanged. Invalid JSON or scalar JSON text retains the original string,
+as in TypeScript. The separately named params helper keeps the existing typed
+query boundary. HOW's ordinary, raw, gzip binary and gzip base64 response paths
+have real-host native-unit/bit regressions and actual maintained-source witnesses.
 
 Signing envelope and secondary-options gates assert decoded native fields
 before re-encoding; roundtrip bytes cannot detect symmetric serde-name swaps. Secondary

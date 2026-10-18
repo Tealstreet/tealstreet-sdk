@@ -35,6 +35,14 @@ struct Signal {
     next: AtomicU64,
     driver: Mutex<Option<Waker>>,
 }
+impl Signal {
+    fn wake_driver(&self) {
+        let driver = self.driver.lock().expect("microtask driver lock").clone();
+        if let Some(driver) = driver {
+            driver.wake();
+        }
+    }
+}
 struct Ready {
     order: Mutex<Option<u64>>,
     signal: Arc<Signal>,
@@ -46,15 +54,7 @@ impl Ready {
             *order = Some(self.signal.next.fetch_add(1, Ordering::Relaxed));
         }
         drop(order);
-        let driver = self
-            .signal
-            .driver
-            .lock()
-            .expect("microtask driver lock")
-            .clone();
-        if let Some(driver) = driver {
-            driver.wake();
-        }
+        self.signal.wake_driver();
     }
 }
 impl Wake for Ready {
@@ -76,6 +76,7 @@ pub(super) struct Jobs {
     runtime: Rc<dyn ExchangeRuntime>,
     signal: Arc<Signal>,
     jobs: RefCell<Vec<Rc<Job>>>,
+    checks: RefCell<Vec<Box<dyn FnOnce()>>>,
     running: Cell<bool>,
     draining: Cell<bool>,
 }
@@ -96,6 +97,7 @@ pub(super) fn for_runtime(runtime: &Rc<dyn ExchangeRuntime>) -> Rc<Jobs> {
             runtime: runtime.clone(),
             signal: Arc::default(),
             jobs: RefCell::default(),
+            checks: RefCell::default(),
             running: Cell::new(false),
             draining: Cell::new(false),
         });
@@ -144,6 +146,18 @@ impl Jobs {
             job: Rc::downgrade(&job),
         })
     }
+    pub(super) fn after_checkpoint(self: &Rc<Self>, check: Box<dyn FnOnce()>) {
+        self.checks.borrow_mut().push(check);
+        self.ensure_driver();
+        self.signal.wake_driver();
+    }
+    fn ensure_driver(self: &Rc<Self>) {
+        if (!self.jobs.borrow().is_empty() || !self.checks.borrow().is_empty())
+            && !self.running.replace(true)
+        {
+            OwnedTasks::start_detached(self.runtime.as_ref(), Box::pin(Driver(self.clone())));
+        }
+    }
     fn enqueue(self: &Rc<Self>, work: Work, deadline: Option<f64>, eager: bool) -> Rc<Job> {
         let ready = Arc::new(Ready {
             order: Mutex::new(None),
@@ -161,9 +175,7 @@ impl Jobs {
         } else {
             ready.enqueue();
         }
-        if !self.jobs.borrow().is_empty() && !self.running.replace(true) {
-            OwnedTasks::start_detached(self.runtime.as_ref(), Box::pin(Driver(self.clone())));
-        }
+        self.ensure_driver();
         job
     }
     fn next(&self, timers: bool) -> Option<Rc<Job>> {
@@ -209,8 +221,17 @@ impl Jobs {
             return;
         }
         let _draining = Draining(&self.draining);
-        while let Some(job) = self.next(false) {
-            self.run(job);
+        loop {
+            while let Some(job) = self.next(false) {
+                self.run(job);
+            }
+            let checks = self.checks.take();
+            if checks.is_empty() {
+                break;
+            }
+            for check in checks {
+                check();
+            }
         }
     }
     pub(super) fn wake(self: &Rc<Self>, waker: Waker) {
@@ -243,7 +264,7 @@ impl Future for Driver {
         if self.0.next(true).is_some() {
             cx.waker().wake_by_ref();
         }
-        if self.0.jobs.borrow().is_empty() {
+        if self.0.jobs.borrow().is_empty() && self.0.checks.borrow().is_empty() {
             Poll::Ready(())
         } else {
             Poll::Pending
@@ -260,7 +281,9 @@ impl Drop for Driver {
             .expect("microtask driver lock")
             .take();
         let jobs = self.0.jobs.take();
+        let checks = self.0.checks.take();
         drop(jobs);
+        drop(checks);
     }
 }
 
@@ -278,15 +301,7 @@ impl ExchangeTask for Task {
                 .borrow_mut()
                 .retain(|entry| !Rc::ptr_eq(entry, &job));
             drop(work);
-            let driver = owner
-                .signal
-                .driver
-                .lock()
-                .expect("microtask driver lock")
-                .clone();
-            if let Some(driver) = driver {
-                driver.wake();
-            }
+            owner.signal.wake_driver();
         }
     }
 }

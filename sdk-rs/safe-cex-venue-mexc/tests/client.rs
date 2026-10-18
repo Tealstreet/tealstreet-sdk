@@ -37,7 +37,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("factory must not spawn")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -47,7 +47,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -155,7 +159,9 @@ impl HttpHost for Host {
                 .as_ref()
                 .map(|body| {
                     safe_cex_venue_mexc::api::normalize_request_data(
-                        &safe_cex_num::JsJsonValue::from(body.untransformed().unwrap().clone()),
+                        &safe_cex_exchange::js_runtime::value::from_retained_input(
+                            body.untransformed().unwrap().clone(),
+                        ),
                     )
                     .unwrap()
                 })
@@ -326,7 +332,11 @@ fn mexc_factory_live_shared_http_composition() {
             method: config["method"].as_str().unwrap_or("get").into(),
             url: config["url"].as_str().unwrap().into(),
             params: config.get("params").cloned(),
-            body: config.get("data").cloned().map(RestBody::Untransformed),
+            body: config.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             ..Default::default()
         };
         if let Some(headers) = config.get("headers").and_then(Value::as_object) {
@@ -818,7 +828,55 @@ fn mexc_rich_query_recurses_without_reordering_native_inputs() {
 
 #[test]
 #[expect(clippy::arc_with_non_send_sync)]
-fn mexc_factory_native_utf8_refusal_and_response_projection() {
+fn mexc_factory_retains_native_response_units_and_typed_options_refusal() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    struct NativeResponse(Arc<Wire>);
+    impl RestAdapter for NativeResponse {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            Box::pin(async move {
+                let mut response = self.0.execute(request).await?;
+                let mut units: Vec<u16> =
+                    r#"{"code":0,"data":[{"symbol":""#.encode_utf16().collect();
+                units.push(0xd800);
+                units.extend(r#"","vol":2,"price":3}]}"#.encode_utf16());
+                response.body = RestResponseBody::Untransformed(Input::Text(units));
+                Ok(response)
+            })
+        }
+    }
+    fn field<'a>(fields: &'a [(Vec<u16>, Input)], name: &str) -> &'a Input {
+        &fields
+            .iter()
+            .find(|(key, _)| key.iter().copied().eq(name.encode_utf16()))
+            .unwrap()
+            .1
+    }
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/factory_oracle.mjs"
+        ))
+        .arg("--response-units")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source.len(),
+        2,
+        "native response independent maintained-source phase census"
+    );
+    for row in &source {
+        assert_eq!(
+            row,
+            &json!({"symbolUnits":[0xd800],"code":0,"vol":2,"price":3,"http":1}),
+            "native response actual maintained-source units and fields"
+        );
+    }
     let refused = serde_json::from_str::<safe_cex_types::ExchangeOptions>(
         r#"{"key":"\ud800","secret":"fixture-secret"}"#,
     );
@@ -838,6 +896,11 @@ fn mexc_factory_native_utf8_refusal_and_response_projection() {
             response: r#"{"code":0,"data":[{"symbol":"\ud800","vol":2,"price":3}]}"#.into(),
             capture: RefCell::new(vec![]),
         });
+        let adapter: Arc<dyn RestAdapter> = if index % 2 == 0 {
+            wire.clone()
+        } else {
+            Arc::new(NativeResponse(wire.clone()))
+        };
         let api = create_api(
             HttpClientOptions {
                 response_transform: None,
@@ -849,7 +912,7 @@ fn mexc_factory_native_utf8_refusal_and_response_projection() {
                 provider: None,
                 signer: None,
                 account_name: None,
-                adapter: wire.clone(),
+                adapter,
                 host,
                 runtime: runtime.clone(),
                 store: None,
@@ -879,9 +942,37 @@ fn mexc_factory_native_utf8_refusal_and_response_projection() {
             response.status, 200,
             "factory native Unicode response status"
         );
-        assert!(
-            matches!(response.body, RestResponseBody::Transformed(Value::Null)),
-            "factory native actual lone-surrogate response projects to transformed Null"
+        let RestResponseBody::Transformed(Input::Object(fields)) = &response.body else {
+            panic!("native response retains parsed object and transform phase")
+        };
+        assert_eq!(fields.len(), 2, "native response complete root");
+        assert_eq!(
+            field(fields, "code"),
+            &Input::Float(0.0),
+            "native response source code"
+        );
+        let Input::Array(rows) = field(fields, "data") else {
+            panic!("native response data array")
+        };
+        assert_eq!(rows.len(), 1, "native response complete rows");
+        let Input::Object(row) = &rows[0] else {
+            panic!("native response row object")
+        };
+        assert_eq!(row.len(), 3, "native response complete row");
+        assert_eq!(
+            field(row, "symbol"),
+            &Input::Text(vec![0xd800]),
+            "native response exact source lone units before model projection"
+        );
+        assert_eq!(
+            field(row, "vol"),
+            &Input::Float(2.0),
+            "native response volume"
+        );
+        assert_eq!(
+            field(row, "price"),
+            &Input::Float(3.0),
+            "native response price"
         );
         assert_eq!(
             runtime.attempt.get(),
@@ -1324,7 +1415,10 @@ fn mexc_signature_rejection_resends_once_with_a_fresh_signature() {
                 method: "post".into(),
                 url: "/private".into(),
                 body: Some(RestBody::Untransformed(
-                    json!({"symbol":"BTC_USDT","vol":1}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"symbol":"BTC_USDT","vol":1}),
+                    )
+                    .unwrap(),
                 )),
                 ..Default::default()
             }

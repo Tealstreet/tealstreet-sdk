@@ -52,7 +52,14 @@ impl RemoteSigner for Browser {
             );
             assert_eq!(
                 request.config.data.as_ref(),
-                expected.get("data"),
+                expected
+                    .get("data")
+                    .cloned()
+                    .map(
+                        |value| safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
+                            .unwrap()
+                    )
+                    .as_ref(),
                 "native remote data identity"
             );
             assert_eq!(
@@ -98,7 +105,7 @@ impl RemoteSigner for Browser {
             };
             let mut input = json!({"headers":client.headers});
             if let Some(body) = &client.body {
-                input["data"] = body.untransformed().unwrap().clone();
+                input["data"] = body.untransformed().unwrap().clone().into_value().unwrap();
             }
             assert_eq!(
                 input, self.expected["clientInput"],
@@ -168,7 +175,11 @@ fn remote_stage_matches_whole_source_adapter_and_real_axios() {
             method: "post".into(),
             url: "/data".into(),
             base_url: Some("https://example.test".into()),
-            body: row.get("data").cloned().map(RestBody::Untransformed),
+            body: row.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             ..Default::default()
         };
         request
@@ -189,7 +200,14 @@ fn remote_stage_matches_whole_source_adapter_and_real_axios() {
             sent.body.as_ref().map(|body| body
                 .untransformed()
                 .expect("remote inner adapter must receive structured data")),
-            row["wire"].get("data"),
+            row["wire"]
+                .get("data")
+                .cloned()
+                .map(
+                    |value| safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
+                        .unwrap()
+                )
+                .as_ref(),
             "remote inner adapter must retain echoed object versus string identity: {row}"
         );
     }

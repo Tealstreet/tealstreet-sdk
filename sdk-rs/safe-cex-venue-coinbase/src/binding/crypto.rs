@@ -148,7 +148,7 @@ mod tests {
             self.jobs.borrow_mut().push(future);
             Box::new(Task)
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             "fixture-nonce".into()
         }
@@ -159,7 +159,7 @@ mod tests {
             0.5
         }
         fn report_exception(&self, _: &ExchangeError, _: &Value) {}
-        fn report_raw_exception(&self, _: &Value, _: &Value) {}
+        fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
         fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
             Box::pin(async { Ok(Value::Null) })
         }

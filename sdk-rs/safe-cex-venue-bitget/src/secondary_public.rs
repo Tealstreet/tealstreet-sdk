@@ -328,7 +328,11 @@ impl WsProtocol for SecondaryProtocol {
             SocketFrame::Close { .. } => return Err(type_error("data.includes is not a function")),
         };
         if text.contains("\"channel\":\"ticker\"") {
-            let value = safe_cex_transport::how::json_parse(&text);
+            let value = safe_cex_transport::how::json_parse(&text)
+                .into_value()
+                .map_err(|error| {
+                    safe_cex_exchange::runtime::ExchangeError::new(error.to_string())
+                })?;
             if value
                 .get("arg")
                 .and_then(|arg| arg.get("channel"))

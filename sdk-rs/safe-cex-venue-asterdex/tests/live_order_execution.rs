@@ -102,7 +102,12 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: Some("OK".into()),
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(next["data"].clone()),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        next["data"].clone(),
+                    )
+                    .unwrap(),
+                ),
             })
         })
     }
@@ -442,7 +447,9 @@ fn order_execution_matches_live_typescript() {
             assert_eq!(r.method, e["method"], "{name} method");
             assert_eq!(r.url, e["url"], "{name} url");
             match &r.body {
-                Some(RestBody::Untransformed(v)) => assert_json(v, &e["body"], &name),
+                Some(RestBody::Untransformed(v)) => {
+                    assert_json(&v.clone().into_value().unwrap(), &e["body"], &name)
+                }
                 None => assert!(e.get("body").is_none()),
                 _ => panic!("unexpected transformed request"),
             };

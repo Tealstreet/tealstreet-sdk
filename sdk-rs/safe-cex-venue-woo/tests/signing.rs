@@ -68,29 +68,31 @@ fn signatures_match_original_hash_boundary_captures() {
         }
         let signed = if case["version"] == 1 {
             run(safe_cex_venue_woo::api::sign_v1(
-                &input,
+                &safe_cex_exchange::js_runtime::value::from_json(&input),
                 &options,
                 &provider,
                 1700000000123.0,
             ))
         } else {
             run(safe_cex_venue_woo::api::sign_v3(
-                &input,
+                &safe_cex_exchange::js_runtime::value::from_json(&input),
                 &options,
                 &provider,
                 1700000000123.0,
             ))
         }
         .unwrap();
+        let config_view =
+            oracle_view(safe_cex_exchange::js_runtime::value::to_json(&signed.config).unwrap());
         assert_eq!(signed.preimage, case["preimage"], "{}", case["name"]);
         assert_eq!(
-            signed.config["headers"]["x-api-signature"], case["signature"],
+            config_view["headers"]["x-api-signature"], case["signature"],
             "{}",
             case["name"]
         );
         for key in ["url", "method", "params", "data"] {
             assert_eq!(
-                signed.config.get(key),
+                config_view.get(key),
                 case["signed"].get(key),
                 "{} {key}",
                 case["name"]
@@ -127,14 +129,14 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
             let before = provider.0.lock().unwrap().len();
             let result = if version == 1 {
                 run(safe_cex_venue_woo::api::sign_v1(
-                    input,
+                    &safe_cex_exchange::js_runtime::value::from_json(input),
                     &options,
                     &provider,
                     1700000000123.,
                 ))
             } else {
                 run(safe_cex_venue_woo::api::sign_v3(
-                    input,
+                    &safe_cex_exchange::js_runtime::value::from_json(input),
                     &options,
                     &provider,
                     1700000000123.,
@@ -165,37 +167,40 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                 }
                 _ => {
                     let signed = result.unwrap();
+                    let config_view =
+                        safe_cex_exchange::js_runtime::value::to_json(&signed.config).unwrap();
                     if version == 3 {
                         assert_eq!(
-                            signed.config["method"],
+                            config_view["method"],
                             if index == 5 { "POST" } else { "GET" },
                             "WOO-AUDIT native selected method"
                         );
                     }
                     if index == 5 && version == 3 {
                         assert_eq!(
-                            signed.config["data"]["body"], 37,
-                            "WOO-AUDIT native retained body"
+                            config_view["data"]["body"].as_f64().unwrap().to_bits(),
+                            37.0_f64.to_bits(),
+                            "WOO-AUDIT native retained body bits"
                         );
                     }
                     if version == 1 {
                         match index {
-                            1 => assert_eq!(signed.config["method"], json!({"toUpperCase":null})),
-                            2 => assert_eq!(signed.config["method"], false),
+                            1 => assert_eq!(config_view["method"], json!({"toUpperCase":null})),
+                            2 => assert_eq!(config_view["method"], false),
                             5 => {
-                                assert_eq!(signed.config["method"], "pOsT");
+                                assert_eq!(config_view["method"], "pOsT");
                                 assert_eq!(
-                                    signed.config["data"], "body=37",
+                                    config_view["data"], "body=37",
                                     "WOO-AUDIT native V1 form body"
                                 );
                             }
-                            6 => assert!(signed.config.get("method").is_none()),
-                            9 => assert_eq!(signed.config["method"], json!([])),
-                            10 => assert_eq!(signed.config["method"], ""),
+                            6 => assert!(config_view.get("method").is_none()),
+                            9 => assert_eq!(config_view["method"], json!([])),
+                            10 => assert_eq!(config_view["method"], ""),
                             _ => unreachable!("successful audit case floor"),
                         }
                     }
-                    json!({"method":signed.config.get("method"),"url":signed.config.get("url"),"preimage":signed.preimage})
+                    json!({"method":config_view.get("method"),"url":config_view.get("url"),"preimage":signed.preimage})
                 }
             };
             let seen = provider.0.lock().unwrap();
@@ -218,10 +223,16 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                     request.url, "https://example.invalid/x",
                     "WOO-AUDIT native provider URL before rewrite"
                 );
+                let params = request.params.as_ref().unwrap().as_object().unwrap();
                 assert_eq!(
-                    request.params.as_ref(),
-                    Some(&json!({"query":41})),
-                    "WOO-AUDIT native provider params"
+                    params.len(),
+                    1,
+                    "WOO-AUDIT native provider params field floor"
+                );
+                assert_eq!(
+                    params["query"].as_f64().unwrap().to_bits(),
+                    41.0_f64.to_bits(),
+                    "WOO-AUDIT native provider params bits"
                 );
                 assert!(
                     matches!(request.body, Some(RestBody::Untransformed(_))),
@@ -229,7 +240,10 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                 );
                 assert_eq!(
                     request.body.as_ref().unwrap().untransformed().unwrap(),
-                    &json!({"body":37}),
+                    &safe_cex_types::retained_json::RetainedJsonInput::Object(vec![(
+                        "body".encode_utf16().collect(),
+                        safe_cex_types::retained_json::RetainedJsonInput::Float(37.0),
+                    )]),
                     "WOO-AUDIT native proxy body"
                 );
                 assert_eq!(
@@ -252,7 +266,7 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                     Some(71),
                     "WOO-AUDIT native proxy timeout"
                 );
-                observed_context(request)
+                oracle_view(observed_context(request))
             };
             entry["proxy"] = proxy;
             entry["proxyCalls"] = json!(proxy_calls);
@@ -336,6 +350,14 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
         }
     }
 }
+// The maintained oracle returns a JSON.stringify report; native assertions run above.
+fn oracle_view(value: Value) -> Value {
+    let text = safe_cex_num::js_json_stringify(&safe_cex_num::JsJsonValue::from(value))
+        .unwrap()
+        .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
 fn observed_context(request: &RestRequest) -> Value {
     let RestRequest {
         method,
@@ -359,7 +381,7 @@ fn observed_context(request: &RestRequest) -> Value {
             && config_extensions.is_empty(),
         "WOO-AUDIT native unused context fields"
     );
-    json!({"method":method,"url":url,"params":params,"body":body.as_ref().map(|b| b.untransformed().unwrap()),"headers":headers,"baseURL":base_url,"timeout":timeout_ms})
+    json!({"method":method,"url":url,"params":params,"body":body.as_ref().map(|b| b.untransformed().unwrap().clone().into_value().unwrap()),"headers":headers,"baseURL":base_url,"timeout":timeout_ms})
 }
 struct AuditProvider(std::sync::Mutex<Vec<RestRequest>>);
 impl TransportProvider for AuditProvider {
