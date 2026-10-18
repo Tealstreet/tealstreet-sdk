@@ -981,5 +981,254 @@
         }
       }
     ]
+  },
+  "safe_cex_ffi::native_exchange::account_closed_error": {
+    "category": "decoder",
+    "evidence": "Issued-but-released handle error envelope preserves exact native UTF-16 fields. Actual Node lifecycle regressions observe the Error class/name/code/message after release and control never-issued handles.",
+    "api": {
+      "kind": "function",
+      "name": "account_closed_error",
+      "signature": {
+        "inputs": [
+          [
+            "id",
+            {
+              "primitive": "u32"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::owned::OwnedJsValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let result = $type(u32::try_from($value.as_u64().expect(\"account id\")).expect(\"u32 account id\")); crate::__accepted_set_native_value(&result) }",
+    "cases": [
+      {
+        "input": 1,
+        "output": [
+          "object",
+          [
+            [
+              [
+                110,
+                97,
+                109,
+                101
+              ],
+              [
+                "string",
+                [
+                  65,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  67,
+                  108,
+                  111,
+                  115,
+                  101,
+                  100,
+                  69,
+                  114,
+                  114,
+                  111,
+                  114
+                ]
+              ]
+            ],
+            [
+              [
+                109,
+                101,
+                115,
+                115,
+                97,
+                103,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  97,
+                  116,
+                  105,
+                  118,
+                  101,
+                  32,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  32,
+                  49,
+                  32,
+                  105,
+                  115,
+                  32,
+                  99,
+                  108,
+                  111,
+                  115,
+                  101,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                99,
+                111,
+                100,
+                101
+              ],
+              [
+                "string",
+                [
+                  65,
+                  67,
+                  67,
+                  79,
+                  85,
+                  78,
+                  84,
+                  95,
+                  67,
+                  76,
+                  79,
+                  83,
+                  69,
+                  68
+                ]
+              ]
+            ]
+          ]
+        ]
+      },
+      {
+        "input": 17,
+        "output": [
+          "object",
+          [
+            [
+              [
+                110,
+                97,
+                109,
+                101
+              ],
+              [
+                "string",
+                [
+                  65,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  67,
+                  108,
+                  111,
+                  115,
+                  101,
+                  100,
+                  69,
+                  114,
+                  114,
+                  111,
+                  114
+                ]
+              ]
+            ],
+            [
+              [
+                109,
+                101,
+                115,
+                115,
+                97,
+                103,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  97,
+                  116,
+                  105,
+                  118,
+                  101,
+                  32,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  32,
+                  49,
+                  55,
+                  32,
+                  105,
+                  115,
+                  32,
+                  99,
+                  108,
+                  111,
+                  115,
+                  101,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                99,
+                111,
+                100,
+                101
+              ],
+              [
+                "string",
+                [
+                  65,
+                  67,
+                  67,
+                  79,
+                  85,
+                  78,
+                  84,
+                  95,
+                  67,
+                  76,
+                  79,
+                  83,
+                  69,
+                  68
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    ]
   }
 }

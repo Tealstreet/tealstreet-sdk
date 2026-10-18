@@ -7123,7 +7123,7 @@ reason = "FFI boundary glue: napi export calling an account's Exchange method by
 
 [[exempt]]
 rs = "safe-cex-ffi/src/native_exchange.rs::signer_available"
-reason = "FFI boundary glue: napi export pushing remote-signer availability from the JS session, with no TypeScript counterpart."
+reason = "FFI boundary glue: napi export acknowledging remote-signer availability from the JS session with Promise<void>, with no TypeScript counterpart. Actual Node native-account-signer-availability regressions verify ordered unavailable/available transitions, closed/never-issued rejection and dispose-retained handles."
 
 [[exempt]]
 rs = "safe-cex-ffi/src/native_exchange.rs::native_account_close"
