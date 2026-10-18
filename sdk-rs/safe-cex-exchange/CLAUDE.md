@@ -1921,9 +1921,14 @@ eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
 `js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
-and the Vec<Market> info boundary. Its optional recorded-payload probe measures
-parse and typed decode separately; `tests/large_payload_source.mjs` captures
+and the Vec<Market> info boundary. `tests/large_payload_source.mjs` captures
 maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Use `cargo run --release -p safe-cex-exchange --features native --example
+large_payload_decode` with LARGE_PAYLOAD_MANIFEST and LARGE_PAYLOAD_OUTPUT to
+measure the same recorded probe with the production allocator. The test binary
+has a counting allocator and must not supply production CPU ratios. Report CPU
+medians and spread from at least three interleaved control/candidate runs;
+input restoration and complete output observations stay outside timed phases.
 Native observation files encode UTF-16, own undefined and f64 bits explicitly so
 before/after byte comparisons do not hide lossy JSON projections.
 

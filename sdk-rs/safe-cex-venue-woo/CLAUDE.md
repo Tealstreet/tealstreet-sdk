@@ -153,8 +153,8 @@ instance and performs a live transaction-normalizer lookup, retaining arbitrary
 returned values and original method/getter errors. RegExp capabilities now take
 pattern and flags, including global slash replacement. Two successful whole-class
 constructions reach client assignment, both sockets and fill subscription before
-native-first method assertions. The other 66 arrow slots and getPositionMode
-remain unbound; this closes the two member bindings, not the owning-class FINDING.
+native-first method assertions. The production host now binds all other arrow slots and getPositionMode too;
+EXCHANGE_CLASS_EVIDENCE.md records the successful complete-class reconciliation.
 The existing `response` wire facades retain their separate typed/cache boundaries.
 
 The public `factory::create_api` composes the shared HttpClient and classified-read
@@ -530,3 +530,7 @@ See LIVE_ORDER_REVIEW.md; typed own-entry slices do not replace runtime lookup.
 History candidates and transaction parsing retain canonical Input through field
 selection and numeric coercion. HISTORY_PARSER_REVIEW.md records the signed native
 regression; strict typed historical output/option boundaries remain separate.
+
+History options follow source coercion before the typed request. Selected output
+assets use one row-admission pass after slicing; one malformed asset is reported
+and omitted while good rows survive. See HISTORY_OUTPUT_REVIEW.md.

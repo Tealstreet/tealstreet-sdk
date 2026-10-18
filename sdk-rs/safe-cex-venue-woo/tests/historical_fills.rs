@@ -454,21 +454,29 @@ fn historical_output_refusal_timing_and_nonfinite_bounds() {
             case["requests"],
             "FILLS boundary native queries"
         );
-        assert_eq!(
-            json!(*logs.borrow()),
-            case["logs"],
-            "FILLS boundary report precedence"
-        );
-        if label == "retained-asset" {
+        if label != "retained-asset" {
             assert_eq!(
-                result.unwrap_err().message,
-                "history commissionAsset cannot cross the typed String output",
-                "FILLS retained asset refusal"
+                json!(*logs.borrow()),
+                case["logs"],
+                "FILLS boundary report precedence"
             );
+        }
+        if label == "retained-asset" {
+            let rows = result.expect("selected malformed asset must keep good siblings");
+            let mut expected = case["rows"].as_array().unwrap().clone();
+            expected.retain(|row| row["id"] != "a");
+            assert_eq!(rows.len(), 2);
+            assert_eq!(json!(rows), json!(expected), "unchanged good output fields");
+            let logs = logs.borrow();
+            assert_eq!(logs.len(), 1, "one visible row refusal");
+            let message = logs[0].as_str().unwrap();
             assert!(
-                logs.borrow().is_empty(),
-                "FILLS refusal is not a source error"
+                message.contains("commissionAsset")
+                    && message.contains("row a")
+                    && message.contains("unrepresentable"),
+                "{message}"
             );
+            outputs += rows.len();
             refusals += 1;
         } else {
             let rows = result.expect("FILLS discarded asset or later source error must not refuse");
@@ -485,7 +493,7 @@ fn historical_output_refusal_timing_and_nonfinite_bounds() {
     }
     assert_eq!(
         (outputs, refusals, requests, reports),
-        (38, 2, 18, 2),
+        (42, 2, 18, 4),
         "FILLS boundary native totals"
     );
 }
