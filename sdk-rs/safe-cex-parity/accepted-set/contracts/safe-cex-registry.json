@@ -5904,5 +5904,56 @@
         ]
       }
     ]
+  },
+  "safe_cex_registry::native_account::native_account_event": {
+    "category": "non-decoder",
+    "reason": "Packages an outbound worker notification from an emitter event name and already owned NativeValue data. It neither deserializes nor admits incoming account commands; native_account_call retains those decoder contracts.",
+    "evidence": "safe-cex-registry/src/native_account.rs::native_account_event; native_host_mexc_hosted::mexc_private_open_posts_the_worker_reconnect_packet_without_data runs the real native MEXC private socket onOpen and the production packet constructor, with the unchanged baseline compiled RED and the omission fix GREEN.",
+    "api": {
+      "kind": "function",
+      "name": "native_account_event",
+      "signature": {
+        "inputs": [
+          [
+            "event",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::owned::OwnedJsValue",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::owned::OwnedJsValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
   }
 }

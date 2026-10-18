@@ -36,7 +36,14 @@ pub fn account_to_exchange_options(
     let broker = resolve_public_kucoin_broker_config(name, host.environment);
     let mut extra = empty_extra_options();
     extra.kucoin_broker = broker;
-    let mut has_extra = extra.kucoin_broker.is_some();
+    if account.exchange == ExchangeName::Hyrotrader {
+        extra.hyrotrader_mode = Some(if account.hyrotrader_demo == Some(true) {
+            safe_cex_types::ExchangeOptionsExtraHyrotraderMode::Demo
+        } else {
+            safe_cex_types::ExchangeOptionsExtraHyrotraderMode::Production
+        });
+    }
+    let mut has_extra = extra.kucoin_broker.is_some() || extra.hyrotrader_mode.is_some();
     if let Some(patch) = overrides.and_then(|patch| patch.extra.as_ref()) {
         has_extra |= extra_patch_present(patch);
         apply_extra_patch(patch, &mut extra);

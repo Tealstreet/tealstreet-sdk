@@ -1197,6 +1197,7 @@
     "evidence": "packages/safe-cex/src/types.ts: ExchangeOptionsExtra",
     "entrypoints": [],
     "sample": {
+      "hyrotraderMode": "production",
       "tickInterval": 1,
       "recvWindow": 1,
       "asterdexApiVersion": "v1",
@@ -49568,5 +49569,14 @@
         }
       ]
     }
+  },
+  "safe_cex_types::ExchangeOptionsExtraHyrotraderMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/types.ts: ExchangeOptions.extra.hyrotraderMode optional demo|production; actual binding tests/hyro_mode_binding.rs",
+    "entrypoints": [],
+    "literals": [
+      "demo",
+      "production"
+    ]
   }
 }

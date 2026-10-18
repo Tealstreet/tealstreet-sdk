@@ -227,6 +227,13 @@ the execution price, supported-market position updates, and per-currency balance
 merging with current position PnL. These are coverage of existing source behavior,
 not additional venue fixes.
 
+Daily and coarser candle bounds normalize the supplied Dayjs value to UTC before
+selecting midnight, then rebuild the previous-day instant exactly as TS does.
+The real assembled receiver regression uses genuine shared Dayjs instances with
+positive, negative and fractional offsets; its maintained-source oracle compares
+all request fields and candles, with numeric and intraday controls. This runtime
+input test does not widen the typed OHLCVOptions.to number field.
+
 
 Post-merge #418 review found snapshot failure warnings dispatching to the socket's
 missing log instead of parent.log, and stringifying Error rather than reading its
