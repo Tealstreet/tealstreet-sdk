@@ -128,7 +128,7 @@ fn data_descriptor_flags_and_redefinitions_match_native_engine() {
             .map(|e| json!(e.value.get("name").unwrap().to_display()))
             .unwrap_or(Value::Null);
         steps.push(step);
-        object.delete(&utf16("x"));
+        object.reflect_delete(&utf16("x")).unwrap();
         steps.push(snapshot(&object));
         actual.push(steps);
     }
@@ -178,7 +178,8 @@ fn enhanced_error_message_is_readonly_enumerable_and_nonconfigurable() {
         to_json(&enhanced.spread_object().unwrap()).unwrap(),
         json!({"message": "Polymarket Error: try later"})
     );
-    enhanced.delete(&utf16("message"));
+    let error = enhanced.delete(&utf16("message")).unwrap_err();
+    assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
     assert!(
         enhanced.has_own("message"),
         "nonconfigurable message must survive deletion"

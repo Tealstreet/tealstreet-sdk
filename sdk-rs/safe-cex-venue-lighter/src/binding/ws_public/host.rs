@@ -63,7 +63,7 @@ fn delete(object: &Js, key: &[u16]) -> Result<(), Thrown> {
     if object.is_nullish() {
         return Err(not_object(object));
     }
-    object.delete(key);
+    object.delete(key)?;
     Ok(())
 }
 

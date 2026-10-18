@@ -1001,7 +1001,8 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
                     "bookError":book.err().map(|error| error.message()),
                     "tickerError":items.err().map(|error| error.message()),
                 }));
-                row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+                row.delete(&"cycle".encode_utf16().collect::<Vec<_>>())
+                    .unwrap();
                 continue;
             }
         };
@@ -1034,7 +1035,8 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
             "ownUndefined":observed.own_keys().contains(&"missing".encode_utf16().collect()) && observed.get("missing").unwrap().is_undefined(),
             "cycle":observed.get("cycle").unwrap().same_reference(&row),
         }));
-        row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+        row.delete(&"cycle".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
     }
     let mut reads = vec![];
     for method in ["parseRestOrderBookLevels", "parseRestTickerItems"] {

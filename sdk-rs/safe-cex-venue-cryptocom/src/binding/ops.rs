@@ -69,7 +69,7 @@ pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
         set: Rc::new(|v, k, x| v.set(k, x)),
         set_index: Rc::new(|v, k, x| v.set_key(&k.to_js_string()?, x)),
         delete: Rc::new(|v, k| {
-            v.delete(&k.to_js_string()?);
+            v.delete(&k.to_js_string()?)?;
             Ok(true)
         }),
         global: Rc::new(move |name| scope(&global)?.global(name)),

@@ -297,7 +297,7 @@ impl TradingHost for Rt {
         v.spread_object()
     }
     fn remove_key(&self, v: Js, key: &str) -> Result<(), Thrown> {
-        v.delete(&key.encode_utf16().collect::<Vec<_>>());
+        v.delete(&key.encode_utf16().collect::<Vec<_>>())?;
         Ok(())
     }
     fn chunk(&self, v: Js, n: usize) -> Result<Js, Thrown> {

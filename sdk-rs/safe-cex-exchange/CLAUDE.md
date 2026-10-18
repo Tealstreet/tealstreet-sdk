@@ -1822,3 +1822,16 @@ thrown values. Native builtin adapters keep their existing separate surfaces.
 `js_builtins_native` compares eight actual NativeRuntime operator hook cases with
 Node; the unchanged Dayjs, Breakout, Kraken candle and Paradex ticker consumers
 cover malformed objects reaching their source Date/arithmetic branches.
+
+
+## Property deletion
+
+Js::delete is strict and returns Result<(), Thrown>; Js::reflect_delete returns
+the reflective boolean completion for object targets. Both use one descriptor
+removal operation: nonconfigurable properties survive, getters are not read,
+and strict refusal stops the following source statement. Supplied receivers
+propagate errors; positive test teardown asserts success. Fixed Builtin own
+properties refuse visibly until mutable intrinsic storage exists; the maintained
+source/dependency check is scripts/js-intrinsic-delete-audit.cjs. The accepted
+boundary is recorded in known-residuals.md. Tests/js_strict_delete_refusals.rs
+compares actual Node completions, original referents and primitive/array rules.

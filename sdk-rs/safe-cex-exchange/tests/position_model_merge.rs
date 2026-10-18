@@ -67,7 +67,9 @@ fn position_upserts_distinguish_absent_undefined_and_present_fields() {
         let incoming = from_json(&source["seed"]);
         incoming.define("contracts", Js::Number(0.0)).unwrap();
         incoming.define("entryPrice", Js::Number(0.0)).unwrap();
-        incoming.delete(&field.encode_utf16().collect::<Vec<_>>());
+        incoming
+            .delete(&field.encode_utf16().collect::<Vec<_>>())
+            .unwrap();
         match mode {
             "absent" => {}
             "undefined" => {
