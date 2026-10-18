@@ -3946,18 +3946,23 @@ dependencies = [
 name = "safe-cex-parity"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "indexmap 2.14.2",
+ "js-sys",
  "proc-macro2 1.0.107",
  "safe-cex-exchange",
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
  "safe-cex-venue-asterdex",
+ "safe-cex-venue-mexc",
  "safe-cex-webworker",
  "serde",
  "serde_json",
  "syn 3.0.7",
  "tokio",
  "toml",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -4355,18 +4360,15 @@ dependencies = [
  "futures",
  "hmac 0.12.1",
  "indexmap 2.14.2",
- "js-sys",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
- "safe-cex-webworker",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "wasm-bindgen",
 ]
 
 [[package]]

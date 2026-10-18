@@ -20,14 +20,3 @@ serde_json.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
-
-[dev-dependencies]
-safe-cex-webworker = { path = "../safe-cex-webworker" }
-
-[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen.workspace = true
-js-sys = "0.3.106"
-
-[[example]]
-name = "reporting_worker_host"
-crate-type = ["cdylib"]
