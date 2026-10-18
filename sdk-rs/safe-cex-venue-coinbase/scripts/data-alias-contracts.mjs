@@ -16,15 +16,19 @@ const names = [
   'exchange_lifecycle::LifecycleTimer',
 ].map(name => `safe_cex_venue_coinbase::${name}`).sort();
 const args = process.argv.slice(2);
-assert.ok(args.length <= 1 && args.every(arg => arg === '--expect-unclassified'));
+assert.ok(args.length <= 1 && args.every(arg => ['--expect-unclassified', '--controls'].includes(arg)));
 const { metadata, pkg, target, aliases, macroOrigins, found } = acceptedAliasContext({
   workspace: root, packageName: 'safe-cex-venue-coinbase', aliasNames: names, jobs: 1,
 });
-const results = runProbes(root, metadata, [{
+const packages = [{
   package: pkg.name, packageId: pkg.id, target, types: [], publicAliases: aliases,
   features: [], defaultWitnesses: [], locals: [], delegatedLocals: [], macroOrigins,
   externalTypeAliases: found.externalTypeAliases,
-}], loadContracts(), { target: 'native', features: [], jobs: 1 });
+}];
+const probe = contracts => runProbes(root, metadata, packages, contracts,
+  { target: 'native', features: [], jobs: 1 });
+const contracts = loadContracts();
+const results = probe(contracts);
 fs.writeFileSync(path.join(metadata.target_directory, 'coinbase-data-alias-inventory.json'),
   `${JSON.stringify(aliases, null, 2)}\n`);
 fs.writeFileSync(path.join(metadata.target_directory, 'coinbase-data-alias-results.json'),
@@ -42,4 +46,27 @@ if (args.includes('--expect-unclassified')) {
     assert.equal(Boolean(result.classificationOnly), capability, `${result.name}: actual decoder capability`);
   }
   console.log('Eight native decoder receipts and three explicit data capability classifications pass.');
+}
+
+if (args.includes('--controls')) {
+  for (const [suffix, before, after] of [
+    ['market_position_reads::ReadItems', 'let rows=decoded.borrow();',
+      'let mut rows=decoded.borrow_mut(); rows.truncate(1);'],
+    ['market_position_reads::ReadMarket', 'market(&decoded.borrow())',
+      '{let mut row=decoded.borrow_mut(); row.info=None; market(&row)}'],
+  ]) {
+    const name = `safe_cex_venue_coinbase::${suffix}`;
+    const faulty = structuredClone(contracts);
+    const original = faulty[name].observation.call;
+    assert.ok(original.includes(before));
+    faulty[name].observation.call = original.replace(before, after);
+    const failed = probe(faulty);
+    const owner = failed.find(row => row.name === name);
+    assert.ok(!owner.classificationOnly && owner.failures.some(failure =>
+      failure.includes('Deserialize output mismatch')), `${name}: actual native mutation must fail`);
+    assert.ok(failed.filter(row => row.name !== name).every(row => !row.failures.length));
+    const restored = probe(contracts);
+    assert.ok(restored.every(row => !row.failures.length));
+    console.log(`${name}: compiled native observation loss RED; exact restoration GREEN`);
+  }
 }
