@@ -593,7 +593,7 @@ pub fn get_tick_size(market: &safe_cex_types::Market) -> Result<f64, JsCoercionE
             {
                 let tick = filter.get("tickSize");
                 if tick.is_some_and(Input::is_truthy) {
-                    return Ok(safe_cex_num::js_retained_parse_float(tick)?);
+                    return safe_cex_num::js_retained_parse_float(tick);
                 }
                 break;
             }

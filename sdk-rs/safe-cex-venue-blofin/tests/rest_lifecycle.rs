@@ -412,7 +412,7 @@ fn read_cases(method: &str, expected_count: usize) {
                     if c["fallbackAlias"] == true {
                         *actual[0].info.as_mut().unwrap().get_mut("stored").unwrap() =
                             json!(false).into();
-                        assert_eq!(
+                        assert!(
                             s.markets()[0]
                                 .info
                                 .as_ref()
@@ -421,7 +421,6 @@ fn read_cases(method: &str, expected_count: usize) {
                                 .unwrap()
                                 .as_bool()
                                 .unwrap(),
-                            true,
                             "native fallback snapshots independent"
                         )
                     }
@@ -1248,7 +1247,7 @@ fn native_rest_boundaries() {
             let actual = ready(fetch_markets(&s, &adapter, &h, || "cache-id".into())).unwrap();
             assert_eq!(actual.len(), 1);
             assert_eq!(actual[0].id, models["market"]["id"]);
-            assert_eq!(
+            assert!(
                 actual[0]
                     .info
                     .as_ref()
@@ -1256,8 +1255,7 @@ fn native_rest_boundaries() {
                     .get("stored")
                     .unwrap()
                     .as_bool()
-                    .unwrap(),
-                true
+                    .unwrap()
             );
         } else {
             let opts: OHLCVOptions =
