@@ -803,7 +803,7 @@ impl BingxDataReads {
                     if let Err(error) = future.await {
                         base.runtime.report_exception(
                             &error,
-                            &json!({"operation":"BingX metadata leverage sibling"}),
+                            &json!({"operation":"BingX metadata leverage sibling"}).into(),
                         );
                     }
                 });
@@ -814,7 +814,7 @@ impl BingxDataReads {
                     if let Err(error) = future.await {
                         base.runtime.report_exception(
                             &error,
-                            &json!({"operation":"BingX metadata margin sibling"}),
+                            &json!({"operation":"BingX metadata margin sibling"}).into(),
                         );
                     }
                 });

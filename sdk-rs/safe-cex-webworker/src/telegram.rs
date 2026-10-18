@@ -97,7 +97,7 @@ fn detach(host: Rc<dyn TelegramHost>, future: ExchangeFuture<'static, ()>, metho
     let report = runtime.clone();
     runtime.spawn_local(Box::pin(async move {
         if let Err(error) = future.await {
-            report.report_exception(&error, &serde_json::json!({"method":method}));
+            report.report_exception(&error, &serde_json::json!({"method":method}).into());
         }
     }));
 }
@@ -241,7 +241,7 @@ impl<Token: AsRef<str> + 'static> TelegramWorker<Token, Result<Rc<dyn Exchange>,
                 if let Err(error) = worker.process_messages(host.clone(), &messages) {
                     host.runtime().report_exception(
                         &error,
-                        &serde_json::json!({"method":"TelegramWorker.processMessages"}),
+                        &serde_json::json!({"method":"TelegramWorker.processMessages"}).into(),
                     );
                 }
                 for message in messages {

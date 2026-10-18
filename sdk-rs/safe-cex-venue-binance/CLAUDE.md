@@ -589,6 +589,25 @@ updates independently, requires the named native assertion to fail, restores exa
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
 
+### Position snapshot callback alias receipts
+
+`position_snapshots::{Emit,Log}` are executable capabilities captured from the
+actual ExchangeState. `node scripts/snapshot-alias-contracts.mjs` (cwd this
+crate) uses fresh authenticated compiler discovery and runs the two native alias
+trait/type probes. These are classification receipts, not callback execution.
+The concrete execution witnesses are in `tests/support/snapshot_aliases.rs`,
+included by the native `private_classes` target. They construct the production
+native dependencies/ExchangeOwner, drive signed Futures/PM positions failures
+and Futures account balance aggregation through native HTTP, and observe Base
+error/log callbacks, one-time logging, native balance bits and listener errors.
+Run them with `cargo test --locked --jobs 1 -p safe-cex-venue-binance --features
+native --test private_classes snapshot_aliases` from `sdk-rs`.
+`python3 safe-cex-venue-binance/scripts/snapshot-alias-controls.py` independently
+faults Emit forwarding and Log severity in the production capture bodies,
+requires the corresponding compiled native assertion to fail, then restores the
+exact file and requires GREEN. This cohort makes no claim for other aliases or
+Wasm callback execution.
+
 `public_rest::RestFuture` is the pinned request continuation returned by the live
 `RestContext::get`, with a reviewed `'static` compiler instantiation. Its specific
 non-decoder classification does not classify the resolved JSON or other lifetimes.
@@ -611,3 +630,45 @@ the actual get method with the original header receiver. The native
 compares five signed request outcomes, including mixed-case weight/retry headers,
 against actual maintained TS guards with installed Axios. Its only request stub
 is the terminal RestAdapter; the factories, signer and response guards are live.
+
+The twenty history/API/lifecycle capabilities have individual source-role records
+and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
+Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls
+are described in `LIFECYCLE_ALIAS_REVIEW.md`. Income paging uses the canonical
+native typed bridge on both sides of the shared pager, preserving native number
+bits while retaining the existing numeric transaction/trade ID String policy.
+
+### Retired duplicate order throttle
+
+The former `orders_throttle` generic module had no production caller; its only
+Rust caller was its standalone oracle target. The assembled private constructor
+already installs `PrivateState::start_fetch_throttled`, and its live
+`throttled_orders` method selects and schedules that callback. The two TypeScript
+private-socket source methods remain mapped to those canonical class bodies.
+Do not restore `FetchOrdersCallback`/`LoadedProperties` or their duplicate helper
+module to satisfy an alias inventory.
+
+`tests/support/order_throttle_binding.rs` exercises the production native
+Futures/PM constructor, 10000ms timer, both signed order requests and one loaded
+Store publication with the ticker-loaded sibling retained. Run the native
+`private_classes` target with filter `order_throttle_binding` from `sdk-rs`.
+`scripts/live-order-throttle-controls.py` separately corrupts the real class delay
+and loaded flag, requires compiled named native failures, and restores the exact
+production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
+receipts describe the retired oracle-only helper; they are not current class
+execution evidence. No package script directly names the deleted target/oracle;
+the existing all-targets Binance oracle command continues to discover live tests.
+
+Keep production imports explicit. The canonical accepted-set scanner must prove
+macro provenance across each source scope; wildcard imports can hide that proof
+even when the current business logic compiles. Import changes also require review
+of any affected source pins; nested helper bodies keep their existing contracts.
+
+The private-construction Clone reviews in the Binance construction policy cover
+three reusable capabilities: the inverse listener retry context, shared class
+settlement observations and captured private arrows with their receiver/base
+leases. The disconnected candle-listener witness executes the actual retry
+clone before a real socket frame and cleanup; the native private-clone witness
+holds a listen-key request, drops the original settlement and observes both
+clones before invoking a cloned reconnect arrow. These reviews do not classify
+raw-input decoders or widen accepted representations.

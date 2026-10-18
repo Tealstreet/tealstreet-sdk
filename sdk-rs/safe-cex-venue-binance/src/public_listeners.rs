@@ -6,7 +6,7 @@
 //! discarded-job ownership and drop/unwind cleanup remain separate integrations.
 use crate::{
     orderbook::BinanceOrderBookSyncState,
-    private_event_value::*,
+    private_event_value::{EventOps, EventValue, number, string},
     protocol_types::BinanceOrderBookApplyResult,
     request_weight::{Failure, type_error},
 };

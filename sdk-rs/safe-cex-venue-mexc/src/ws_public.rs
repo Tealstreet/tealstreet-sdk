@@ -162,7 +162,7 @@ impl MexcPublicSocket {
                 ) {
                     lease.base().runtime.report_exception(
                         &log_error,
-                        &json!({"operation":"MEXC orderbook snapshot catch"}),
+                        &json!({"operation":"MEXC orderbook snapshot catch"}).into(),
                     );
                 }
             }

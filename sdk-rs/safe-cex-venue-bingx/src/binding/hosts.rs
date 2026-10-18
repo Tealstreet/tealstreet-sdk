@@ -171,7 +171,8 @@ impl Host {
             }
             let result = slept.and_then(|_| callback());
             if let Err(e) = result {
-                runtime.report_exception(&e, &serde_json::json!({"operation":"BingX timer"}));
+                runtime
+                    .report_exception(&e, &serde_json::json!({"operation":"BingX timer"}).into());
             }
         }));
         self.tasks.borrow_mut().push((id, task));
@@ -193,7 +194,10 @@ impl Host {
         let runtime = self.scope.runtime.clone();
         self.scope.runtime.spawn_local(Box::pin(async move {
             if let Err(e) = future.await {
-                runtime.report_exception(&e, &serde_json::json!({"operation":"BingX callback"}));
+                runtime.report_exception(
+                    &e,
+                    &serde_json::json!({"operation":"BingX callback"}).into(),
+                );
             }
         }));
     }
@@ -305,7 +309,7 @@ impl HistoryHost for Host {
                             if let Err(e) = f.await {
                                 rt.report_exception(
                                     &e,
-                                    &serde_json::json!({"operation":"BingX tick"}),
+                                    &serde_json::json!({"operation":"BingX tick"}).into(),
                                 );
                             }
                         }));

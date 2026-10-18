@@ -838,7 +838,7 @@ impl OrderExecution {
         let this = self.clone();
         self.owner.start_owned_operation(async move {
             if let Err(e) = this.poll_open_interest().await {
-                this.owner.runtime.report_exception(&e, &Value::Null);
+                this.owner.runtime.report_exception(&e, &Value::Null.into());
             }
         });
     }
