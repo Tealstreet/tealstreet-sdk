@@ -105,49 +105,49 @@
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::string: Constructs a VM string handle from already typed text for assembly.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::assembly::AssemblyHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::object: Constructs an outgoing assembly VM object from supplied field/value handles.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::assembly::AssemblyHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::property: Reads an existing assembly property through shared Js::get.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::assembly::AssemblyHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::define: Defines an own assembly property using an existing field handle.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::assembly::AssemblyHost::assign for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::assign: Performs ordinary assignment on an existing assembly receiver.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::assembly::AssemblyHost::global for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::global: Delegates internal module-global selection to shared Scope::global.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::assembly::AssemblyHost::member for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::member: Delegates capture of an existing member to bound_member, retaining its original receiver.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::assembly::AssemblyHost::bind_mapped for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
     "reason": "Individually reviewed assembly::AssemblyHost::bind_mapped: Creates a receiver-scoped capability through the separately reviewed binding::targets::bind factory; returned executable consumers retain their own decoder obligations.",
-    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+    "itemSha256": "251da705b3b7e6b268bb6992500cc3cc55ca6cd4ddda989ebf27ca82332f9b4c"
   },
   "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
