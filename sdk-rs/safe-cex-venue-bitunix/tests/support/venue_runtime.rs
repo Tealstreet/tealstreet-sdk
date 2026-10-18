@@ -221,6 +221,7 @@ pub struct HeldResponse {
     waker: Mutex<Option<std::task::Waker>>,
 }
 impl HeldResponse {
+    #[allow(dead_code)]
     pub fn release(&self) {
         self.open.store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(waker) = self.waker.lock().unwrap().take() {
