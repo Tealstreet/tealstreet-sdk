@@ -57,3 +57,23 @@ sort direction, loaded flag and detach event. Each changed body must compile
 and fail its named receipt while the other three stay green. Exact production
 bytes are restored in `finally`, and all four must pass again after each fault.
 Compilation errors, missing receipts and unexpected passes are rejected.
+
+## Measured evidence
+
+The pre-contract canonical measurement produced four named missing-contract
+failures. The completed native measurement now executes all four owners and
+44 observations, with zero classification-only receipts and zero failures.
+Each run authenticates the full reexported dependency inventory (197
+Deserialize owners), rather than skipping unselected source guards.
+
+All four independently compiled semantic faults produced only their named
+owner's failures: leverage maximum, descending closed-time sort, loaded flag
+and message-listener removal. Each exact restoration then passed all four
+owners again. The controller also records each native result; compilation
+errors or absent receipts cannot count as RED. A final hash comparison confirms
+all four production files were restored byte-for-byte.
+
+The maintained TypeScript captures regenerated successfully: 133 reconciliation,
+658 closed-position reader, 22 futures-start and 32 shared-detach source cases.
+Those captures cover surrounding source operations beyond this 44-observation
+contract profile; their existing Rust comparison targets remain separate.
