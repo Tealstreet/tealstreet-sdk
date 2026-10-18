@@ -208,9 +208,10 @@ fn leverage_reads_match_actual_typescript() {
         compared, 9720,
         "BITRUE-LEVERAGE-READ executed market comparisons"
     );
-    assert!(
-        js_from_str::<String>(capture["surrogateRaw"].as_str().unwrap()).is_err(),
-        "CHOSEN read symbol UTF8 refusal"
+    typed_utf16::assert_projection(
+        capture["surrogateRaw"].as_str().unwrap(),
+        &(js_from_str::<String>(capture["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     let supplements = capture["supplements"].as_array().unwrap();
     assert_eq!(supplements.len(), 6, "CHOSEN read supplement source count");
@@ -289,3 +290,6 @@ fn market(id: &str, symbol: &str, max: f64) -> Market {
     market.limits.leverage.max = max;
     market
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

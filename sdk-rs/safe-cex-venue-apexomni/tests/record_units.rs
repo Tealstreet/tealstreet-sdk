@@ -36,10 +36,13 @@ fn check<T: DeserializeOwned + serde::Serialize + safe_cex_num::numeric_ingress:
     let marker = format!("APEX-RECORD-UNIT {name}/{label}");
     let actual = js_from_str::<T>(row["raw"].as_str().unwrap());
     if ["high", "low", "high-tail"].contains(&label) {
-        assert!(
-            actual.is_err(),
-            "{marker} native whole-record ingress refusal"
+        let actual = actual.expect("typed record retains surrogate leaf");
+        assert_eq!(
+            access(&actual),
+            String::from_utf16_lossy(expected(label)),
+            "{marker} typed U+FFFD leaf"
         );
+        typed_utf16::assert_projection(row["raw"].as_str().unwrap(), &actual);
     } else {
         let actual =
             actual.unwrap_or_else(|error| panic!("{marker} native unexpected refusal: {error}"));
@@ -141,7 +144,7 @@ fn declared_record_unit_boundaries_are_native_first() {
         "TxEthSignature",
         "TxSignature",
     ];
-    let mut refused = 0;
+    let mut typed_boundaries = 0;
     let mut positive = 0;
     for (index, row) in rows.iter().enumerate() {
         assert_eq!(
@@ -249,18 +252,21 @@ fn declared_record_unit_boundaries_are_native_first() {
             name => panic!("APEX-RECORD-UNIT unselected target {name}"),
         }
         if index % 7 < 3 {
-            refused += 1
+            typed_boundaries += 1
         } else {
             positive += 1
         }
     }
     assert_eq!(names.len(), 50, "APEX-RECORD-UNIT independent target floor");
-    assert_eq!(refused, 150, "APEX-RECORD-UNIT independent refusal floor");
+    assert_eq!(
+        typed_boundaries, 150,
+        "APEX-RECORD-UNIT independent typed-boundary floor"
+    );
     assert_eq!(
         positive, 200,
         "APEX-RECORD-UNIT independent native-positive floor"
     );
-    // Every typed native leaf/refusal and source-unit assertion finishes before wire.
+    // Every typed native leaf/boundary and source-unit assertion finishes before wire.
     for row in rows.iter().filter(|row| row["label"] == "high") {
         assert_eq!(
             row["returnedWire"], r#""\ud800""#,
@@ -268,3 +274,6 @@ fn declared_record_unit_boundaries_are_native_first() {
         );
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

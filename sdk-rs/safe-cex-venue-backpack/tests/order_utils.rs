@@ -73,10 +73,10 @@ fn actual_typescript_order_enum_mappings() {
         compared[2] += 1;
     }
     for (i, case) in corpus["boundary"].as_array().unwrap().iter().enumerate() {
-        assert!(
-            safe_cex_num::numeric_ingress::js_from_str::<String>(case["raw"].as_str().unwrap())
-                .is_err(),
-            "order utility UTF8 ingress refusal case {i}"
+        typed_utf16::assert_projection(
+            case["raw"].as_str().unwrap(),
+            &(safe_cex_num::numeric_ingress::js_from_str::<String>(case["raw"].as_str().unwrap()))
+                .expect("typed surrogate record is retained"),
         );
         assert_eq!(
             case["status"], "open",
@@ -94,3 +94,6 @@ fn actual_typescript_order_enum_mappings() {
         "ORDER-UTILS completed comparisons"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

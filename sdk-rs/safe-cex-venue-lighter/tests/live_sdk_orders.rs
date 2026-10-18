@@ -342,7 +342,8 @@ fn check<T: DeserializeOwned + Serialize + NativeIdentity>(
                 }
             }
         } else {
-            assert!(result.is_err(), "{name} shared UTF8 representation refusal");
+            assert!(result.is_err(), "{name} upstream Value refusal");
+            let _: T = typed_utf16::decode(w["encoded"].as_str().unwrap());
         }
     }
 }
@@ -1034,3 +1035,6 @@ fn sdk_orders_missing_compiler_fails_loudly() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("MODULE_NOT_FOUND"));
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

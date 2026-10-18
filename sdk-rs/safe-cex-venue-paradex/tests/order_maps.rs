@@ -160,11 +160,15 @@ fn actual_typescript_order_maps() {
         corpus["surrogate"]["type"]["text"], "limit",
         "maps_source_surrogate_type"
     );
-    assert!(
-        js_from_str::<String>(corpus["surrogate"]["raw"].as_str().unwrap()).is_err(),
-        "maps_utf8_refusal"
+    typed_utf16::assert_projection(
+        corpus["surrogate"]["raw"].as_str().unwrap(),
+        &(js_from_str::<String>(corpus["surrogate"]["raw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     for (native, expected) in wires {
         assert_eq!(native, *expected, "maps_wire_after_native");
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
