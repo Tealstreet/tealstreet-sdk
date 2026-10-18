@@ -103,13 +103,25 @@ pub fn assert_refusals(reports: &str, case: &Value) {
         );
     } else {
         for refusal in refusals {
-            for key in ["symbol", "field", "value"] {
-                let fragment = refusal[key].as_str().unwrap();
-                assert!(
-                    reports.contains(fragment),
-                    "native ticker missing {key}={fragment}: {reports}"
-                );
-            }
+            let symbol = refusal["symbol"].as_str().unwrap();
+            let field = refusal["field"].as_str().unwrap();
+            let value = refusal["value"].as_str().unwrap();
+            let expected = match case["venue"].as_str().unwrap() {
+                "woo" => format!(
+                    "Refused WOO ticker row symbol={symbol:?}: {field}={value}: expected number"
+                ),
+                "asterdex" => format!(
+                    "AsterDEX ticker {symbol} typed field {field} requires a number; received {value}"
+                ),
+                "orderly" => format!(
+                    "Orderly ticker {symbol} typed field {field} requires a number; received {value}"
+                ),
+                venue => panic!("unsupported strict ticker venue {venue}"),
+            };
+            assert!(
+                reports.lines().any(|row| row.ends_with(&expected)),
+                "native ticker missing refusal tuple {expected}: {reports}"
+            );
         }
     }
 }

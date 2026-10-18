@@ -84,7 +84,7 @@ const cases = [];
         return { id: ticker.id, symbol: ticker.symbol, fields: Object.fromEntries(fields.map(field => [field, bits(admitted[field])])) };
       });
       for (const index of [1, 2]) assert(fields.some(field => bits(store.tickers[index][field]) !== bits(tickers[index][field])), `good sibling must update: ${channel}/${field}/${label}`);
-      cases.push({ channel, field, label, frames, refusals, expected });
+      cases.push({ venue, channel, field, label, frames, refusals, expected });
     }
   } finally { exchange.dispose(); }
   assert.equal(cases.length, { asterdex: 252, orderly: 120, woo: 72 }[venue]);
