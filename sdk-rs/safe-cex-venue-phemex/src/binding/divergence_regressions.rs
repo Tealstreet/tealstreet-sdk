@@ -1,7 +1,5 @@
 //! Exact FIX-audit rows, exercised on constructed production receivers/clients.
-#[path = "../../tests/support/binding_harness.rs"]
-#[allow(dead_code)]
-mod support;
+use super::test_support as support;
 use safe_cex_exchange::js_runtime::{
     promise::await_js,
     value::{Js, from_json},

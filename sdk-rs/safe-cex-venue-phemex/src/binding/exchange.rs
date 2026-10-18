@@ -6,6 +6,10 @@ mod divergence_regressions;
 #[cfg(test)]
 #[path = "order_regressions.rs"]
 mod order_regressions;
+#[cfg(test)]
+#[path = "../../tests/support/binding_harness.rs"]
+#[allow(dead_code)]
+mod test_support;
 use super::{
     globals,
     rt::{ExternalPublicDataFactory, Extra, Host, Rt, Shared, TransportInstaller},
