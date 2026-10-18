@@ -4761,6 +4761,7 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
     owner.private.position.last_fetch_time.set(-10_000.0);
     owner.private.position.pending_events.set(true);
     let private = owner.private.clone();
+    let positions_before = owner.base.store.update_ids().positions;
     let starter: PositionFetchStarter<Failure> = Rc::new(move || private.throttled_positions());
     starter().unwrap();
     for _ in 0..32 {
@@ -4778,9 +4779,10 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
         ["/fapi/v1/symbolConfig", "/fapi/v3/positionRisk"],
         "the actual starter reaches both configured native REST requests"
     );
-    assert!(
-        owner.base.store.loaded().positions,
-        "the actual refresh publishes loaded positions"
+    assert_eq!(
+        owner.base.store.update_ids().positions,
+        positions_before + 1.0,
+        "the actual refresh publishes one complete position snapshot"
     );
     assert!(!owner.private.position.pending_events.get());
     assert!(!owner.private.position.in_flight.get());

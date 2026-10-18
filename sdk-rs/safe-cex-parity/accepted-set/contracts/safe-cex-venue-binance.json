@@ -3062,5 +3062,133 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_binance::position_refresh::PositionFetchStarter": {
+    "category": "non-decoder",
+    "evidence": "The production PrivateState::throttled_positions constructs this zero-input executable capability to resolve and start the CURRENT bound execute_positions method. Both Futures and PM throttle bodies invoke it; it does not parse an external representation. The canonical native alias probe executes ordinary Deserialize/conversion detectors at its fixed serde_json::Value error instantiation; the production-native position starter witness separately exercises the actual Failure instantiation and HTTP/Store path.",
+    "reason": "Rc<dyn Fn() -> Result<(), E>> is a configured position-fetch invocation capability, not a decoder. Source BinancePrivateWebsocket.throttledFetchPositions calls this.executePositionFetch immediately or from its timer; synchronous lookup/invocation errors propagate, while the separately owned asynchronous job handles its own rejection. This classification grants no serde input, generic instantiation selection or callback-body replacement.",
+    "generics": {
+      "params": [
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }
