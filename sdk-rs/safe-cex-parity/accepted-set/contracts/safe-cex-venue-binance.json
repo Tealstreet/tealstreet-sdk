@@ -49809,5 +49809,928 @@
     },
     "reason": "Constructs a diagnostic error from existing typed message text.",
     "evidence": "Direct source-role review in src/public_classes.rs; no native decoder execution claim for this classification."
+  },
+  "safe_cex_venue_binance::public_listeners::payload": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "payload",
+      "signature": {
+        "inputs": [
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "topic",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "id",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outbound record factory from typed method/topic strings and a typed numeric subscription ID. It constructs the send capability payload; it neither admits nor deserializes a raw incoming representation.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::add_handler": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "add_handler",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "handler",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "parser",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::public_listeners::Parser",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed callback registry append: reads the current handler row, retains existing Parser Rc identities/order and appends the supplied callback. It does not invoke or decode that callback payload.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::remove_handler": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "remove_handler",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "handler",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "parser",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_listeners::Parser",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "delete_empty",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "usize"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed callback registry removal: compares Parser Rc identities, keeps the other callbacks, and conditionally deletes or retains an empty row. No incoming event representation is parsed here.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::topic_add": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "topic_add",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "topic",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed subscription counter bookkeeping over the host topic dictionary. Source numeric falsy fallback and increment are internal state effects; this is not a message decoder or arbitrary-JavaScript admission API.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::legacy_topic_remove": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "legacy_topic_remove",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "topic",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Legacy typed counter cleanup: decrements a shared topic count or removes the last numeric subscription. It does not parse socket data or manufacture a replacement listener.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::depth": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "depth",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "venue",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::public_listeners::Venue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "callback",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::public_listeners::Book",
+                                            "args": null
+                                          }
+                                        }
+                                      ],
+                                      "output": {
+                                        "resolved_path": {
+                                          "path": "core::result::Result",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "tuple": []
+                                                  }
+                                                },
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::public_listeners::Unsubscribe",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed listener lifecycle factory: captures host, Venue, String symbol and native Book callback; allocates a book/sequence/parser state and returns an unsubscribe continuation. Raw frame handling and snapshot admission occur in its separately executed live consumers, not as a deserializer entrypoint on this function.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::listen_futures_book": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "listen_futures_book",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "callback",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::public_listeners::Book",
+                                            "args": null
+                                          }
+                                        }
+                                      ],
+                                      "output": {
+                                        "resolved_path": {
+                                          "path": "core::result::Result",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "tuple": []
+                                                  }
+                                                },
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::public_listeners::Unsubscribe",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed Futures entrypoint selecting Venue::Futures and forwarding the host, symbol and native callback to the depth lifecycle. It does not expose an alternate raw decoder.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::listen_pm_book": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "listen_pm_book",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "callback",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::public_listeners::Book",
+                                            "args": null
+                                          }
+                                        }
+                                      ],
+                                      "output": {
+                                        "resolved_path": {
+                                          "path": "core::result::Result",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "tuple": []
+                                                  }
+                                                },
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::public_listeners::Unsubscribe",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed Portfolio Margin entrypoint selecting Venue::PM and forwarding the host, symbol and native callback to the depth lifecycle. It does not expose an alternate raw decoder.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::public_listeners::listen_spot_book": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "listen_spot_book",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_venue_binance::public_listeners::ListenerHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "callback",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::public_listeners::Book",
+                                            "args": null
+                                          }
+                                        }
+                                      ],
+                                      "output": {
+                                        "resolved_path": {
+                                          "path": "core::result::Result",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "tuple": []
+                                                  }
+                                                },
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::public_listeners::Unsubscribe",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed Spot entrypoint selecting Venue::Spot and forwarding the host, symbol and native callback to the depth lifecycle. It does not expose an alternate raw decoder.",
+    "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
   }
 }
