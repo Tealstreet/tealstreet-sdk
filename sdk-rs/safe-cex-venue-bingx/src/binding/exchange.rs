@@ -26,6 +26,11 @@ pub struct BingxExchange {
     host: Rc<Host>,
     capabilities: ExchangeCapabilities,
 }
+impl Drop for BingxExchange {
+    fn drop(&mut self) {
+        let _ = self.dispose();
+    }
+}
 impl BingxExchange {
     pub fn new(
         name: ExchangeName,
@@ -49,7 +54,7 @@ impl BingxExchange {
             ));
         }
         let runtime = deps.runtime.clone();
-        let host = Host::new(options.clone(), store.clone(), deps);
+        let host = Host::new(options.clone(), store.clone(), deps)?;
         let inner = Bodies::new(
             name,
             options,
@@ -135,10 +140,11 @@ impl Exchange for BingxExchange {
         let preflight = self
             .base()
             .assert_caller_client_order_ids(std::slice::from_ref(order.options()));
-        Box::pin(async move {
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
             preflight?;
-            ids(self
-                .inner
+            ids(inner
                 .placement
                 .place_order(&safe_cex_types::PreparedOrderOpts::from(order.options()))
                 .await?)
@@ -150,21 +156,31 @@ impl Exchange for BingxExchange {
             .iter()
             .map(|o| safe_cex_types::PreparedOrderOpts::from(o.options()))
             .collect();
-        Box::pin(async move { ids(self.inner.placement.place_orders(&options).await?) })
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            ids(inner.placement.place_orders(&options).await?)
+        })
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
-        Box::pin(self.inner.start())
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move { inner.start().await })
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        Box::pin(async move {
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
             let value =
-                crate::account_reads::get_account(|request| self.inner.xhr.send(request)).await?;
+                crate::account_reads::get_account(|request| inner.xhr.send(request)).await?;
             serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))
         })
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
-        Box::pin(async move {
-            let v = self.inner.reads.validate_account().await?;
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            let v = inner.reads.validate_account().await?;
             Ok(ValidateAccountResult {
                 error: v.error.into(),
                 balance: v.balance,
@@ -172,22 +188,44 @@ impl Exchange for BingxExchange {
         })
     }
     fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
-        Box::pin(async move { self.inner.reads.fetch_positions(symbols.as_deref()).await })
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner.reads.fetch_positions(symbols.as_deref()).await
+        })
     }
     fn fetch_orders(&self, _symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
-        Box::pin(self.inner.history.fetch_orders())
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner.history.fetch_orders().await
+        })
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        Box::pin(self.inner.reads.fetch_markets())
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(
+            &runtime,
+            async move { inner.reads.fetch_markets().await },
+        )
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        Box::pin(self.inner.reads.fetch_tickers())
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(
+            &runtime,
+            async move { inner.reads.fetch_tickers().await },
+        )
     }
     fn fetch_leverage_for_symbol(
         &self,
         symbol: String,
     ) -> ExchangeFuture<'_, Option<FetchedLeverage>> {
-        Box::pin(async move { self.inner.reads.fetch_leverage_for_symbol(&symbol).await })
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner.reads.fetch_leverage_for_symbol(&symbol).await
+        })
     }
     fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
         inherited()
@@ -198,31 +236,53 @@ impl Exchange for BingxExchange {
         leverage: f64,
         side: Option<PositionSide>,
     ) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move { self.inner.reads.set_leverage(&symbol, leverage, side).await })
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner.reads.set_leverage(&symbol, leverage, side).await
+        })
     }
     fn change_position_mode(
         &self,
         hedged: bool,
         _symbol: Option<String>,
     ) -> ExchangeFuture<'_, ()> {
-        Box::pin(self.inner.reads.change_position_mode(hedged))
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner.reads.change_position_mode(hedged).await
+        })
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner
                 .reads
                 .change_margin_type(isolated, symbol.as_deref())
                 .await
         })
     }
     fn update_order(&self, opts: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
-        Box::pin(async move { ids(self.inner.amendment.update_order(&opts).await?) })
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            ids(inner.amendment.update_order(&opts).await?)
+        })
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move { self.inner.reads.cancel_orders(&orders).await })
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner.reads.cancel_orders(&orders).await
+        })
     }
     fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move { self.inner.reads.cancel_symbol_orders(&symbol).await })
+        let inner = self.inner.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            inner.reads.cancel_symbol_orders(&symbol).await
+        })
     }
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         inherited()
@@ -235,13 +295,22 @@ impl Exchange for BingxExchange {
         inherited()
     }
     fn fetch_ohlcv(&self, opts: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
-        Box::pin(async move { self.inner.history.fetch_ohlcv(&opts).await })
+        let history = self.inner.history.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(
+            &runtime,
+            async move { history.fetch_ohlcv(&opts).await },
+        )
     }
     fn fetch_historical_fills(
         &self,
         opts: ExecutionsOptions,
     ) -> ExchangeFuture<'_, Vec<Execution>> {
-        Box::pin(async move { self.inner.history.fetch_historical_fills(&opts).await })
+        let history = self.inner.history.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            history.fetch_historical_fills(&opts).await
+        })
     }
     fn listen_ohlcv(
         &self,
@@ -276,11 +345,17 @@ impl Exchange for BingxExchange {
         Ok(Box::new(move || cleanup()))
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
-        self.inner.dispose()?;
+        let result = self.inner.dispose();
         self.host.dispose_timers();
-        Ok(())
+        result
     }
 }
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/binding_harness.rs"]
+#[allow(dead_code)]
+mod binding_test_harness;
 
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
@@ -291,3 +366,8 @@ mod retained_info_native;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/handler_list_native.rs"]
 mod structural_alias_tests;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/divergence_native.rs"]
+mod divergence_native;

@@ -163,7 +163,7 @@ fn fixture(mult: Option<f64>) -> (Rc<Host>, Rc<ExchangeWorker<Host>>) {
     (h, w)
 }
 fn frame(w: &ExchangeWorker<Host>, latency: f64) -> StoreFrame {
-    let mut d = w.store().serialize();
+    let mut d = w.store().serialize().unwrap();
     d.latency = latency;
     Rc::new(RefCell::new(d))
 }
@@ -693,10 +693,8 @@ fn dispose_token_cancel_exchange_and_foreach_retained_array() {
     let exchange: Rc<dyn Exchange> = em.clone();
     *wm.exchange_handle.borrow_mut() = Some(exchange.clone());
     let options = serde_json::from_value(json!({"symbol":"BTC","size":3,"side":"buy","maxAttempts":10,"delay":100,"reduceOnly":false})).unwrap();
-    let instance = Rc::new(ChaserOrderInstance::new(
-        exchange,
-        Rc::new(RefCell::new(options)),
-    ));
+    let instance =
+        Rc::new(ChaserOrderInstance::new(exchange, Rc::new(RefCell::new(options))).unwrap());
     hm.manager.instances().borrow_mut().push(instance.clone());
     em.base.on(
         "warning",

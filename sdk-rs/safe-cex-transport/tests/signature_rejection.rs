@@ -161,7 +161,7 @@ fn observe((errors, responses): &Sequence) -> Observed {
 fn signature_rejection_decisions_match_actual_typescript_source() {
     let mut native = vec![];
     for (data, expected) in binance_corpus() {
-        let actual = is_binance_style_signature_rejection(&data).unwrap();
+        let actual = is_binance_style_signature_rejection(&data.clone().into()).unwrap();
         assert_eq!(actual, expected, "native binance-style rejection {data}");
         native.push(actual);
     }

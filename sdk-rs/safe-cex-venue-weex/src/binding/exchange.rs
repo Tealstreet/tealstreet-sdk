@@ -76,7 +76,7 @@ impl WeexExchange {
             Rc::new(super::classes::Factory(Rc::downgrade(&shared))),
             js(&name)?,
             js(&options)?,
-            store::facade(store),
+            store::facade(store)?,
         )
         .map_err(err)?;
         *shared.exchange.borrow_mut() = class.receiver.clone();

@@ -87,7 +87,8 @@ The TLS recorder admits only each venue's literal public WS host. TS receives
 one real upstream stream; the recorder freezes it after live prices appear,
 then replays exactly those text/binary messages and arrival delays into the
 native socket. Native commands cross an event-loop barrier before ticker
-values are inspected. If synchronous native processing prevents this barrier
+values are inspected. This checks command liveness, not whether unread socket
+frames have drained. If synchronous native processing prevents this barrier
 from completing, the report records `NATIVE_EVENT_LOOP_STALL` and a timeout,
 not a comparison of partially processed ticker values. Zero-price startup
 stubs do not count as live ticker coverage. Lighter's real REST fallback is
@@ -131,3 +132,82 @@ Private validation and placement on other venues, account routing requiring
 Tealstreet proxy/tunnel credentials, and clocks embedded directly in output
 records need additional adapters. Such limitations must be reported explicitly;
 public parity is not authenticated or order lifecycle proof.
+
+## Public streams: capture once, replay four times
+
+`streams.mjs` uses the actual TS exchange and ExchangeWorker Store delivery,
+plus the compiled native account binding. Public host adapters cover Binance
+USD-M, Bybit, OKX and Hyperliquid, in that order. No credentials are accepted.
+
+```sh
+node sdk-rs/scripts/live-diff/streams.mjs --venue binance \
+  --addon /absolute/path/safe_cex_ffi.node --rust-revision ACTUAL_BUILD_SOURCE \
+  --output .cache/live-diff/binance-streams-60s.json
+node --test sdk-rs/scripts/live-diff/*.test.mjs
+```
+
+The capture keeps the startup prelude and **60 seconds after subscriptions**.
+Binance market/public and OKX public/business sockets share one ordered tape.
+Exact text/binary payloads, control frames, socket occurrences and relative times
+are retained. REST response bytes and the fixed candle-seed request range join
+the tape in a `.bundle.v8` file under `.cache/live-diff/fixtures/<venue>`.
+The child-only TLS hook also covers OKX port 8443 and Binance spot port 9443;
+upstream certificates and child SNI still validate normally.
+
+Four fresh accounts (two TS, two native) replay that identical tape. Replay REST
+misses fail closed without opening an upstream connection. Reports include frame
+receipts, missing indices, actual addon SHA, raw V8 output paths, each side's exact
+repeat comparison, and cross-side ordered comparisons for Store slices,
+orderbook, candles and each emitted event. The combined sequence also detects
+ordering differences across channels. Raw output preserves undefined, NaN, -0
+and typed values; nothing is sorted, aligned or coalesced by the probe.
+
+`qualifiedStatus` prevents a changing within-side sequence or incomplete input
+from being attributed as a final cross-side bug. Replay clocks and timer deadlines
+are controlled; the real production Store throttle still runs at its 250ms cadence.
+A command barrier alone is not a processing fence. Per-socket application and
+physical transport receipts now gate `nativeDrainVerified`; incomplete receipts
+keep comparisons provisional. Failed playback retains diagnostic partial outputs.
+Empty book/candle/ticker channels cannot satisfy coverage. `--capture-ms 1000`
+is a smoke check only, never the live gate.
+
+To repeat a captured case without new live input, copy the `capture.bundle` path
+from its report and pass `--replay /absolute/path/to.bundle.v8 --venue binance`
+with the addon and source label. Use the same Node major version for V8 artifacts.
+Both sides still instantiate their production transports/parsers/subscriptions.
+TS attaches its exchange instance to the existing ExchangeWorker delivery methods
+rather than starting a second account; venue startup runs with fixed host clock
+inputs before replay timer control begins. Subscription handles in native callback envelopes are stripped only to
+match the direct TS callback boundary; event and Store data are unmodified.
+
+There is no standalone public trade listener in the SDK. Bybit's production
+candle subscription consumes `publicTrade` frames and emits derived candles;
+other venues' candle channels do not establish standalone trade-event coverage.
+That capability gap stays explicit in every report.
+
+### Controlled replay and native drain receipts
+
+The replay worker now opens the compiled addon with an explicit `replayEpochMs`
+host, using the captured candle bound as its epoch. Both sides receive fixed
+startup Date/performance readings. Replay then advances the clock to each exact
+captured frame time, including timer deadlines along the way. Each application
+frame must reach its per-socket handler completion receipt before the next frame
+is sent. Output data is compared unchanged; timestamps are not stripped.
+
+The final receipt checks consumed/processed application counts per physical URL
+occurrence and native transport counts for messages, ping, pong and close. Only
+matching receipts set `nativeDrainVerified: true`. Ready Promise jobs are included
+in the native checkpoint, and outstanding source Promise jobs keep drain false.
+TS HTTP completion and returned WebSocket listener Promises are fenced through
+their response/continuation turns as well. Startup subscription work settles
+under real scheduling before the replay clock is activated. Startup still uses real scheduling, so exact two-run repeatability on
+each side remains mandatory for attribution. The trailing Store delivery runs
+under the replay clock, through the real production throttle.
+
+Missing/extra frames, unfinished handlers, unread control frames and clock
+rollback fail closed. An ack-only instrument tape proves receipt wiring but
+provides no ticker/orderbook/candle coverage or 60-second venue result. Full
+venue comparisons await the shared Store hot-path repair before being rerun.
+
+The addon bytes are copied before child startup; the recorded SHA identifies the
+loaded snapshot even if another lane rebuilds the supplied addon path.

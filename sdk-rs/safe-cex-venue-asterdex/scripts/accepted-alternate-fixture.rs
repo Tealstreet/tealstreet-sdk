@@ -25,7 +25,7 @@ pub fn fixture() -> (
     Rc<crate::native_exchange::AsterDEXExchange>,
     crate::binding::Rt,
     Rc<support::Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     Arc<support::Wire>,
 ) {
     let (venue, runtime, store, wire) =
@@ -57,7 +57,7 @@ pub fn requests(wire: &support::Wire) -> Value {
 pub fn setup_markets(
     venue: &crate::native_exchange::AsterDEXExchange,
     runtime: &support::Runtime,
-    store: &safe_cex_store::store::DefaultStore,
+    store: &safe_cex_exchange::native_store::DefaultStore,
 ) {
     let markets = drive(runtime, venue.fetch_markets()).unwrap();
     safe_cex_store::Store::update(
@@ -96,7 +96,7 @@ pub fn result<T>(value: Result<T, safe_cex_exchange::runtime::ExchangeError>) ->
 pub fn seed_tickers(
     venue: &crate::native_exchange::AsterDEXExchange,
     runtime: &support::Runtime,
-    store: &safe_cex_store::store::DefaultStore,
+    store: &safe_cex_exchange::native_store::DefaultStore,
 ) {
     let tickers = drive(runtime, venue.fetch_tickers()).unwrap();
     safe_cex_store::Store::update(
@@ -109,7 +109,7 @@ pub fn seed_tickers(
     )
     .unwrap();
 }
-pub fn balance(store: &safe_cex_store::store::DefaultStore) -> Value {
+pub fn balance(store: &safe_cex_exchange::native_store::DefaultStore) -> Value {
     let value = store.balance();
     json!({"total":format!("{:016x}",value.total.to_bits()),"free":format!("{:016x}",value.free.to_bits()),"used":format!("{:016x}",value.used.to_bits())})
 }

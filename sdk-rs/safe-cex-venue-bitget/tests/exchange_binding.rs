@@ -243,7 +243,7 @@ fn cancel_orders_posts_batch_cancel() {
 fn start_loads_public_data_and_logs_in_before_subscribing() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     h.drive(h.venue().start()).expect("start");
-    let loaded = h.store.loaded().clone();
+    let loaded = h.store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers,
         "markets and tickers loaded"
@@ -575,7 +575,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                     )));
                 h.runtime.pump();
             }
-            ticker_coercion::assert_native(&h.store.tickers(), case);
+            ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
         }
         assert!(
             h.runtime.reports.borrow().is_empty(),

@@ -83,7 +83,7 @@ fn private_pin_key_retains_native_value_and_request_rejection_after_suspension()
                 name,
                 serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
                     .unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 dependencies,
             )
             .unwrap();
@@ -122,7 +122,10 @@ fn private_pin_key_retains_native_value_and_request_rejection_after_suspension()
                     "source rejected interceptor rethrows the original HTTP error"
                 );
                 assert_eq!(
-                    error.response.as_ref().expect("original HTTP response")["data"]["msg"],
+                    error
+                        .response_json_view()
+                        .as_ref()
+                        .expect("original HTTP response")["data"]["msg"],
                     "native listen-key refusal"
                 );
                 assert!(!error.name.is_empty());

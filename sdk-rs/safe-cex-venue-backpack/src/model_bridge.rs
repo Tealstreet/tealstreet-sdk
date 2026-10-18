@@ -80,7 +80,7 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
             }),
             amount: MarketLimitsAmount {
                 min: m.limits[0][0],
-                max: m.limits[0][1],
+                max: (m.limits[0][1]).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: m.limits[3][0],

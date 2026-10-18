@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, Thrown, from_json},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use serde_json::{Value, json};
 use std::rc::Rc;
 fn selector(tag: &str) -> Js {
@@ -81,7 +81,7 @@ fn position_batch_ids_match_source_strict_and_indexed_lookup_modes() {
     );
     for row in cases {
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         let seeds = row["ids"]
             .as_array()
             .unwrap()
@@ -98,7 +98,9 @@ fn position_batch_ids_match_source_strict_and_indexed_lookup_modes() {
                 vec![Js::object(vec![("positions", Js::array(seeds))])],
             )
             .unwrap();
-        let before = safe_cex_store::Store::update_ids(native.as_ref()).positions;
+        let before = safe_cex_store::Store::update_ids(native.as_ref())
+            .unwrap()
+            .positions;
         let count = row["count"].as_u64().unwrap();
         let mut updates = vec![];
         if count > 0 {
@@ -132,7 +134,9 @@ fn position_batch_ids_match_source_strict_and_indexed_lookup_modes() {
             row["mode"],
             row["tag"]
         );
-        let after = safe_cex_store::Store::update_ids(native.as_ref()).positions;
+        let after = safe_cex_store::Store::update_ids(native.as_ref())
+            .unwrap()
+            .positions;
         assert_eq!(
             after - before,
             row["delta"].as_f64().unwrap(),

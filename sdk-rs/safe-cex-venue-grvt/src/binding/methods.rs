@@ -162,14 +162,14 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
             Ok(crate::snapshots::calculate_position_upnl_from_last_price(
                 &to_typed(&a)?,
                 h.0.shared.store.as_ref(),
-            )
+            )?
             .map_or(Js::Null, Js::Number))
         }
         "calculateUpnlFromPositions" => {
             Ok(Js::Number(crate::snapshots::calculate_upnl_from_positions(
                 &to_typed::<Vec<Position>>(&a)?,
                 h.0.shared.store.as_ref(),
-            )))
+            )?))
         }
         "syncBalanceUpnlFromPositions" => {
             let positions = if a.is_undefined() {

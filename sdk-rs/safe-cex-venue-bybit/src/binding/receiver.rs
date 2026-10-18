@@ -287,7 +287,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         "inferProtectiveOrderSide",
         |rt, a| match venue(rt)?
             .infer_protective_order_side(&to_json(&arg(&a, 0))?)
-            .map_err(|m| Thrown::error("TypeError", &m))?
+            .map_err(Thrown::from)?
         {
             Some(side) => from_typed(&side),
             None => Ok(Js::Undefined),

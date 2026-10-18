@@ -84,6 +84,7 @@ fn failure(message: &str) -> ListenerFailure {
     Rc::new(PublicStreamFailure {
         name: "TypeError".into(),
         message: message.into(),
+        native: None,
     })
 }
 fn data(message: PublicStreamMessage, first: &str) -> Result<PublicData, ListenerFailure> {

@@ -1,8 +1,9 @@
 // Native values and observers shared by individually reviewed Store/helper adapters.
 // This fixture never invokes or redirects a production function under review.
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeErrorOrigin, LogSeverity};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     Candle, FetchedLeverage, Market, Order, OrderBook, OrderBookOrders, PlaceOrderOpts, Position,
     StoreSubscriberError, Ticker,
@@ -91,6 +92,7 @@ pub fn view_cache(store: &dyn Store) -> Value {
     Value::Array(
         store
             .fetched_leverage()
+            .unwrap()
             .iter()
             .map(|(key, value)| json!([key, view_leverage(value)]))
             .collect(),
@@ -113,14 +115,14 @@ pub fn retained(value: &safe_cex_types::retained_json::RetainedJsonInput) -> Val
 pub fn view_market(value: &Market) -> Value {
     json!({"id":value.id,"symbol":value.symbol,"base":value.base,"quote":value.quote,"active":value.active,
         "pretty":value.pretty_symbol,"precision":[bits(value.precision.amount),bits(value.precision.price)],
-        "amount":[bits(value.limits.amount.min),bits(value.limits.amount.max)],
+        "amount":[bits(value.limits.amount.min),bits(safe_cex_num::numeric_value_to_number(&value.limits.amount.max))],
         "leverage":[bits(value.limits.leverage.min),bits(value.limits.leverage.max)],"price_limits":value.limits.price.is_some(),
         "flags":[value.is_spot,value.is_perpetual,value.is_inverse,value.is_expiring,value.is_read_only],
         "contract_size":value.contract_size.map(bits),"option":value.option.is_some(),
         "taker":value.taker_fee.map(bits),"maker":value.maker_fee.map(bits),"info":value.info.as_ref().map(retained)})
 }
 pub fn view_markets(store: &dyn Store) -> Value {
-    Value::Array(store.markets().iter().map(view_market).collect())
+    Value::Array(store.markets().unwrap().iter().map(view_market).collect())
 }
 pub fn error(name: &str, message: &str) -> ExchangeError {
     let mut error = ExchangeError::new(message);
@@ -129,7 +131,7 @@ pub fn error(name: &str, message: &str) -> ExchangeError {
         "fixed native origin",
     )));
     error.code = Some(safe_cex_exchange::js_runtime::value::Js::Number(55.0));
-    error.response = Some(json!({"native":true}));
+    error = error.with_retained_response((json!({"native":true})).into());
     error.stack = Some("native stack".into());
     error
 }
@@ -142,7 +144,7 @@ pub fn view_error(error: &ExchangeError) -> Value {
             .expect("defined fixture code");
         serde_json::from_str::<Value>(&text).expect("finite fixture JSON")
     });
-    json!({"name":error.name,"message":error.message,"code":code,"response":error.response,"stack":error.stack,
+    json!({"name":error.name,"message":error.message,"code":code,"response":error.response_json_view(),"stack":error.stack,
         "origin":error.origin.is_some(),"subscriber":error.store_subscriber_cause.is_some(),"subscriber_ids":error.store_subscriber_ids.len()})
 }
 pub fn log(
@@ -243,6 +245,7 @@ pub fn view_positions(store: &dyn Store) -> Value {
     Value::Array(
         store
             .positions()
+            .unwrap()
             .iter()
             .map(|v| json!([v.id, v.symbol, bits(v.leverage)]))
             .collect(),

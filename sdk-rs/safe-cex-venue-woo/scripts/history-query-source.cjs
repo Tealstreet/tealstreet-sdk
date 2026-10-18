@@ -44,6 +44,31 @@ const context = {
 vm.runInNewContext(compile(`${signing.join('\n')}; this.sign = (config, options) => config.url.startsWith('/v1') ? signV1(config, options) : signV3(config, options); class Selected {${members.join('\n')}}; this.Owner = Selected;`), context);
 (async () => {
   const owner = new context.Owner();
+  if (input.kind === 'report') {
+    const baseFile = path.join(root, 'packages/safe-cex/src/exchanges/base.ts');
+    const baseAst = ts.createSourceFile(baseFile, fs.readFileSync(baseFile, 'utf8'), ts.ScriptTarget.Latest, true);
+    const base = baseAst.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'BaseExchange');
+    const reporter = base.members.find(node => node.name?.getText(baseAst) === 'emitAndLogError');
+    assert.ok(reporter, 'Missing maintained BaseExchange reporter');
+    const emitted = [], calls = [];
+    const scope = {console: {error() {}, trace() {}}, reportException() {}, readHttpFailureContext: () => undefined};
+    vm.runInNewContext(compile(`class Reporter {${reporter.getText(baseAst)}} this.Reporter = Reporter;`), scope);
+    owner.name = 'woo'; owner.options = {}; owner.isPublicDataOnly = false;
+    owner.emitter = {emit: (event, message) => {assert.equal(event, 'error'); emitted.push(message);}};
+    owner.emitAndLogError = value => scope.Reporter.prototype.emitAndLogError.call(owner, value);
+    owner.xhr = {get: async (url, config) => {
+      calls.push(context.sign({method: 'get', url, params: config.params}, {secret: 'fixture-secret'}).url);
+      const error = new Error('Request failed with status code 500');
+      error.response = {data: JSON.parse(input.raw)};
+      throw error;
+    }};
+    const result = await owner[input.method](input.method === 'fetchHistoricalFills' ? {} : {symbol: 'BTCUSDT'});
+    assert.equal(result.length, 0); assert.equal(emitted.length, 1);
+    const units = value => Array.from({length: value.length}, (_, i) => value.charCodeAt(i));
+    assert.equal(typeof emitted[0], 'string');
+    process.stdout.write(JSON.stringify({units: units(emitted[0]), calls: calls.length}));
+    return;
+  }
   const calls = [];
   owner.isPublicDataOnly = false;
   owner.emitAndLogError = () => assert.fail('Unexpected source error');

@@ -208,8 +208,11 @@ impl PublicMarketReadHost for ReadHost {
             .find(|(v, _)| Rc::ptr_eq(v, e))
             .map(|(_, v)| v.clone())
     }
-    fn cached_markets(&self) -> CatalogMarkets {
-        self.cache.clone()
+    fn cached_markets(
+        &self,
+    ) -> std::result::Result<Rc<RefCell<Vec<Rc<RefCell<CatalogMarket>>>>>, Rc<PortfolioThrown>>
+    {
+        Ok(self.cache.clone())
     }
     fn emit_and_log_error(&self, v: Option<Value>) -> Result<(), PortfolioFailure> {
         self.emits.borrow_mut().push(v);
@@ -442,7 +445,10 @@ fn public_reads_assert_native_catalog_candles_and_query_bits_against_live_source
                     ("precision/amount", m.precision.amount),
                     ("precision/price", m.precision.price),
                     ("limits/amount/min", m.limits.amount.min),
-                    ("limits/amount/max", m.limits.amount.max),
+                    (
+                        "limits/amount/max",
+                        safe_cex_num::numeric_value_to_number(&m.limits.amount.max),
+                    ),
                     ("limits/leverage/min", m.limits.leverage.min),
                     ("limits/leverage/max", m.limits.leverage.max),
                     ("contractSize", m.contract_size.unwrap()),

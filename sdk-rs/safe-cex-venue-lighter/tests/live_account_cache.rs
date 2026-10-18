@@ -814,7 +814,7 @@ fn actual_account_cache_native_floor() {
     assert_eq!(counts["fetchAccountSnapshot"], 39);
     assert_eq!(counts["fetchAccountLimits"], 33);
     assert_eq!(
-        corpus["contentHash"], "cf1d6d273e289132112f92b8ce16f3e2a390b01ba33bd2e4c35342ebed52ebd3",
+        corpus["contentHash"], "bcaf3a4cc1a62b6847d1efa0b8157d3d28211c06fada0e6d469621e2758a6625",
         "actual source/import pin after all native assertions"
     );
     eprintln!("72 native cases; stopped at iteration71; bounded cache/Promise host fixture");

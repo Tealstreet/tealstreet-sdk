@@ -1,5 +1,9 @@
 # Bybit venue port (in progress)
 
+The fill-history source witness compares diagnostic messages separately from
+the console severity argument. Its native observer verifies both argument count
+and severity before comparing all 45 maintained-source request/result/log cases.
+
 The 19 concrete SessionHost, SnapshotHost and AccountRefreshHost receiver rows
 are pinned to their full production impl items. The native `receiver_tests`
 construct primary/demo exchanges and observe cells, UTF-16, signed zero,
@@ -938,3 +942,18 @@ response normalization, `emitAndLogError` and typed error rematerialization.
 Position-mode failure extras also retain raw message units while the source
 continues with its `oneway` placement fallback. Runtime report contexts remain
 canonical retained inputs through the terminal reporting capability.
+
+The ticker prototype witness in `tests/ticker_prototype_native.rs` passes raw
+frames through constructed primary/demo/inverse/spot sockets on NativeRuntime.
+It compares 192 maintained-source cases against the full TS DefaultStore:
+stock prototype members, own shadows, dictionary prototype tickers, parse
+failures, notifications and the real `undefined` ID target. The handler uses
+Store's canonical lookup instead of the borrowed own-entry map. SDK timing and
+onMessage handler-table prototype dispatch remain separate rows.
+
+The three no-socket send/subscribe rejection-timing rows now have a real native
+reconciliation witness in `tests/detached_reconnect_native.rs`: constructed
+primary/demo exchanges, actual Store notification and native stderr reporting.
+Its compiled core controls distinguish synchronous caller rejection from a
+detached report and require both continuation and reporting. This closes stale
+notification timing notes; it does not change the public SDK wrapper family.

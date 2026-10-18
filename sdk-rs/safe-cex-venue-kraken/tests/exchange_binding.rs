@@ -429,7 +429,7 @@ fn change_margin_type_merges_refreshed_positions_into_the_store() {
     .expect("seed positions");
     h.drive(h.venue().change_margin_type(true, Some(SYMBOL.into())))
         .expect("changeMarginType");
-    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    let positions = safe_cex_store::Store::positions(h.store.as_ref()).unwrap();
     let symbols: Vec<&str> = positions.iter().map(|p| p.symbol.as_str()).collect();
     assert!(
         symbols.contains(&"PF_ETHUSD") && symbols.contains(&SYMBOL),
@@ -474,15 +474,15 @@ fn start_loads_markets_tickers_connects_sockets_and_ticks() {
     for _ in 0..10 {
         h.runtime.advance(100.0);
     }
-    assert_eq!(h.store.markets().len(), 1);
-    assert_eq!(h.store.tickers().len(), 1);
-    let loaded = h.store.loaded().clone();
+    assert_eq!(h.store.markets().unwrap().len(), 1);
+    assert_eq!(h.store.tickers().unwrap().len(), 1);
+    let loaded = h.store.loaded().unwrap().clone();
     assert!(loaded.markets && loaded.tickers);
     assert!(
         loaded.orders && loaded.positions && loaded.balance,
         "{loaded:?}"
     );
-    assert_eq!(h.store.orders().len(), 1);
+    assert_eq!(h.store.orders().unwrap().len(), 1);
     let urls: Vec<String> = h
         .runtime
         .sockets
@@ -1001,7 +1001,7 @@ fn constructed_private_orders_frame_updates_store() {
         &h,
         json!({"feed":"open_orders_snapshot","orders":[{"order_id":"frame-order","instrument":SYMBOL,"type":"lmt","direction":0,"qty":3,"filled":0.5,"limit_price":29100}]}),
     );
-    let rows = h.store.orders();
+    let rows = h.store.orders().unwrap();
     assert_eq!(rows.len(), 1);
     let order = &rows[0];
     assert_eq!(
@@ -1035,7 +1035,7 @@ fn constructed_private_fill_frame_updates_order_and_emits_fill() {
         &h,
         json!({"feed":"fills","fills":[{"order_id":"o-1","instrument":SYMBOL,"qty":0.25,"price":30002,"buy":true}]}),
     );
-    let rows = h.store.orders();
+    let rows = h.store.orders().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!((rows[0].filled, rows[0].remaining), (0.25, 1.75));
     let fills = fills.borrow();
@@ -1066,7 +1066,7 @@ fn constructed_private_position_frame_updates_store() {
         &h,
         json!({"feed":"open_positions","positions":[{"instrument":SYMBOL,"balance":3,"entry_price":29000,"mark_price":30000,"pnl":7,"liquidation_threshold":25000}]}),
     );
-    let rows = h.store.positions();
+    let rows = h.store.positions().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].symbol, SYMBOL);
     assert_eq!(
@@ -1086,7 +1086,7 @@ fn constructed_private_balance_frame_updates_store() {
         &h,
         json!({"feed":"account_balances","accounts":{"flex":{"type":"multiCollateralMarginAccount","portfolioValue":1250,"availableMargin":1100,"initialMargin":100,"maintenanceMargin":50,"pnl":9}}}),
     );
-    let b = h.store.balance();
+    let b = h.store.balance().unwrap();
     assert_eq!(
         (b.total, b.free, b.used, b.upnl),
         (1250.0, 1100.0, 150.0, 9.0)
@@ -1149,8 +1149,8 @@ fn spot_private_fixture() -> Harness {
         }}))
     );
     assert_eq!(h.http.calls("/0/private/GetWebSocketsToken").len(), 1);
-    assert_eq!(h.store.balance().total, 100.0);
-    assert_eq!(h.store.positions().len(), 2);
+    assert_eq!(h.store.balance().unwrap().total, 100.0);
+    assert_eq!(h.store.positions().unwrap().len(), 2);
     h
 }
 
@@ -1166,7 +1166,7 @@ fn spot_private_order_frame() -> Value {
 fn constructed_spot_private_orders_frame_updates_real_store() {
     let h = spot_private_fixture();
     private_frame(&h, spot_private_order_frame());
-    let orders = h.store.orders().to_vec();
+    let orders = h.store.orders().unwrap().to_vec();
     assert_eq!(orders.len(), 1);
     let order = &orders[0];
     assert_eq!(
@@ -1191,7 +1191,7 @@ fn constructed_spot_private_orders_frame_updates_real_store() {
             "order_id":"spot-frame-order","exec_type":"canceled"
         }]}),
     );
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
 }
 
 #[test]
@@ -1217,10 +1217,13 @@ fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
         }]}),
     );
     assert_eq!(
-        (h.store.orders()[0].filled, h.store.orders()[0].remaining),
+        (
+            h.store.orders().unwrap()[0].filled,
+            h.store.orders().unwrap()[0].remaining
+        ),
         (0.75, 2.25)
     );
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Open);
     let fills = fills.borrow();
     assert_eq!(fills.len(), 1);
     let fill = &fills[0];
@@ -1263,7 +1266,7 @@ fn constructed_spot_private_balance_frame_refreshes_authoritative_rest_store() {
     );
     h.runtime.advance(1000.0);
     assert_eq!(h.http.calls("/0/private/Balance").len(), before + 1);
-    let b = h.store.balance();
+    let b = h.store.balance().unwrap();
     assert_eq!((b.free, b.used, b.total, b.upnl), (132.0, 0.0, 132.0, 0.0));
     let currencies = b.currencies.as_ref().unwrap();
     assert_eq!(currencies["USD"].as_balance().unwrap().total, 125.0);
@@ -1274,14 +1277,14 @@ fn constructed_spot_private_balance_frame_refreshes_authoritative_rest_store() {
 fn constructed_spot_private_position_topic_preserves_rest_owned_store() {
     let h = spot_private_fixture();
     private_frame(&h, spot_private_order_frame());
-    let orders = h.store.orders().to_vec();
+    let orders = h.store.orders().unwrap().to_vec();
     assert_eq!(
         orders.len(),
         1,
         "ignored-topic witness starts with a real WS order"
     );
-    let positions = h.store.positions().to_vec();
-    let balance = h.store.balance().clone();
+    let positions = h.store.positions().unwrap().to_vec();
+    let balance = h.store.balance().unwrap().clone();
     let fills = std::rc::Rc::new(std::cell::Cell::new(0));
     let saved = fills.clone();
     h.venue().base().on(
@@ -1297,9 +1300,9 @@ fn constructed_spot_private_position_topic_preserves_rest_owned_store() {
             "symbol":"XBT/USD","contracts":99,"unrealizedPnl":123
         }]}),
     );
-    assert_eq!(&*h.store.orders(), orders.as_slice());
-    assert_eq!(&*h.store.positions(), positions.as_slice());
-    assert_eq!(&*h.store.balance(), &balance);
+    assert_eq!(&h.store.orders().unwrap(), orders.as_slice());
+    assert_eq!(&h.store.positions().unwrap(), positions.as_slice());
+    assert_eq!(&h.store.balance().unwrap(), &balance);
     assert_eq!(
         fills.get(),
         0,
@@ -1612,7 +1615,7 @@ fn ticker_corpus(name: ExchangeName, source_name: &str, count: usize) {
                 .unwrap();
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),

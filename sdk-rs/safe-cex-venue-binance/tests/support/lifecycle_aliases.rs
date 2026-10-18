@@ -94,7 +94,7 @@ fn owner(http: Arc<Http>, runtime: Rc<Runtime>) -> Rc<ExchangeOwner> {
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"alias-key","secret":"alias-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap()
@@ -486,12 +486,12 @@ fn native_lifecycle_aliases_publish_store_then_resolve_tick_again_at_timer_fire(
     let owner = owner(http.clone(), runtime.clone());
     invoke(&owner, &runtime, Method::Tick, vec![]);
     assert_eq!(
-        owner.base.store.balance().total.to_bits(),
+        owner.base.store.balance().unwrap().total.to_bits(),
         17.25_f64.to_bits(),
         "LifecycleCall Store update"
     );
     assert!(
-        owner.base.store.loaded().balance,
+        owner.base.store.loaded().unwrap().balance,
         "LifecycleAsyncCall settles account"
     );
     assert_eq!(http.count("/fapi/v3/account"), 1);
@@ -570,7 +570,10 @@ fn native_api_aliases_sign_and_preserve_success_and_rejection() {
     );
     let error = run(&runtime, send()).unwrap_err();
     assert_eq!(error.message, "alias refusal");
-    assert_eq!(error.response.as_ref().unwrap()["data"]["code"], -2015);
+    assert_eq!(
+        error.response_json_view().as_ref().unwrap()["data"]["code"],
+        -2015
+    );
     assert_eq!(
         errors.borrow().as_slice(),
         &[vec![

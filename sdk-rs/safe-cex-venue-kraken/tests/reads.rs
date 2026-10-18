@@ -1,11 +1,12 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
     JsJsonValue,
     numeric_ingress::{JsNumberInput, js_from_value},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     IncomeCategory, IncomeRecord, MarginType, Market, Position, PositionMode, PositionSide,
 };
@@ -91,7 +92,7 @@ fn response(case: &Value) -> Result<Option<JsNumberInput>, Box<dyn Error>> {
         let mut error = ExchangeError::new("read failure");
         error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str("EPRIVATE"));
         error.metadata.store_subscriber_ids = vec![13, 29];
-        error.metadata.response = Some(json!({"status":429}));
+        error = error.with_retained_response((json!({"status":429})).into());
         return Err(Box::new(error));
     }
     Ok(case["raw"]
@@ -119,7 +120,7 @@ fn error(error: Box<dyn Error>, identity: Option<*const ExchangeError>) -> Value
             "read failure metadata retained"
         );
         assert_eq!(
-            native.metadata.response,
+            native.response_json_view(),
             Some(json!({"status":429})),
             "read failure response retained"
         );
@@ -288,7 +289,7 @@ fn spot_positions_live_oracle() {
     for case in cardinality::cases("reads", "positions", oracle()) {
         let store = DefaultStore::new();
         install(&store, &case["markets"]);
-        let positions = reads::fetch_spot_positions(&store);
+        let positions = reads::fetch_spot_positions(&store).unwrap();
         cardinality::native_len(
             positions.len(),
             &case["result"],

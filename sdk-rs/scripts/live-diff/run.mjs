@@ -72,8 +72,15 @@ const report = {
   requests: [],
   limitations: [],
 };
-report.addonSha256 = hash(readFileSync(report.addon));
+
 const directory = mkdtempSync(join(tmpdir(), 'safe-cex-live-diff-'));
+// Pin the exact loaded bytes even if a collaborating lane rebuilds its path.
+const frozenAddon = join(directory, 'safe_cex_ffi.node');
+{
+  const bytes = readFileSync(report.addon);
+  report.addonSha256 = hash(bytes);
+  writeFileSync(frozenAddon, bytes, { mode: 0o600 });
+}
 const cache = new Map(),
   records = [],
   workers = [],
@@ -99,7 +106,7 @@ function worker(implementation, proxy, cert, socketEnvironment = {}) {
       SSL_CERT_FILE: cert,
       NODE_EXTRA_CA_CERTS: cert,
       TSX_TSCONFIG_PATH: join(root, 'packages/safe-cex/tsconfig.json'),
-      LIVE_DIFF_ADDON: report.addon,
+      LIVE_DIFF_ADDON: frozenAddon,
       ...socketEnvironment,
     },
   });

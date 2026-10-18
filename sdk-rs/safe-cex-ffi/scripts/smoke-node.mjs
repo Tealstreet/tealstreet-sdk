@@ -15,6 +15,8 @@ execFileSync('bun', ['run', join(crate, 'smoke/bun/native-exchange.mjs')], { std
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-placement.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-streams.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-factory-errors.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-bitunix-market-limit.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-bitrue-gzip.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-factory-routing.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-callback-lifetime.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-errors.test.mjs')], { stdio: 'inherit' });
@@ -26,6 +28,8 @@ execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-valu
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-metadata.test.mjs')], { stdio: 'inherit' });
 
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-lifecycle.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-replay.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, '../scripts/live-diff/replay-clock.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-signer-availability.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-startup.test.mjs')], { stdio: 'inherit' });
 

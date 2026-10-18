@@ -1,10 +1,13 @@
 use super::*;
+#[path = "../tests/support/unit_tasks.rs"]
+mod unit_tasks;
 use crate::utils::normalize_market;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::ExchangeSettings,
     runtime::{ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{RestFuture, RestResponse};
 use safe_cex_types::StoreSubscriberError;
 use safe_cex_types::{ExchangeName, ExchangeOptions, ExecutionsOptions};
@@ -26,8 +29,8 @@ impl ExchangeRuntime for Runtime {
             Ok(())
         })
     }
-    fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        panic!("unexpected spawn")
+    fn spawn_local(&self, work: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
+        unit_tasks::spawn(work)
     }
     fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
         let rendered = if !matches!(severity, "info" | "warning" | "debug") {
@@ -240,7 +243,7 @@ fn venue_with_runtime_and_key(
         ])),
         canceled: RefCell::new(BTreeMap::from([("canceled".into(), 1.0)])),
         rejected: RefCell::new(BTreeMap::from([("rejected".into(), 1.0)])),
-        symbol_settings: RefCell::new(BTreeMap::new()),
+        symbol_settings: Rc::new(RefCell::new(BTreeMap::new())),
         account_position_mode: RefCell::new(safe_cex_types::PositionMode::Hedged),
         public_socket: RefCell::default(),
         binding: Default::default(),
@@ -252,7 +255,7 @@ fn venue_with_runtime_and_key(
 fn mexc_test_runtime_monotonic_clock_tracks_sleep() {
     let runtime = Runtime(1_000.0, RefCell::default(), Rc::new(Cell::new(0.0)));
     assert_eq!(runtime.monotonic_now_ms(), 0.0);
-    futures::executor::block_on(runtime.sleep(17)).unwrap();
+    unit_tasks::drive(runtime.sleep(17)).unwrap();
     assert_eq!(runtime.monotonic_now_ms(), 17.0);
 }
 
@@ -264,7 +267,7 @@ fn mexc_account_identity_matches_live_source() {
     ));
     let mut exchange = venue(Rc::new(DefaultStore::new()), 100.0, false);
     exchange.xhr = response.clone();
-    let validation = futures::executor::block_on(Exchange::validate_account(&exchange)).unwrap();
+    let validation = unit_tasks::drive(Exchange::validate_account(&exchange)).unwrap();
     assert_eq!(
         validation.error.as_value(),
         &json!(""),
@@ -286,7 +289,7 @@ fn mexc_account_identity_matches_live_source() {
             "MEXC validation native balance:{label}"
         );
     }
-    let account = futures::executor::block_on(Exchange::get_account(&exchange)).unwrap();
+    let account = unit_tasks::drive(Exchange::get_account(&exchange)).unwrap();
     assert_eq!(
         account.user_id, "mexc:2c70e12b7a0646f92279f427",
         "MEXC account identity"
@@ -295,7 +298,7 @@ fn mexc_account_identity_matches_live_source() {
     let (mut empty_key, _) =
         venue_with_runtime_and_key(Rc::new(DefaultStore::new()), 100.0, false, "");
     empty_key.xhr = response;
-    let empty_account = futures::executor::block_on(Exchange::get_account(&empty_key)).unwrap();
+    let empty_account = unit_tasks::drive(Exchange::get_account(&empty_key)).unwrap();
     assert_eq!(
         empty_account.user_id, "mexc:e4acf8526c3684f3f7572ff1",
         "MEXC empty-key identity fallback"
@@ -306,15 +309,13 @@ fn mexc_account_identity_matches_live_source() {
         message: "transport failure".into(),
         response_data: Some(json!({"msg":"response detail"})),
     });
-    let validation =
-        futures::executor::block_on(Exchange::validate_account(&failure_venue)).unwrap();
+    let validation = unit_tasks::drive(Exchange::validate_account(&failure_venue)).unwrap();
     assert_eq!(
         validation.error.as_value(),
         &json!("response detail"),
         "MEXC native response-msg precedence"
     );
-    let rust_error =
-        futures::executor::block_on(Exchange::get_account(&failure_venue)).unwrap_err();
+    let rust_error = unit_tasks::drive(Exchange::get_account(&failure_venue)).unwrap_err();
     assert_eq!(
         rust_error.message, "response detail",
         "MEXC getAccount propagated validation error"
@@ -432,7 +433,7 @@ fn mexc_rejected_order_state_matches_live_source() {
             )
             .unwrap();
         let actual = json!({
-            "orders":store.orders().iter().map(|order|json!({"id":order.id,"status":order.status})).collect::<Vec<_>>(),
+            "orders":store.orders().unwrap().iter().map(|order|json!({"id":order.id,"status":order.status})).collect::<Vec<_>>(),
             "shield":exchange.rejected.borrow().iter().map(|(id,time)|json!([id,time])).collect::<Vec<_>>(),
             "logs":runtime.1.borrow().clone()
         });
@@ -516,7 +517,7 @@ fn mexc_rejected_order_propagates_notification_after_commit() {
     assert_eq!(error.message, expected["message"]);
     assert_eq!(error.store_subscriber_ids, [0]);
     assert_eq!(
-        store.orders()[0].status,
+        store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Canceled,
         "Store status commits before notification failure"
     );
@@ -613,7 +614,7 @@ fn mexc_cancel_orders_matches_live_source() {
             BTreeMap::from([("plan".into(), 1.0), ("stop".into(), 1.0)]);
         *exchange.canceled.borrow_mut() = BTreeMap::new();
         exchange.xhr = adapter.clone();
-        let result = futures::executor::block_on(Exchange::cancel_orders(&exchange, orders));
+        let result = unit_tasks::drive(Exchange::cancel_orders(&exchange, orders));
         let expected_error = case.get("error").filter(|value| !value.is_null());
         if let Some(expected_error) = expected_error {
             let error = match result {
@@ -673,7 +674,7 @@ fn mexc_cancel_orders_matches_live_source() {
                 "cancelOrders payload identity: {name}/{request_index}"
             );
         }
-        let native_orders = store.orders();
+        let native_orders = store.orders().unwrap();
         assert_eq!(
             native_orders.len(),
             expected_source_counts[index],
@@ -855,7 +856,7 @@ fn mexc_fetch_markets_matches_live_source() {
         ));
         let mut venue = venue(Rc::new(DefaultStore::new()), 100.0, false);
         venue.xhr = response.clone();
-        let mut markets = futures::executor::block_on(venue.fetch_markets()).unwrap();
+        let mut markets = unit_tasks::drive(venue.fetch_markets()).unwrap();
         if let Some(market) = markets.first_mut() {
             let raw_rows = extract_rows(Some(&case["payload"]), &[]);
             let raw = raw_rows
@@ -906,7 +907,7 @@ fn mexc_fetch_markets_matches_live_source() {
                     "amount": bits(market.precision.amount),
                     "price": bits(market.precision.price),
                     "min": bits(market.limits.amount.min),
-                    "max": bits(market.limits.amount.max),
+                    "max": bits(safe_cex_num::numeric_value_to_number(&market.limits.amount.max)),
                     "minLeverage": bits(market.limits.leverage.min),
                     "maxLeverage": bits(market.limits.leverage.max),
                 })
@@ -1004,7 +1005,7 @@ fn mexc_fetch_ohlcv_matches_live_source() {
         let local_offset = case["localOffsetMs"].as_f64().unwrap();
         venue.local_to_utc = Rc::new(move |milliseconds| milliseconds + local_offset);
         venue.xhr = response.clone();
-        let result = futures::executor::block_on(venue.fetch_ohlcv(options));
+        let result = unit_tasks::drive(venue.fetch_ohlcv(options));
         match case["error"].as_str() {
             Some(expected) => {
                 assert_eq!(
@@ -1188,7 +1189,7 @@ fn mexc_fetch_order_book_matches_live_source() {
         let mut exchange = venue(store, 100.0, false);
         exchange.xhr = adapter.clone();
         let limit = case["limit"].as_f64();
-        let result = futures::executor::block_on(
+        let result = unit_tasks::drive(
             exchange.fetch_order_book(case["symbol"].as_str().unwrap().into(), limit),
         );
         match case["error"].as_str() {
@@ -1508,7 +1509,7 @@ fn mexc_fetch_tickers_matches_live_source() {
     ));
     let mut venue = venue(store, 100.0, false);
     venue.xhr = response.clone();
-    let mut tickers = futures::executor::block_on(venue.fetch_tickers()).unwrap();
+    let mut tickers = unit_tasks::drive(venue.fetch_tickers()).unwrap();
     let mut parsed_source = case["raw"].clone();
     if let Some(ticker) = tickers.first_mut() {
         let info = ticker.info.as_mut().unwrap();
@@ -1595,7 +1596,7 @@ fn mexc_fetch_balance_matches_live_source() {
     ));
     let mut exchange_venue = venue(Rc::new(DefaultStore::new()), 100.0, false);
     exchange_venue.xhr = response.clone();
-    let mut balance = futures::executor::block_on(exchange_venue.fetch_balance()).unwrap();
+    let mut balance = unit_tasks::drive(exchange_venue.fetch_balance()).unwrap();
     let bits = |value: f64| {
         if value.is_nan() {
             "7ff8000000000000".to_owned()
@@ -1658,7 +1659,7 @@ fn mexc_fetch_balance_matches_live_source() {
     ));
     let mut timing_venue = venue(Rc::new(DefaultStore::new()), 100.0, false);
     timing_venue.xhr = timing_response;
-    let error = futures::executor::block_on(timing_venue.fetch_balance()).unwrap_err();
+    let error = unit_tasks::drive(timing_venue.fetch_balance()).unwrap_err();
     assert_eq!(error.name, case["timing"]["name"]);
     assert_eq!(error.message, case["timing"]["message"]);
 }
@@ -1705,7 +1706,7 @@ fn mexc_fetch_position_mode_matches_live_source() {
         ));
         let mut exchange_venue = venue(Rc::new(DefaultStore::new()), 100.0, false);
         exchange_venue.xhr = response.clone();
-        let mode = futures::executor::block_on(exchange_venue.fetch_position_mode()).unwrap();
+        let mode = unit_tasks::drive(exchange_venue.fetch_position_mode()).unwrap();
         assert_eq!(serde_json::to_value(mode).unwrap(), case["mode"]);
         assert_eq!(
             response.1.borrow()[0].url,
@@ -1832,8 +1833,7 @@ fn mexc_fetch_historical_fills_matches_live_source() {
         let mut exchange = venue(store, 123.25, public_only);
         exchange.xhr = adapter.clone();
         let fills =
-            futures::executor::block_on(Exchange::fetch_historical_fills(&exchange, options))
-                .unwrap();
+            unit_tasks::drive(Exchange::fetch_historical_fills(&exchange, options)).unwrap();
         let expected_fills = case["fills"].as_array().unwrap();
         let source_count = match name {
             "full-options" | "default-limit" | "non-finite-from" => 2,
@@ -2137,8 +2137,7 @@ fn mexc_fetch_positions_matches_live_source() {
                 .collect()
         });
         let mut positions =
-            futures::executor::block_on(Exchange::fetch_positions(&exchange_venue, symbols))
-                .unwrap();
+            unit_tasks::drive(Exchange::fetch_positions(&exchange_venue, symbols)).unwrap();
         if std::env::var_os("MEXC_CARDINALITY_BYPASS_SOURCE_COUNTS").is_none() {
             assert_eq!(
                 case["positions"].as_array().unwrap().len(),
@@ -2426,7 +2425,7 @@ fn mexc_reconciliation_live_store_transitions() {
             Ok(fetched)
         });
         let mut result =
-            futures::executor::block_on(venue.reconcile_orders(symbols, fetch, regular)).unwrap();
+            unit_tasks::drive(venue.reconcile_orders(symbols, fetch, regular)).unwrap();
         // Compare source-observable fields, retaining order/duplicates; the TS
         // fetch boundary uses partial rows, which the typed model fills out.
         let expected: Vec<_> = case["result"]
@@ -2443,12 +2442,12 @@ fn mexc_reconciliation_live_store_transitions() {
             .map(order)
             .collect();
         assert_eq!(
-            view(&store.orders()),
+            view(&store.orders().unwrap()),
             view(&expected),
             "orders {index}: {case}"
         );
         assert_eq!(
-            serde_json::to_value(store.loaded().clone()).unwrap(),
+            serde_json::to_value(store.loaded().unwrap().clone()).unwrap(),
             case["loaded"],
             "loaded {index}"
         );
@@ -2458,7 +2457,7 @@ fn mexc_reconciliation_live_store_transitions() {
             "notifications {index}"
         );
         assert_eq!(
-            Store::update_ids(store.as_ref()).clone(),
+            Store::update_ids(store.as_ref()).unwrap().clone(),
             serde_json::from_value::<safe_cex_types::StoreUpdateIds>(case["updateIds"].clone())
                 .unwrap(),
             "update ids {index}"
@@ -2472,6 +2471,7 @@ fn mexc_reconciliation_live_store_transitions() {
         );
         let stored = store
             .orders()
+            .unwrap()
             .iter()
             .find(|o| o.id == result[0].id)
             .map(|o| o.last_update);
@@ -2553,7 +2553,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
     exchange.xhr = adapter.clone();
 
     let object: &dyn Exchange = &exchange;
-    let fetched = futures::executor::block_on(object.fetch_leverage_for_symbol("BTCUSDT".into()))
+    let fetched = unit_tasks::drive(object.fetch_leverage_for_symbol("BTCUSDT".into()))
         .unwrap()
         .expect("MEXC override returns a fetched leverage record");
     assert_eq!(
@@ -2584,13 +2584,16 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         Some(json!({"symbol":"BTC_USDT"}))
     );
     assert_eq!(
-        store.fetched_leverage()["BTCUSDT"].buy_leverage,
+        store.fetched_leverage().unwrap()["BTCUSDT"].buy_leverage,
         expected["success"]["store"]["BTCUSDT"]["buyLeverage"]
             .as_f64()
             .unwrap()
     );
     assert_eq!(
-        store.markets_by_symbol()["BTCUSDT"].limits.leverage.max,
+        store.markets_by_symbol().unwrap()["BTCUSDT"]
+            .limits
+            .leverage
+            .max,
         expected["success"]["market"]["limits"]["leverage"]["max"]
             .as_f64()
             .unwrap()
@@ -2666,13 +2669,12 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
             position_mode: safe_cex_types::PositionMode::Hedged,
         },
     );
-    let error = futures::executor::block_on(
-        (&throwing as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()),
-    )
-    .unwrap_err();
+    let error =
+        unit_tasks::drive((&throwing as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()))
+            .unwrap_err();
     assert_eq!(error.message, "subscriber failed");
     assert_eq!(
-        throwing_store.markets_by_symbol()["BTCUSDT"]
+        throwing_store.markets_by_symbol().unwrap()["BTCUSDT"]
             .limits
             .leverage
             .max,
@@ -2680,7 +2682,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         "market update commits before its notification failure"
     );
     assert_eq!(
-        throwing_store.fetched_leverage()["BTCUSDT"].buy_leverage,
+        throwing_store.fetched_leverage().unwrap()["BTCUSDT"].buy_leverage,
         21.0,
         "caught market notification falls back to the configured leverage"
     );
@@ -2689,7 +2691,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         ["first", "first"],
         "notification failure skips later subscribers on both writes"
     );
-    futures::executor::block_on(object.update_symbol_metadata("BTCUSDT".into())).unwrap();
+    unit_tasks::drive(object.update_symbol_metadata("BTCUSDT".into())).unwrap();
     assert_eq!(
         adapter.0.borrow().len(),
         2,
@@ -2726,11 +2728,10 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
             position_mode: safe_cex_types::PositionMode::Hedged,
         },
     );
-    let fallback_result = futures::executor::block_on(
-        (&fallback as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()),
-    )
-    .unwrap()
-    .unwrap();
+    let fallback_result =
+        unit_tasks::drive((&fallback as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()))
+            .unwrap()
+            .unwrap();
     assert_eq!(
         fallback_result.buy_leverage,
         expected["publicFallback"]["fetched"]["buyLeverage"]
@@ -2739,7 +2740,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         "public-only fallback buy leverage"
     );
     assert_eq!(
-        fallback_store.fetched_leverage()["BTCUSDT"].sell_leverage,
+        fallback_store.fetched_leverage().unwrap()["BTCUSDT"].sell_leverage,
         expected["publicFallback"]["store"]["BTCUSDT"]["sellLeverage"]
             .as_f64()
             .unwrap()
@@ -2756,11 +2757,10 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
             position_mode: safe_cex_types::PositionMode::Hedged,
         },
     );
-    let missing_result = futures::executor::block_on(
-        (&missing as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()),
-    )
-    .unwrap()
-    .unwrap();
+    let missing_result =
+        unit_tasks::drive((&missing as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()))
+            .unwrap()
+            .unwrap();
     assert_eq!(
         missing_result.buy_leverage,
         expected["missingMarket"]["fetched"]["buyLeverage"]
@@ -2800,11 +2800,10 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         },
     );
     failed.xhr = Rc::new(LeverageFailure);
-    let failed_result = futures::executor::block_on(
-        (&failed as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()),
-    )
-    .unwrap()
-    .unwrap();
+    let failed_result =
+        unit_tasks::drive((&failed as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()))
+            .unwrap()
+            .unwrap();
     assert_eq!(
         failed_result.buy_leverage,
         expected["requestFailure"]["fetched"]["buyLeverage"]
@@ -2813,7 +2812,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         "request failure fallback buy leverage"
     );
     assert_eq!(
-        failed_store.fetched_leverage()["BTCUSDT"].sell_leverage,
+        failed_store.fetched_leverage().unwrap()["BTCUSDT"].sell_leverage,
         expected["requestFailure"]["store"]["BTCUSDT"]["sellLeverage"]
             .as_f64()
             .unwrap()
@@ -2947,7 +2946,7 @@ fn mexc_fetch_orders_live_requests_and_results() {
         let symbols = case
             .get("symbols")
             .map(|s| serde_json::from_value(s.clone()).unwrap());
-        let result = futures::executor::block_on(if case["method"] == "fetchOrders" {
+        let result = unit_tasks::drive(if case["method"] == "fetchOrders" {
             venue.fetch_orders(symbols)
         } else {
             venue.fetch_regular_orders(symbols)
@@ -3091,19 +3090,19 @@ fn mexc_orders_override_reaches_concrete_reconciliation() {
         });
         let response = if captured {
             let method = <MexcExchange as Exchange>::fetch_and_set_orders;
-            futures::executor::block_on(method(&venue, Some(vec![])))
+            unit_tasks::drive(method(&venue, Some(vec![])))
         } else {
             let erased: &dyn Exchange = &venue;
-            futures::executor::block_on(erased.fetch_and_set_orders(None))
+            unit_tasks::drive(erased.fetch_and_set_orders(None))
         }
         .unwrap();
         assert!(!response.iter().any(|o| o.id == "placed"));
         assert!(
-            store.orders().iter().any(|o| o.id == "placed"),
+            store.orders().unwrap().iter().any(|o| o.id == "placed"),
             "concrete MEXC placement shield override must run, captured={captured}"
         );
         assert!(
-            store.loaded().orders,
+            store.loaded().unwrap().orders,
             "empty scope must dispatch full MEXC reconciliation"
         );
     }
@@ -3126,7 +3125,7 @@ fn mexc_reconciliation_drop_leaves_state_recoverable() {
     )
     .unwrap();
     let venue = venue(store.clone(), 1000.0, false);
-    let before = store.serialize();
+    let before = store.serialize().unwrap();
     for poll in [false, true] {
         let fetch = Box::pin(futures::future::pending());
         let mut future = venue.reconcile_orders(None, fetch, false);
@@ -3139,14 +3138,14 @@ fn mexc_reconciliation_drop_leaves_state_recoverable() {
             ));
         }
         drop(future);
-        assert_eq!(store.serialize(), before);
+        assert_eq!(store.serialize().unwrap(), before);
         assert_eq!(venue.placed.borrow().len(), 2);
     }
     // A canceled caller must not leave a gate that blocks the next snapshot.
     let next = Box::pin(async { Ok(vec![]) });
-    futures::executor::block_on(venue.reconcile_orders(None, next, false)).unwrap();
-    assert!(store.loaded().orders);
-    assert_eq!(store.orders()[0].id, "placed");
+    unit_tasks::drive(venue.reconcile_orders(None, next, false)).unwrap();
+    assert!(store.loaded().unwrap().orders);
+    assert_eq!(store.orders().unwrap()[0].id, "placed");
 }
 
 #[test]
@@ -3221,7 +3220,7 @@ fn mexc_cancel_transport_projection_finding() {
         0,
         "CHOSEN native cancellation lazy POST prefix"
     );
-    let error = futures::executor::block_on(pending).unwrap_err();
+    let error = unit_tasks::drive(pending).unwrap_err();
     assert_eq!(
         calls.get(),
         1,
@@ -3258,7 +3257,7 @@ fn mexc_cancel_transport_projection_finding() {
         "MEXC cancellation native original response"
     );
     assert_eq!(
-        store.orders()[0].status,
+        store.orders().unwrap()[0].status,
         OrderStatus::Open,
         "MEXC transport rejection leaves native order open"
     );
@@ -3268,7 +3267,7 @@ fn mexc_cancel_transport_projection_finding() {
         "MEXC cancellation native code retained"
     );
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["message"],
+        error.response_json_view().as_ref().unwrap()["data"]["message"],
         "response detail",
         "MEXC cancellation native response retained"
     );
@@ -3365,7 +3364,7 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
                 0,
                 "CHOSEN native balance lazy GET prefix"
             );
-            futures::executor::block_on(pending).unwrap_err()
+            unit_tasks::drive(pending).unwrap_err()
         } else {
             let pending = exchange.fetch_position_mode();
             assert_eq!(
@@ -3373,7 +3372,7 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
                 0,
                 "CHOSEN native mode lazy GET prefix"
             );
-            futures::executor::block_on(pending).unwrap_err()
+            unit_tasks::drive(pending).unwrap_err()
         };
         assert_eq!(
             error.message, "transport failure",
@@ -3465,7 +3464,7 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
             "MEXC REST native context {name}"
         );
         assert_eq!(
-            error.response.as_ref().unwrap()["data"]["marker"],
+            error.response_json_view().as_ref().unwrap()["data"]["marker"],
             7,
             "MEXC REST metadata snapshot view {name}"
         );
@@ -3524,7 +3523,7 @@ impl std::fmt::Display for MetadataSubscriberOrigin {
 }
 impl std::error::Error for MetadataSubscriberOrigin {}
 #[test]
-fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() {
+fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_eager_prefix() {
     use std::error::Error;
     for public_only in [false, true] {
         let store = Rc::new(DefaultStore::new());
@@ -3604,24 +3603,24 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
         let pending = Exchange::update_symbol_metadata(&exchange, "BTCUSDT".into());
         assert_eq!(
             first.get(),
-            0,
-            "CHOSEN metadata native lazy subscriber prefix"
+            if public_only { 1 } else { 0 },
+            "metadata source eager subscriber prefix"
         );
         assert_eq!(later.get(), 0, "metadata native no later prefix subscriber");
         assert_eq!(
             adapter.0.borrow().len(),
-            0,
-            "CHOSEN metadata native lazy request prefix"
+            if public_only { 0 } else { 1 },
+            "metadata source eager request prefix"
         );
         assert!(
-            !store.fetched_leverage().contains_key("BTCUSDT"),
-            "CHOSEN metadata native no pre-poll write"
+            store.fetched_leverage().unwrap().contains_key("BTCUSDT") == public_only,
+            "metadata source only public fallback commits before awaiting HTTP"
         );
         assert!(
             runtime.1.borrow().is_empty(),
             "metadata native no prefix log"
         );
-        let error = futures::executor::block_on(pending)
+        let error = unit_tasks::drive(pending)
             .expect_err("metadata native wrapper propagates original final failure");
         let expected_calls = if public_only { 1 } else { 2 };
         assert_eq!(
@@ -3640,7 +3639,7 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
             "metadata independent native request calls"
         );
         assert_eq!(
-            store.markets_by_symbol()["BTCUSDT"]
+            store.markets_by_symbol().unwrap()["BTCUSDT"]
                 .limits
                 .leverage
                 .max
@@ -3648,7 +3647,7 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
             if public_only { 20_f64 } else { 60_f64 }.to_bits(),
             "metadata native committed market cap"
         );
-        let fetched = &store.fetched_leverage()["BTCUSDT"];
+        let fetched = &store.fetched_leverage().unwrap()["BTCUSDT"];
         assert_eq!(
             fetched.buy_leverage.to_bits(),
             21_f64.to_bits(),
@@ -3813,7 +3812,7 @@ fn mexc_history_keeps_native_query_numbers_before_rendering() {
         0,
         "history native request prefix before polling"
     );
-    let fills = futures::executor::block_on(future).unwrap();
+    let fills = unit_tasks::drive(future).unwrap();
     assert_eq!(
         fills.len(),
         0,
@@ -3976,14 +3975,13 @@ fn mexc_history_reads_markets_per_row_and_preserves_error_precedence() {
         let mut exchange = venue(Rc::new(DefaultStore::new()), 123.25, false);
         Rc::get_mut(&mut exchange.base).unwrap().store = store.clone();
         exchange.xhr = adapter.clone();
-        let result =
-            futures::executor::block_on(exchange.fetch_historical_fills(ExecutionsOptions {
-                symbol: Some("BTCUSDT".into()),
-                order_id: None,
-                from: None,
-                to: None,
-                limit: None,
-            }));
+        let result = unit_tasks::drive(exchange.fetch_historical_fills(ExecutionsOptions {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from: None,
+            to: None,
+            limit: None,
+        }));
         assert_eq!(
             adapter.1.borrow().len(),
             1,
@@ -4188,7 +4186,7 @@ fn mexc_history_rejection_keeps_native_request_and_typed_origin() {
         0,
         "history rejected native lazy request prefix"
     );
-    let error = futures::executor::block_on(pending).unwrap_err();
+    let error = unit_tasks::drive(pending).unwrap_err();
     assert_eq!(
         error.name, "Error",
         "history rejected native original error name"
@@ -4364,7 +4362,7 @@ fn mexc_history_uses_configured_local_date_conversion() {
         0,
         "history date native host prefix"
     );
-    let fills = futures::executor::block_on(pending).unwrap();
+    let fills = unit_tasks::drive(pending).unwrap();
     assert_eq!(fills.len(), 1, "history date independent native fill floor");
     assert_eq!(
         adapter.1.borrow().len(),
@@ -4501,7 +4499,7 @@ fn mexc_positions_reads_each_market_and_keeps_symbol_only_caller_lookup() {
             0,
             "positions native unpolled market getter floor {label}"
         );
-        let positions = futures::executor::block_on(future).unwrap();
+        let positions = unit_tasks::drive(future).unwrap();
         calls += 1;
         assert_eq!(
             positions.len(),
@@ -4629,7 +4627,7 @@ fn mexc_validation_keeps_raw_detail_and_error_precedence() {
                 Ok(())
             }),
         );
-        let result = futures::executor::block_on(exchange.validate_account()).unwrap();
+        let result = unit_tasks::drive(exchange.validate_account()).unwrap();
         native.push(result.error.as_value().clone());
         assert_eq!(
             result.error.as_value(),
@@ -4706,13 +4704,13 @@ fn mexc_ohlcv_retains_rejected_transport_origin() {
         to: None,
         limit: None,
     };
-    let error = futures::executor::block_on(exchange.fetch_ohlcv(options)).unwrap_err();
+    let error = unit_tasks::drive(exchange.fetch_ohlcv(options)).unwrap_err();
     assert_eq!(
         error.message, "original transport",
         "MEXC OHLCV original transport message"
     );
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["message"],
+        error.response_json_view().as_ref().unwrap()["data"]["message"],
         "server detail",
         "MEXC OHLCV retained server response"
     );
@@ -4757,14 +4755,10 @@ fn mexc_snapshot_reporters_preserve_object_detail_and_listener_failure() {
                 }),
             );
             let result = match method {
-                "fetchMarkets" => {
-                    futures::executor::block_on(exchange.fetch_markets()).map(|v| v.len())
-                }
-                "fetchTickers" => {
-                    futures::executor::block_on(exchange.fetch_tickers()).map(|v| v.len())
-                }
+                "fetchMarkets" => unit_tasks::drive(exchange.fetch_markets()).map(|v| v.len()),
+                "fetchTickers" => unit_tasks::drive(exchange.fetch_tickers()).map(|v| v.len()),
                 "fetchPositions" => {
-                    futures::executor::block_on(exchange.fetch_positions(None)).map(|v| v.len())
+                    unit_tasks::drive(exchange.fetch_positions(None)).map(|v| v.len())
                 }
                 _ => unreachable!(),
             };
@@ -4871,7 +4865,7 @@ fn mexc_four_borrowed_methods_price_unpolled_drop_and_first_poll() {
             "MEXC borrowed dropped observer omits request {method}"
         );
         assert_eq!(
-            futures::executor::block_on(make()).unwrap(),
+            unit_tasks::drive(make()).unwrap(),
             0,
             "MEXC borrowed empty response output {method}"
         );
@@ -4909,7 +4903,7 @@ fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
             Ok(())
         }),
     );
-    let validation = futures::executor::block_on(exchange.validate_account()).unwrap();
+    let validation = unit_tasks::drive(exchange.validate_account()).unwrap();
     assert_eq!(
         validation.error.as_value()["enhancedMessage"],
         "enhanced",
@@ -4929,7 +4923,7 @@ fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
         message: "transport".into(),
         response_data: Some(json!({"message":{"message":"visible","toString":null}})),
     });
-    let error = futures::executor::block_on(exchange.get_account()).unwrap_err();
+    let error = unit_tasks::drive(exchange.get_account()).unwrap_err();
     assert_eq!(
         error.name, "TypeError",
         "MEXC getAccount preserves original coercion TypeError"

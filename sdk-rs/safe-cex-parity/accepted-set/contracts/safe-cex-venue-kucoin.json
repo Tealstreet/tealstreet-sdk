@@ -10251,7 +10251,7 @@
         "where_predicates": []
       }
     },
-    "call": "{use safe_cex_store::store::DefaultStore;let store=DefaultStore::new();let symbol=$value[\"symbol\"].as_str().unwrap();let side=if $value[\"long\"].as_bool().unwrap(){safe_cex_types::PositionSide::Long}else{safe_cex_types::PositionSide::Short};$type(&store,symbol,$value[\"leverage\"].as_f64().unwrap(),Some(side)).unwrap();let rows=store.fetched_leverage();let value=rows.get(symbol).unwrap();serde_json::json!({\"count\":rows.len(),\"key\":rows.keys().next().unwrap(),\"buyBits\":format!(\"{:016x}\",value.buy_leverage.to_bits()),\"sellBits\":format!(\"{:016x}\",value.sell_leverage.to_bits()),\"marginAbsent\":value.margin_type.is_none(),\"positionAbsent\":value.position_mode.is_none()})}",
+    "call": "{use safe_cex_exchange::native_store::DefaultStore;let store=DefaultStore::new();let symbol=$value[\"symbol\"].as_str().unwrap();let side=if $value[\"long\"].as_bool().unwrap(){safe_cex_types::PositionSide::Long}else{safe_cex_types::PositionSide::Short};$type(&store,symbol,$value[\"leverage\"].as_f64().unwrap(),Some(side)).unwrap();let rows=store.fetched_leverage();let value=rows.get(symbol).unwrap();serde_json::json!({\"count\":rows.len(),\"key\":rows.keys().next().unwrap(),\"buyBits\":format!(\"{:016x}\",value.buy_leverage.to_bits()),\"sellBits\":format!(\"{:016x}\",value.sell_leverage.to_bits()),\"marginAbsent\":value.margin_type.is_none(),\"positionAbsent\":value.position_mode.is_none()})}",
     "cases": [
       {
         "input": {
@@ -10301,7 +10301,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -10341,7 +10341,7 @@
         "where_predicates": []
       }
     },
-    "call": "{match $type($value){Ok(result)=>serde_json::json!({\"ok\":true,\"rejected\":result}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "call": "{match $type(&safe_cex_types::retained_json::RetainedJsonInput::from_value($value.clone()).expect(\"authored retained input\")){Ok(result)=>serde_json::json!({\"ok\":true,\"rejected\":result}),Err(_)=>serde_json::json!({\"ok\":false})}}",
     "cases": [
       {
         "input": {
@@ -26351,7 +26351,7 @@
         "where_predicates": []
       }
     },
-    "call": "{#[allow(dead_code)] mod fx {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-binding-fixture.rs\"));}let store=safe_cex_store::store::DefaultStore::new();fx::seed_market(&store,fx::market(\"API\",$value.as_str().unwrap(),Some(1.0)));let native=$type(&store,None);serde_json::json!(native.iter().map(|p|serde_json::json!({\"id\":p.id,\"symbol\":p.symbol,\"side\":format!(\"{:?}\",p.side),\"mode\":format!(\"{:?}\",p.position_mode),\"margin\":format!(\"{:?}\",p.margin_type),\"bits\":([p.entry_price,p.notional,p.leverage,p.contracts].map(|v|format!(\"{:016x}\",v.to_bits()))),\"spot\":p.info.as_ref().unwrap()[\"spot\"]})).collect::<Vec<_>>())}",
+    "call": "{#[allow(dead_code)] mod fx {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-binding-fixture.rs\"));}let store=safe_cex_exchange::native_store::DefaultStore::new();fx::seed_market(&store,fx::market(\"API\",$value.as_str().unwrap(),Some(1.0)));let native=$type(&store,None);serde_json::json!(native.iter().map(|p|serde_json::json!({\"id\":p.id,\"symbol\":p.symbol,\"side\":format!(\"{:?}\",p.side),\"mode\":format!(\"{:?}\",p.position_mode),\"margin\":format!(\"{:?}\",p.margin_type),\"bits\":([p.entry_price,p.notional,p.leverage,p.contracts].map(|v|format!(\"{:016x}\",v.to_bits()))),\"spot\":p.info.as_ref().unwrap()[\"spot\"]})).collect::<Vec<_>>())}",
     "cases": [
       {
         "input": "BTC-USDT",

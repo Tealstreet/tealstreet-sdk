@@ -226,7 +226,7 @@ fn refresh_markets_replaces_metadata_when_instrument_ids_are_unchanged() {
     let changes = h.drive(h.venue().refresh_markets()).unwrap();
     assert!(changes.added.is_empty());
     assert!(changes.removed.is_empty());
-    let markets = h.store.markets();
+    let markets = h.store.markets().unwrap();
     assert_eq!(markets.len(), 1);
     let market = &markets[0];
     assert_eq!(market.id, "BTC_USDT_Perp");
@@ -234,7 +234,10 @@ fn refresh_markets_replaces_metadata_when_instrument_ids_are_unchanged() {
         market.precision.price, 0.25,
         "refresh must replace metadata"
     );
-    assert_eq!(market.limits.amount.max, 77.0);
+    assert_eq!(
+        safe_cex_num::numeric_value_to_number(&market.limits.amount.max),
+        77.0
+    );
     let info = market.info.as_ref().unwrap();
     assert!(info.get("ih").unwrap().text_equals("0x030502"));
     assert_eq!(
@@ -285,7 +288,10 @@ fn refresh_markets_returns_added_and_removed_instruments_through_trait() {
             .unwrap()
             .text_equals("0x030501")
     );
-    assert_eq!(h.store.markets().as_ref(), changes.added.as_slice());
+    assert_eq!(
+        h.store.markets().unwrap().as_slice(),
+        changes.added.as_slice()
+    );
 }
 #[test]
 fn fetch_tickers_uses_loaded_markets_without_http() {
@@ -318,7 +324,7 @@ fn validate_account_seeds_sdk_cookie_and_sends_null_funding_body() {
 fn fetch_positions_maps_private_rows_and_preserves_source_filter_mapping() {
     let h = setup();
     loaded(&h);
-    let before = h.store.positions().to_vec();
+    let before = h.store.positions().unwrap().to_vec();
     let rows = h
         .drive(h.venue().fetch_positions(Some(vec![SYMBOL.into()])))
         .unwrap();
@@ -327,7 +333,11 @@ fn fetch_positions_maps_private_rows_and_preserves_source_filter_mapping() {
     assert_eq!(rows[0].side, PositionSide::Short);
     assert_eq!(rows[0].contracts, 0.5);
     assert_eq!(rows[0].entry_price, 49000.0);
-    assert_eq!(h.store.positions().len(), before.len(), "fetch is pure");
+    assert_eq!(
+        h.store.positions().unwrap().len(),
+        before.len(),
+        "fetch is pure"
+    );
     let calls = h.http.calls("/lite/v1/positions");
     assert_eq!(calls[0].data["sa"], "42");
     assert_eq!(
@@ -348,7 +358,7 @@ fn fetch_orders_maps_nonce_and_singleton_source_filter() {
     assert_eq!(rows[0].symbol, SYMBOL);
     assert_eq!(rows[0].amount, 0.125);
     assert_eq!(rows[0].filled, 0.025);
-    assert!(h.store.orders().is_empty(), "fetch is pure");
+    assert!(h.store.orders().unwrap().is_empty(), "fetch is pure");
     assert_eq!(
         h.http.calls("/lite/v1/open_orders")[0].data,
         json!({"sa":"42","undefined":"BTC_USDT_Perp"})
@@ -413,7 +423,10 @@ fn set_leverage_sends_sdk_request_and_updates_cache() {
         calls[0].data,
         json!({"sa":"42","i":"BTC_USDT_Perp","l":"7"})
     );
-    assert_eq!(h.store.fetched_leverage()[SYMBOL].buy_leverage, 7.0);
+    assert_eq!(
+        h.store.fetched_leverage().unwrap()[SYMBOL].buy_leverage,
+        7.0
+    );
 }
 #[test]
 fn update_order_validates_then_cancels_and_replaces() {
@@ -530,13 +543,13 @@ fn start_public_only_loads_markets_tickers_and_opens_public_socket() {
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
     assert!(
-        h.store.loaded().markets
-            && h.store.loaded().tickers
-            && h.store.loaded().positions
-            && h.store.loaded().orders
-            && h.store.loaded().balance
+        h.store.loaded().unwrap().markets
+            && h.store.loaded().unwrap().tickers
+            && h.store.loaded().unwrap().positions
+            && h.store.loaded().unwrap().orders
+            && h.store.loaded().unwrap().balance
     );
-    assert_eq!(h.store.markets().len(), 1);
+    assert_eq!(h.store.markets().unwrap().len(), 1);
     assert_eq!(h.runtime.sockets.borrow().len(), 1);
     let socket = h.runtime.sockets.borrow()[0].1.clone();
     assert!(
@@ -623,11 +636,11 @@ fn start_private_loads_pure_snapshots_and_tick_balance() {
     h.runtime.private_proxy.set(true);
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    assert_eq!(h.store.balance().total, 123.0);
-    assert_eq!(h.store.balance().free, 100.0);
-    assert_eq!(h.store.positions()[0].contracts, 0.5);
-    assert_eq!(h.store.orders()[0].id, "71");
-    assert_eq!(h.store.markets()[0].limits.leverage.max, 50.0);
+    assert_eq!(h.store.balance().unwrap().total, 123.0);
+    assert_eq!(h.store.balance().unwrap().free, 100.0);
+    assert_eq!(h.store.positions().unwrap()[0].contracts, 0.5);
+    assert_eq!(h.store.orders().unwrap()[0].id, "71");
+    assert_eq!(h.store.markets().unwrap()[0].limits.leverage.max, 50.0);
     assert_eq!(h.runtime.sockets.borrow().len(), 2);
     assert!(
         h.runtime.reports.borrow().is_empty(),
@@ -811,7 +824,7 @@ fn real_private_order_frame_populates_store() {
     let mut order = source_order();
     order["m"]["co"] = json!("72");
     private_frame(&h, json!({"s":"v1.order","f":order}));
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let actual = orders.iter().find(|o| o.id == "72").unwrap();
     assert_eq!(actual.symbol, SYMBOL);
     assert_eq!(actual.amount, 0.125);
@@ -874,12 +887,12 @@ fn real_private_position_frame_updates_positions_and_balance_upnl() {
         json!({"r":[row.clone()]}),
     );
     private_frame(&h, json!({"s":"v1.position","f":row}));
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let actual = positions.iter().find(|p| p.contracts == 0.25).unwrap();
     assert_eq!(actual.symbol, SYMBOL);
     assert_eq!(actual.entry_price, 50000.0);
     assert_eq!(actual.unrealized_pnl, 12.5);
-    assert_eq!(h.store.balance().upnl, 12.5);
+    assert_eq!(h.store.balance().unwrap().upnl, 12.5);
     drop(positions);
     h.venue().dispose().unwrap();
 }
@@ -1032,7 +1045,7 @@ fn market_refresh_commits_good_rows_around_a_refused_asset_row() {
     assert_eq!(changes.added.len(), 1);
     assert_eq!(changes.added[0].id, "ETH_USDT_Perp");
     assert!(changes.removed.is_empty());
-    let markets = h.store.markets();
+    let markets = h.store.markets().unwrap();
     assert_eq!(
         markets.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         ["BTC_USDT_Perp", "ETH_USDT_Perp"]
@@ -1270,7 +1283,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 "ticker reports: {:?}",
                 h.runtime.reports.borrow()
             );
-            ticker_coercion::assert_native(&h.store.tickers(), case);
+            ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
             let expected_callbacks = if case["channel"].as_str().unwrap().starts_with("candle") {
                 3
             } else {
@@ -1332,7 +1345,7 @@ fn market_info_preserves_source_own_keys_and_native_metadata() {
             Js::object(vec![("r", Js::array(vec![raw]))]),
         );
         loaded(&h);
-        let markets = h.store.markets();
+        let markets = h.store.markets().unwrap();
         assert_eq!(markets.len(), 1, "real market fetch admits opaque metadata");
         let info = markets[0].info.as_ref().unwrap();
         assert_eq!(

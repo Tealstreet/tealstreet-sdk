@@ -17,7 +17,7 @@ pub fn format_spot_create_order(
     }
     let market = base
         .store
-        .markets_by_symbol()
+        .markets_by_symbol()?
         .get(&opts.symbol)
         .cloned()
         .ok_or_else(|| ExchangeError::new(format!("Market {} not found", opts.symbol)))?;
@@ -69,7 +69,7 @@ pub fn format_spot_create_order(
     {
         insert(&mut request, "timeInForce", *name);
     }
-    let max = market.limits.amount.max;
+    let max = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
     let split = max > 0.0 && amount > max;
     let lots = if split { (amount / max).ceil() } else { 1.0 };
     let rest = if split {

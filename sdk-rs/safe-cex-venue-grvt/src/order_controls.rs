@@ -21,10 +21,8 @@ fn cancellation_error<T>(
     match result {
         Ok(value) => Ok(value),
         Err(cause) => {
-            let data = cause
-                .response
-                .as_ref()
-                .and_then(|response| response.get("data"));
+            let response = cause.response_json_view();
+            let data = response.as_ref().and_then(|response| response.get("data"));
             let message = data
                 .and_then(|data| data.get("message"))
                 .filter(|v| js_truthy(Some(v)))

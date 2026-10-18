@@ -63,7 +63,7 @@ fn production_native_public_frame_guard_releases_success_error_and_unwind() {
                         .to_string(),
                 ))
                 .unwrap();
-            let tickers = owner.base.store.tickers();
+            let tickers = owner.base.store.tickers().unwrap();
             let ticker = &tickers[0];
             assert_eq!(ticker.bid, bid, "next native bid after {outcome} {venue:?}");
             assert_eq!(ticker.ask, ask, "next native ask after {outcome} {venue:?}");

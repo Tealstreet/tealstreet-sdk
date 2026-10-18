@@ -515,3 +515,47 @@ keep its existing runtime-owned continuation and do not wrap it in another spawn
 `EAGER_WRAPPER_REVIEW.md` describes the real HTTP/drop/rejection regressions and
 live-source witness. Pumping physical Axios interceptor jobs is separate from
 polling the returned SDK waiter.
+
+
+The three `rest_account` aliases have finite profiles at the actual constructed
+`binding::rt::Rt` host (and explicit `bool` payload for ReadResult), with native
+Serde/conversion detectors and independent invariant expected types. Run
+`RUSTC_BOOTSTRAP=1 node safe-cex-venue-kraken/scripts/handle-alias-contracts.mjs`
+from `sdk-rs`; discovery stays in its separate accepted-inventory target. The
+constructed-Scope tests and three compiled consumer controls are described in
+[READ_ALIAS_REVIEW.md](READ_ALIAS_REVIEW.md). These contracts do not classify
+other hosts, payloads, following aliases, or runtime method behavior by default.
+
+`PAGE_ALIAS_REVIEW.md` covers the following two income-page aliases at the same
+actual Scope host. `page-alias-contracts.mjs` measures their finite native types;
+`accepted_page_aliases` drives the real signed account-log client and pager with
+held completion, native error identity, wire parameters and native income fields.
+`page-alias-controls.py` requires named compiled faults and exact restored passes.
+These continuation contracts do not classify other Kraken aliases.
+
+`CONSTRUCTION_ALIAS_REVIEW.md` covers the two finite Factory/RateLimit callback
+profiles over the real Scope. `construction-alias-contracts.mjs` measures their
+actual compiler identities and decoder traits; `accepted_construction_aliases`
+observes signed client bases, native thrown values and source throttle timing.
+The two compiled constructor faults in `construction-alias-controls.py` must fail
+named witnesses and restore exact bytes before readiness.
+
+`POLLING_ALIAS_REVIEW.md` covers the four finite OHLCV continuation capabilities.
+The `polling-alias-contracts.mjs` native probes authenticate actual compiler
+identities; `accepted_polling_aliases` uses the constructed Scope, real chart
+client and timers. `polling-alias-controls.py` requires four independently named
+compiled runtime failures and exact-source restored passes.
+
+`MEMBER_ALIAS_REVIEW.md` covers three finite class dispatch/continuation aliases.
+`member-alias-contracts.mjs` authenticates their compiler identities; the native
+`accepted_member_aliases` witnesses use constructed receivers, real chart HTTP
+and the initialized arrow. `member-alias-controls.py` must fail three named
+compiled runtime assertions and restore exact source bytes before readiness.
+
+`binding::rt::SpotIds` is the module-owned mutable generator capability, not a
+wire decoder. `CLIENT_ID_ALIAS_REVIEW.md` records its source lifetime and exact
+native proof. `--lib accepted_client_id_alias` uses the real generator shared
+by two constructed Spot clients, signed AddOrder requests and entropy refusal;
+`scripts/client-id-alias-controls.py` requires named compiled semantic failures
+and exact restored passes. `scripts/client-id-alias-contracts.mjs` uses fresh
+compiler-authenticated identity/Serde/conversion probes for this one alias.

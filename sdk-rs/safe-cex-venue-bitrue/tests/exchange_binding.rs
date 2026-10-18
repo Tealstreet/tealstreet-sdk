@@ -1,5 +1,6 @@
 #[path = "support/binding_runtime.rs"]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -9,7 +10,6 @@ use safe_cex_exchange::{
     },
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts, UpdateOrderOpts};
 use safe_cex_venue_bitrue::{BitrueDependencies, BitrueExchange};
 use serde_json::{Value, json};
@@ -115,7 +115,7 @@ fn symbol_metadata_refresh_fetches_and_commits_the_current_leverage_bracket() {
         "metadata refresh must fetch the symbol's current bracket"
     );
     assert_eq!(
-        store.markets()[0].limits.leverage.max,
+        store.markets().unwrap()[0].limits.leverage.max,
         17.0,
         "metadata refresh must commit the returned bracket to the real Store"
     );
@@ -203,7 +203,7 @@ impl Drop for PrivateFixture {
 fn private_order_frame_commits_to_the_production_store() {
     let f = PrivateFixture::new();
     f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":"socket-order","S":"SELL","o":"LIMIT","x":"NEW","X":"NEW","p":"27300","q":"3","z":"1"}}));
-    let orders = f.store.orders();
+    let orders = f.store.orders().unwrap();
     let order = orders
         .iter()
         .find(|o| o.id == "socket-order")
@@ -222,7 +222,7 @@ fn private_order_frames_map_native_types_to_source_limit() {
     for kind in ["IOC", "FOK", "POST_ONLY", "STOP_LIMIT"] {
         let id = format!("native-{kind}");
         f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":id,"S":"SELL","o":kind,"x":"NEW","X":"NEW","p":"27300","q":"3","z":"1"}}));
-        let orders = f.store.orders();
+        let orders = f.store.orders().unwrap();
         let order = orders
             .iter()
             .find(|order| order.id == id)
@@ -241,6 +241,7 @@ fn private_order_frames_map_native_types_to_source_limit() {
     assert!(
         f.store
             .orders()
+            .unwrap()
             .iter()
             .any(|order| order.id == "existing-order")
     );
@@ -276,6 +277,7 @@ fn private_trade_frame_emits_incremental_fill_and_commits_order() {
     assert_eq!(
         f.store
             .orders()
+            .unwrap()
             .iter()
             .find(|o| o.id == "socket-fill")
             .unwrap()
@@ -303,7 +305,7 @@ fn private_account_frame_refreshes_positions_through_real_rest_binding() {
         f.account_reads() > before,
         "private account frame must trigger the real account read"
     );
-    let positions = f.store.positions();
+    let positions = f.store.positions().unwrap();
     let position = positions
         .iter()
         .find(|p| p.symbol == "E-BTC-USDT")
@@ -334,7 +336,7 @@ fn private_balance_frame_refreshes_balance_through_real_rest_binding() {
         f.account_reads() > before,
         "private balance frame must trigger the real account read"
     );
-    let balance = f.store.balance();
+    let balance = f.store.balance().unwrap();
     assert_eq!(balance.total, 1234.0);
     assert_eq!(balance.free, 1000.0);
     assert_eq!(balance.used, 234.0);
@@ -420,8 +422,8 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
     );
     let api: &dyn Exchange = venue.as_ref();
     complete(&runtime, api.start()).expect("BIND start");
-    assert_eq!(store.markets().len(), 1, "BIND start markets");
-    assert!(store.loaded().markets, "BIND start loaded markets");
+    assert_eq!(store.markets().unwrap().len(), 1, "BIND start markets");
+    assert!(store.loaded().unwrap().markets, "BIND start loaded markets");
     assert_eq!(
         complete(&runtime, api.get_account()).unwrap_err().message,
         "Not implemented",
@@ -645,7 +647,7 @@ fn client_ids_fail_closed_for_single_and_whole_batch_before_writes() {
 }
 
 #[test]
-fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_plain_json() {
+fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_gzip_blob() {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
     let runtime = Rc::new(support::Runtime::default());
@@ -703,16 +705,19 @@ fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_p
         .events
         .borrow_mut()
         .push_back(WsEvent::Message(SocketFrame::Binary(
-            br#"{"ping":9007199254740993}"#.to_vec(),
+            b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff\xab\x56\x2a\xc8\xcc\x4b\x57\xb2\xb2\x34\x30\x30\x37\xb4\xb4\x34\x32\x35\x31\x37\x31\xb0\xb4\x34\xae\x05\x00\xe1\x6d\x06\xae\x19\x00\x00\x00".to_vec(),
         )));
-    runtime.pump();
+    // Blob.arrayBuffer/readBlob resume through the shared Promise jobs.
+    for _ in 0..4 {
+        runtime.pump();
+    }
     assert!(
         public
             .sent
             .borrow()
             .iter()
             .any(|s| s == "{\"pong\":9007199254740992}"),
-        "PUBLIC binary Buffer coerces through plain jsonParse: {:?}",
+        "PUBLIC gzip Blob inflates before plain jsonParse: {:?}",
         public.sent.borrow()
     );
     venue.dispose().unwrap();
@@ -1026,7 +1031,7 @@ fn malformed_balance_upnl_refuses_only_its_account_row() {
         )
         .unwrap();
         complete(&runtime, venue.start()).expect("bad upnl must not reject the valid account rows");
-        let balance = store.balance();
+        let balance = store.balance().unwrap();
         assert_eq!(
             (balance.total, balance.free, balance.used, balance.upnl),
             (100., 70., 30., 3.)
@@ -1224,7 +1229,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     let source = ticker_coercion::source("bitrue");
     assert_eq!(source["cases"].as_array().unwrap().len(), 32);
     let f = PrivateFixture::new();
-    let template = f.store.markets()[0].clone();
+    let template = f.store.markets().unwrap()[0].clone();
     let tickers = ticker_coercion::seed("bitrue");
     let markets = tickers
         .iter()
@@ -1281,7 +1286,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             f.runtime.pump();
         }
-        ticker_coercion::assert_native(&f.store.tickers(), case);
+        ticker_coercion::assert_native(&f.store.tickers().unwrap(), case);
     }
     assert!(
         f.runtime.reports.borrow().is_empty(),

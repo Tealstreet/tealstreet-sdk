@@ -3,12 +3,13 @@ mod oracle_clock;
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_bingx::{
     data_reads::{BingxDataReads, ReadTransport},
@@ -342,8 +343,12 @@ fn run(c: &Value) {
         .collect();
     let clock = oracle_clock::ClockWindow::start();
     let result: Result<Value, ExchangeError> = match method {
-        "mapOrder" => map_order(&input["wireOrder"].clone().into(), &store.orders(), 5678.0)
-            .map(|o| o.as_ref().map_or(json!({"undefined":true}), order)),
+        "mapOrder" => map_order(
+            &input["wireOrder"].clone().into(),
+            &store.orders().unwrap(),
+            5678.0,
+        )
+        .map(|o| o.as_ref().map_or(json!({"undefined":true}), order)),
         "normalizeSymbol" => v
             .normalize_symbol(Some(&input["symbol"].clone().into()))
             .map(Value::String),
@@ -387,7 +392,14 @@ fn run(c: &Value) {
     };
     host.drain();
     let clock = clock.finish();
-    let mut native_orders = json!(store.orders().iter().map(order).collect::<Vec<_>>());
+    let mut native_orders = json!(
+        store
+            .orders()
+            .unwrap()
+            .iter()
+            .map(order)
+            .collect::<Vec<_>>()
+    );
     if method != "mapOrder" {
         clock.normalize_orders(&mut native_orders, &c["orders"]);
     }
@@ -414,7 +426,14 @@ fn run(c: &Value) {
         native_orders, c["orders"],
         "BINGX-PRIVATE native orders {method} variant {variant}"
     );
-    let positions = json!(store.positions().iter().map(position).collect::<Vec<_>>());
+    let positions = json!(
+        store
+            .positions()
+            .unwrap()
+            .iter()
+            .map(position)
+            .collect::<Vec<_>>()
+    );
     let mut expected_positions = c["positions"].clone();
     for (index, row) in expected_positions
         .as_array_mut()
@@ -437,7 +456,7 @@ fn run(c: &Value) {
         "BINGX-PRIVATE native positions {method} variant {variant}"
     );
     assert_eq!(
-        serde_json::to_value(&*Store::loaded(store.as_ref())).unwrap(),
+        serde_json::to_value(Store::loaded(store.as_ref()).unwrap()).unwrap(),
         c["loaded"],
         "BINGX-PRIVATE loaded flag {method} variant {variant}"
     );
@@ -537,7 +556,7 @@ fn refresh_timer_coalesces_and_executes_at_boundary() {
         );
     }
     assert_eq!(
-        serde_json::to_value(&*Store::loaded(store.as_ref())).unwrap(),
+        serde_json::to_value(Store::loaded(store.as_ref()).unwrap()).unwrap(),
         expected["loaded"]
     );
 }
@@ -597,7 +616,7 @@ fn typed_order_and_snapshot_boundaries_are_explicit() {
     let (_, store, _) = fixture(input);
     let mut o = input["wireOrder"].clone();
     o["timeInForce"] = json!("constructor");
-    let e = map_order(&o.clone().into(), &store.orders(), 1234.0).unwrap_err();
+    let e = map_order(&o.clone().into(), &store.orders().unwrap(), 1234.0).unwrap_err();
     assert!(e.message.contains("inherited callable"));
     assert!(
         corpus()["boundary"]["inherited"]["output"]["ok"]["timeInForce"]
@@ -607,7 +626,7 @@ fn typed_order_and_snapshot_boundaries_are_explicit() {
     );
     o["timeInForce"] = json!("GTC");
     o["o"] = json!("STOP_MARKET");
-    let mapped = map_order(&o.clone().into(), &store.orders(), 1234.0)
+    let mapped = map_order(&o.clone().into(), &store.orders().unwrap(), 1234.0)
         .unwrap()
         .unwrap();
     assert!(mapped.sl_trigger_type.is_none());
@@ -644,7 +663,8 @@ fn refresh_catch_reports_original_subscriber_error() {
             let mut cause = ExchangeError::new("subscriber cause");
             cause.name = "ListenerError".into();
             cause.store_subscriber_ids = vec![71, 83];
-            cause.response = Some(json!({"data":{"msg":"subscriber denied"}}));
+            cause =
+                cause.with_retained_response((json!({"data":{"msg":"subscriber denied"}})).into());
             Err(StoreSubscriberError::new("subscriber cause").with_cause(Rc::new(cause)))
         }),
     );
@@ -660,11 +680,11 @@ fn refresh_catch_reports_original_subscriber_error() {
     assert_eq!(&reports[0].store_subscriber_ids[..2], &[71, 83]);
     assert_eq!(reports[0].store_subscriber_ids.len(), 3);
     assert_eq!(
-        reports[0].response,
+        reports[0].response_json_view(),
         Some(json!({"data":{"msg":"subscriber denied"}}))
     );
     assert_eq!(
-        store.loaded().positions,
+        store.loaded().unwrap().positions,
         corpus()["boundary"]["caughtRefresh"]["loaded"] == true
     );
     assert!(!v.has_pending_position_events.get());

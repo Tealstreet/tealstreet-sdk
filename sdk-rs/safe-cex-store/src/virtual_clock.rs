@@ -14,6 +14,18 @@ type SyncFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type Listener = Arc<dyn Fn(f64) + Send + Sync>;
 type Scheduler = Arc<dyn Fn(u64, SyncFuture) -> u64 + Send + Sync>;
 pub const TIME_SYNC_INTERVAL_MS: u64 = 300_000;
+// Native replay hosts run one isolated account on their host thread. The override
+// supplies Date.now only; offset/server synchronization policy below is unchanged.
+fn with_host_time<R>(read: impl FnOnce(&std::cell::Cell<Option<f64>>) -> R) -> R {
+    std::thread_local! {
+        static HOST_TIME: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) };
+    }
+    HOST_TIME.with(read)
+}
+pub fn set_thread_host_time(time: Option<f64>) {
+    with_host_time(|value| value.set(time));
+}
+
 pub static VIRTUAL_CLOCK: LazyLock<VirtualClock> = LazyLock::new(VirtualClock::default);
 
 #[derive(Clone)]
@@ -84,6 +96,9 @@ impl Default for VirtualClock {
     fn default() -> Self {
         Self {
             now: Arc::new(|| {
+                if let Some(time) = with_host_time(|value| value.get()) {
+                    return time;
+                }
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()

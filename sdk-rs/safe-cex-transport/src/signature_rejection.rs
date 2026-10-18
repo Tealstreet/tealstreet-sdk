@@ -6,7 +6,7 @@ use crate::{
     retry::{ClassifiedRequest, only_reads},
 };
 use safe_cex_num::JsCoercionError;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -17,7 +17,7 @@ pub const SIGNATURE_RETRY_CONFIG_KEY: &str = "safeCexSignatureRetry";
 
 /// ts: IsSignatureRejection. Reads a venue's error body; coercion failures are the
 /// source's thrown TypeErrors and stay visible.
-pub type IsSignatureRejection = Rc<dyn Fn(&Value) -> Result<bool, JsCoercionError>>;
+pub type IsSignatureRejection = Rc<dyn Fn(&RetainedJsonInput) -> Result<bool, JsCoercionError>>;
 
 /// The source stamps the request config, and both resend paths forward that same
 /// config. `RestRequest` carries no free-form properties, so one call shares this
@@ -35,24 +35,48 @@ impl SignatureRetry {
 }
 
 /// The body an Axios error or response exposes as `data`.
-pub fn response_data(response: &RestResponse) -> Value {
-    response.body.json_value().unwrap_or(Value::Null)
+pub fn response_data(response: &RestResponse) -> RetainedJsonInput {
+    match &response.body {
+        crate::RestResponseBody::Encoded(bytes) => {
+            let text = String::from_utf8_lossy(bytes)
+                .encode_utf16()
+                .collect::<Vec<_>>();
+            RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Text(text))
+        }
+        body => body.clone().into_data(),
+    }
 }
 
 /// ts: isBinanceStyleSignatureRejection (Binance -1022, kept by Bitrue and AsterDEX).
-pub fn is_binance_style_signature_rejection(data: &Value) -> Result<bool, JsCoercionError> {
-    let field = |key| data.as_object().and_then(|object| object.get(key));
-    if safe_cex_num::js_number(field("code"))? == -1022.0 {
+pub fn is_binance_style_signature_rejection(
+    data: &RetainedJsonInput,
+) -> Result<bool, JsCoercionError> {
+    let field = |key| data.get(key);
+    if safe_cex_num::js_retained_number(field("code"))? == -1022.0 {
         return Ok(true);
     }
-    let message = match field("msg").filter(|value| !value.is_null()) {
-        Some(value) => safe_cex_num::js_string(Some(value))?,
-        None => String::new(),
+    let message = match field("msg").filter(|value| {
+        !matches!(
+            value,
+            RetainedJsonInput::Null | RetainedJsonInput::Undefined
+        )
+    }) {
+        Some(value) => safe_cex_types::js_coercion::js_retained_string_utf16(value)?,
+        None => Vec::new(),
     };
-    // A non-unicode /i regex never folds a non-ASCII unit onto an ASCII one.
-    Ok(message
-        .to_ascii_lowercase()
-        .contains("signature for this request is not valid"))
+    let pattern = "signature for this request is not valid"
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    Ok(message.windows(pattern.len()).any(|units| {
+        units.iter().zip(&pattern).all(|(unit, expected)| {
+            let folded = if (65..=90).contains(unit) {
+                *unit + 32
+            } else {
+                *unit
+            };
+            folded == *expected
+        })
+    }))
 }
 
 fn coercion_failure(error: JsCoercionError, request: &RestRequest) -> RestFailure {
@@ -92,7 +116,7 @@ pub fn resend_on_signature_rejection(
 }
 /// The same decision for a client that surfaces only the resolved `response.data`.
 pub fn resend_on_rejected_data(
-    data: &Value,
+    data: &RetainedJsonInput,
     retry: &SignatureRetry,
     is_rejection: &IsSignatureRejection,
 ) -> Result<bool, JsCoercionError> {

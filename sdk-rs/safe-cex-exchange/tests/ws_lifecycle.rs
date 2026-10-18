@@ -307,7 +307,7 @@ fn any_healthy_public_socket_wins_and_durable_diagnostics_survive_recovery() {
     b.track_last_received().unwrap();
     b.record_close_diagnostics(Some(1013), false);
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap();
+    let health = store.socket_health().unwrap().unwrap();
     assert_eq!(health["publicHealthy"], true);
     assert_eq!(health["publicInitialized"], true);
     assert_eq!(health["publicCloseCode"].as_f64(), Some(1013.0));
@@ -433,6 +433,7 @@ fn replacing_socket_clears_old_optional_close_and_message_evidence() {
         store
             .socket_health()
             .unwrap()
+            .unwrap()
             .get("publicCloseCode")
             .is_some()
     );
@@ -440,13 +441,14 @@ fn replacing_socket_clears_old_optional_close_and_message_evidence() {
         store
             .socket_health()
             .unwrap()
+            .unwrap()
             .get("publicLastMessage")
             .is_some()
     );
     let fresh = socket(&venue, &runtime, 2);
     venue.base().set_socket(SocketSlot::Public, Some(fresh));
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap();
+    let health = store.socket_health().unwrap().unwrap();
     assert!(health.get("publicCloseCode").is_none());
     assert!(health.get("publicLastMessage").is_none());
     assert_eq!(health["publicCloseCountTotal"].as_f64(), Some(0.0));
@@ -601,7 +603,7 @@ fn cleared_socket_diagnostics_preserve_retained_key_order() {
         )
         .unwrap();
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap();
+    let health = store.socket_health().unwrap().unwrap();
     let retained: Vec<_> = health
         .as_object()
         .unwrap()
@@ -713,7 +715,7 @@ fn worker_and_socket_snapshot_entrypoints_dispatch_venue_overrides() {
         base: BaseExchange::new(
             ExchangeName::Bybit,
             serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             runtime,
             ExchangeSettings::default(),
         ),
@@ -999,10 +1001,15 @@ mod js_sockets {
         let received = received.borrow();
         assert_eq!(received.len(), 2);
         assert!(
-            matches!(&received[0], Js::Object(object) if object.class == "Buffer"),
-            "binary frame remains a Buffer"
+            matches!(&received[0], Js::Object(object) if object.class == "Blob"),
+            "native socket uses the source WebSocket/reconnecting wrapper default Blob"
         );
-        let bytes = received[0].get("bytes").unwrap().array_values().unwrap();
+        assert_eq!(received[0].get("size").unwrap().as_f64(), Some(4.0));
+        let Js::Promise(buffer) = received[0].call_method("arrayBuffer", vec![]).unwrap() else {
+            panic!("Blob.arrayBuffer returns a Promise")
+        };
+        let buffer = buffer.result().unwrap().unwrap();
+        let bytes = buffer.get("bytes").unwrap().array_values().unwrap();
         assert_eq!(
             bytes
                 .iter()
@@ -1010,22 +1017,14 @@ mod js_sockets {
                 .collect::<Vec<_>>(),
             vec![0, 128, 255, 65]
         );
-        assert_eq!(received[0].get("byteLength").unwrap().as_f64(), Some(4.0));
+        assert_eq!(buffer.get("byteLength").unwrap().as_f64(), Some(4.0));
+        let Js::Promise(text) = received[0].call_method("text", vec![]).unwrap() else {
+            panic!("Blob.text returns a Promise")
+        };
         assert_eq!(
-            received[0]
-                .get("buffer")
-                .unwrap()
-                .get("bytes")
-                .unwrap()
-                .array_values()
-                .unwrap()
-                .len(),
-            4
-        );
-        assert_eq!(
-            received[0].to_display(),
+            text.result().unwrap().unwrap().to_display(),
             "\0��A",
-            "Buffer text conversion stays explicit"
+            "Blob text conversion stays explicit"
         );
         assert!(matches!(&received[1], Js::String(_)));
         assert_eq!(received[1].to_display(), "plain");
@@ -1279,7 +1278,11 @@ mod js_sockets {
         assert_eq!(socket.get("pingAt").unwrap().as_f64(), Some(sent_at));
         runtime.now.set(sent_at + 100.0);
         socket.call_method("handlePongEvent", vec![]).unwrap();
-        assert_eq!(store.latency(), 50.0, "latency is half the ping round trip");
+        assert_eq!(
+            store.latency().unwrap(),
+            50.0,
+            "latency is half the ping round trip"
+        );
     }
 
     /// A socket whose connectAndSubscribe counts redials and registers `this.onClose`.

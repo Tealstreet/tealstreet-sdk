@@ -1,5 +1,13 @@
 # OKX venue port
 
+The five-row follow-on FIX-audit is recorded in DIVERGENCE_FIX_AUDIT.md and
+tests/divergence-rulings.json. Placement-result IDs now use shared JS String
+under shared-type decision 4 so an already-live order's numeric ID survives.
+Missing/falsy IDs still reject; the historical string-only refusal notes below
+are superseded. The same placement algorithm serves normal/algo production
+bindings and pure callers. The original 118 source cases and sequencing/error
+controls remain, with eight authorized output-conversion expectations updated.
+
 Behavioral authority: [TypeScript OKX guidance](../../packages/safe-cex/src/exchanges/okx/CLAUDE.md), [shared exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md), and [shared socket binding](../safe-cex-exchange/WS_CONTRACT.md).
 
 The port is in progress. Protocol tables, the two literal union types, and pure ledger/history/closed-position mappers are implemented; remaining exchange and socket manifest rows stay pending until their runtime behavior and independent oracle pass. `types.rs` preserves all global/EEA live/demo hosts, 28 endpoint entries, 13 intervals, order mappings, and telemetry endpoint lists. Lookup records use immutable pair arrays; the union types accept JSON strings only. Checked-in public declarations remain visible to the source index; the private RegionWire and InstrumentWire owners preserve serialization and typed From mappings and independently require string admission before their private Serde remote schemas. A deserialize_enum metadata inventory inspects those actual remote decoding schemas and compares each complete accepted literal set against the maintained TypeScript union. Rejected-shape probes cover tagged objects, arrays, null, booleans, numbers, case changes, whitespace, U+FEFF and unknown strings. The audit found and corrected externally tagged object acceptance in both unions; restoring it fails the protocol-table test.

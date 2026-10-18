@@ -97,6 +97,9 @@ its internal payload never appears in serialized JSON. The single retained JSON
 writer lives here below Num and applies JSON.stringify projection only on output.
 `safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
 against actual typed bridges and the production Store facade before wire checks.
+StoreData and StoreUpdate use the same native Store record profile: undefined
+optional JSON-view properties are omitted rather than turned into null, while
+retained zk config and nested model/info presence keep their native markers.
 
 Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
 float directly. Capture accepts that event using the same Float path as the
@@ -234,6 +237,12 @@ native numbers, undefined and UTF16 before serialization; `into_value` is a real
 JSON boundary, never an intermediate model conversion. The native Serde marker
 and InfoRecord codecs preserve own undefined without exposing marker objects in
 wire JSON. The single retained JSON writer lives below Num in this crate.
+
+NumericValue retains Number versus Text for numeric runtime fields whose source
+mapper passes strings unchanged. Market.limits.amount.max uses this carrier.
+The static TS projection remains number, following its maintained declaration;
+output preserves the runtime variant. Numeric consumers explicitly call num's
+numeric_value_to_number, which uses the existing Number(string) parser.
 
 Market.runtime is the shared carrier for runtime type/spot/swap/future/contract/
 linear/inverse properties constructed outside the maintained TS Market declaration.

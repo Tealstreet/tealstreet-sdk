@@ -1,7 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{
-    Store, StoreMutationError, StoreUpdate, model_patch::ModelPatch, store::DefaultStore,
-};
+use safe_cex_store::{Store, StoreMutationError, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{Order, OrderStatus, OrderType, StoreSubscriberError};
 use safe_cex_venue_binance::cancel_symbol_orders::*;
 use serde_json::{Value, json};
@@ -38,7 +37,7 @@ fn fixture() -> Rc<DefaultStore> {
     )
     .unwrap();
     assert_eq!(
-        store.update_ids().orders,
+        store.update_ids().unwrap().orders,
         1.0,
         "independent seeded order version"
     );
@@ -67,8 +66,9 @@ fn sentinel(role: &str, msg: Option<&Value>) -> Rc<ExchangeError> {
     error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         format!("{role}-code")
     )));
-    error.response = Some(
-        json!({"status":503,"data":msg.map(|value|json!({"msg":value})).unwrap_or(json!({}))}),
+    error = error.with_retained_response(
+        (json!({"status":503,"data":msg.map(|value|json!({"msg":value})).unwrap_or(json!({}))}))
+            .into(),
     );
     Rc::new(error)
 }
@@ -294,7 +294,7 @@ fn compare(variant: &str, count: usize) {
                     if fail == ordinal {
                         return Err(StoreSubscriberError::with_response(
                             ls.message.clone(),
-                            ls.response.clone().unwrap(),
+                            ls.response_json_view().clone().unwrap(),
                         )
                         .with_cause(ls.clone()));
                     }
@@ -350,7 +350,9 @@ fn compare(variant: &str, count: usize) {
                 })
             }))
         };
-        let emit = |message: Value| {
+        let emit = |message: safe_cex_exchange::js_runtime::value::Js| {
+            let message = safe_cex_exchange::js_runtime::value::to_json(&message)
+                .expect("finite source message fixture");
             emissions.borrow_mut().push(message);
             if case["emitReject"] == true {
                 Err(emitter.clone())
@@ -363,7 +365,7 @@ fn compare(variant: &str, count: usize) {
             run(cancel_binance_symbol_orders(
                 || {
                     view_reads.set(view_reads.get() + 1);
-                    handles.clone()
+                    Ok(handles.clone())
                 },
                 symbol,
                 delete,
@@ -408,7 +410,7 @@ fn compare(variant: &str, count: usize) {
             expected(&case, pm_spot);
         // Assert the decoded native Store and errors before any source trace or
         // request wire-option comparison. No serialization/roundtrip is used.
-        let actual = store.orders();
+        let actual = store.orders().unwrap();
         assert_eq!(
             actual.len(),
             expected_rows.len(),
@@ -454,7 +456,7 @@ fn compare(variant: &str, count: usize) {
             "CANCEL {variant} case {index} native later subscriber count"
         );
         assert_eq!(
-            store.update_ids().orders,
+            store.update_ids().unwrap().orders,
             (1 + expected_notifications) as f64,
             "CANCEL {variant} case {index} native authored version delta"
         );
@@ -602,6 +604,7 @@ fn compare(variant: &str, count: usize) {
         }
         for (actual, source) in store
             .orders()
+            .unwrap()
             .iter()
             .zip(case["orders"].as_array().unwrap())
         {
@@ -612,7 +615,7 @@ fn compare(variant: &str, count: usize) {
             );
         }
         assert_eq!(
-            store.update_ids().orders,
+            store.update_ids().unwrap().orders,
             case["updateId"].as_f64().unwrap()
         );
         assert_eq!(
@@ -708,7 +711,7 @@ fn futures_waits_for_both_settlements_without_repolling_ready_future() {
                     }))
                 };
                 let mut future = std::pin::pin!(cancel_binance_symbol_orders(
-                    || handles.clone(),
+                    || Ok(handles.clone()),
                     "BTCUSDT",
                     delete,
                     |group, status| {
@@ -736,6 +739,7 @@ fn futures_waits_for_both_settlements_without_repolling_ready_future() {
                 assert!(
                     store
                         .orders()
+                        .unwrap()
                         .iter()
                         .all(|order| order.status == OrderStatus::Open),
                     "CANCEL native no early mutation after one settlement"

@@ -1,7 +1,8 @@
 #[path = "support/retained_assert.rs"]
 mod retained_assert;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_value, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     NetworkFailure, RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportFuture, rate_limit::RateLimitClock,
@@ -138,7 +139,10 @@ fn market(a: &Market, e: &Value) {
     num(a.precision.amount, &e["precision"]["amount"]);
     num(a.precision.price, &e["precision"]["price"]);
     num(a.limits.amount.min, &e["limits"]["amount"]["min"]);
-    num(a.limits.amount.max, &e["limits"]["amount"]["max"]);
+    num(
+        safe_cex_num::numeric_value_to_number(&a.limits.amount.max),
+        &e["limits"]["amount"]["max"],
+    );
     num(a.limits.leverage.min, &e["limits"]["leverage"]["min"]);
     num(a.limits.leverage.max, &e["limits"]["leverage"]["max"]);
     num(a.contract_size.unwrap(), &e["contractSize"]);
@@ -272,7 +276,7 @@ fn state(a: &StoreData, e: &Value) {
     }
 }
 fn snapshot(s: &DefaultStore) -> StoreData {
-    Store::serialize(s)
+    Store::serialize(s).unwrap()
 }
 fn store(i: &Value) -> DefaultStore {
     let models = &corpus()["models"];
@@ -413,7 +417,7 @@ fn read_cases(method: &str, expected_count: usize) {
                         *actual[0].info.as_mut().unwrap().get_mut("stored").unwrap() =
                             json!(false).into();
                         assert!(
-                            s.markets()[0]
+                            s.markets().unwrap()[0]
                                 .info
                                 .as_ref()
                                 .unwrap()
@@ -829,7 +833,7 @@ impl ConstructorHost for Constructor<'_> {
     ) -> Result<usize, String> {
         assert_eq!(name, ExchangeName::Blofin);
         assert_eq!(o.key, "k");
-        assert_eq!(s.markets().len(), 1);
+        assert_eq!(s.markets().unwrap().len(), 1);
         self.trace.push(json!(["super", "blofin"]));
         if self.stop == "super" {
             Err("super failed".into())
@@ -1369,7 +1373,7 @@ fn native_rest_boundaries() {
     assert_eq!(error(ready(start(&host)).unwrap_err()), "raw failure");
     host.markets_released.set(true);
     assert!(
-        !host.s.loaded().markets,
+        !host.s.loaded().unwrap().markets,
         "native pending peer dropped after Promise.all rejection"
     );
     assert_eq!(

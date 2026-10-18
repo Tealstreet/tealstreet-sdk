@@ -138,7 +138,7 @@ pub(super) fn native_unicode_boundaries() {
                 "private native Unicode later subscriber count"
             );
             if kind == "position" {
-                let positions = store.positions();
+                let positions = store.positions().unwrap();
                 assert_eq!(positions.len(), 1);
                 assert_eq!(
                     positions[0].symbol.encode_utf16().collect::<Vec<_>>(),
@@ -147,7 +147,7 @@ pub(super) fn native_unicode_boundaries() {
                 );
                 assert_eq!(positions[0].contracts.to_bits(), 6f64.to_bits());
             } else {
-                let orders = store.orders();
+                let orders = store.orders().unwrap();
                 assert_eq!(orders.len(), 1);
                 assert_eq!(
                     orders[0].symbol.encode_utf16().collect::<Vec<_>>(),

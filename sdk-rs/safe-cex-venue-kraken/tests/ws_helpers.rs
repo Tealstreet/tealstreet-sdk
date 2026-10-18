@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{ProtoMember, TableHit};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,
 };
@@ -51,7 +52,7 @@ fn market(symbol: &str, active: bool) -> Market {
             cost: None,
             amount: MarketLimitsAmount {
                 min: 1.0,
-                max: 10.0,
+                max: (10.0).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: 1.0,
@@ -144,7 +145,12 @@ fn product_ids_live_source() {
             json!(["active"]),
             "PUBLIC-HELPER source callback count"
         );
-        let after: Vec<_> = store.markets().iter().map(|m| m.symbol.clone()).collect();
+        let after: Vec<_> = store
+            .markets()
+            .unwrap()
+            .iter()
+            .map(|m| m.symbol.clone())
+            .collect();
         assert_eq!(
             json!(after),
             case["after"],

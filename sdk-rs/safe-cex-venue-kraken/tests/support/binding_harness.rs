@@ -242,12 +242,12 @@ pub struct Request {
 /// Scripted HTTP: (method, path without query) -> queue of responses; the last repeats.
 #[derive(Default)]
 pub struct Http {
-    /// Tests may hold physical responses while the runtime owns their continuations.
-    pub hold_responses: Rc<Cell<bool>>,
-    response_wakers: Rc<RefCell<Vec<Waker>>>,
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
+    /// Tests may hold physical responses while the runtime owns their continuations.
+    pub hold_responses: Rc<Cell<bool>>,
+    pub response_wakers: Rc<RefCell<Vec<Waker>>>,
 }
 impl Http {
     pub fn release_responses(&self) {
@@ -345,7 +345,7 @@ impl JsHttpHost for Http {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Rc<Http>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<KrakenExchange>,
 }
 
@@ -385,7 +385,7 @@ pub fn harness_with(
     let http = Rc::new(Http::default());
     *http.runtime.borrow_mut() = Some(runtime.clone());
     script(&http);
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let mut counter = 0u8;
     let exchange = KrakenExchange::new(
         name,

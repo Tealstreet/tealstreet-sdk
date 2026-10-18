@@ -1,8 +1,9 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::*,
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{
@@ -130,7 +131,7 @@ fn real_store_commit_preserves_listener_failure_and_stops_both_fanouts() {
     );
     let error = store.set_setting("isHedged", true).unwrap_err();
     assert!(
-        store.options().is_hedged,
+        store.options().unwrap().is_hedged,
         "mutation must remain committed after listener failure"
     );
     assert_eq!(
@@ -209,7 +210,7 @@ fn non_exchange_subscriber_response_survives_overlay_recovery() {
     );
     let error = ExchangeError::from(store.set_setting("isHedged", true).unwrap_err());
     assert_eq!(
-        error.response,
+        error.response_json_view(),
         Some(expected),
         "canonical subscriber response must survive non-ExchangeError projection"
     );
@@ -498,7 +499,7 @@ fn store_notification_conversion_retains_subscriber_identity_on_both_paths() {
         "projected subscriber error retains subscriber identity"
     );
     assert_eq!(
-        projected.response,
+        projected.response_json_view(),
         Some(response),
         "subscriber identity preserves response"
     );

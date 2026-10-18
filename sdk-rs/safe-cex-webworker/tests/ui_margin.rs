@@ -1,12 +1,13 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use runtime::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, FetchedLeverage, StoreData};
 use safe_cex_webworker::ui_state::handle_active_margin_symbol_change;
 use serde_json::{Value, json};
@@ -47,7 +48,7 @@ impl Exchange for Venue {
                 std::future::pending::<()>().await;
             }
             if self.spec["concurrent"] == true {
-                let mut fetched = self.base.store.fetched_leverage().clone();
+                let mut fetched = self.base.store.fetched_leverage().unwrap().clone();
                 fetched.insert("OTHER".into(), leverage(7.0, 8.0));
                 self.base.store.update(
                     StoreUpdate {
@@ -59,7 +60,7 @@ impl Exchange for Venue {
             }
             if self.spec["concurrentNumeric"] == true {
                 // Supply an insertion-ordered host map so cleanup itself must restore JS key order.
-                let mut fetched = self.base.store.fetched_leverage().clone();
+                let mut fetched = self.base.store.fetched_leverage().unwrap().clone();
                 fetched.insert("42".into(), leverage(21.0, 23.0));
                 self.base.store.update(
                     StoreUpdate {
@@ -189,7 +190,7 @@ fn expected_specs() -> [Value; 32] {
 
 fn assert_native_state(store: &dyn Store, expected: &Value, index: usize) {
     let expected_positions = expected.get("leverage").unwrap().as_array().unwrap();
-    let positions = store.positions();
+    let positions = store.positions().unwrap();
     assert_eq!(
         positions.len(),
         expected_positions.len(),
@@ -203,7 +204,7 @@ fn assert_native_state(store: &dyn Store, expected: &Value, index: usize) {
         );
     }
     let expected_fetched = expected.get("fetched").unwrap().as_object().unwrap();
-    let fetched = store.fetched_leverage();
+    let fetched = store.fetched_leverage().unwrap();
     assert_eq!(
         fetched.keys().collect::<Vec<_>>(),
         expected_fetched.keys().collect::<Vec<_>>(),
@@ -359,12 +360,12 @@ fn margin_fetch_effects_match_live_source() {
             "MARGIN source notification count {index}"
         );
         assert_eq!(
-            store.positions().len(),
+            store.positions().unwrap().len(),
             usize::from(index != 6),
             "MARGIN independent position count {index}"
         );
         assert_eq!(
-            store.fetched_leverage().len(),
+            store.fetched_leverage().unwrap().len(),
             expected_fetched[index],
             "MARGIN independent fetched count {index}"
         );
@@ -422,7 +423,7 @@ fn margin_fetch_effects_match_live_source() {
             .map(|error| json!({"name":error.name,"message":error.message,"code":error.code.as_ref().map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())}));
         wire_results.push((
             numeric(
-                json!({"calls":venue.calls.get(),"notifications":count.get(),"events":*venue.events.borrow(),"state":json!({"fetched":*store.fetched_leverage(),"leverage":store.positions().iter().map(|p|p.leverage).collect::<Vec<_>>()}),"thrown":thrown})
+                json!({"calls":venue.calls.get(),"notifications":count.get(),"events":*venue.events.borrow(),"state":json!({"fetched":store.fetched_leverage().unwrap(),"leverage":store.positions().unwrap().iter().map(|p|p.leverage).collect::<Vec<_>>()}),"thrown":thrown})
             ),
             numeric(
                 json!({"calls":row["calls"],"notifications":row["notifications"],"events":row["events"],"state":row["state"],"thrown":row["thrown"]})
@@ -476,18 +477,19 @@ fn margin_cleanup_restores_native_numeric_key_order() {
     // Independent expectations guard native values before consulting source/wire projections.
     assert_eq!(venue.calls.get(), 1, "MARGIN cleanup native fetch count");
     assert_eq!(
-        store.positions().len(),
+        store.positions().unwrap().len(),
         0,
         "MARGIN cleanup native position count"
     );
     assert_eq!(
-        store.fetched_leverage().len(),
+        store.fetched_leverage().unwrap().len(),
         2,
         "MARGIN cleanup native fetched count"
     );
     assert_eq!(
         store
             .fetched_leverage()
+            .unwrap()
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
@@ -495,7 +497,7 @@ fn margin_cleanup_restores_native_numeric_key_order() {
         "MARGIN cleanup native fetched key order"
     );
     for (key, buy, sell) in [("42", 21.0_f64, 23.0_f64), ("OTHER", 7.0_f64, 8.0_f64)] {
-        let fetched = store.fetched_leverage();
+        let fetched = store.fetched_leverage().unwrap();
         let actual = &fetched[key];
         assert_eq!(
             actual.buy_leverage.to_bits(),
@@ -552,7 +554,7 @@ fn dropped_margin_fetch_retains_unowned_store_state_and_reports_cancellation() {
     let (venue, runtime, store) = setup(json!({}), true);
     let unpolled = handle_active_margin_symbol_change(&venue, true, Some("BTC"));
     drop(unpolled);
-    assert!(store.fetched_leverage().is_empty());
+    assert!(store.fetched_leverage().unwrap().is_empty());
     assert!(runtime.exceptions.borrow().is_empty());
     let mut future = Box::pin(handle_active_margin_symbol_change(
         &venue,
@@ -565,8 +567,11 @@ fn dropped_margin_fetch_retains_unowned_store_state_and_reports_cancellation() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
-    assert_eq!(store.fetched_leverage()["BTC"].is_fetching, Some(true));
-    let mut fetched = store.fetched_leverage().clone();
+    assert_eq!(
+        store.fetched_leverage().unwrap()["BTC"].is_fetching,
+        Some(true)
+    );
+    let mut fetched = store.fetched_leverage().unwrap().clone();
     fetched.insert("OTHER".into(), leverage(7.0, 8.0));
     store
         .update(
@@ -579,11 +584,11 @@ fn dropped_margin_fetch_retains_unowned_store_state_and_reports_cancellation() {
         .unwrap();
     drop(future);
     assert!(
-        store.fetched_leverage().contains_key("BTC"),
+        store.fetched_leverage().unwrap().contains_key("BTC"),
         "MARGIN cancellation retains marker without request identity"
     );
     assert_eq!(
-        store.fetched_leverage()["OTHER"].buy_leverage,
+        store.fetched_leverage().unwrap()["OTHER"].buy_leverage,
         7.0,
         "MARGIN cancellation retains concurrent symbol"
     );
@@ -609,7 +614,7 @@ fn dropped_margin_fetch_keeps_a_published_result() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
-    let mut fetched = store.fetched_leverage().clone();
+    let mut fetched = store.fetched_leverage().unwrap().clone();
     fetched.insert("BTC".into(), leverage(17.0, 19.0));
     store
         .update(
@@ -622,7 +627,7 @@ fn dropped_margin_fetch_keeps_a_published_result() {
         .unwrap();
     drop(future);
     assert_eq!(
-        store.fetched_leverage()["BTC"].buy_leverage,
+        store.fetched_leverage().unwrap()["BTC"].buy_leverage,
         17.0,
         "MARGIN cancellation preserves published result"
     );
@@ -664,7 +669,11 @@ fn dropping_old_margin_fetch_does_not_clear_restarted_fetch_marker() {
     assert_eq!(venue.calls.get(), 2, "MARGIN restart performs second fetch");
     drop(old);
     assert_eq!(
-        store.fetched_leverage().get("BTC").map(|v| v.is_fetching),
+        store
+            .fetched_leverage()
+            .unwrap()
+            .get("BTC")
+            .map(|v| v.is_fetching),
         Some(Some(true)),
         "MARGIN old cancellation preserves restarted marker"
     );
