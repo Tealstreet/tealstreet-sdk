@@ -360,3 +360,11 @@ Production private dispatch remains in sockets::PrivateProtocol; public book
 subscriptions remain in ws_public::MexcPublicSocket. The assembly oracle now
 covers only its seven live exchange-body groups (61 source cases). Manifest
 rows cite those live owners and retain explicit coverage findings.
+
+The constructed ticker corpus in `tests/exchange_trait.rs` covers 160 cases / 480 frames with every numeric alias, distinct fallback values and per-market contract sizes. Source Date parsing and native local-time conversion use the explicit UTC host profile.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.

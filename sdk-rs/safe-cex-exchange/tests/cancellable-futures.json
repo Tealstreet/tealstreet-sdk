@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "226 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "227 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1582,9 +1582,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "d589312884765506d724b83781b1902dfa628300468bd4054c84fddec5673f51",
+      "producer_sha256": "94d8e4e82e5c05ea0caf21b440d1ccb0d3175cb6d93e51410945c34699278ab9",
       "classification": "no-owned-latch",
-      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced. Reviewed native emitter forwarding and error-code materialization within the existing factory: all async/socket/worker setup boundaries and task ownership remain unchanged. Reviewed synchronous emitter removal: live function-alias getters run outside listener borrows; a successful filter commits the captured rows, while a getter throw preserves its side effects and propagates. Existing async boundaries and lifecycle ownership are unchanged. Reviewed Raw(Js) facade: the synchronous emitAndLogError callback passes the original Js instead of eager Error/JSON projection. All twelve async/await boundaries and existing task, socket, worker-RPC and provider ownership are unchanged."
+      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced. Reviewed native emitter forwarding and error-code materialization within the existing factory: all async/socket/worker setup boundaries and task ownership remain unchanged. Reviewed synchronous emitter removal: live function-alias getters run outside listener borrows; a successful filter commits the captured rows, while a getter throw preserves its side effects and propagates. Existing async boundaries and lifecycle ownership are unchanged. Reviewed Raw(Js) facade: the synchronous emitAndLogError callback passes the original Js instead of eager Error/JSON projection. All twelve async/await boundaries and existing task, socket, worker-RPC and provider ownership are unchanged. Async facade review: fallible snapshot/order/position preparation runs inside its existing eager Promise body. Only owned arguments and weak socket context are newly captured; public/disposed snapshot exits precede tries coercion. No new latch or registry."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::js_remote_signer",
@@ -2988,6 +2988,16 @@
       "classification": "delegated",
       "delegate": "src/exchange.rs::Exchange::fetch_and_set_private_snapshot",
       "reason": "Weak WS bridge resolves the concrete venue then delegates the snapshot; it owns no second task or resync latch."
+    },
+    {
+      "owner": "src/js_runtime/globals.rs::resolve_promise",
+      "boundaries": [
+        "async-block"
+      ],
+      "producer_sha256": "3281225f36ba1c41a6fa78d30c1ea44767a3ae3dfc159fed230b8a011d8f1928",
+      "classification": "delegated",
+      "delegate": "src/js_runtime/jobs.rs::Jobs::spawn / OwnedTasks driver",
+      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup."
     }
   ]
 }
