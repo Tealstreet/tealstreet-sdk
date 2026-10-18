@@ -1670,3 +1670,164 @@ fn normal_worker_dispose_still_stops_at_the_source_handler_throw() {
         "SESSION native context policy must not change normal source dispose failure ordering"
     );
 }
+
+#[test]
+fn config_and_fixture_carriers_reach_real_listener_without_legacy_validation() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/worker_bootstrap_oracle.mjs"
+        ))
+        .arg("--config-carriers")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "CONFIG-CARRIER source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let tokens = [
+        "-0", "-0.0", "0", "1e400", "-1e400", "1e-400", "-1e-400", "1.25", "1e3", "-1e-4000",
+    ];
+    assert_eq!(source["tokens"], json!(tokens));
+    assert_eq!(source["bits"].as_array().unwrap().len(), 10);
+    let host = Host::new();
+    let module = WorkerModule::new(host.clone());
+    let _session = module.start(host.clone(), false);
+    let listener = host.state.listener.borrow().clone().unwrap();
+    let seen = Rc::new(RefCell::new(Vec::<Js>::new()));
+    let received = seen.clone();
+    host.state
+        .config
+        .borrow_mut()
+        .push(Rc::new(move |cfg| received.borrow_mut().push(cfg.clone())));
+    let mut configs = 0;
+    let mut dumps = 0;
+    let mut bit_checks = 0;
+    for (index, token) in tokens.iter().enumerate() {
+        let number = safe_cex_num::number_from_string(token);
+        let expected_bits =
+            u64::from_str_radix(source["bits"][index].as_str().unwrap(), 16).unwrap();
+        assert_eq!(number.to_bits(), expected_bits);
+        let msg = Js::object(vec![
+            ("value", Js::Number(number)),
+            ("own", Js::Undefined),
+            ("text", Js::String(vec![0xd800, 88, 0xdc00].into())),
+        ]);
+        let frame = Js::object(vec![("atMs", Js::Number(number)), ("msg", msg.clone())]);
+        let fixture = Js::object(vec![
+            ("version", Js::Number(2.0)),
+            ("recordedAtMs", Js::Number(number)),
+            ("durationMs", Js::Number(number)),
+            ("frames", Js::array(vec![frame.clone()])),
+        ]);
+        let perf = Js::object(vec![
+            ("mode", Js::str("external-mode")),
+            ("intervalMs", Js::Number(number)),
+            ("fixture", fixture.clone()),
+            ("loop", Js::Null),
+        ]);
+        let tick = Js::object(vec![("bybit", Js::Number(number))]);
+        let cfg = Js::object(vec![
+            ("tickIntervalMultipliers", tick.clone()),
+            ("perfFixture", perf.clone()),
+        ]);
+        finish(
+            &host,
+            listener(Js::object(vec![
+                ("op", Js::str("__workerConfig")),
+                ("data", cfg.clone()),
+            ])),
+        )
+        .unwrap();
+        assert!(
+            seen.borrow().last().unwrap().strict_equals(&cfg),
+            "CONFIG-CARRIER callback identity"
+        );
+        let inputs = host.state.knob_inputs.borrow();
+        assert_eq!(inputs.len(), (index + 1) * 2);
+        assert!(
+            inputs[index * 2].1.strict_equals(&tick),
+            "CONFIG-CARRIER tick identity"
+        );
+        assert!(
+            inputs[index * 2 + 1].1.strict_equals(&perf),
+            "CONFIG-CARRIER perf argument identity"
+        );
+        drop(inputs);
+        configs += 1;
+        *host.state.fixture_dump.borrow_mut() = Some(fixture.clone());
+        finish(
+            &host,
+            listener(Js::object(vec![("op", Js::str("__perfFixtureDump"))])),
+        )
+        .unwrap();
+        let posts = host.state.native_posts.borrow();
+        assert_eq!(posts.len(), index + 1);
+        let actual = posts[index].get("data").unwrap();
+        assert!(
+            actual.strict_equals(&fixture),
+            "CONFIG-CARRIER returned fixture identity"
+        );
+        let actual_frame = actual.get("frames").unwrap().get("0").unwrap();
+        assert!(actual_frame.strict_equals(&frame));
+        let actual_msg = actual_frame.get("msg").unwrap();
+        assert!(actual_msg.strict_equals(&msg));
+        assert!(actual_msg.has_own("own"));
+        assert!(actual_msg.get("own").unwrap().is_undefined());
+        assert_eq!(
+            actual_msg.get("text").unwrap().as_str().unwrap().as_ref(),
+            &[0xd800, 88, 0xdc00]
+        );
+        for value in [
+            tick.get("bybit").unwrap(),
+            perf.get("intervalMs").unwrap(),
+            actual.get("recordedAtMs").unwrap(),
+            actual.get("durationMs").unwrap(),
+            actual_frame.get("atMs").unwrap(),
+            actual_msg.get("value").unwrap(),
+        ] {
+            assert!(
+                matches!(value, Js::Number(n) if n.to_bits() == expected_bits),
+                "CONFIG-CARRIER native bits {token}"
+            );
+            bit_checks += 1;
+        }
+        dumps += 1;
+    }
+    for value in [
+        Js::Null,
+        Js::Bool(true),
+        Js::str("untyped"),
+        Js::array(vec![]),
+        Js::object(vec![
+            ("mode", Js::str("off")),
+            ("fixture", Js::Null),
+            ("intervalMs", Js::Null),
+            ("loop", Js::Null),
+        ]),
+    ] {
+        let before = host.state.knob_inputs.borrow().len();
+        finish(
+            &host,
+            listener(Js::object(vec![
+                ("op", Js::str("__workerConfig")),
+                ("data", Js::object(vec![("perfFixture", value.clone())])),
+            ])),
+        )
+        .unwrap();
+        let inputs = host.state.knob_inputs.borrow();
+        assert_eq!(inputs.len(), before + 1);
+        assert!(
+            inputs.last().unwrap().1.strict_equals(&value),
+            "CONFIG-CARRIER native non-record forwarding"
+        );
+        configs += 1;
+    }
+    assert_eq!(bit_checks, 60);
+    assert_eq!(configs, 15);
+    assert_eq!(dumps, 10);
+    assert_eq!(source["configs"], json!(configs));
+    assert_eq!(source["dumps"], json!(dumps));
+}

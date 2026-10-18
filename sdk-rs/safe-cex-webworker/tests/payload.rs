@@ -89,56 +89,9 @@ fn operation_sets_equal_live_typescript_unions() {
 }
 
 #[test]
-fn fixture_version_accepts_only_the_typescript_numeric_literal() {
-    let source = include_str!("../../../packages/safe-cex/src/webworker/StoreWorkerPayload.ts");
-    let version = source
-        .split("export interface PerfFixture {")
-        .nth(1)
-        .unwrap()
-        .split("version:")
-        .nth(1)
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .trim();
-    let expected: Value =
-        serde_json::from_str(version).expect("fixture version must remain a numeric literal");
-    assert_eq!(serde_json::to_value(PerfFixtureVersion).unwrap(), expected);
-
-    for value in [json!(1), json!(1.0)] {
-        let version: PerfFixtureVersion = serde_json::from_value(value).unwrap();
-        assert_eq!(serde_json::to_value(version).unwrap(), json!(1));
-    }
-    for value in [
-        json!(0),
-        json!(2),
-        json!(-1),
-        json!(1.5),
-        json!(256),
-        json!("1"),
-        json!(null),
-        json!(true),
-        json!([]),
-    ] {
-        assert!(
-            serde_json::from_value::<PerfFixture>(
-                json!({"version":value,"recordedAtMs":0,"durationMs":0,"frames":[]})
-            )
-            .is_err()
-        );
-        assert!(
-            serde_json::from_value::<PerfFixtureVersion>(value.clone()).is_err(),
-            "{value}"
-        );
-    }
-}
-
-#[test]
 fn public_deserialize_cannot_bypass_string_literal_boundary() {
     use serde::Deserialize;
     assert!(StoreWorkerIncomingOp::deserialize(json!({"init":null})).is_err());
     assert!(StoreWorkerOutgoingOp::deserialize(json!({"store":null})).is_err());
     assert!(StoreWorkerOp::deserialize(json!({"init":null})).is_err());
-    assert!(PerfFixtureMode::deserialize(json!({"off":null})).is_err());
 }

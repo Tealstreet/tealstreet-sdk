@@ -23,14 +23,6 @@ reject_sequence!(
     StoreWorkerPayload,
     json!(["store", null, null])
 );
-reject_sequence!(worker_config, WorkerConfig, json!([null, null, null]));
-reject_sequence!(fixture_frame, PerfFixtureFrame, json!([0,{"op":"store"}]));
-reject_sequence!(fixture, PerfFixture, json!([1, 0, 100, []]));
-reject_sequence!(
-    fixture_config,
-    PerfFixtureConfig,
-    json!(["off", null, null, null])
-);
 reject_sequence!(
     app_settings,
     AppSettingsWorkerType,
@@ -71,16 +63,6 @@ fn valid_records_keep_their_object_shape_and_nested_arrays_are_rejected() {
     assert!(
         serde_json::from_value::<AppSettingsWorkerType>(
             json!({"placeOrder":["mark_price","last_price"]})
-        )
-        .is_err()
-    );
-    assert!(
-        serde_json::from_value::<WorkerConfig>(json!({"perfFixture":["off",null,null,null]}))
-            .is_err()
-    );
-    assert!(
-        serde_json::from_value::<PerfFixture>(
-            json!({"version":1,"recordedAtMs":0,"durationMs":0,"frames":[[0,{}]]})
         )
         .is_err()
     );
@@ -154,20 +136,6 @@ fn optional_nonnullable_fields_reject_null_without_erasing_payload_null() {
         accepted.push("StoreWorkerPayload.instanceId");
     }
     for key in [
-        "tickIntervalMultipliers",
-        "perfFixture",
-        "wsDiagnosticsEnabled",
-    ] {
-        if WorkerConfig::deserialize(json!({key:null})).is_ok() {
-            accepted.push(key);
-        }
-    }
-    for key in ["fixture", "intervalMs", "loop"] {
-        if PerfFixtureConfig::deserialize(json!({"mode":"off",key:null})).is_ok() {
-            accepted.push(key);
-        }
-    }
-    for key in [
         "defaultTPTriggerType",
         "defaultSLTriggerType",
         "fetchLeverageOnMarginSymbolChange",
@@ -191,8 +159,6 @@ fn optional_nonnullable_fields_reject_null_without_erasing_payload_null() {
     );
     let payload = StoreWorkerPayload::deserialize(json!({"op":"store","data":null})).unwrap();
     assert_eq!(payload.data, Some(serde_json::Value::Null));
-    assert!(WorkerConfig::deserialize(json!({})).is_ok());
-    assert!(PerfFixtureConfig::deserialize(json!({"mode":"off"})).is_ok());
     assert!(SerializableWorkerError::deserialize(json!({"message":"m","name":"Error"})).is_ok());
     assert!(
         ExchangeMetadataWorkerType::deserialize(
