@@ -257,7 +257,18 @@ pub fn normalize_position_mode(value: Option<&Value>) -> Result<PositionMode, Js
 }
 
 pub fn normalize_margin_type(value: Option<&Value>) -> Result<MarginType, JsCoercionError> {
-    let parsed = to_number(value, Some(f64::NAN))?;
+    let value = value
+        .cloned()
+        .map(safe_cex_types::retained_json::RetainedJsonInput::from);
+    normalize_retained_margin_type(value.as_ref())
+}
+
+pub(crate) fn normalize_retained_margin_type(
+    value: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+) -> Result<MarginType, JsCoercionError> {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let parsed = safe_cex_num::js_retained_parse_float(value)?;
     if parsed.is_finite() {
         return Ok(if parsed == 1.0 {
             MarginType::Isolated
@@ -265,18 +276,25 @@ pub fn normalize_margin_type(value: Option<&Value>) -> Result<MarginType, JsCoer
             MarginType::Cross
         });
     }
-    let normalized = if js_truthy(value) {
-        js_string(value)?.to_lowercase()
+    let units = if value.is_some_and(Input::is_truthy) {
+        safe_cex_types::js_coercion::js_retained_string_utf16(value.unwrap())?
     } else {
-        String::new()
+        Vec::new()
     };
-    Ok(
-        if normalized.contains("isolated") || normalized.contains("isolate") {
-            MarginType::Isolated
-        } else {
-            MarginType::Cross
-        },
-    )
+    let normalized = Js::utf16(&units)
+        .call_method("toLowerCase", vec![])
+        .expect("primitive String lowercase cannot throw");
+    let includes = |needle| {
+        normalized
+            .call_method("includes", vec![Js::str(needle)])
+            .expect("primitive String includes cannot throw")
+            .truthy()
+    };
+    Ok(if includes("isolated") || includes("isolate") {
+        MarginType::Isolated
+    } else {
+        MarginType::Cross
+    })
 }
 
 pub fn normalize_plan_order_type(

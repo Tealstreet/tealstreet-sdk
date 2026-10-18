@@ -174,9 +174,9 @@ note = ""
 ts = "normalizeMarginType"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-mexc/src/utils.rs::normalize_margin_type"
+rs = [ "safe-cex-venue-mexc/src/utils.rs::normalize_margin_type", "safe-cex-venue-mexc/src/utils.rs::normalize_retained_margin_type" ]
 status = "ported"
-note = ""
+note = "Rename: normalizeMarginType -> safe-cex-venue-mexc/src/utils.rs::normalize_retained_margin_type. One retained-data implementation serves info readers and the existing finite JSON wire adapter. Native String lowercase/includes preserve UTF-16, including unrelated unpaired surrogates; isolated/isolate matching remains exact. The constructed leverage regression compares ten actual-source cases, native own-undefined and Number bits before any wire projection."
 
 [[symbol]]
 ts = "normalizePosition"

@@ -1,6 +1,5 @@
 //! Pure selection of REST versus recent private-stream position records.
-use crate::numeric::{FiniteNumberInput, to_finite_number};
-use safe_cex_types::Position;
+use safe_cex_types::{Position, retained_json::RetainedJsonInput as Input};
 use std::collections::{HashMap, HashSet};
 
 // ts: BitgetPrivateWebsocket.getPositionPayloadUpdateTime
@@ -8,18 +7,14 @@ pub fn get_position_payload_update_time(position: &Position) -> Option<f64> {
     let raw = position.info.as_ref().and_then(|info| {
         ["uTime", "updatedTime", "utime", "cTime", "createdTime"]
             .into_iter()
-            .find_map(|key| info.get(key).filter(|v| !v.is_null()))
+            .find_map(|key| info.get(key).filter(|v| !v.is_nullish()))
     });
-    let text = raw
-        .and_then(|value| value.as_text())
-        .and_then(|units| String::from_utf16(units).ok());
-    let input = match raw.and_then(|value| value.as_f64()) {
-        Some(value) => FiniteNumberInput::Number(value),
-        None => text
-            .as_deref()
-            .map_or(FiniteNumberInput::Other, FiniteNumberInput::String),
+    let parsed = match raw? {
+        value @ Input::Text(_) => safe_cex_num::js_retained_parse_float(Some(value))
+            .expect("primitive text parseFloat cannot throw"),
+        value @ (Input::Float(_) | Input::Lexeme(_)) => value.as_f64()?,
+        _ => return None,
     };
-    let parsed = to_finite_number(input, f64::NAN);
     parsed.is_finite().then_some(parsed)
 }
 

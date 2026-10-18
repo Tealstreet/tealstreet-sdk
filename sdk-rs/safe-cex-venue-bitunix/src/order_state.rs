@@ -60,7 +60,7 @@ pub fn get_tpsl_leg_snapshot(
             {
                 if get_tpsl_raw_order_id(candidate)? == raw_id
                     || position_id
-                        .filter(|v| !v.is_null())
+                        .filter(|v| !v.is_nullish())
                         .zip(info(candidate, "positionId"))
                         .is_some_and(|(a, b)| strict_equal(a, b))
                 {

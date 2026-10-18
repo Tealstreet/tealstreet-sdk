@@ -1,7 +1,7 @@
 //! Pure symbol settings selection used by the MEXC leverage override.
 use crate::{
     exchange_helpers::{find_open_position, native_position_id},
-    utils::to_number,
+    utils::{normalize_retained_margin_type, to_number},
 };
 use safe_cex_num::{JsCoercionError, JsJsonValue, js_number_string};
 use safe_cex_types::{
@@ -66,30 +66,10 @@ pub fn derive_symbol_config(
     let margin = position
         .and_then(|p| p.info.as_ref())
         .and_then(|info| info.get("openType"))
-        .filter(|v| !v.is_null())
+        .filter(|v| !v.is_nullish())
         .or(margin.as_ref());
     Ok(MexcSymbolConfig {
-        margin_type: {
-            let parsed = safe_cex_num::js_retained_parse_float(margin)?;
-            if parsed.is_finite() {
-                if parsed == 1.0 {
-                    MarginType::Isolated
-                } else {
-                    MarginType::Cross
-                }
-            } else if safe_cex_num::js_retained_string(
-                margin.filter(|value| value.is_truthy()).or(Some(
-                    &safe_cex_types::retained_json::RetainedJsonInput::Text(Vec::new()),
-                )),
-            )?
-            .to_lowercase()
-            .contains("isolat")
-            {
-                MarginType::Isolated
-            } else {
-                MarginType::Cross
-            }
-        },
+        margin_type: normalize_retained_margin_type(margin)?,
         buy_leverage: match long {
             Some(p) => leverage(p.leverage, existing.map_or(20.0, |c| c.buy_leverage))?,
             None => one_way

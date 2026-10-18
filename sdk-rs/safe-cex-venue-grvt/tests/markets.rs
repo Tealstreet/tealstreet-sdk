@@ -1,6 +1,5 @@
 #![cfg(not(target_arch = "wasm32"))]
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::js_value_as_f64;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::Market;
 use safe_cex_venue_grvt::markets::{fetch_markets, refresh_markets};
@@ -121,13 +120,14 @@ fn native_market(actual: &Market, expected: &Value) {
             assert!(info.get(key).is_none(), "MARKETS absent JSON-data {key}");
         } else if expected["info"][key].get("bits").is_some() {
             number(
-                js_value_as_f64(&info[key]).unwrap(),
+                info.get(key).unwrap().as_f64().unwrap(),
                 &expected["info"][key],
                 &format!("MARKETS native info {key}"),
             );
         } else {
             assert_eq!(
-                info[key], expected["info"][key],
+                info.get(key).unwrap(),
+                &expected["info"][key].clone().into(),
                 "MARKETS native info {key}"
             );
         }
@@ -438,8 +438,19 @@ fn refresh_markets_native_store_and_effect_order() {
                 "REFRESH native stored id"
             );
             assert_eq!(
-                market.info.as_ref().unwrap().get("ih").unwrap(),
-                expected["info"]["ih"],
+                market
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("ih")
+                    .unwrap()
+                    .as_text()
+                    .unwrap(),
+                expected["info"]["ih"]
+                    .as_str()
+                    .unwrap()
+                    .encode_utf16()
+                    .collect::<Vec<_>>(),
                 "REFRESH native replaced signing hash"
             );
             assert_eq!(
@@ -471,8 +482,19 @@ fn refresh_markets_native_store_and_effect_order() {
                         "REFRESH native added id"
                     );
                     assert_eq!(
-                        market.info.as_ref().unwrap().get("ih").unwrap(),
-                        expected["info"]["ih"],
+                        market
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("ih")
+                            .unwrap()
+                            .as_text()
+                            .unwrap(),
+                        expected["info"]["ih"]
+                            .as_str()
+                            .unwrap()
+                            .encode_utf16()
+                            .collect::<Vec<_>>(),
                         "REFRESH native added hash"
                     );
                 }
@@ -487,8 +509,19 @@ fn refresh_markets_native_store_and_effect_order() {
                         "REFRESH native removed id"
                     );
                     assert_eq!(
-                        market.info.as_ref().unwrap().get("ih").unwrap(),
-                        expected["info"]["ih"],
+                        market
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("ih")
+                            .unwrap()
+                            .as_text()
+                            .unwrap(),
+                        expected["info"]["ih"]
+                            .as_str()
+                            .unwrap()
+                            .encode_utf16()
+                            .collect::<Vec<_>>(),
                         "REFRESH native removed hash"
                     );
                 }

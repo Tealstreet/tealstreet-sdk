@@ -381,3 +381,9 @@ with `--target nodejs`, then run `tests/reporting-worker-host.mjs <generated-js>
 with `SAFE_CEX_TYPESCRIPT_PATH` set. Its six cases compare actual source readers
 and worker registration to the native browser post and UI structured clone.
 A cloned Error keeps its message but resets a custom name, matching JavaScript.
+
+Margin normalization has one retained-data implementation shared by info consumers
+and the finite wire adapter. Native String lowercase/includes retain UTF-16 and
+the source isolated/isolate alternatives. The constructed leverage regression
+compares ten maintained-source cases while preserving own undefined, NaN and
+signed zero in the original Position.info; no info JSON view is constructed.

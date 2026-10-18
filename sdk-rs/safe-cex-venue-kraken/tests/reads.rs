@@ -3,7 +3,7 @@ mod cardinality;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
     JsJsonValue,
-    numeric_ingress::{JsNumberInput, js_from_value, js_value_as_f64},
+    numeric_ingress::{JsNumberInput, js_from_value},
 };
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::{

@@ -188,9 +188,13 @@ fn private_position_frame_updates_position_id_then_fetches_authoritative_positio
         initial.contracts, 0.0,
         "position frame itself only patches the ID"
     );
-    assert_eq!(
-        initial.info.unwrap().get("positionId").unwrap(),
-        "frame-position"
+    assert!(
+        initial
+            .info
+            .unwrap()
+            .get("positionId")
+            .unwrap()
+            .text_equals("frame-position")
     );
     assert_eq!(s.requests(POSITIONS), 0);
     s.advance(999.0);
@@ -242,4 +246,68 @@ fn private_balance_frame_debounces_rest_balance_and_retains_positions() {
     assert_eq!(s.store.positions().to_vec(), positions);
     assert!(s.store.loaded().balance && s.store.loaded().positions);
     assert_eq!(s.fills.get(), 0);
+}
+
+#[test]
+fn private_position_frame_preserves_retained_store_info() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let s = Scene::new();
+    let mut positions = s.store.positions().to_vec();
+    let position = positions
+        .iter_mut()
+        .find(|position| position.side == PositionSide::Long)
+        .unwrap();
+    let field = |key: &str, value| (key.encode_utf16().collect(), value);
+    position.info = Some(Input::Object(vec![
+        field("unreadNaN", Input::Float(f64::NAN)),
+        field("negativeZero", Input::Float(-0.0)),
+        field("ownUndefined", Input::Undefined),
+        field("unreadText", Input::Text(vec![0xD800, 0xDC00, 0xDC00])),
+    ]))
+    .into();
+    Store::update(
+        s.store.as_ref(),
+        StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    s.frame(
+        "position",
+        json!({"event":"UPDATE","positionId":"retained-position","symbol":"BTCUSDT","side":"LONG"}),
+    );
+    let positions = s.store.positions();
+    let position = positions
+        .iter()
+        .find(|position| position.side == PositionSide::Long)
+        .unwrap();
+    let info = position.info.as_ref().unwrap();
+    assert!(
+        info.get("positionId")
+            .unwrap()
+            .text_equals("retained-position")
+    );
+    assert!(info.get("unreadNaN").unwrap().as_f64().unwrap().is_nan());
+    assert_eq!(
+        info.get("negativeZero")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert!(matches!(info.get("ownUndefined"), Some(Input::Undefined)));
+    assert_eq!(
+        info.get("unreadText").unwrap().as_text().unwrap(),
+        &[0xD800, 0xDC00, 0xDC00]
+    );
+    assert_eq!(info.as_object().unwrap().len(), 5);
+    assert_eq!(
+        s.requests(POSITIONS),
+        0,
+        "native metadata patch precedes debounce"
+    );
 }

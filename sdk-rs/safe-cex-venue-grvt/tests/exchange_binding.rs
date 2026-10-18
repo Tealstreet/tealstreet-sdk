@@ -192,7 +192,15 @@ fn fetch_markets_uses_public_gateway_and_keeps_signing_metadata() {
     assert_eq!(market.id, "BTC_USDT_Perp");
     assert_eq!(market.symbol, SYMBOL);
     assert_eq!(market.precision.amount, 0.001);
-    assert_eq!(market.info.as_ref().unwrap().get("ih").unwrap(), "0x030501");
+    assert!(
+        market
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("0x030501")
+    );
     assert_eq!(
         h.http.calls("/lite/v1/all_instruments")[0].base_url,
         "https://market-data.grvt.io"
@@ -228,7 +236,7 @@ fn refresh_markets_replaces_metadata_when_instrument_ids_are_unchanged() {
     );
     assert_eq!(market.limits.amount.max, 77.0);
     let info = market.info.as_ref().unwrap();
-    assert_eq!(info.get("ih").unwrap(), "0x030502");
+    assert!(info.get("ih").unwrap().text_equals("0x030502"));
     assert_eq!(
         info.get("bd").unwrap().as_f64().unwrap().to_bits(),
         4.0_f64.to_bits()
@@ -257,15 +265,25 @@ fn refresh_markets_returns_added_and_removed_instruments_through_trait() {
     let changes = h.drive(h.venue().refresh_markets()).unwrap();
     assert_eq!(changes.added.len(), 1);
     assert_eq!(changes.added[0].id, "ETH_USDT_Perp");
-    assert_eq!(
-        changes.added[0].info.as_ref().unwrap().get("ih").unwrap(),
-        "0x030503"
+    assert!(
+        changes.added[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("0x030503")
     );
     assert_eq!(changes.removed.len(), 1);
     assert_eq!(changes.removed[0].id, "BTC_USDT_Perp");
-    assert_eq!(
-        changes.removed[0].info.as_ref().unwrap().get("ih").unwrap(),
-        "0x030501"
+    assert!(
+        changes.removed[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("0x030501")
     );
     assert_eq!(h.store.markets().as_ref(), changes.added.as_slice());
 }
