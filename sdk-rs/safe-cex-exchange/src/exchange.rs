@@ -1433,25 +1433,18 @@ impl BaseExchange {
         if self.settings.client_order_id_rule.is_none() {
             return Ok(ClientOrderLookup::NotFound { definitive: false });
         }
-        if let Some(order) = self
-            .store
-            .orders()
-            .iter()
-            .find(|order| order.symbol == symbol && order_carries_client_order_id(order, id))
-            .cloned()
-        {
-            return Ok(ClientOrderLookup::Found(Box::new(order)));
+        for order in self.store.orders().iter() {
+            if order.symbol == symbol && order_carries_client_order_id(order, id)? {
+                return Ok(ClientOrderLookup::Found(Box::new(order.clone())));
+            }
         }
         let orders = venue.fetch_orders(Some(vec![symbol.into()])).await?;
-        Ok(
-            match orders
-                .into_iter()
-                .find(|order| order.symbol == symbol && order_carries_client_order_id(order, id))
-            {
-                Some(order) => ClientOrderLookup::Found(Box::new(order)),
-                None => ClientOrderLookup::NotFound { definitive: false },
-            },
-        )
+        for order in orders {
+            if order.symbol == symbol && order_carries_client_order_id(&order, id)? {
+                return Ok(ClientOrderLookup::Found(Box::new(order)));
+            }
+        }
+        Ok(ClientOrderLookup::NotFound { definitive: false })
     }
 
     pub async fn cancel_symbol_orders<E: Exchange + ?Sized>(

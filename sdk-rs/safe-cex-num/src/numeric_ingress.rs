@@ -6,7 +6,6 @@
 use serde::de::{
     self, DeserializeOwned, DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor,
 };
-use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize};
 mod eligibility;
 mod output;
@@ -23,17 +22,7 @@ use serde_json::{Error, Value};
 #[derive(Debug, Clone)]
 pub struct JsNumberInput(Node);
 
-#[derive(Debug, Clone)]
-enum Node {
-    Undefined,
-    Null,
-    Bool(bool),
-    Text(String),
-    Lexeme(String),
-    Float(f64),
-    Array(Vec<JsNumberInput>),
-    Object(Vec<(String, JsNumberInput)>),
-}
+use safe_cex_types::retained_json::RetainedJsonInput as Node;
 
 /// Decode JSON with ECMAScript Number values before any typed Serde buffering.
 pub fn js_from_str<T: DeserializeOwned + Serialize + JsNumberOutput>(
@@ -72,33 +61,7 @@ pub fn js_value_as_f64(value: &Value) -> Option<f64> {
 // typed adapter use exactly the same lexeme and native-event visitor.
 impl JsNumberInput {
     fn from_retained(input: RetainedJsonInput) -> Result<Self, Error> {
-        Ok(Self(match input {
-            RetainedJsonInput::Undefined => Node::Undefined,
-            RetainedJsonInput::Null => Node::Null,
-            RetainedJsonInput::Bool(value) => Node::Bool(value),
-            RetainedJsonInput::Text(value) => {
-                Node::Text(String::from_utf16(&value).map_err(de::Error::custom)?)
-            }
-            RetainedJsonInput::Lexeme(value) => Node::Lexeme(value),
-            RetainedJsonInput::Float(value) => Node::Float(value),
-            RetainedJsonInput::Array(values) => Node::Array(
-                values
-                    .into_iter()
-                    .map(Self::from_retained)
-                    .collect::<Result<_, _>>()?,
-            ),
-            RetainedJsonInput::Object(values) => Node::Object(
-                values
-                    .into_iter()
-                    .map(|(key, value)| {
-                        Ok((
-                            String::from_utf16(&key).map_err(de::Error::custom)?,
-                            Self::from_retained(value)?,
-                        ))
-                    })
-                    .collect::<Result<_, Error>>()?,
-            ),
-        }))
+        Ok(Self(input))
     }
 }
 
@@ -109,7 +72,7 @@ impl<'de> Deserialize<'de> for JsNumberInput {
     }
 }
 
-struct Array(std::vec::IntoIter<JsNumberInput>);
+struct Array(std::vec::IntoIter<Node>);
 impl<'de> SeqAccess<'de> for Array {
     type Error = Error;
     fn next_element_seed<T: DeserializeSeed<'de>>(
@@ -118,7 +81,7 @@ impl<'de> SeqAccess<'de> for Array {
     ) -> Result<Option<T::Value>, Error> {
         self.0
             .next()
-            .map(|value| seed.deserialize(JsNumberDeserializer(value.0)))
+            .map(|value| seed.deserialize(JsNumberDeserializer(value)))
             .transpose()
     }
     fn size_hint(&self) -> Option<usize> {
@@ -126,8 +89,8 @@ impl<'de> SeqAccess<'de> for Array {
     }
 }
 struct Object {
-    entries: std::vec::IntoIter<(String, JsNumberInput)>,
-    value: Option<JsNumberInput>,
+    entries: std::vec::IntoIter<(Vec<u16>, Node)>,
+    value: Option<Node>,
 }
 impl<'de> MapAccess<'de> for Object {
     type Error = Error;
@@ -138,7 +101,12 @@ impl<'de> MapAccess<'de> for Object {
         match self.entries.next() {
             Some((key, value)) => {
                 self.value = Some(value);
-                seed.deserialize(key.into_deserializer()).map(Some)
+                seed.deserialize(
+                    String::from_utf16(&key)
+                        .map_err(de::Error::custom)?
+                        .into_deserializer(),
+                )
+                .map(Some)
             }
             None => Ok(None),
         }
@@ -147,8 +115,7 @@ impl<'de> MapAccess<'de> for Object {
         seed.deserialize(JsNumberDeserializer(
             self.value
                 .take()
-                .ok_or_else(|| de::Error::custom("value requested before key"))?
-                .0,
+                .ok_or_else(|| de::Error::custom("value requested before key"))?,
         ))
     }
     fn size_hint(&self) -> Option<usize> {
@@ -173,7 +140,9 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         match self.0 {
             Node::Undefined | Node::Null => visitor.visit_unit(),
             Node::Bool(value) => visitor.visit_bool(value),
-            Node::Text(value) => visitor.visit_string(value),
+            Node::Text(value) => {
+                visitor.visit_string(String::from_utf16(&value).map_err(de::Error::custom)?)
+            }
             Node::Float(value) => visitor.visit_f64(value),
             Node::Lexeme(value) => {
                 let number: f64 = value.parse().map_err(de::Error::custom)?;
@@ -223,6 +192,9 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
+        if name == safe_cex_types::retained_json::RETAINED_NATIVE {
+            return JsNumberDeserializer(self.0.into_native_payload()).deserialize_seq(visitor);
+        }
         if name == safe_cex_types::model_field::MODEL_FIELD && matches!(self.0, Node::Undefined) {
             visitor.visit_unit()
         } else {
@@ -248,7 +220,11 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match self.0 {
-            Node::Text(value) => visitor.visit_enum(value.into_deserializer()),
+            Node::Text(value) => visitor.visit_enum(
+                String::from_utf16(&value)
+                    .map_err(de::Error::custom)?
+                    .into_deserializer(),
+            ),
             Node::Object(entries) => {
                 if entries.len() != 1 {
                     return Err(de::Error::custom(
@@ -298,7 +274,7 @@ impl JsNumberInput {
         let result = decode(JsNumberDeserializer(self.0))?;
         result.check_number_output();
         let actual = output::capture(&result)?;
-        check_numbers(&expected, &actual, "$")?;
+        check_numbers(&expected.0, &actual.0, "$")?;
         Ok(result)
     }
 }
@@ -309,24 +285,24 @@ fn as_number(node: &Node) -> Option<f64> {
         _ => None,
     }
 }
-fn check_numbers(
-    expected: &JsNumberInput,
-    actual: &JsNumberInput,
-    path: &str,
-) -> Result<(), Error> {
-    if let Some(number) = as_number(&expected.0) {
-        let actual = as_number(&actual.0).ok_or_else(|| <Error as de::Error>::custom(format!("numeric ingress lost Number at {path}; serde_json::Value buffers are forbidden; use JsNumberInput")))?;
+fn check_numbers(expected: &Node, actual: &Node, path: &str) -> Result<(), Error> {
+    if let Some(number) = as_number(expected) {
+        let actual = as_number(actual).ok_or_else(|| <Error as de::Error>::custom(format!("numeric ingress lost Number at {path}; serde_json::Value buffers are forbidden; use JsNumberInput")))?;
         if number.to_bits() != actual.to_bits() {
             return Err(de::Error::custom(format!(
                 "numeric ingress changed Number bits at {path}"
             )));
         }
     } else {
-        match (&expected.0, &actual.0) {
+        match (expected, actual) {
             (Node::Object(expected), Node::Object(actual)) => {
                 for (key, expected) in expected {
                     if let Some((_, actual)) = actual.iter().find(|(name, _)| name == key) {
-                        check_numbers(expected, actual, &format!("{path}.{key}"))?;
+                        check_numbers(
+                            expected,
+                            actual,
+                            &format!("{path}.{}", String::from_utf16_lossy(key)),
+                        )?;
                     }
                 }
             }
@@ -342,57 +318,13 @@ fn check_numbers(
 }
 impl Serialize for JsNumberInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match &self.0 {
-            Node::Undefined => {
-                serializer.serialize_unit_struct(safe_cex_types::model_field::UNDEFINED)
-            }
-            Node::Null => serializer.serialize_unit(),
-            Node::Bool(v) => serializer.serialize_bool(*v),
-            Node::Text(v) => serializer.serialize_str(v),
-            Node::Float(v) => serializer.serialize_f64(*v),
-            Node::Lexeme(v) => {
-                serializer.serialize_f64(v.parse().map_err(serde::ser::Error::custom)?)
-            }
-            Node::Array(values) => {
-                let mut seq = serializer.serialize_seq(Some(values.len()))?;
-                for v in values {
-                    seq.serialize_element(v)?;
-                }
-                seq.end()
-            }
-            Node::Object(values) => {
-                let mut map = serializer.serialize_map(Some(values.len()))?;
-                for (key, value) in values {
-                    map.serialize_entry(key, value)?;
-                }
-                map.end()
-            }
-        }
+        self.0.serialize(serializer)
     }
 }
 
 /// Capture serialized native values before JSON would project non-finite numbers.
 pub fn js_capture_output<T: Serialize + ?Sized>(value: &T) -> Result<RetainedJsonInput, Error> {
-    fn retained(value: JsNumberInput) -> RetainedJsonInput {
-        match value.0 {
-            Node::Undefined => RetainedJsonInput::Undefined,
-            Node::Null => RetainedJsonInput::Null,
-            Node::Bool(value) => RetainedJsonInput::Bool(value),
-            Node::Text(value) => RetainedJsonInput::Text(value.encode_utf16().collect()),
-            Node::Lexeme(value) => RetainedJsonInput::Lexeme(value),
-            Node::Float(value) => RetainedJsonInput::Float(value),
-            Node::Array(values) => {
-                RetainedJsonInput::Array(values.into_iter().map(retained).collect())
-            }
-            Node::Object(values) => RetainedJsonInput::Object(
-                values
-                    .into_iter()
-                    .map(|(key, value)| (key.encode_utf16().collect(), retained(value)))
-                    .collect(),
-            ),
-        }
-    }
-    output::capture(value).map(retained)
+    output::capture(value).map(|value| value.0)
 }
 
 #[cfg(test)]
@@ -402,7 +334,7 @@ mod output_controls {
         let input: JsNumberInput = serde_json::from_str(raw)?;
         let expected = input.clone();
         let value = T::deserialize(JsNumberDeserializer(input.0))?;
-        check_numbers(&expected, &output::capture(&value)?, "$")?;
+        check_numbers(&expected.0, &output::capture(&value)?.0, "$")?;
         Ok(value)
     }
     #[derive(Debug, Deserialize, Serialize)]

@@ -637,7 +637,11 @@ impl StoreState {
         true
     }
     fn strip_ticker_info(mut ticker: Ticker) -> Ticker {
-        if ticker.info.as_ref().is_some_and(json_truthy) {
+        if ticker
+            .info
+            .as_ref()
+            .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
+        {
             ticker.info = None;
         }
         ticker
@@ -1215,8 +1219,32 @@ impl StoreState {
         if let Some(packed) = packed {
             changed |= self.apply_packed_ticker_deltas_in_place(&packed);
         }
-        let normalized = serde_json::to_value(&changes).unwrap();
-        changed |= !normalized.as_object().unwrap().is_empty();
+        changed |= [
+            changes.latency.is_some(),
+            changes.balance.is_some(),
+            changes.markets.is_some(),
+            changes.tickers.is_some(),
+            changes.orders.is_some(),
+            changes.stark_config.is_some(),
+            changes.zk_link_config.is_some(),
+            changes.user_data.is_some(),
+            changes.positions.is_some(),
+            changes.displayed_positions.is_some(),
+            changes.displayed_margin.is_some(),
+            changes.orders_risk.is_some(),
+            changes.active_chasers.is_some(),
+            changes.active_twaps.is_some(),
+            changes.loaded.is_some(),
+            changes.options.is_some(),
+            changes.update_ids.is_some(),
+            changes.message_handler_stats.is_some(),
+            changes.request_stats.is_some(),
+            changes.fetched_leverage.is_some(),
+            changes.socket_health.is_some(),
+            changes.ticker_deltas.is_some(),
+        ]
+        .into_iter()
+        .any(|present| present);
         if !changed {
             return;
         }
@@ -1361,15 +1389,7 @@ fn copy_ticker(target: &mut Ticker, source: &Ticker) {
         target.info.clone_from(&source.info);
     }
 }
-fn json_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().is_some_and(|v| v != 0.0 && !v.is_nan()),
-        Value::String(s) => !s.is_empty(),
-        _ => true,
-    }
-}
+
 fn checked_index(index: f64, len: usize) -> usize {
     assert!(
         index.is_finite() && index.fract() == 0.0 && index >= 0.0 && index < len as f64,

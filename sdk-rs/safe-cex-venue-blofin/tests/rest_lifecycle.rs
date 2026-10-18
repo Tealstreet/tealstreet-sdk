@@ -1382,3 +1382,6 @@ fn audit_validation_interleaves_sum_coercion() {
         "BLOFIN-AUDIT validation native report"
     );
 }
+
+#[path = "support/retained_market_info.rs"]
+mod retained_market_info;
