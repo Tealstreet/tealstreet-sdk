@@ -20293,5 +20293,819 @@
       ]
     },
     "evidence": "Reviewed public_depth_snapshot and its live caller AsterDEXPublicWebsocket.handleDepthSnapshot: raw JSON levels enter the actual production function. Native observations inspect each price/amount/cumulative-amount total as binary64 bits before owner serialization, with unsorted/fractional/hex positives and malformed, empty, crossed, zero, nonfinite and non-string refusal cases. Expectations are independently authored from source arithmetic, not captured production output. tests/live_ws_helpers.rs::public_depth_snapshot_matches_typescript supplies the maintained-source counterpart. No host, transport, or callback is stubbed by this contract."
+  },
+  "safe_cex_venue_asterdex::virtual_clock::ClockOperation": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/virtual_clock.rs; exact current compiler-selected APIs reviewed. Future::poll consumes the existing typed Pin/Context and forwards the shared typed completion. It accepts no serialized input and does not parse or construct a decoded model. The clock lifecycle witnesses exercise pending, completion, shared waiters and cancellation. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::future::future::Future",
+          "name": "poll",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "resolved_path": {
+                    "path": "core::pin::Pin",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": true,
+                                "type": {
+                                  "generic": "Self"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "cx",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::task::wake::Context",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'_"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::task::poll::Poll",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Output",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Future::poll consumes the existing typed Pin/Context and forwards the shared typed completion. It accepts no serialized input and does not parse or construct a decoded model. The clock lifecycle witnesses exercise pending, completion, shared waiters and cancellation."
+      }
+    ]
+  },
+  "safe_cex_venue_asterdex::virtual_clock::AsterDEXVirtualClock": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/virtual_clock.rs; exact current compiler-selected APIs reviewed. new binds the existing typed owner, realm and API-version enum to the clock lifecycle. The constructed native clock/venue witnesses exercise dispatch, timestamp synchronization and cancellation. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "owner",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::exchange::BaseExchange",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "http",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_venue_asterdex::virtual_clock::ClockHttp",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "new binds the existing typed owner, realm and API-version enum to the clock lifecycle. The constructed native clock/venue witnesses exercise dispatch, timestamp synchronization and cancellation."
+      }
+    ]
+  },
+  "safe_cex_venue_asterdex::virtual_clock::AsterDEXClockRealm": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/virtual_clock.rs; exact current compiler-selected APIs reviewed. new retains the typed BaseExchange and ClockHttp capability. Native clock lifecycle witnesses exercise the constructed realm and its real shared completion ownership. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "owner",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::exchange::BaseExchange",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "http",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_venue_asterdex::virtual_clock::ClockHttp",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "new retains the typed BaseExchange and ClockHttp capability. Native clock lifecycle witnesses exercise the constructed realm and its real shared completion ownership."
+      }
+    ]
+  },
+  "safe_cex_venue_asterdex::private_repairs::PrivateRepairs": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/private_repairs.rs; exact current compiler-selected APIs reviewed. new retains the typed BaseExchange and RepairParent capability and initializes empty timer/flight state. The real private repair and constructed socket witnesses exercise the resulting state and callbacks. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "owner",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::exchange::BaseExchange",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "parent",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_venue_asterdex::private_repairs::RepairParent",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "new retains the typed BaseExchange and RepairParent capability and initializes empty timer/flight state. The real private repair and constructed socket witnesses exercise the resulting state and callbacks."
+      }
+    ]
+  },
+  "safe_cex_venue_asterdex::listen_key::ListenKeyLifecycle": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/listen_key.rs; exact current compiler-selected APIs reviewed. new retains the typed BaseExchange and ListenKeyParent capability and initializes empty key/timer state. The live listen-key and constructed private socket witnesses exercise requests, retries and disposal. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "owner",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::exchange::BaseExchange",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "parent",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_venue_asterdex::listen_key::ListenKeyParent",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "new retains the typed BaseExchange and ListenKeyParent capability and initializes empty key/timer state. The live listen-key and constructed private socket witnesses exercise requests, retries and disposal."
+      }
+    ]
+  },
+  "safe_cex_venue_asterdex::order_execution::PreparedExecutionOrder": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/order_execution.rs; exact current compiler-selected APIs reviewed. The three From implementations copy an already validated ExecutionOrder or prepared carrier; they introduce no raw input decoder. The public placement decoder remains strict. Native owned/borrowed/prepared conversion and constructed order witnesses check preserved values and presence. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_venue_asterdex::order_execution::ExecutionOrder",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "The three From implementations copy an already validated ExecutionOrder or prepared carrier; they introduce no raw input decoder. The public placement decoder remains strict. Native owned/borrowed/prepared conversion and constructed order witnesses check preserved values and presence."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_asterdex::order_execution::ExecutionOrder",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "The three From implementations copy an already validated ExecutionOrder or prepared carrier; they introduce no raw input decoder. The public placement decoder remains strict. Native owned/borrowed/prepared conversion and constructed order witnesses check preserved values and presence."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_venue_asterdex::order_execution::PreparedExecutionOrder",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "The three From implementations copy an already validated ExecutionOrder or prepared carrier; they introduce no raw input decoder. The public placement decoder remains strict. Native owned/borrowed/prepared conversion and constructed order witnesses check preserved values and presence."
+      }
+    ]
+  },
+  "safe_cex_venue_asterdex::order_execution::OrderExecution": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/order_execution.rs; exact current compiler-selected APIs reviewed. new retains the typed BaseExchange, three existing RestAdapter capabilities and the API-version enum. The source order execution and constructed signed-client witnesses execute this constructor and its produced owner. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "owner",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::exchange::BaseExchange",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "primary",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::provider::RestAdapter",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "secondary",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::provider::RestAdapter",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "public",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::provider::RestAdapter",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "version",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::types::AsterDEXAPIVersion",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "new retains the typed BaseExchange, three existing RestAdapter capabilities and the API-version enum. The source order execution and constructed signed-client witnesses execute this constructor and its produced owner."
+      }
+    ]
+  },
+  "safe_cex_venue_asterdex::exchange_runtime::AsterDEXExchange": {
+    "shape": "typed",
+    "evidence": "safe-cex-venue-asterdex/src/exchange_runtime.rs; exact current compiler-selected APIs reviewed. new receives the already typed AssemblyHost and its native values. The real constructed Aster binding executes this ported constructor through the production Host, API factories and socket constructors. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              [
+                "store",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "H"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "new receives the already typed AssemblyHost and its native values. The real constructed Aster binding executes this ported constructor through the production Host, API factories and socket constructors."
+      }
+    ]
   }
 }
