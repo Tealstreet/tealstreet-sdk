@@ -748,3 +748,46 @@ fn retained_standalone_info(selected: usize) {
         venue.dispose().unwrap();
     }
 }
+
+#[test]
+fn discarded_ticker_call_still_sends_its_request() {
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/eager-operation-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["requests"].as_array().unwrap().len(), 1);
+    let (venue, rt, store, wire) = support::fixture_with(false);
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/futures/market/tickers".into(),
+        json!({"code":0,"data":[]}),
+    );
+    let pending = venue.fetch_tickers();
+    drop(pending);
+    rt.pump();
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.url == "/api/v1/futures/market/tickers")
+            .count(),
+        1,
+        "a discarded source Promise still sends its ticker request"
+    );
+    assert_eq!(
+        safe_cex_store::Store::tickers(store.as_ref())
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(requests);
+    venue.dispose().unwrap();
+}

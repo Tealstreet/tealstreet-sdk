@@ -574,6 +574,15 @@ impl BlofinExchangeHost for ExchangeHost {
     fn sleep(&self, _: f64) -> rl::LifecycleFuture<'_, (), String> {
         Box::pin(async { Ok(()) })
     }
+    fn start_order_read(
+        &self,
+        _: &Self::Base,
+        body: rl::LifecycleFuture<'static, Vec<Order>, String>,
+    ) -> rl::LifecycleFuture<'static, Vec<Order>, String> {
+        // This bounded assembly fixture drives all children through ready(); the
+        // production scheduling contract is tested with NativeHost separately.
+        body
+    }
     fn init_external_public_data(&self, _: &Self::Base) -> rl::LifecycleFuture<'_, bool, String> {
         Box::pin(async { Ok(false) })
     }

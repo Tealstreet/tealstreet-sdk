@@ -3,6 +3,7 @@ use super::{
     text,
 };
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_typed};
+use safe_cex_transport::query::{QueryArrayFormat, QueryKeyOrder, QueryProfile, render_query};
 use safe_cex_types::{QueryValue, object_map::JsObjectMap};
 use std::rc::Rc;
 pub(super) fn table<T: serde::Serialize>(entries: &[(&str, T)], key: &Js, inverse: bool) -> R<V> {
@@ -79,7 +80,6 @@ fn query_value(value: &Js) -> R<QueryValue> {
     })
 }
 pub(super) fn query(value: &Js, sorted: bool) -> R<Js> {
-    use safe_cex_transport::query::*;
     let profile = QueryProfile {
         arrays: QueryArrayFormat::Indexed,
         encode: true,

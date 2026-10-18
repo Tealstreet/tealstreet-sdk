@@ -1109,3 +1109,6 @@ fn fetch_markets_retains_opaque_native_info_before_normalization() {
     assert_eq!(markets[0].symbol, "BTCUSDT");
     assert!(sent(&calls(&wire), "GET", DETAIL));
 }
+
+#[path = "support/eager_wrappers.rs"]
+mod eager_wrappers;
