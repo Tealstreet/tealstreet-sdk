@@ -176,7 +176,7 @@ async fn submit(
     let pending = owner.get("pending")?;
     let mut group = pending.call_method("get", vec![key.clone()])?;
     if !group.is_nullish() && group.get("running")?.truthy() {
-        return await_js(group.get("running")?).await;
+        return await_js(&rt.exchange_runtime(), group.get("running")?).await;
     }
     if !group.truthy() {
         let creates = payloads.call_method(
@@ -197,7 +197,7 @@ async fn submit(
     }
     let running = owner.call_method("runGroup", vec![group.clone(), on_accepted])?;
     group.set("running", running.clone())?;
-    let outcome = await_js(running).await;
+    let outcome = await_js(&rt.exchange_runtime(), running).await;
     let result = (|| -> Result<Js, Thrown> {
         match outcome {
             Ok(responses) => {
@@ -237,7 +237,7 @@ async fn submit_one(rt: &Rt, owner: Js, create: Js, brand: Js) -> Result<Js, Thr
     while !owner.call_method("isDisposed", vec![])?.truthy() {
         if create.get("uncertain")?.truthy() {
             let boundary = owner.call_method("getPublicationBoundary", vec![])?;
-            let found = match await_js(owner.call_method("findOrder", vec![payload.clone()])?).await
+            let found = match await_js(&rt.exchange_runtime(), owner.call_method("findOrder", vec![payload.clone()])?).await
             {
                 Ok(found) => found,
                 Err(error) => return Err(unknown(rt, payload, error.value)?),
@@ -324,7 +324,7 @@ async fn submit_one(rt: &Rt, owner: Js, create: Js, brand: Js) -> Result<Js, Thr
         let boundary = owner.call_method("getPublicationBoundary", vec![])?;
         let attempt: Result<Option<Js>, Thrown> = async {
             let xhr = owner.call_method("getClient", vec![])?;
-            let response = await_js(xhr.call_method("post", vec![endpoint(rt, "CREATE_ORDER")?, payload.clone(),
+            let response = await_js(&rt.exchange_runtime(), xhr.call_method("post", vec![endpoint(rt, "CREATE_ORDER")?, payload.clone(),
                 Js::object(vec![("axios-retry", Js::object(vec![("retries", Js::Number(0.0))]))])])?).await?;
             let data = response.get("data")?;
             let http_status = response.get("status")?;

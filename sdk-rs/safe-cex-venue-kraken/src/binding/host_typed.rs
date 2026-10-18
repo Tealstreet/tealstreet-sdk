@@ -25,7 +25,7 @@ pub(crate) fn call_future(
     args: Vec<Js>,
 ) -> Result<ExchangeFuture<'static, Js>, ExchangeError> {
     let promise = rt.this.call_method(member, args).map_err(ex)?;
-    Ok(Box::pin(async move { await_js(promise).await.map_err(ex) }))
+    { let pending = await_js(&rt.exchange_runtime(), promise); Ok(Box::pin(async move { pending.await.map_err(ex) })) }
 }
 
 fn store(rt: &Rt) -> Result<Js, ExchangeError> {
@@ -387,7 +387,7 @@ impl SpotCancelHost for Rt {
             )
             .map_err(ex)?;
         Ok(Box::pin(async move {
-            await_js(promise).await.map_err(ex)?;
+            await_js(&self.exchange_runtime(), promise).await.map_err(ex)?;
             Ok(())
         }))
     }

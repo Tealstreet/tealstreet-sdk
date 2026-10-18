@@ -27,7 +27,7 @@ impl Host {
         super::members::select(&rt, n)
     }
     pub(super) fn future(&self, v: Js) -> JsFuture<'static> {
-        Box::pin(async move { await_js(v).await })
+        { let rt = self.rt(); Box::pin(async move { await_js(&rt?.exchange_runtime(), v).await }) }
     }
     pub(super) fn operation(&self, n: &str, a: Vec<Js>) -> Result<JsFuture<'static>, Thrown> {
         Ok(self.future(self.selected(n)?.call(Js::Undefined, a)?))

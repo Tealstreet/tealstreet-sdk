@@ -247,7 +247,7 @@ impl BreakoutpropExchange {
                 .map_err(Into::into)
         });
         Box::pin(async move {
-            let value = await_js(call?).await.map_err(ExchangeError::from)?;
+            let value = await_js(&self.base.runtime, call?).await.map_err(ExchangeError::from)?;
             decoded(&value)
         })
     }
@@ -265,7 +265,7 @@ impl BreakoutpropExchange {
                 .map_err(Into::into)
         });
         Box::pin(async move {
-            await_js(call?).await.map_err(ExchangeError::from)?;
+            await_js(&self.base.runtime, call?).await.map_err(ExchangeError::from)?;
             Ok(())
         })
     }
@@ -283,7 +283,7 @@ impl BreakoutpropExchange {
                 .map_err(Into::into)
         });
         Box::pin(async move {
-            let value = await_js(call?).await.map_err(ExchangeError::from)?;
+            let value = await_js(&self.base.runtime, call?).await.map_err(ExchangeError::from)?;
             // The source returns its single opaque orderId; the shared native ABI
             // returns a list of scalar IDs. Preserve numeric/string ID spelling.
             let ids = if value.is_array() {

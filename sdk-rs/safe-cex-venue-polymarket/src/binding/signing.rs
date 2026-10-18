@@ -107,6 +107,7 @@ pub(crate) fn install(g: &Js, weak: Weak<Shared>) {
                     let clock = rt.shared.runtime.clone();
                     let random = clock.clone();
                     let builder = Builder {
+                        runtime: rt.exchange_runtime(),
                         signer,
                         chain,
                         signature_type,
@@ -281,6 +282,7 @@ fn order_fields() -> serde_json::Value {
     ])
 }
 struct Builder {
+    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
     signer: Js,
     chain: Js,
     signature_type: Js,
@@ -290,6 +292,7 @@ struct Builder {
 }
 async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Result<Js, Thrown> {
     let Builder {
+        runtime,
         signer,
         chain,
         signature_type,
@@ -300,7 +303,7 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
     if version.to_number()? != 2. {
         return Err(error("Only CLOB V2 orders are bound"));
     }
-    let address = await_js(signer.call_method("getAddress", vec![])?).await?;
+    let address = await_js(&runtime, signer.call_method("getAddress", vec![])?).await?;
     let maker = if funder.is_undefined() {
         address.clone()
     } else {
@@ -366,7 +369,7 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
         let domain_hash = domain_hash(contract, chain.to_number()? as u64)?;
         types["TypedDataSign"] = serde_json::json!([{"name":"contents","type":"Order"},{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"},{"name":"salt","type":"bytes32"}]);
         let value = serde_json::json!({"contents":message,"name":"DepositWallet","version":"1","chainId":chain.to_number()?,"verifyingContract":message["signer"],"salt":ZERO});
-        let inner = await_js(signer.call_method(
+        let inner = await_js(&runtime, signer.call_method(
             "_signTypedData",
             vec![from_json(&domain), from_json(&types), from_json(&value)],
         )?)
@@ -380,7 +383,7 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
         )
     } else {
         text(
-            &await_js(signer.call_method(
+            &await_js(&runtime, signer.call_method(
                 "_signTypedData",
                 vec![from_json(&domain), from_json(&types), from_json(&message)],
             )?)
@@ -509,6 +512,7 @@ mod tests {
             ]);
             let now = corpus["now"].as_f64().unwrap();
             let builder = Builder {
+                runtime: rt.exchange_runtime(),
                 signer,
                 chain: Js::Number(137.),
                 signature_type: from_json(&params["signatureType"]),

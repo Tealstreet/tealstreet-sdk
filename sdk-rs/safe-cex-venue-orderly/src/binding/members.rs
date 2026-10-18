@@ -140,7 +140,7 @@ pub(super) fn invoke(
                 let options = to_typed(&arg(0))?;
                 let mode = crate::utils::get_position_side_for_order(&options, || async {
                     let promise = receiver.call_method("getPositionMode", vec![])?;
-                    to_typed(&safe_cex_exchange::js_runtime::promise::await_js(promise).await?)
+                    to_typed(&safe_cex_exchange::js_runtime::promise::await_js(&host.rt()?.exchange_runtime(), promise).await?)
                 })
                 .await?;
                 Ok(v(mode.map_or(Js::Undefined, Js::str)))

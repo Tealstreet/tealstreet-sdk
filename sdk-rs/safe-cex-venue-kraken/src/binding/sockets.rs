@@ -1153,7 +1153,7 @@ impl RefreshHost for SocketHost {
             .parent()?
             .call_method("fetchOrders", vec![])
             .map_err(ex)?;
-        Ok(async move { await_js(promise).await.map(Rc::new).map_err(ex) })
+        Ok(async move { await_js(&self.exchange_runtime(), promise).await.map(Rc::new).map_err(ex) })
     }
     fn current_loaded(&self) -> Result<Rc<Js>, ExchangeError> {
         self.store()?.get("loaded").map(Rc::new).map_err(ex)
@@ -1186,7 +1186,7 @@ impl RefreshHost for SocketHost {
             .call_method("fetchAndSetOrders", vec![])
             .map_err(ex)?;
         Ok(async move {
-            await_js(promise).await.map_err(ex)?;
+            await_js(&self.exchange_runtime(), promise).await.map_err(ex)?;
             Ok(())
         })
     }

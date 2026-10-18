@@ -208,7 +208,7 @@ async fn observe(shared: &Rc<ScopeShared<()>>, method: &str, label: &str) -> Val
         .unwrap();
     trace.borrow_mut().push(json!("returned"));
     let output =
-        match await_js(pending).await {
+        match await_js(&(shared.runtime.clone() as Rc<dyn ExchangeRuntime>), pending).await {
             Ok(value) if value.is_undefined() => json!({"undefined":true}),
             Ok(value) => {
                 let length = value.get("length").unwrap().as_f64().unwrap() as usize;
@@ -311,7 +311,7 @@ fn series_module_roots_survive_export_removal_and_release_with_scope() {
                     vec![Js::array(vec![Js::Number(1.0)]), callback, Js::Number(0.0)],
                 )
                 .expect("SERIES_MODULE bootstrap and post-publication roots");
-            let result = await_js(pending).await.unwrap();
+            let result = await_js(&(shared.runtime.clone() as Rc<dyn ExchangeRuntime>), pending).await.unwrap();
             assert_eq!(
                 result.get("0").unwrap().as_f64().unwrap().to_bits(),
                 (-0.0_f64).to_bits()

@@ -78,7 +78,7 @@ fn get_data(
         .and_then(|c| c.call_method(verb, args))
         .map_err(ex)?;
     Ok(async move {
-        let response = await_js(promise).await.map_err(ex)?;
+        let response = await_js(&rt.exchange_runtime(), promise).await.map_err(ex)?;
         number_input(&response.get("data").map_err(ex)?).map_err(ex)
     })
 }
@@ -522,7 +522,7 @@ pub(crate) fn dispatch(
                 let balance = || {
                     let promise = rt.this.call_method("fetchBalance", vec![]).map_err(ex)?;
                     Ok(async move {
-                        let value = await_js(promise).await.map_err(ex)?;
+                        let value = await_js(&rt.exchange_runtime(), promise).await.map_err(ex)?;
                         to_typed::<safe_cex_types::Balance>(&value).map_err(ex)
                     })
                 };
@@ -842,7 +842,7 @@ pub(crate) fn dispatch(
                     move || {
                         let promise = this.call_method("authenticate", vec![]).map_err(ex)?;
                         Ok(async move {
-                            await_js(promise).await.map_err(ex)?;
+                            await_js(&rt.exchange_runtime(), promise).await.map_err(ex)?;
                             Ok(())
                         })
                     },
@@ -875,7 +875,7 @@ pub(crate) fn dispatch(
                             .call_method("fetchWsToken", vec![])
                             .map_err(ex)?;
                         Ok(async move {
-                            let token = await_js(promise).await.map_err(ex)?;
+                            let token = await_js(&rt.exchange_runtime(), promise).await.map_err(ex)?;
                             js_json(&token).map_err(ex)
                         })
                     },

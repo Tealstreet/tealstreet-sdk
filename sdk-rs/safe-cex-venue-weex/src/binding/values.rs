@@ -26,7 +26,7 @@ pub(super) fn invoke_async<'a>(
     args: Vec<Js>,
 ) -> Result<JsFuture<'a>, Thrown> {
     let pending = function.call(Js::Undefined, args)?;
-    Ok(Box::pin(await_js(pending)))
+    Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
 }
 pub(super) fn units(value: &Js) -> Result<Vec<u16>, Thrown> {
     Ok(value.to_js_string()?.to_vec())

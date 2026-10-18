@@ -16,7 +16,7 @@ use std::rc::Rc;
 /// `(await this.xhr.get(endpoint)).data` as a JSON object; a non-object body is empty.
 async fn get_data(rt: Rt, endpoint: String) -> Result<Map<String, Value>, Thrown> {
     let xhr = rt.this.get("xhr")?;
-    let response = await_js(xhr.call_method("get", vec![Js::str(&endpoint)])?).await?;
+    let response = await_js(&rt.exchange_runtime(), xhr.call_method("get", vec![Js::str(&endpoint)])?).await?;
     Ok(match to_json(&response.get("data")?)? {
         Value::Object(map) => map,
         _ => Map::new(),
@@ -107,7 +107,7 @@ pub(crate) fn validate_account(rt: &Rt) -> Result<Js, Thrown> {
                 .this
                 .call_method("fetchBalance", vec![])
                 .map_err(value_error)?;
-            Ok(async move { await_js(pending).await.map_err(value_error) })
+            Ok(async move { await_js(&rt.exchange_runtime(), pending).await.map_err(value_error) })
         };
         let emit =
             move |message: Option<Value>| emit(&emit_rt, message.as_ref()).map_err(value_error);
@@ -132,7 +132,7 @@ pub(crate) fn fetch_balance(rt: &Rt) -> Result<Js, Thrown> {
     let raw = this.call_method("fetchRawBalance", vec![])?;
     let (disposed, stored, format) = (this.clone(), this.clone(), this);
     let body = account_readers::fetch_balance(
-        move || await_js(raw),
+        move || await_js(&rt.exchange_runtime(), raw),
         move || disposed.get("isDisposed").is_ok_and(|v| v.truthy()),
         move || stored.get("store").and_then(|s| s.get("balance")),
         move |raw| Ok(format.call_method("formatBalance", vec![raw])),

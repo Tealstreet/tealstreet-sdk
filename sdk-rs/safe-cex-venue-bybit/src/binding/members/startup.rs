@@ -36,7 +36,7 @@ pub(crate) fn fetch_api_key_info(rt: &Rt) -> Result<Js, Thrown> {
                     .get("xhr")
                     .and_then(|xhr| xhr.call_method("get", vec![Js::str(endpoint)]));
                 async move {
-                    let response = await_js(request.map_err(to_error)?)
+                    let response = await_js(&rt.exchange_runtime(), request.map_err(to_error)?)
                         .await
                         .map_err(to_error)?;
                     Ok(Rc::new(
@@ -110,7 +110,7 @@ pub(crate) fn fetch_and_cache_api_key_info(rt: &Rt) -> Result<Js, Thrown> {
                     .this
                     .call_method("fetchApiKeyInfo", vec![])
                     .map_err(to_error)?;
-                Ok(async move { await_js(pending).await.map(|_| ()).map_err(to_error) })
+                Ok(async move { await_js(&rt.exchange_runtime(), pending).await.map(|_| ()).map_err(to_error) })
             },
             cached,
             || update_batch_limit_based_on_vip_level(&rt).map_err(to_error),

@@ -250,7 +250,7 @@ async fn connect(rt: &Rt) -> Result<Js, Thrown> {
         return Ok(Js::Undefined);
     }
     rt.this.set("connecting", Js::Bool(true))?;
-    let listen_key = match async { await_js(rt.call_path("fetchListenKey", vec![])?).await }.await {
+    let listen_key = match async { await_js(&rt.exchange_runtime(), rt.call_path("fetchListenKey", vec![])?).await }.await {
         Ok(key) => key,
         Err(error) => {
             let message = ops::add(
@@ -692,7 +692,7 @@ async fn execute_positions(rt: &Rt) -> Result<Js, Thrown> {
         .set("lastPositionFetchTime", global(rt, "Date.now", vec![])?)?;
     rt.this.set("hasPendingPositionEvents", Js::Bool(false))?;
     let _ = async {
-        let positions = await_js(rt.call_path("parent.fetchPositions", vec![])?).await?;
+        let positions = await_js(&rt.exchange_runtime(), rt.call_path("parent.fetchPositions", vec![])?).await?;
         if !flag(rt, "isDisposed")?
             && version.strict_equals(&rt.call_path("parent.getPositionStateVersion", vec![])?)
         {
@@ -709,7 +709,7 @@ async fn execute_positions(rt: &Rt) -> Result<Js, Thrown> {
     Ok(Js::Undefined)
 }
 async fn fetch_listen_key(rt: &Rt) -> Result<Js, Thrown> {
-    let reply = await_js(rt.call_path(
+    let reply = await_js(&rt.exchange_runtime(), rt.call_path(
         "parent.xhr.post",
         vec![rt.global("ENDPOINTS")?.get("LISTEN_KEY")?],
     )?)
@@ -728,7 +728,7 @@ async fn update_listen_key(rt: &Rt) -> Result<Js, Thrown> {
         return Ok(Js::Undefined);
     }
     let result = async {
-        await_js(rt.call_path(
+        await_js(&rt.exchange_runtime(), rt.call_path(
             "parent.xhr.put",
             vec![rt.global("ENDPOINTS")?.get("LISTEN_KEY")?],
         )?)
@@ -761,7 +761,7 @@ async fn fetch_orders(rt: &Rt) -> Result<Js, Thrown> {
         return Ok(Js::Undefined);
     }
     let _ = async {
-        let orders = await_js(rt.call_path("parent.fetchOrders", vec![])?).await?;
+        let orders = await_js(&rt.exchange_runtime(), rt.call_path("parent.fetchOrders", vec![])?).await?;
         if flag(rt, "isDisposed")? || rt.path("parent.ordersSnapshotStale")?.truthy() {
             return Ok(());
         }

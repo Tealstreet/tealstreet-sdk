@@ -247,7 +247,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         "fetchLegacyTransactionHistoryRows" => asynchronous(name, rt, |rt, a| {
             Box::pin(async move {
                 let query = history_query(&arg(&a, 0))?;
-                let adapter = JsRestAdapter::new(rt.this.get("xhr")?);
+                let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 match legacy_fills::fetch_legacy_transaction_history_rows(&adapter, &query).await {
                     Ok(values) => Ok(rows(values)),
                     Err(failure) => Err(adapter.thrown(failure)),
@@ -258,7 +258,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         "fetchTransactionHistoryRows" => asynchronous(name, rt, |rt, a| {
             Box::pin(async move {
                 let query = history_query(&arg(&a, 0))?;
-                let adapter = JsRestAdapter::new(rt.this.get("xhr")?);
+                let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 match history_fetch::fetch_transaction_history_rows(&adapter, &query).await {
                     Ok(values) => Ok(rows(values)),
                     Err(failure) => Err(adapter.thrown(failure)),
@@ -275,7 +275,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
                 } else {
                     opts
                 })?;
-                let adapter = JsRestAdapter::new(rt.this.get("xhr")?);
+                let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 let venue = venue(&rt)?;
                 let fills =
                     historical_fills::fetch_historical_fills(venue.as_ref(), &adapter, &opts)
@@ -288,7 +288,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         "fetchHistoricalTradesInternal" => asynchronous(name, rt, |rt, a| {
             Box::pin(async move {
                 let opts = to_typed(&arg(&a, 0))?;
-                let adapter = JsRestAdapter::new(rt.this.get("xhr")?);
+                let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 let venue = venue(&rt)?;
                 let trades = historical_fills::fetch_historical_trades_internal(
                     venue.as_ref(),
@@ -305,7 +305,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
             Box::pin(async move {
                 let endpoint = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
                 let page = number_option(&arg(&a, 1))?;
-                let adapter = JsRestAdapter::new(rt.this.get("xhr")?);
+                let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 match order_pages::fetch_orders_recursively(rt.base(), &adapter, &endpoint, page)
                     .await
                 {

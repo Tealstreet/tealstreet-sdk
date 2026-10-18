@@ -452,13 +452,13 @@ impl ReadHost for Rt {
         } else {
             xhr.call_method("get", vec![Js::str(endpoint)])?
         };
-        Ok(async move { Ok(h(await_js(promise).await?.get("data")?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?.get("data")?)) })
     }
     fn fetch_balance(
         &self,
     ) -> ReadResult<Self, impl Future<Output = ReadResult<Self, Handle<Self>>>> {
         let promise = self.this.call_method("fetchBalance", vec![])?;
-        Ok(async move { Ok(h(await_js(promise).await?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?)) })
     }
     fn update_balance(&self, patch: Handle<Self>) -> ReadResult<Self, ()> {
         self.this
@@ -684,7 +684,7 @@ impl TradingHost for Rt {
             Method::Put => "put",
         };
         let promise = xhr.call_method(verb, vec![Js::str(endpoint), (*body).clone()])?;
-        Ok(async move { Ok(h(await_js(promise).await?.get("data")?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?.get("data")?)) })
     }
     fn derive(&self, options: Vec<Handle<Self>>) -> ReadResult<Self, Handle<Self>> {
         let opts: Vec<safe_cex_types::PlaceOrderOpts> = options
@@ -720,7 +720,7 @@ impl TradingHost for Rt {
         let list = Js::array(orders.iter().map(|o| (**o).clone()).collect());
         let promise = self.this.call_method("cancelOrders", vec![list])?;
         Ok(async move {
-            await_js(promise).await?;
+            await_js(&self.exchange_runtime(), promise).await?;
             Ok(())
         })
     }
@@ -731,7 +731,7 @@ impl TradingHost for Rt {
         let promise = self
             .this
             .call_method("placeOrder", vec![(*options).clone()])?;
-        Ok(async move { Ok(h(await_js(promise).await?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?)) })
     }
     fn finite_number(&self, value: &Js) -> bool {
         value.as_f64().is_some_and(f64::is_finite)
@@ -757,7 +757,7 @@ impl TradingHost for Rt {
         &self,
     ) -> ReadResult<Self, impl Future<Output = ReadResult<Self, Handle<Self>>>> {
         let promise = self.this.call_method("fetchPositions", vec![])?;
-        Ok(async move { Ok(h(await_js(promise).await?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?)) })
     }
     // ts: `this.store.addOrUpdatePositions(positions)` — an upsert, not a replacement.
     fn add_positions(&self, positions: Handle<Self>) -> ReadResult<Self, ()> {
@@ -865,7 +865,7 @@ impl ApiHost for Rt {
         config: Handle<Self>,
     ) -> ReadResult<Self, impl Future<Output = ReadResult<Self, Handle<Self>>>> {
         let pending = client.call_method("request", vec![(*config).clone()])?;
-        Ok(async move { Ok(h(await_js(pending).await?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), pending).await?)) })
     }
     // ts: installTransportAdapter(xhr, options, exchange.name).
     fn install_transport(
@@ -930,7 +930,7 @@ impl ApiHost for Rt {
                     let promise = original.call(owner.clone(), a)?;
                     let state = state.clone();
                     Ok(spawn_body(&rt, async move {
-                        match await_js(promise).await {
+                        match await_js(&self.exchange_runtime(), promise).await {
                             Ok(v) => Ok(v),
                             Err(e) => {
                                 let own = state

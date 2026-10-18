@@ -313,7 +313,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                         "fetchAndSetPrivateSnapshotHelper" => snapshots::fetch_and_set_private_snapshot_helper(&body, owner, arg(&args, 0)).await,
                         "validateAccount" => {
                             let balance = match owner.call_method("fetchBalance", vec![]) {
-                                Ok(promise) => await_js(promise).await,
+                                Ok(promise) => await_js(&rt.exchange_runtime(), promise).await,
                                 Err(error) => Err(error),
                             };
                             match balance {
@@ -330,7 +330,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                             }
                         }
                         "fetchMarginAccountInfos" => {
-                            let balance = await_js(owner.call_method("fetchBalance", vec![])?).await?;
+                            let balance = await_js(&rt.exchange_runtime(), owner.call_method("fetchBalance", vec![])?).await?;
                             if !owner.get("isDisposed")?.truthy() {
                                 owner.get("store")?.call_method("update", vec![Js::object(vec![("balance", balance)])])?;
                             }
@@ -399,7 +399,7 @@ async fn place_orders(rt: &Rt, owner: Js, orders: Js, key_fn: Js) -> Result<Js, 
     let pending = owner.get("pendingOrderLists")?;
     let mut current = pending.call_method("get", vec![key.clone()])?;
     if !current.is_nullish() && current.get("running")?.truthy() {
-        return await_js(current.get("running")?).await;
+        return await_js(&rt.exchange_runtime(), current.get("running")?).await;
     }
     if !current.truthy() {
         current = Js::object(vec![("index", Js::Number(0.0)), ("ids", Js::array(vec![]))]);
@@ -413,7 +413,7 @@ async fn place_orders(rt: &Rt, owner: Js, orders: Js, key_fn: Js) -> Result<Js, 
             &orders.get("length")?,
         )? {
             let opts = orders.get_key(&body.get("index")?.to_js_string()?)?;
-            let ids = await_js(owner.call_method("placeOrder", vec![opts])?).await?;
+            let ids = await_js(&rt.exchange_runtime(), owner.call_method("placeOrder", vec![opts])?).await?;
             body.get("ids")?
                 .call_method("push", ids.iterable_values()?)?;
             body.set("index", Js::Number(body.get("index")?.to_number()? + 1.0))?;
@@ -421,7 +421,7 @@ async fn place_orders(rt: &Rt, owner: Js, orders: Js, key_fn: Js) -> Result<Js, 
         body.get("ids")
     }));
     current.set("running", running.clone())?;
-    let result = await_js(running).await;
+    let result = await_js(&rt.exchange_runtime(), running).await;
     let result = match result {
         Ok(ids) => pending.call_method("delete", vec![key]).map(|_| ids),
         Err(error) => Err(error),

@@ -216,7 +216,7 @@ fn installed_tunnel_statuses_follow_source_fulfilled_interceptors() {
             events.borrow_mut().clear();
             let response = tokio::time::timeout(
                 std::time::Duration::from_secs(3),
-                await_js(
+                await_js(&(runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>), 
                     xhr.call_method(
                         "post",
                         vec![
@@ -267,7 +267,7 @@ fn installed_tunnel_statuses_follow_source_fulfilled_interceptors() {
                     && frame["arg"]["method"] == "POST")
         );
         let direct = client::create(host, Js::object(vec![]));
-        let error = await_js(direct.call_method("get", vec![Js::str("/direct")]).unwrap())
+        let error = await_js(&(runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>), direct.call_method("get", vec![Js::str("/direct")]).unwrap())
             .await
             .unwrap_err();
         assert_eq!(

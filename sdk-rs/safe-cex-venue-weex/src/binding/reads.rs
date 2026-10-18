@@ -128,15 +128,15 @@ pub(super) fn account_runtime() -> a::WeexAccountReadRuntime<Host, Js, Thrown> {
                 "getOrFetchSymbolConfig",
                 std::vec![symbol, Js::Bool(refetch)],
             )?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         balance: |h| {
             let pending = h.call("fetchBalance", std::vec![])?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         positions: |h| {
             let pending = h.call("fetchPositions", std::vec![])?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         all: |_, a, b| {
             Ok(Box::pin(
@@ -219,7 +219,7 @@ pub(super) fn income_runtime() -> i::WeexIncomeRuntime<Host, Js, Thrown> {
         request_factory: |h| v::method(h, &h.root("xhr")?, "post"),
         post: |_, post, endpoint, payload| {
             let pending = post.call(Js::Undefined, std::vec![Js::str(endpoint), payload])?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         optional_get: v::optional,
         get: v::get,
@@ -250,7 +250,7 @@ pub(super) fn range_runtime() -> i::WeexIncomeRangeRuntime<Host, Js> {
                 .call("fetchIncomeHistory", std::vec![opts])
                 .map_err(|e| e.to_exchange_error())?;
             Ok(Box::pin(async move {
-                to_typed(&await_js(pending).await.map_err(|e| e.to_exchange_error())?)
+                to_typed(&await_js(&h.0.exchange_runtime(), pending).await.map_err(|e| e.to_exchange_error())?)
                     .map_err(|e| e.to_exchange_error())
             }))
         },

@@ -108,7 +108,7 @@ fn native_promise_iterator_diagnostics_match_node() {
                 .expect("invalid iterable rejects the returned Promise");
             assert!(matches!(result, Js::Promise(_)));
             assert_eq!(
-                diagnostic(await_js(result).await.unwrap_err()),
+                diagnostic(await_js(&(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>), result).await.unwrap_err()),
                 row["expected"],
                 "{row}"
             );

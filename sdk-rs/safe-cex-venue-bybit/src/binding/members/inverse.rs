@@ -33,7 +33,7 @@ fn fields(value: &Js) -> Result<Vec<Js>, Thrown> {
         .collect()
 }
 async fn get(rt: &Rt, endpoint: &str, params: Js) -> Result<Js, Thrown> {
-    await_js(rt.this.get("xhr")?.call_method(
+    await_js(&rt.exchange_runtime(), rt.this.get("xhr")?.call_method(
         "get",
         vec![Js::str(endpoint), Js::object(vec![("params", params)])],
     )?)
@@ -129,7 +129,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let hedged = arg(&a, 0);
         Ok(rt.clone().spawn(Box::pin(async move {
             // Source deliberately discards symbol and changes linear USDT.
-            await_js(rt.this.call_method(
+            await_js(&rt.exchange_runtime(), rt.this.call_method(
                 "changePositionModeHelper",
                 vec![hedged, Js::str("linear"), Js::str("USDT")],
             )?)
@@ -158,7 +158,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                         .call_method("getSettleCoinsForCategory", vec![category.clone()])?,
                 )? {
                     out.extend(fields(
-                        &await_js(
+                        &await_js(&rt.exchange_runtime(), 
                             rt.this
                                 .call_method("fetchOrdersHelper", vec![category.clone(), coin])?,
                         )
@@ -174,7 +174,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(rt.clone().spawn(Box::pin(async move {
             let symbols = arg(&a, 0);
             if symbols.truthy() && symbols.get("length")?.to_number()? > 0. {
-                return await_js(rt.this.call_method("fetchPositionsHelper", vec![symbols])?).await;
+                return await_js(&rt.exchange_runtime(), rt.this.call_method("fetchPositionsHelper", vec![symbols])?).await;
             }
             let mut out = vec![];
             for category in fields(&rt.this.get("supportedCategories")?)? {
@@ -183,7 +183,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                         .call_method("getSettleCoinsForCategory", vec![category.clone()])?,
                 )? {
                     out.extend(fields(
-                        &await_js(rt.this.call_method(
+                        &await_js(&rt.exchange_runtime(), rt.this.call_method(
                             "fetchPositionsHelper",
                             vec![Js::Undefined, category.clone(), coin],
                         )?)
@@ -240,7 +240,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 .global("Promise.all")?
                 .call(rt.global("Promise")?, vec![Js::array(pending)])?;
             let mut tickers = vec![];
-            for rows in fields(&await_js(all).await?)? {
+            for rows in fields(&await_js(&rt.exchange_runtime(), all).await?)? {
                 tickers.extend(fields(&rows)?);
             }
             if tickers.iter().any(|row| row.strict_equals(&Js::Null)) {
@@ -253,7 +253,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "fetchTickersWithoutParse", |rt, _| {
         Ok(rt.clone().spawn(Box::pin(async move {
-            let raw = await_js(rt.this.call_method("fetchTickersRaw", vec![])?).await?;
+            let raw = await_js(&rt.exchange_runtime(), rt.this.call_method("fetchTickersRaw", vec![])?).await?;
             if rt.this.get("isDisposed")?.truthy() {
                 Ok(Js::array(vec![]))
             } else {
@@ -263,7 +263,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "fetchTickers", |rt, _| {
         Ok(rt.clone().spawn(Box::pin(async move {
-            let raw = await_js(rt.this.call_method("fetchTickersRaw", vec![])?).await?;
+            let raw = await_js(&rt.exchange_runtime(), rt.this.call_method("fetchTickersRaw", vec![])?).await?;
             if rt.this.get("isDisposed")?.truthy() {
                 rt.this.get("store")?.get("tickers")
             } else {
@@ -301,7 +301,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 fn fetch_and_cache_api_key_info(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
     Ok(rt.clone().spawn(Box::pin(async move {
         let result = async {
-            await_js(rt.this.call_method("fetchApiKeyInfo", vec![])?).await?;
+            await_js(&rt.exchange_runtime(), rt.this.call_method("fetchApiKeyInfo", vec![])?).await?;
             if rt.this.get("apiKeyInfo")?.truthy() {
                 super::startup::update_batch_limit_based_on_vip_level(&rt)?;
                 // Same typed user-data channel as the primary cache adapter.
@@ -360,7 +360,7 @@ fn fetch_markets_helper(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         let fees = if rt.this.get("isPublicDataOnly")?.truthy() {
             Js::array(vec![])
         } else {
-            await_js(rt.this.call_method("fetchFees", vec![category.clone()])?).await?
+            await_js(&rt.exchange_runtime(), rt.this.call_method("fetchFees", vec![category.clone()])?).await?
         };
         let data = get(
             &rt,
@@ -565,7 +565,7 @@ fn publish_loaded(this: &Js, mut values: Vec<(&str, Js)>, flags: &[&str]) -> Res
 fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
     Ok(rt.clone().spawn(Box::pin(async move {
         let this = &rt.this;
-        await_js(rt.shared.globals.get("virtualClock")?.call_method("start", vec![])?).await?;
+        await_js(&rt.exchange_runtime(), rt.shared.globals.get("virtualClock")?.call_method("start", vec![])?).await?;
         this.set("batchLimit", Js::Number(10.))?;
         let public_only = this.get("isPublicDataOnly")?.truthy();
         if this.get("needsAccountMarketOverlay")?.truthy() {
@@ -576,14 +576,14 @@ fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
                     let mut pending = vec![];
                     for category in fields(&rt.this.get("supportedCategories")?)? { pending.push(rt.this.call_method("fetchFees", vec![category])?); }
                     let all = rt.global("Promise.all")?.call(rt.global("Promise")?, vec![Js::array(pending)])?;
-                    let fees = await_js(all).await?.call_method("flat", vec![])?;
+                    let fees = await_js(&rt.exchange_runtime(), all).await?.call_method("flat", vec![])?;
                     rt.global("bybitFeeOverlay")?.call(Js::Undefined, vec![fees])
                 })))
             });
-            await_js(this.call_method("loadAccountMarketOverlay", vec![loader])?).await?;
+            await_js(&rt.exchange_runtime(), this.call_method("loadAccountMarketOverlay", vec![loader])?).await?;
             if this.get("isDisposed")?.truthy() { return Ok(Js::Undefined); }
         }
-        let external = await_js(this.call_method("initExternalPublicData", vec![])?).await?;
+        let external = await_js(&rt.exchange_runtime(), this.call_method("initExternalPublicData", vec![])?).await?;
         let probe = if public_only { Js::Null } else {
             this.call_method("fetchMarginAccountInfos", vec![])?.call_method("then", vec![
                 Js::function("privateProbeSuccess", |_, _| Ok(Js::Undefined)),
@@ -597,23 +597,23 @@ fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
         };
         if !public_only { this.call_method("fetchAndCacheApiKeyInfo", vec![])?.call_method("catch", vec![Js::function("inverseKeyCacheCatch", |_, _| Ok(Js::Undefined))])?; }
         if !external.truthy() {
-            let markets = await_js(this.call_method("fetchMarkets", vec![])?).await?;
+            let markets = await_js(&rt.exchange_runtime(), this.call_method("fetchMarkets", vec![])?).await?;
             if !this.get("isDisposed")?.truthy() {
                 this.call_method("log", vec![Js::str(&format!("Loaded {} BybitInverse markets", text(&markets.get("length")?)?))])?;
                 publish_loaded(this, vec![("markets", markets)], &["markets"])?;
                 this.get("publicInverseWebsocket")?.call_method("connectAndSubscribe", vec![])?;
             }
-            let raw = await_js(this.call_method("fetchTickersWithoutParse", vec![])?).await?;
+            let raw = await_js(&rt.exchange_runtime(), this.call_method("fetchTickersWithoutParse", vec![])?).await?;
             let tickers = this.call_method("parseTickers", vec![raw])?;
             if this.get("isDisposed")?.truthy() { return Ok(Js::Undefined); }
             publish_loaded(this, vec![("tickers", tickers)], &["tickers"])?;
         }
-        let failure = if probe.truthy() { await_js(probe).await? } else { Js::Undefined };
+        let failure = if probe.truthy() { await_js(&rt.exchange_runtime(), probe).await? } else { Js::Undefined };
         if failure.truthy() { this.call_method("log", vec![Js::str(&format!("BybitInverse market data is ready, but the private API was rejected ({}) — trading is unavailable", text(&failure)?)), Js::str("warning")])?; }
         else { this.call_method("log", vec![Js::str("Ready to trade on BybitInverse")])?; }
         if public_only { publish_loaded(this, vec![], &["balance", "positions", "orders"])?; return Ok(Js::Undefined); }
         this.get("privateWebsocket")?.call_method("connectAndSubscribe", vec![])?;
-        await_js(this.call_method("fetchOrdersPositionsAndBalance", vec![])?).await?;
+        await_js(&rt.exchange_runtime(), this.call_method("fetchOrdersPositionsAndBalance", vec![])?).await?;
         this.call_method("tick", vec![])?;
         Ok(Js::Undefined)
     })))

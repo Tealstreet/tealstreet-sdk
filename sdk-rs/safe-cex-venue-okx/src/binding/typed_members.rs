@@ -134,7 +134,7 @@ fn placement(scope: &OkxScope, name: &'static str, algo: bool) {
                 .iter()
                 .map(to_js_json)
                 .collect::<Result<_, _>>()?;
-            let adapter = JsRestAdapter::new(s.this.get("xhr")?);
+            let adapter = JsRestAdapter::new(s.exchange_runtime(), s.this.get("xhr")?);
             let emitter = capture(&s, "this.emitAndLogError")?;
             let emit = |message: &str| -> Result<(), ExchangeError> {
                 call(&emitter, vec![Js::str(message)])
@@ -165,7 +165,7 @@ fn find_order_by_client_order_id(scope: &OkxScope) {
             } else {
                 Some(to_typed(&market)?)
             };
-            let adapter = JsRestAdapter::new(s.this.get("xhr")?);
+            let adapter = JsRestAdapter::new(s.exchange_runtime(), s.this.get("xhr")?);
             let map_orders = |row: &Value,
                               state: TableHit<&'static str>|
              -> Result<Vec<Order>, RestFailure> {
@@ -315,7 +315,7 @@ fn account(scope: &OkxScope, variant: Variant) {
                     |name| {
                         let p =
                             xhr.call_method("get", vec![s.global(&format!("ENDPOINTS.{name}"))?])?;
-                        Ok(await_js(p))
+                        Ok(await_js(&s.exchange_runtime(), p))
                     },
                     || capture(&s, "this.emitAndLogError"),
                     |e, mode| {
@@ -341,9 +341,9 @@ fn account(scope: &OkxScope, variant: Variant) {
                     |name| {
                         let p =
                             xhr.call_method("get", vec![s.global(&format!("ENDPOINTS.{name}"))?])?;
-                        Ok(await_js(p))
+                        Ok(await_js(&s.exchange_runtime(), p))
                     },
-                    || Ok(await_js(this_call(&s, "fetchBalance", vec![])?)),
+                    || Ok(await_js(&s.exchange_runtime(), this_call(&s, "fetchBalance", vec![])?)),
                     || capture(&s, "this.emitAndLogError"),
                     |e, mode| {
                         if mode == "message" {
@@ -372,7 +372,7 @@ fn account(scope: &OkxScope, variant: Variant) {
     async_member(scope, "fetchTickers", |s, _| {
         Box::pin(async move {
             rest_reads::fetch_tickers(
-                |name| Ok(await_js(this_call(&s, name, vec![])?)),
+                |name| Ok(await_js(&s.exchange_runtime(), this_call(&s, name, vec![])?)),
                 |raw| this_call(&s, "parseTickers", vec![raw]),
             )
             .await
@@ -382,7 +382,7 @@ fn account(scope: &OkxScope, variant: Variant) {
         Box::pin(async move {
             rest_reads::fetch_positions(
                 arg(&a, 0),
-                |name, symbols| Ok(await_js(this_call(&s, name, vec![symbols])?)),
+                |name, symbols| Ok(await_js(&s.exchange_runtime(), this_call(&s, name, vec![symbols])?)),
                 |response, key| response.get(key),
             )
             .await
@@ -391,7 +391,7 @@ fn account(scope: &OkxScope, variant: Variant) {
     async_member(scope, "fetchBalance", |s, _| {
         Box::pin(async move {
             rest_reads::fetch_balance(
-                |name| Ok(await_js(this_call(&s, name, vec![])?)),
+                |name| Ok(await_js(&s.exchange_runtime(), this_call(&s, name, vec![])?)),
                 |response, key| response.get(key),
             )
             .await
@@ -421,7 +421,7 @@ fn position_mode(scope: &OkxScope) {
                 |name| {
                     let p =
                         xhr.call_method("get", vec![s.global(&format!("ENDPOINTS.{name}"))?])?;
-                    Ok(await_js(p))
+                    Ok(await_js(&s.exchange_runtime(), p))
                 },
                 // const { data: { data: [{ posMode, acctLv }] } } = response
                 |response| {
@@ -455,7 +455,7 @@ fn position_mode(scope: &OkxScope) {
             vec![Js::Bool(force)],
         );
         async move {
-            let value = await_js(pending?).await?;
+            let value = await_js(&s.exchange_runtime(), pending?).await?;
             let mode: PositionMode = to_typed(&value.get("positionMode")?)?;
             Ok::<_, Thrown>((mode, value.get("accountLevel")?.to_number()?))
         }

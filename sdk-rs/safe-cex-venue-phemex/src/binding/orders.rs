@@ -71,7 +71,7 @@ impl CancellationHost for Host {
         side: Js,
         id: Vec<u16>,
     ) -> Result<Js, Thrown> {
-        safe_cex_exchange::js_runtime::promise::await_js(c.call_method(
+        safe_cex_exchange::js_runtime::promise::await_js(&self.rt.exchange_runtime(), c.call_method(
             "delete",
             vec![
                 Js::str(e),

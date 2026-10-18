@@ -41,7 +41,7 @@ async fn request(
     args: Vec<Js>,
 ) -> Result<serde_json::Value, ExchangeError> {
     let result = async {
-        let v = await_js(h.0.this.get(slot)?.call_method(member, args)?).await?;
+        let v = await_js(&h.0.exchange_runtime(), h.0.this.get(slot)?.call_method(member, args)?).await?;
         to_json(&v.get("data")?)
     }
     .await;
@@ -50,7 +50,7 @@ async fn request(
 async fn endpoint(h: Host) -> Result<serde_json::Value, ExchangeError> {
     let result = async {
         to_json(
-            &await_js(
+            &await_js(&h.0.exchange_runtime(), 
                 h.0.this
                     .get("grvtClient")?
                     .call_method("authenticatedEndpoint", vec![])?,
@@ -69,7 +69,7 @@ async fn tdg(
 ) -> Result<serde_json::Value, ExchangeError> {
     let result = async {
         to_json(
-            &await_js(
+            &await_js(&h.0.exchange_runtime(), 
                 h.0.this
                     .get("grvtClient")?
                     .get("tdgClient")?
@@ -206,7 +206,7 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                             });
                             async move {
                                 let response =
-                                    await_js(response.map_err(|cause| cause.to_exchange_error())?)
+                                    await_js(&h.0.exchange_runtime(), response.map_err(|cause| cause.to_exchange_error())?)
                                         .await
                                         .map_err(|cause| cause.to_exchange_error())?;
                                 to_retained_input(
@@ -264,7 +264,7 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                     || {
                         let result = call(&h, "fetchMarkets", vec![]);
                         async move {
-                            let v = await_js(result.map_err(|e| e.to_exchange_error())?)
+                            let v = await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
                                 .await
                                 .map_err(|e| e.to_exchange_error())?;
                             to_typed(&v).map_err(|e| e.to_exchange_error())
@@ -349,7 +349,7 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                         let result =
                             from_typed(order).and_then(|v| call(&h, "cancelOrder", vec![v]));
                         async move {
-                            await_js(result.map_err(|e| e.to_exchange_error())?)
+                            await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
                                 .await
                                 .map(|_| ())
                                 .map_err(|e| e.to_exchange_error())
@@ -359,7 +359,7 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                         let result =
                             from_typed(&order).and_then(|v| call(&h, "placeOrder", vec![v]));
                         async move {
-                            let v = await_js(result.map_err(|e| e.to_exchange_error())?)
+                            let v = await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
                                 .await
                                 .map_err(|e| e.to_exchange_error())?;
                             to_typed(&v).map_err(|e| e.to_exchange_error())
@@ -531,7 +531,7 @@ fn cancel(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown> {
                         let result =
                             from_typed(order).and_then(|v| call(&h, "cancelOrder", vec![v]));
                         async move {
-                            await_js(result.map_err(|e| e.to_exchange_error())?)
+                            await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
                                 .await
                                 .map(|_| ())
                                 .map_err(|e| e.to_exchange_error())
@@ -565,7 +565,7 @@ fn place_orders(h: Host, input: Js) -> Result<Js, Thrown> {
                 let host = h.clone();
                 let original = original.clone();
                 async move {
-                    let result = async { to_typed(&await_js(pending?).await?) }.await;
+                    let result = async { to_typed(&await_js(&h.0.exchange_runtime(), pending?).await?) }.await;
                     result.map_err(|cause: Thrown| {
                         if crate::trading_runtime::TradingHost::is_builder_error(
                             &host,

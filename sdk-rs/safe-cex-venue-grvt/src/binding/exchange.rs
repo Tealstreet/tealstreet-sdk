@@ -111,7 +111,7 @@ impl GrvtExchange {
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.0.this.clone();
         Box::pin(async move {
-            let value = await_js(this.call_method(member, args).map_err(err)?)
+            let value = await_js(&self.rt.0.exchange_runtime(), this.call_method(member, args).map_err(err)?)
                 .await
                 .map_err(err)?;
             to_typed(&value).map_err(err)
@@ -120,7 +120,7 @@ impl GrvtExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.0.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(member, args).map_err(err)?)
+            await_js(&self.rt.0.exchange_runtime(), this.call_method(member, args).map_err(err)?)
                 .await
                 .map_err(err)?;
             Ok(())
@@ -209,7 +209,7 @@ impl Exchange for GrvtExchange {
     fn refresh_markets(&self) -> ExchangeFuture<'_, safe_cex_exchange::snapshots::MarketChanges> {
         let this = self.rt.0.this.clone();
         Box::pin(async move {
-            let changes = await_js(this.call_method("refreshMarkets", vec![]).map_err(err)?)
+            let changes = await_js(&self.rt.0.exchange_runtime(), this.call_method("refreshMarkets", vec![]).map_err(err)?)
                 .await
                 .map_err(err)?;
             Ok(safe_cex_exchange::snapshots::MarketChanges {

@@ -46,7 +46,7 @@ fn merge(a: &Js, b: &Js) -> Result<Js, Thrown> {
 
 async fn post(rt: &Rt, endpoint: &str, payload: Js) -> Result<Js, Thrown> {
     let xhr = rt.this.get("xhr")?;
-    await_js(xhr.call_method("post", vec![Js::str(endpoint), payload])?)
+    await_js(&rt.exchange_runtime(), xhr.call_method("post", vec![Js::str(endpoint), payload])?)
         .await?
         .get("data")
 }
@@ -76,7 +76,7 @@ async fn cancel(rt: &Rt, order: &Js) -> Result<(), Thrown> {
     let pending = rt
         .this
         .call_method("cancelOrders", vec![Js::array(vec![order.clone()])])?;
-    await_js(pending).await?;
+    await_js(&rt.exchange_runtime(), pending).await?;
     Ok(())
 }
 
@@ -118,7 +118,7 @@ fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
             let ids = if primary {
                 place_trailing_stop_loss(&rt, &replacement).await?
             } else {
-                await_js(
+                await_js(&rt.exchange_runtime(), 
                     rt.this
                         .call_method("placeTrailingStopLoss", vec![replacement])?,
                 )
@@ -165,7 +165,7 @@ fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
                 let ids = if primary {
                     place_stop_loss_or_take_profit(&rt, &replacement).await?
                 } else {
-                    await_js(
+                    await_js(&rt.exchange_runtime(), 
                         rt.this
                             .call_method("placeStopLossOrTakeProfit", vec![replacement])?,
                     )
@@ -276,7 +276,7 @@ fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
                 let order_json = to_json(&order)?.as_object().cloned().unwrap_or_default();
                 get_order_position_idx(&rt, order_json).await?
             } else {
-                await_js(
+                await_js(&rt.exchange_runtime(), 
                     rt.this
                         .call_method("getOrderPositionIdx", vec![order.clone()])?,
                 )

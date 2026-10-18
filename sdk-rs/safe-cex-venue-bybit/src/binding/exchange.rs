@@ -604,7 +604,7 @@ impl BybitExchange {
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt().this.clone();
         Box::pin(async move {
-            let value = await_js(this.call_method(member, args).map_err(err)?)
+            let value = await_js(&rt.exchange_runtime(), this.call_method(member, args).map_err(err)?)
                 .await
                 .map_err(err)?;
             to_typed(&value).map_err(err)
@@ -613,7 +613,7 @@ impl BybitExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt().this.clone();
         Box::pin(async move {
-            await_js(this.call_method(member, args).map_err(err)?)
+            await_js(&rt.exchange_runtime(), this.call_method(member, args).map_err(err)?)
                 .await
                 .map_err(err)?;
             Ok(())
@@ -735,7 +735,7 @@ impl Exchange for BybitExchange {
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
         let this = self.rt().this.clone();
         Box::pin(async move {
-            let account = await_js(this.call_method("getAccount", vec![]).map_err(err)?)
+            let account = await_js(&rt.exchange_runtime(), this.call_method("getAccount", vec![]).map_err(err)?)
                 .await
                 .map_err(err)?;
             for key in ["userId", "affiliateId"] {

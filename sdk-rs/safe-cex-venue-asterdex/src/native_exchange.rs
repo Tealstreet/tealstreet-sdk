@@ -103,14 +103,14 @@ impl AsterDEXExchange {
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            let result = await_js(this.call_method(member, args)?).await?;
+            let result = await_js(&self.rt.exchange_runtime(), this.call_method(member, args)?).await?;
             Ok(to_typed(&result)?)
         })
     }
     fn unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(member, args)?).await?;
+            await_js(&self.rt.exchange_runtime(), this.call_method(member, args)?).await?;
             Ok(())
         })
     }

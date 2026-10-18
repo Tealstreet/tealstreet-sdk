@@ -128,8 +128,9 @@ fn real_http_json_response_retains_lone_surrogate_fields_and_rows() {
         write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
     });
     run(async {
+        let runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = native_runtime();
         let host = client::rest_http_host(
-            native_runtime(),
+            runtime.clone(),
             Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
         );
         let xhr = client::create(
@@ -140,7 +141,7 @@ fn real_http_json_response_retains_lone_surrogate_fields_and_rows() {
             ]),
         );
         let pending = xhr.call_method("get", vec![Js::str("/json")]).unwrap();
-        let response = await_js(pending).await.unwrap();
+        let response = await_js(&runtime, pending).await.unwrap();
         assert_eq!(
             observe(&response.get("data").unwrap()),
             source["restValue"],

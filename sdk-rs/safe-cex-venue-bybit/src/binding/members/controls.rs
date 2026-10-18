@@ -43,7 +43,7 @@ fn post(
         )
         .map_err(to_error)?;
     Ok(async move {
-        let response = await_js(pending).await.map_err(to_error)?;
+        let response = await_js(&rt.exchange_runtime(), pending).await.map_err(to_error)?;
         Ok(Rc::new(
             to_json(&response.get("data").map_err(to_error)?).map_err(to_error)?,
         ))
@@ -62,7 +62,7 @@ fn fetch(
         .this
         .call_method("fetchPositions", vec![symbols])
         .map_err(to_error)?;
-    Ok(async move { await_js(pending).await.map_err(to_error) })
+    Ok(async move { await_js(&rt.exchange_runtime(), pending).await.map_err(to_error) })
 }
 
 fn store_call(rt: &Rt, member: &str, value: Js) -> Result<(), Error> {
@@ -141,7 +141,7 @@ fn set_leverage_body(rt: &Rt, symbol: Js, leverage: Js, primary: bool) -> Result
             })],
         )?;
         if positions.get("length")?.strict_equals(&Js::Number(0.)) {
-            positions = await_js(
+            positions = await_js(&rt.exchange_runtime(), 
                 rt.this
                     .call_method("fetchPositions", vec![Js::array(vec![symbol.clone()])])?,
             )
@@ -165,7 +165,7 @@ fn set_leverage_body(rt: &Rt, symbol: Js, leverage: Js, primary: bool) -> Result
             limits.get("max")?.to_number()?,
         );
         if !current.strict_equals(&Js::Number(next)) {
-            let data = await_js(rt.this.get("xhr")?.call_method(
+            let data = await_js(&rt.exchange_runtime(), rt.this.get("xhr")?.call_method(
                 "post",
                 vec![
                     Js::str(crate::types::ENDPOINTS["SET_LEVERAGE"].as_str().unwrap()),
@@ -204,7 +204,7 @@ fn set_leverage_body(rt: &Rt, symbol: Js, leverage: Js, primary: bool) -> Result
                     },
                 ));
             }
-            let positions = await_js(
+            let positions = await_js(&rt.exchange_runtime(), 
                 rt.this
                     .call_method("fetchPositions", vec![Js::array(vec![symbol])])?,
             )
@@ -263,7 +263,7 @@ pub(crate) fn change_position_mode(rt: &Rt, hedged: Js, symbol: Js) -> Result<Js
                         vec![Js::Bool(hedged), Js::str(category), Js::str(coin)],
                     )
                     .map_err(to_error)?;
-                Ok(async move { await_js(pending).await.map(|_| ()).map_err(to_error) })
+                Ok(async move { await_js(&rt.exchange_runtime(), pending).await.map(|_| ()).map_err(to_error) })
             },
         )
         .await

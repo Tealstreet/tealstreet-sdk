@@ -96,7 +96,7 @@ fn constructor_thenable_jobs_share_fifo_with_promise_reactions() {
                 })],
             )
             .unwrap();
-        assert_eq!(await_js(promise).await.unwrap().as_f64(), Some(1.));
+        assert_eq!(await_js(&scope.exchange_runtime(), promise).await.unwrap().as_f64(), Some(1.));
         assert_eq!(
             serde_json::to_value(&*trace.borrow()).unwrap(),
             oracle()["mixedTrace"],
@@ -127,7 +127,7 @@ fn constructor_runs_executor_synchronously_and_first_settlement_wins() {
             oracle()["firstTrace"]
         );
         assert_eq!(
-            await_js(promise).await.unwrap().as_f64(),
+            await_js(&scope.exchange_runtime(), promise).await.unwrap().as_f64(),
             oracle()["firstValue"].as_f64()
         );
         let error = Js::object(vec![("marker", Js::str("executor throw"))]);
@@ -137,7 +137,7 @@ fn constructor_runs_executor_synchronously_and_first_settlement_wins() {
             Js::function("throws", move |_, _| Err(Thrown::new(original.clone()))),
         );
         assert!(
-            await_js(promise)
+            await_js(&scope.exchange_runtime(), promise)
                 .await
                 .unwrap_err()
                 .value
@@ -192,7 +192,7 @@ fn constructor_resolvers_survive_return_and_lock_before_pending_adoption() {
         );
         let value = Js::object(vec![("marker", Js::Number(42.))]);
         inner.settle(Ok(value.clone()));
-        assert!(await_js(promise).await.unwrap().same_reference(&value));
+        assert!(await_js(&scope.exchange_runtime(), promise).await.unwrap().same_reference(&value));
     });
 }
 #[test]
@@ -234,7 +234,7 @@ fn constructor_resolves_thenables_after_return_with_live_getter_and_first_call_r
             oracle()["beforeJob"]
         );
         assert_eq!(
-            await_js(promise).await.unwrap().as_f64(),
+            await_js(&scope.exchange_runtime(), promise).await.unwrap().as_f64(),
             oracle()["adoptedValue"].as_f64()
         );
         assert_eq!(
@@ -260,7 +260,7 @@ fn constructor_rejects_self_resolution_and_preserves_then_getter_error() {
             .call(Js::Undefined, vec![promise.clone()])
             .unwrap();
         assert_eq!(
-            await_js(promise)
+            await_js(&scope.exchange_runtime(), promise)
                 .await
                 .unwrap_err()
                 .value
@@ -284,7 +284,7 @@ fn constructor_rejects_self_resolution_and_preserves_then_getter_error() {
             }),
         );
         assert!(
-            await_js(promise)
+            await_js(&scope.exchange_runtime(), promise)
                 .await
                 .unwrap_err()
                 .value

@@ -119,7 +119,7 @@ async fn authenticated(host: Host, this: Js) -> Result<Js, Thrown> {
                     )]),
                 ],
             )?;
-            parse_cookie(&await_js(pending).await?, |v| {
+            parse_cookie(&await_js(&host.0.exchange_runtime(), pending).await?, |v| {
                 thrown(host.global_call("decodeURIComponent", vec![v]))
             })
         }
@@ -263,11 +263,12 @@ pub(super) fn create(host: &Host, config: Js) -> Result<Js, Thrown> {
                     "post",
                     vec![Js::str(&format!("/lite/v1/{path}")), body, config],
                 );
+                let await_runtime = runtime.clone();
                 Ok(Js::Promise(Promise::spawn(
                     &runtime,
                     Box::pin(async move {
                         let result = async {
-                            let response_value = await_js(pending?).await?;
+                            let response_value = await_js(&await_runtime, pending?).await?;
                             schema::map(&response_value.get("data")?, response, false)
                         }
                         .await;
@@ -286,11 +287,12 @@ pub(super) fn create(host: &Host, config: Js) -> Result<Js, Thrown> {
         "getFundingAccountSummary",
         Js::function("getFundingAccountSummary", move |this, _| {
             let auth = this.call_method("authenticatedEndpoint", vec![]);
+            let await_runtime = runtime.clone();
             Ok(Js::Promise(Promise::spawn(
                 &runtime,
                 Box::pin(async move {
-                    let config = await_js(auth?).await?;
-                    await_js(
+                    let config = await_js(&await_runtime, auth?).await?;
+                    await_js(&await_runtime, 
                         this.get("tdgClient")?
                             .call_method("fundingAccountSummary", vec![config])?,
                     )

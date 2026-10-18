@@ -109,7 +109,7 @@ fn check(method: &str) {
                     Ok(Js::array(actual))
                 }),
             );
-        let actual = tokio::time::timeout(Duration::from_secs(5), await_js(Js::Promise(actual)))
+        let actual = tokio::time::timeout(Duration::from_secs(5), await_js(&runtime, Js::Promise(actual)))
             .await
             .unwrap()
             .unwrap();
@@ -218,7 +218,7 @@ rows.push(trace);
                 Ok(Js::array(rows))
             }),
         );
-        let actual = tokio::time::timeout(Duration::from_secs(5), await_js(Js::Promise(actual)))
+        let actual = tokio::time::timeout(Duration::from_secs(5), await_js(&runtime, Js::Promise(actual)))
             .await
             .unwrap()
             .unwrap();

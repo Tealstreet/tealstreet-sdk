@@ -134,11 +134,11 @@ impl Host for Frame {
         if !params.is_empty() {
             args.push(Js::object(vec![("params", fields_js(params))]));
         }
-        let response = awaited(self.xhr("get", args)?);
+        let response = awaited(&self.rt, self.xhr("get", args)?);
         Ok(Box::pin(async move { response.await?.get("data") }))
     }
     fn post(&mut self, endpoint: &str, body: Fields) -> Result<Task<(), Thrown>, Thrown> {
-        let response = awaited(self.xhr("post", vec![Js::str(endpoint), fields_js(body)])?);
+        let response = awaited(&self.rt, self.xhr("post", vec![Js::str(endpoint), fields_js(body)])?);
         Ok(Box::pin(async move { response.await.map(|_| ()) }))
     }
     fn object(&mut self, v: &Js) -> bool {
@@ -213,7 +213,7 @@ impl Host for Frame {
     }
     fn sleep(&mut self, delay: u64) -> Result<Task<(), Thrown>, Thrown> {
         let sleep = self.rt.global("sleep")?;
-        let done = awaited(invoke(
+        let done = awaited(&self.rt, invoke(
             &sleep,
             Js::Undefined,
             vec![Js::Number(delay as f64)],
@@ -221,7 +221,7 @@ impl Host for Frame {
         Ok(Box::pin(async move { done.await.map(|_| ()) }))
     }
     fn fetch_positions(&mut self) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(awaited(call_member(&self.rt, "fetchPositions", vec![])?))
+        Ok(awaited(&self.rt, call_member(&self.rt, "fetchPositions", vec![])?))
     }
     fn update_positions(&mut self, positions: Js) -> Result<(), Thrown> {
         let store = self.rt.this.get("store")?;
@@ -234,18 +234,18 @@ impl Host for Frame {
         .map(|_| ())
     }
     fn account_info(&mut self) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(awaited(call_member(&self.rt, "fetchAccountInfo", vec![])?))
+        Ok(awaited(&self.rt, call_member(&self.rt, "fetchAccountInfo", vec![])?))
     }
     fn position_mode(&mut self) -> Result<Task<PositionMode, Thrown>, Thrown> {
         self.sync()?;
-        let mode = awaited(call_member(&self.rt, "getPositionMode", vec![])?);
+        let mode = awaited(&self.rt, call_member(&self.rt, "getPositionMode", vec![])?);
         Ok(Box::pin(async move { to_typed(&mode.await?) }))
     }
     fn spawn_metadata(&mut self, request: meta::Shared<Rows, Thrown>) {
         let _ = Promise::spawn(&self.rt.exchange_runtime(), deferred(request));
     }
     fn confirm_mode(&mut self, mode: PositionMode) -> Result<Task<(), Thrown>, Thrown> {
-        let done = awaited(call_member(
+        let done = awaited(&self.rt, call_member(
             &self.rt,
             "confirmPositionModeAndRefreshPositions",
             vec![mode_js(mode)],

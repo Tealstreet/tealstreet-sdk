@@ -28,7 +28,7 @@ impl ContextHost for Host {
         currency: &'static str,
         s: Js,
     ) -> Result<Js, Thrown> {
-        await_js(c.call_method(
+        await_js(&self.rt.exchange_runtime(), c.call_method(
             "get",
             vec![
                 Js::str(e),
@@ -183,7 +183,7 @@ impl SettingsHost for Host {
             p.push(("targetPosMode", Js::str(m)));
         }
         p.extend(leverages.into_iter().map(|(k, v)| (k, Js::Number(v))));
-        await_js(c.call_method(
+        await_js(&self.rt.exchange_runtime(), c.call_method(
             "put",
             vec![
                 Js::str(e),

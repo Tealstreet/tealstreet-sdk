@@ -180,7 +180,7 @@ pub(super) async fn auth_operation(rt: &Rt, op: Op, a: Vec<Js>) -> Result<Js, Th
         Op::Config => {
             let env = text(&arg(&a, 1))?;
             let url = Js::str(&format!("https://api.{env}.paradex.trade/v1/system/config"));
-            let response = await_js(fetch_function(rt).call(Js::Undefined, vec![url])?).await?;
+            let response = await_js(&rt.exchange_runtime(), fetch_function(rt).call(Js::Undefined, vec![url])?).await?;
             if !response.get("ok")?.truthy() {
                 return Err(failure(format!(
                     "Failed to fetch Paradex config: {} {}",
@@ -188,7 +188,7 @@ pub(super) async fn auth_operation(rt: &Rt, op: Op, a: Vec<Js>) -> Result<Js, Th
                     text(&response.get("status")?)?
                 )));
             }
-            let raw = await_js(response.call_method("json", vec![])?).await?;
+            let raw = await_js(&rt.exchange_runtime(), response.call_method("json", vec![])?).await?;
             let out = Js::object(vec![]);
             for (source, target) in [
                 ("starknet_fullnode_rpc_url", "paradexFullNodeRpcUrl"),
@@ -231,8 +231,8 @@ pub(super) async fn auth_operation(rt: &Rt, op: Op, a: Vec<Js>) -> Result<Js, Th
         Op::InitializeSdk => {
             crate::auth_initialization::initialize_paradex_sdk(&Host::new(rt), arg(&a, 0)).await
         }
-        Op::GetAccount => await_js(rt.this.get("xhr")?.call_method("get", a)?).await,
-        Op::GetToken => await_js(rt.this.get("jwtManager")?.call_method("getToken", vec![])?).await,
+        Op::GetAccount => await_js(&rt.exchange_runtime(), rt.this.get("xhr")?.call_method("get", a)?).await,
+        Op::GetToken => await_js(&rt.exchange_runtime(), rt.this.get("jwtManager")?.call_method("getToken", vec![])?).await,
         Op::Wait => {
             rt.shared
                 .runtime
@@ -334,7 +334,7 @@ pub(super) async fn dispatch(rt: &Rt, n: &str, a: Vec<Js>, _c: Vec<Js>) -> Resul
                 || Ok(o.get("refreshPromise")?.truthy()),
                 || o.call_method("generateNewToken", vec![]),
                 |v| o.set("refreshPromise", v),
-                || Ok::<_, Thrown>(async move { await_js(o.get("refreshPromise")?).await }),
+                || Ok::<_, Thrown>(async move { await_js(&rt.exchange_runtime(), o.get("refreshPromise")?).await }),
                 |v| o.set("token", v),
                 |v| o.set("tokenExpiry", Js::Number(v)),
                 |p, e| {
@@ -447,7 +447,7 @@ async fn sign_order(rt: &Rt, p: Js, modify: bool) -> Result<Js, Thrown> {
             rt.this.get("options")?,
         ];
         let promise = typed_signer(rt).call(Js::Undefined, args)?;
-        Ok::<_, Thrown>(async move { await_js(promise).await })
+        Ok::<_, Thrown>(async move { await_js(&rt.exchange_runtime(), promise).await })
     };
     let read = |r: Js| Ok::<_, Thrown>((r.get("signature")?, r.get("headers")?));
     let signed = if modify {

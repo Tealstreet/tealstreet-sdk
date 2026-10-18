@@ -22,7 +22,7 @@ fn type_error(message: &str) -> Thrown {
 /// `this.xhr.get(endpoint, config)` awaited: the Axios response.
 async fn get(rt: Rt, endpoint: String, config: Js) -> Result<Js, Thrown> {
     let xhr = rt.this.get("xhr")?;
-    await_js(xhr.call_method("get", vec![Js::str(&endpoint), config])?).await
+    await_js(&rt.exchange_runtime(), xhr.call_method("get", vec![Js::str(&endpoint), config])?).await
 }
 
 fn params(fields: Vec<(&str, Js)>) -> Js {
@@ -36,7 +36,7 @@ fn member_data(
     args: Vec<Js>,
 ) -> Result<impl Future<Output = Result<DataValue, Thrown>> + 'static + use<>, Thrown> {
     let pending = rt.this.call_method(name, args)?;
-    Ok(async move { Ok(to_data(&await_js(pending).await?)) })
+    Ok(async move { Ok(to_data(&await_js(&rt.exchange_runtime(), pending).await?)) })
 }
 
 fn log(rt: &Rt, message: &str, severity: &str) -> Result<(), Thrown> {
@@ -165,7 +165,7 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
         this.call_method("fetchFees", vec![category.clone()])?
     };
     let body = async move {
-        let fees = await_js(fees).await?;
+        let fees = await_js(&rt.exchange_runtime(), fees).await?;
         let category_text = text(&category)?;
         let timed_out = Rc::new(Cell::new(false));
         let prelaunch = {
@@ -209,7 +209,7 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
             }))
         };
         let trading =
-            await_js(this.call_method("fetchTradingMarketsResponse", vec![category.clone()])?)
+            await_js(&rt.exchange_runtime(), this.call_method("fetchTradingMarketsResponse", vec![category.clone()])?)
                 .await?;
         let data = trading.get("data")?;
         let ret_msg = get_key(&data, "retMsg")?;

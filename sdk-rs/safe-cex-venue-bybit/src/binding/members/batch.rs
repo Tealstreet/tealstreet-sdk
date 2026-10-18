@@ -91,7 +91,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(rt, "getOrderPositionIdx", |rt, a| {
         let opts = arg(&a, 0);
         Ok(rt.clone().spawn(Box::pin(async move {
-            let mode = await_js(
+            let mode = await_js(&rt.exchange_runtime(), 
                 rt.this
                     .call_method("fetchPositionMode", vec![opts.get("symbol")?])?,
             )
@@ -186,7 +186,7 @@ fn place_orders_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
         let mut ids = vec![];
         for order in special {
             let result =
-                async { await_js(rt.this.call_method("placeOrder", vec![order])?).await }.await;
+                async { await_js(&rt.exchange_runtime(), rt.this.call_method("placeOrder", vec![order])?).await }.await;
             match result {
                 Ok(values) => append(&mut ids, values)?,
                 Err(failure) => emit(
@@ -201,7 +201,7 @@ fn place_orders_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
         if !regular.is_empty() {
             append(
                 &mut ids,
-                await_js(
+                await_js(&rt.exchange_runtime(), 
                     rt.this
                         .call_method("placeBatchOrders", vec![Js::array(regular)])?,
                 )
@@ -230,7 +230,7 @@ fn place_batch_orders(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         for (category, orders) in grouped.own_entries()? {
             append(
                 &mut ids,
-                await_js(rt.this.call_method(
+                await_js(&rt.exchange_runtime(), rt.this.call_method(
                     "placeBatchOrdersForCategory",
                     vec![Js::String(category), orders],
                 )?)
@@ -251,14 +251,14 @@ fn place_batch_orders_for_category(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         let mut ids = vec![];
         for (index, batch) in items(&batches)?.into_iter().enumerate() {
             if index > 0 {
-                await_js(
+                await_js(&rt.exchange_runtime(), 
                     rt.global("sleep")?
                         .call(Js::Undefined, vec![Js::Number(1200.)])?,
                 )
                 .await?;
             }
             let result = async {
-                await_js(
+                await_js(&rt.exchange_runtime(), 
                     rt.this
                         .call_method("processBatch", vec![category.clone(), batch.clone()])?,
                 )
@@ -277,7 +277,7 @@ fn place_batch_orders_for_category(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
                     )?;
                     for order in items(&batch)? {
                         let result = async {
-                            await_js(rt.this.call_method("placeOrder", vec![order])?).await
+                            await_js(&rt.exchange_runtime(), rt.this.call_method("placeOrder", vec![order])?).await
                         }
                         .await;
                         match result {
@@ -312,7 +312,7 @@ fn process_batch_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
             pending.push(rt.clone().spawn(Box::pin(async move {
                 Ok(Js::object(vec![
                     ("order", order),
-                    ("request", await_js(request?).await?),
+                    ("request", await_js(&rt.exchange_runtime(), request?).await?),
                 ]))
             })));
         }
@@ -320,7 +320,7 @@ fn process_batch_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
             .global("Promise.all")?
             .call(rt.global("Promise")?, vec![Js::array(pending)])?;
         let mut valid = vec![];
-        for entry in items(&await_js(all).await?)? {
+        for entry in items(&await_js(&rt.exchange_runtime(), all).await?)? {
             if !entry.get("request")?.strict_equals(&Js::Null) {
                 valid.push(entry);
             }
@@ -332,7 +332,7 @@ fn process_batch_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
             .iter()
             .map(|v| v.get("request"))
             .collect::<Result<Vec<_>, _>>()?;
-        let data = await_js(rt.this.get("xhr")?.call_method(
+        let data = await_js(&rt.exchange_runtime(), rt.this.get("xhr")?.call_method(
             "post",
             vec![
                 rt.global("ENDPOINTS")?.get("CREATE_BATCH_ORDER")?,
@@ -433,7 +433,7 @@ fn format_order_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
             } else {
                 opts
             };
-            let index = await_js(
+            let index = await_js(&rt.exchange_runtime(), 
                 rt.this
                     .call_method("getOrderPositionIdx", vec![position_opts])?,
             )
