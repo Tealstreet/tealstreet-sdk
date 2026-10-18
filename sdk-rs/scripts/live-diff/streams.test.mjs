@@ -76,6 +76,7 @@ test(
         if (request.url === '/market') {
           socket.send('ticker-one');
           setTimeout(() => socket.send('ticker-two'), 80);
+          setTimeout(() => socket.close(), 110);
         } else {
           setTimeout(() => {
             socket.send(Buffer.from([0, 255, 128]), { binary: true });
@@ -107,12 +108,15 @@ test(
       );
       socket.on('ping', (bytes) => output.push({ path, kind: 'ping', base64: bytes.toString('base64') }));
       socket.on('pong', (bytes) => output.push({ path, kind: 'pong', base64: bytes.toString('base64') }));
+      socket.on('close', (code, reason) =>
+        output.push({ path, kind: 'close', code, base64: reason.toString('base64') }),
+      );
       await new Promise((resolve, reject) => {
         socket.once('open', resolve);
         socket.once('error', reject);
       });
       socket.send('subscribe');
-      socket.ping('client-health');
+      if (path === '/market') socket.ping('client-health');
       return socket;
     }
     const capture = await streamRelay({
@@ -131,9 +135,12 @@ test(
     await connect(capture, '/public', original);
     await sleep(180);
     capture.freeze();
+    const expected = structuredClone(original);
     await capture.close();
+    assert.equal(original.find((f) => f.kind === 'close')?.code, 1005, 'an empty upstream close stays an empty close');
     assert.equal(tape.connections.length, 2);
     assert.ok(tape.frames.some((f) => f.binary === true));
+    assert.ok(tape.frames.some((f) => f.kind === 'pong'));
     assert.deepEqual(
       tape.frames.filter((f) => f.kind === 'message').map((f) => f.connection),
       [0, 1, 0],
@@ -161,10 +168,10 @@ test(
       assert.equal(receipt.dropped, 0);
       assert.equal(receipt.inputHash, receipt.expectedInputHash);
       assert.equal(receipt.delivered, tape.frames.length);
-      copies.push(output);
+      copies.push(structuredClone(output));
       await relay.close();
     }
-    for (const copy of copies) assert.deepEqual(copy, original);
+    for (const copy of copies) assert.deepEqual(copy, expected);
     assert.equal(upstreamConnections, 2, 'four replay clients never open a new upstream');
     const missing = await streamRelay({
       directory,

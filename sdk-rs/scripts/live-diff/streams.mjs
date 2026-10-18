@@ -38,9 +38,12 @@ const report = {
   node: process.version,
   rustRevision: option('--rust-revision'),
   captureMs,
+  nativeDrainVerified: false,
+  comparisonsProvisional: true,
   limitations: [
     tradeCapability,
     'Real production timers and clocks are retained. Repeatability is checked exactly; clock/throttle nondeterminism blocks parity claims.',
+    'The native command barrier can overtake unread socket frames. No input-consumption fence is exposed; all output comparisons remain provisional, including completed barriers.',
   ],
   runs: [],
 };
@@ -322,6 +325,9 @@ try {
   )
     report.status = 'INCOMPLETE_COVERAGE';
   if (report.status === 'PASS' && !report.liveWindowPassed) report.status = 'SMOKE_ONLY';
+  report.observedStatus = report.status;
+  if (!report.nativeDrainVerified && !['TIMEOUT', 'INPUT_DIFF'].includes(report.status))
+    report.status = 'INCOMPLETE_NATIVE_DRAIN';
 } catch (error) {
   report.status = /timeout/.test(error.message) ? 'TIMEOUT' : 'BLOCKED';
   report.failure = error.message;

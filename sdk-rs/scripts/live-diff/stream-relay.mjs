@@ -33,7 +33,9 @@ export async function streamRelay({
     cancelled = false;
   const misses = [];
   const closePeer = (peer, code, reason) => {
-    if ([1005, 1006, 1015].includes(code)) peer.terminate();
+    if (code === 1005)
+      peer.close(); // An empty close frame, not a TCP abort.
+    else if ([1006, 1015].includes(code)) peer.terminate();
     else peer.close(code, reason);
   };
   const epoch = performance.now();
@@ -101,7 +103,10 @@ export async function streamRelay({
         upstreams.add(upstream);
         upstream.on('open', () => {
           record.status = 101;
-          for (const { data, binary } of queued) upstream.send(data, { binary });
+          for (const { data, binary, kind } of queued) {
+            if (kind) upstream[kind](data);
+            else upstream.send(data, { binary });
+          }
         });
         peer.on('message', (data, binary) => {
           if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary });
@@ -109,9 +114,11 @@ export async function streamRelay({
         });
         peer.on('ping', (data) => {
           if (upstream.readyState === WebSocket.OPEN) upstream.ping(data);
+          else queued.push({ data, kind: 'ping' });
         });
         peer.on('pong', (data) => {
           if (upstream.readyState === WebSocket.OPEN) upstream.pong(data);
+          else queued.push({ data, kind: 'pong' });
         });
         const frame = (kind, data, binary) => {
           if (frozen) return;

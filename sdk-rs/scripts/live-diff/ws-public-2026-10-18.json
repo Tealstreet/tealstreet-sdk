@@ -1,6 +1,7 @@
 {
   "worktree": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/live-diff",
   "limitations": [
+    "Command barriers can overtake unread socket frames. Every comparison is provisional until a real native input-consumption fence exists; successful command completion is not a socket drain.",
     "Store wall-clock/throttle timing is an uncontrolled input; NONDETERMINISTIC channels are not final native parity findings.",
     "TIMEOUT output sequences are partial diagnostic evidence.",
     "Baseline Binance replay overlapped Bybit replay; preserve load sensitivity before source attribution.",
@@ -11,7 +12,7 @@
     {
       "report": ".cache/live-diff/binance-streams-60s.json",
       "exchange": "binance",
-      "status": "NONDETERMINISTIC",
+      "status": "INCOMPLETE_NATIVE_DRAIN",
       "at": "2026-10-18T14:47:52.748Z",
       "revision": "fa732a0aa695730503586b7bc7e006cad7e6e689",
       "rustRevision": "0d9632aca90b99c708178554af614152cacb8151",
@@ -50,7 +51,7 @@
           "status": "fulfilled"
         }
       ],
-      "comparisonsProvisional": false,
+      "comparisonsProvisional": true,
       "runs": [
         {
           "label": "ts-1",
@@ -451,8 +452,8 @@
               },
               {
                 "path": "$.30.87.fundingRate",
-                "ts": 0.000022,
-                "rust": 0.00002405
+                "ts": 2.2e-5,
+                "rust": 2.405e-5
               },
               {
                 "path": "$.31.90.mark",
@@ -646,7 +647,7 @@
               "rust": "<absent>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store": {
           "status": "DIFF",
@@ -659,7 +660,7 @@
               "rust": 0
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "orderbook": {
           "status": "DIFF",
@@ -687,7 +688,7 @@
               "rust": "<absent>"
             }
           ],
-          "qualifiedStatus": "DIFF"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "candles": {
           "status": "DIFF",
@@ -715,7 +716,7 @@
               "rust": "<absent>"
             }
           ],
-          "qualifiedStatus": "DIFF"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:latency": {
           "status": "DIFF",
@@ -728,7 +729,7 @@
               "rust": 0
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:balance": {
           "status": "DIFF",
@@ -741,7 +742,7 @@
               "rust": "<object>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:tickers": {
           "status": "DIFF",
@@ -769,7 +770,7 @@
               "rust": -0.506
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:displayedPositions": {
           "status": "DIFF",
@@ -782,7 +783,7 @@
               "rust": "<array:0>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:displayedMargin": {
           "status": "DIFF",
@@ -795,7 +796,7 @@
               "rust": "<object>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:ordersRisk": {
           "status": "DIFF",
@@ -808,7 +809,7 @@
               "rust": "<object>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:activeChasers": {
           "status": "DIFF",
@@ -821,7 +822,7 @@
               "rust": "<array:0>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:activeTWAPs": {
           "status": "DIFF",
@@ -834,7 +835,7 @@
               "rust": "<array:0>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:messageHandlerStats": {
           "status": "DIFF",
@@ -847,7 +848,7 @@
               "rust": 1792334957054
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:requestStats": {
           "status": "DIFF",
@@ -860,7 +861,7 @@
               "rust": 0
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:fetchedLeverage": {
           "status": "DIFF",
@@ -873,7 +874,7 @@
               "rust": "<object>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:loaded": {
           "status": "DIFF",
@@ -886,7 +887,7 @@
               "rust": "<object>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:options": {
           "status": "DIFF",
@@ -899,7 +900,7 @@
               "rust": "<object>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:updateIds": {
           "status": "DIFF",
@@ -912,7 +913,7 @@
               "rust": "<object>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "store:socketHealth": {
           "status": "DIFF",
@@ -925,7 +926,7 @@
               "rust": "<absent>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         },
         "event:log": {
           "status": "DIFF",
@@ -938,9 +939,11 @@
               "rust": "<array:2>"
             }
           ],
-          "qualifiedStatus": "NONDETERMINISTIC"
+          "qualifiedStatus": "INCOMPLETE"
         }
-      }
+      },
+      "observedStatus": "NONDETERMINISTIC",
+      "nativeDrainVerified": false
     },
     {
       "report": ".cache/live-diff/binance-streams-60s-baseline.json",
@@ -1294,13 +1297,13 @@
               },
               {
                 "path": "$.3.12.fundingRate",
-                "ts": 0.00009861,
-                "rust": 0.00009853
+                "ts": 9.861e-5,
+                "rust": 9.853e-5
               },
               {
                 "path": "$.4.18.fundingRate",
-                "ts": -0.00005528,
-                "rust": -0.00005655
+                "ts": -5.528e-5,
+                "rust": -5.655e-5
               }
             ]
           },
@@ -1783,7 +1786,9 @@
           ],
           "qualifiedStatus": "INCOMPLETE"
         }
-      }
+      },
+      "observedStatus": "TIMEOUT",
+      "nativeDrainVerified": false
     },
     {
       "report": ".cache/live-diff/bybit-streams-60s.json",
@@ -2546,7 +2551,9 @@
           ],
           "qualifiedStatus": "INCOMPLETE"
         }
-      }
+      },
+      "observedStatus": "TIMEOUT",
+      "nativeDrainVerified": false
     },
     {
       "report": ".cache/live-diff/okx-streams-60s.json",
@@ -2736,8 +2743,8 @@
             "diffs": [
               {
                 "path": "$.3.7.bid",
-                "ts": 0.0000693,
-                "rust": 0.00006931
+                "ts": 6.93e-5,
+                "rust": 6.931e-5
               },
               {
                 "path": "$.3.19.mark",
@@ -3388,7 +3395,9 @@
           ],
           "qualifiedStatus": "INCOMPLETE"
         }
-      }
+      },
+      "observedStatus": "TIMEOUT",
+      "nativeDrainVerified": false
     },
     {
       "report": ".cache/live-diff/hyperliquid-streams-60s.json",
@@ -4301,7 +4310,15 @@
           ],
           "qualifiedStatus": "INCOMPLETE"
         }
-      }
+      },
+      "observedStatus": "TIMEOUT",
+      "nativeDrainVerified": false
     }
-  ]
+  ],
+  "ownerFollowup": {
+    "owner": "codex-wdtab1",
+    "isolatedReport": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/live-fix/.cache/binance-1017-isolated.json",
+    "cpuProfile": "/tmp/live-fix-binance-1017-sample.txt",
+    "observation": "Native Binance markPriceUpdate -> native_store::Graph::update_ticker -> Graph::notify -> project<StoreData>/to_typed_preserving_undefined -> typed::capture repeatedly walks whole Store; isolated barriers both time out. Backlog is supported; dropped subscriptions are not proven."
+  }
 }

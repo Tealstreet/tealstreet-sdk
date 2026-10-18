@@ -4,19 +4,19 @@ Each venue has a live capture window of at least 60 seconds after subscription
 registration, followed by two fresh TS and two fresh native replays. This is
 live evidence of remaining differences, **not a full parity PASS**.
 
-| Venue         | Captured frames | Completed barriers TS/native | Finding                                                                                                                                                                                                   |
-| ------------- | --------------: | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Binance USD-M |             570 | 2/2 and 2/2                  | Each TS repeat emits 237 books and 149 candles; each native repeat emits 1 book and 0 candles. Those channel sequences repeat exactly within each side. Store delivery counts/clock fields do not repeat. |
-| Bybit         |          61,518 | 2/2 and 0/2                  | Both native barriers time out after 60 seconds. Captured input includes 357 publicTrade frames; partial native outputs cannot establish final data parity.                                                |
-| OKX           |         285,713 | 2/2 and 0/2                  | Both native barriers time out after 60 seconds. Public and business sockets replay on one ordered timeline; partial output comparisons remain diagnostic.                                                 |
-| Hyperliquid   |             496 | 2/2 and 1/2                  | One native barrier times out; native book/candle sequences also differ between repeats. No final channel parity attribution.                                                                              |
+| Venue         | Captured frames | Completed barriers TS/native | Finding                                                                                                                                                                                                                                              |
+| ------------- | --------------: | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Binance USD-M |             570 | 2/2 and 2/2                  | Observed TS sequences contain 237 books and 149 candles; observed native sequences contain 1 book and 0 candles, repeating within each side. These are provisional windows, not proven frame loss. Store delivery counts/clock fields do not repeat. |
+| Bybit         |          61,518 | 2/2 and 0/2                  | Both native barriers time out after 60 seconds. Captured input includes 357 publicTrade frames; partial native outputs cannot establish final data parity.                                                                                           |
+| OKX           |         285,713 | 2/2 and 0/2                  | Both native barriers time out after 60 seconds. Public and business sockets replay on one ordered timeline; partial output comparisons remain diagnostic.                                                                                            |
+| Hyperliquid   |             496 | 2/2 and 1/2                  | One native barrier times out; native book/candle sequences also differ between repeats. No final channel parity attribution.                                                                                                                         |
 
 The four primary runs use owner-confirmed immutable addon SHA
 `1129c766c0d0d31394960064e968245ee25f0480aaf72c85528415f07d0bc796`,
 source label `0d9632aca90b99c708178554af614152cacb8151` (#1017 candidate).
 All four workers in every primary case receive every captured frame with the
 same input hash and zero REST replay misses. This proves terminal delivery;
-completion still requires the native event-loop barrier.
+a command barrier can overtake unread socket frames and does not prove native input consumption. All comparisons therefore remain provisional, even where all four command barriers completed.
 
 The same 570-frame Binance tape was also replayed against local addon SHA
 `21f25569e48100cd2b11ca7d63cb9be469d92ce2da8a8c1367a1466cf8310e18`,
@@ -25,6 +25,15 @@ out, so its 1-book/4-candle observations are partial only. That baseline replay
 overlapped the Bybit replay; load sensitivity must be considered before source
 attribution. The observations do not establish that #1017 introduced the loss.
 Native Binance logs include stale-receive/reconnect messages during replay.
+
+Wdtab1 subsequently replayed the 570-frame candidate in isolation: both native
+barriers timed out. Its 3-second CPU profile points to `markPriceUpdate` →
+`native_store::Graph::update_ticker` → `Graph::notify` →
+`project<StoreData>/to_typed_preserving_undefined` → `typed::capture`,
+walking the whole Store per ticker update. The isolated report/profile paths
+are in structured evidence. This supports a backlog finding; it does not prove
+dropped subscriptions. A genuine native input-consumption fence is required
+before final ordered output parity can be claimed.
 
 [Structured evidence](ws-public-2026-10-18.json) records every input receipt,
 output artifact, barrier, exact channel diff and within-side repeat comparison.

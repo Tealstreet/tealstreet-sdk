@@ -87,7 +87,8 @@ The TLS recorder admits only each venue's literal public WS host. TS receives
 one real upstream stream; the recorder freezes it after live prices appear,
 then replays exactly those text/binary messages and arrival delays into the
 native socket. Native commands cross an event-loop barrier before ticker
-values are inspected. If synchronous native processing prevents this barrier
+values are inspected. This checks command liveness, not whether unread socket
+frames have drained. If synchronous native processing prevents this barrier
 from completing, the report records `NATIVE_EVENT_LOOP_STALL` and a timeout,
 not a comparison of partially processed ticker values. Zero-price startup
 stubs do not count as live ticker coverage. Lighter's real REST fallback is
@@ -165,9 +166,12 @@ and typed values; nothing is sorted, aligned or coalesced by the probe.
 from being attributed as a final cross-side bug. Production clocks and 250ms
 throttles are intentionally retained. Their nondeterminism is reported, including
 exact fields/counts, and blocks full parity even when individual channels repeat.
-A failed native event-loop barrier leaves diagnostic partial outputs and cannot
-pass. Empty book/candle/ticker channels cannot satisfy coverage. `--capture-ms
-1000` is a smoke check only, never the live gate.
+A native command barrier can overtake unread socket frames: it is not an
+input-consumption fence. Every stream comparison remains provisional and the
+runner reports `INCOMPLETE_NATIVE_DRAIN` even when command barriers complete.
+A failed barrier leaves diagnostic partial outputs and cannot pass. Empty
+book/candle/ticker channels cannot satisfy coverage. `--capture-ms 1000` is a
+smoke check only, never the live gate.
 
 To repeat a captured case without new live input, copy the `capture.bundle` path
 from its report and pass `--replay /absolute/path/to.bundle.v8 --venue binance`
