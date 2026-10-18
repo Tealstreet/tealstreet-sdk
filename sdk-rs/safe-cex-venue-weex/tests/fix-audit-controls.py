@@ -10,9 +10,9 @@ sdk = Path(__file__).resolve().parents[2]
 root = sdk.parent
 file = sdk / 'safe-cex-venue-weex/src/binding/values.rs'
 original = file.read_bytes()
-old = subprocess.check_output(['git', 'show', '2373123bf0:sdk-rs/safe-cex-venue-weex/src/binding/values.rs'], cwd=root).decode()
+old = subprocess.check_output(['git', 'show', 'a8699f238f:sdk-rs/safe-cex-venue-weex/src/binding/values.rs'], cwd=root).decode()
 log_dir = Path(tempfile.gettempdir())
-env = dict(os.environ, SAFE_CEX_TYPESCRIPT_PATH=str(root / 'node_modules/typescript'))
+env = dict(os.environ, CARGO_INCREMENTAL="0", SAFE_CEX_TYPESCRIPT_PATH=str(root / 'node_modules/typescript'))
 
 def segment(text, name):
     a = text.index('pub(super) fn ' + name + '(')

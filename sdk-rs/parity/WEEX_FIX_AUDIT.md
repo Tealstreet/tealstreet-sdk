@@ -1,6 +1,6 @@
 # WEEX: exact 23-row FIX audit
 
-Frozen assignment: `assignments/codex-4ri6pb.json` (23 WEEX rows). Production baseline: `a8699f238f`; unchanged-body compiled RED preparation: `2373123bf0`.
+Frozen assignment: `assignments/codex-4ri6pb.json` (23 WEEX rows). Production baseline: `a8699f238f`; original production adapter file: `a8699f238f` (byte-identical to the source blob captured at `2373123bf0`). The compiled controls replay those bodies against the complete current test target, not an unfinished fixture.
 
 ## Result and limits
 
@@ -44,8 +44,30 @@ Three FIX rows lose valid public data because the native adapter captures unread
 
 ## Reproduce
 
-Run Cargo from `sdk-rs` with `--jobs 1`. Set `SAFE_CEX_TYPESCRIPT_PATH="$PWD/../node_modules/typescript"` for the source-driven targets.
+Run Cargo from `sdk-rs` with `CARGO_INCREMENTAL=0` and `--jobs 1`. Set `SAFE_CEX_TYPESCRIPT_PATH="$PWD/../node_modules/typescript"` for the source-driven targets.
 
 The PR records scoped native/source results, full parity index, all-features cancellation, package fmt check, and native/WASM all-target Clippy. No new exemption or scanner policy is introduced. Auto-merge remains off while #1017 is pending.
 
 Overseer ruling (thread-dm4ltqa1kuqc, 2026-10-19): label all eleven scalar rows FIX-OWNED, because a scoped ACCEPT would read as closed while the shared depth bound can still lose real pages. Other ACCEPTs remain.
+
+All dropped-waiter and continuation probes retain the constructed exchange. They
+make no final-owner Drop claim and introduce no Drop implementation. Final native
+teardown remains governed by the separate deterministic-teardown ruling/helper.
+
+## Checked receipts
+
+On normally refreshed code head `9b2ec24a90` (source unchanged by later documentation):
+
+- Scoped native suite: **79/79 PASS**, `/tmp/port-txflow-weex-final-tests.log`.
+- Maintained whole-class source: **13 utility-consumer profiles + 6 held-refresh profiles**, replayed by actual native SDK/frame/HTTP/Store tests in that suite.
+- Independent compiled original-body controls: candle **RED1**, book **RED2**, each exact-restored **GREEN3**, followed by **GREEN5** constructed audit tests. `/tmp/port-txflow-weex-controls.log`; restored `values.rs` SHA256 `e6baae56252c41f8e52cb74fae297eac7ca2e386288ead1f34b4a52c5ce44428`.
+- Full parity index: **7563 rows / 16644 public Rust items PASS**, `/tmp/port-txflow-weex-final-index.log`.
+- Extractor: **0 drift**, `/tmp/port-txflow-weex-final-extract.log`.
+- Full workspace `cargo fmt --all -- --check`: **PASS**, `/tmp/port-txflow-weex-fmt.log`.
+- The unchanged `record_boundaries` target has four stale UTF16-refusal assertions on this baseline. They are confirmed owned by **#1092**, whose owner reports focused **11/11 GREEN** after migration; this PR does not edit that file. Its independent depth150/bare-String guards remain separate.
+- Strict native all-target Clippy: **PASS**, `/tmp/port-txflow-weex-native-clippy.log` (`CARGO_INCREMENTAL=0`).
+- Strict WASM all-target Clippy: **PASS**, `/tmp/port-txflow-weex-wasm-clippy.log` (`CARGO_INCREMENTAL=0`).
+- All-features cancellation: **5 PASS / 1 FAIL / 1 discovery test ignored**, `/tmp/port-txflow-weex-cancellation.log`. The sole failure is inherited #1082 `src/js_runtime/jobs.rs` guard drift: actual `a20ae3530f9ebf67583909eb67e3399b99bcfbb87430a83b1bc464c8a7d8366c`, reviewed `75bf253c85fc61cd0f632a8684ab250a58a58b5f3d274377391ca6074954d5c0`. Overseer explicitly authorizes READY with this inherited exception; codex-bsswa2 owns `fix/native-replay-cancellation-pin`. No pin is changed here. Normal-merge master after that repair lands.
+- CI parity job `117729376674` stops before WEEX at Crypto.com `types.rs:373` / `wire_utf8_refusal:CryptocomInstrument`. #1092's owner confirms that exact assertion and full Crypto suite GREEN in its test-only migration. This PR leaves Crypto and the four WEEX stale assertions unchanged.
+
+Implementation PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1097. The three local FIX rows are implemented here; eleven shared-bound FIX-OWNED rows remain open with their owner. Auto-merge is deliberately OFF under #1017.
