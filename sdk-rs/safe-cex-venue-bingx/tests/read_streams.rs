@@ -920,7 +920,7 @@ fn stream_representation_boundaries_are_explicit() {
     let mut input = corpus()["cases"][28]["input"].clone();
     input["raw"] = json!("{\"ping\":\"\\ud800\"}");
     let (_, _, _, host) = fixture(input);
-    let e = ready(
+    ready(
         BingxPrivateDispatcher {
             host: host.clone(),
             operations: host.clone(),
@@ -929,15 +929,11 @@ fn stream_representation_boundaries_are_explicit() {
             host.input["raw"].as_str().unwrap().into(),
         )),
     )
-    .unwrap_err();
-    assert!(
-        e.message.contains("refuses a lone surrogate"),
-        "BINGX-RS private UTF8 refusal visible"
-    );
+    .expect("retained private ping accepts lone UTF16");
     assert_eq!(
-        host.calls.borrow().len(),
-        2,
-        "BINGX-RS private refusal after diagnostic before send"
+        *host.calls.borrow(),
+        *source["utfFrame"]["calls"].as_array().unwrap(),
+        "BINGX-RS native retained ping diagnostics and Pong match source"
     );
     assert!(
         source["bookUnits"]

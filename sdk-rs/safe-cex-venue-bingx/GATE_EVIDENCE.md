@@ -1520,3 +1520,11 @@ production probes for 2 selected retained-input decoder owners. Each contract
 observes direct typed fields plus numeric bits or UTF-16 units on distinct
 positive cases and rejected inputs. These selected contracts pass independently
 of whole-package accepted-set coverage; no package-wide green claim is made.
+
+Former raw UTF-8-refusal assertions in account/data reads and private dispatch
+are superseded: retained balance rows/info compare actual source UTF-16 units,
+and a lone-surrogate private ping now compares the entire source diagnostic/Pong
+sequence. Numeric-account comparisons use order-preserving removal of the separately
+bit-observed userId, so the assertion itself does not reorder source keys. The
+retained read adapter preserves source exact/snake/camel lookup using canonical
+lodash case functions and the shared native in-operator.
