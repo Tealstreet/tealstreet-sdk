@@ -146,3 +146,8 @@ REST candles map raw shared Js rows by the six fields actually read by TS.
 The declared twelve-column tuple does not gate runtime response admission.
 The real V1/V3 binding regression checks short rows, numeric prices, opaque unused
 columns and missing-volume NaN against the maintained fetchOHLCV method.
+
+`WIRE_CONTRACT_REVIEW.md` records the 42 private module-scope Deserialize
+companions and their direct shape/native-value witnesses. The focused
+`scripts/accepted-wire-contracts.mjs` retains all 607 observations and every
+compiler field, including each separately executed public-wrapper boundary.
