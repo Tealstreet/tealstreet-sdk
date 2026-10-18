@@ -2,6 +2,7 @@
 use super::Rt;
 use safe_cex_exchange::{
     js_runtime::{
+        ops,
         promise::await_js,
         scope::scope_of,
         sockets,
@@ -223,11 +224,11 @@ fn timeout(rt: &Rt, method: &'static str, delay: f64, guarded: bool) -> Result<J
         delay,
     ))
 }
-fn error_text(error: &Thrown) -> Result<String, Thrown> {
+fn error_text(rt: &Rt, error: &Thrown) -> Result<Js, Thrown> {
     if matches!(&error.value, Js::Object(o) if o.class == "Error") {
-        Ok(error.value.get("message")?.to_display())
+        Ok(Js::utf16(&error.value.get("message")?.to_js_string()?))
     } else {
-        Ok(String::from_utf16_lossy(&error.value.to_js_string()?))
+        global(rt, "String", vec![error.value.clone()])
     }
 }
 fn component(value: &Js) -> Result<String, Thrown> {
@@ -252,10 +253,10 @@ async fn connect(rt: &Rt) -> Result<Js, Thrown> {
     let listen_key = match async { await_js(rt.call_path("fetchListenKey", vec![])?).await }.await {
         Ok(key) => key,
         Err(error) => {
-            let message = Js::str(&format!(
-                "Binance COIN-M user data stream unavailable: {}",
-                error_text(&error)?
-            ));
+            let message = ops::add(
+                &Js::str("Binance COIN-M user data stream unavailable: "),
+                &error_text(rt, &error)?,
+            )?;
             let delay = rt.this.get("listenKeyRetryDelayMs")?.to_number()?;
             if delay == 5_000. {
                 rt.call_path("emitAndLogError", vec![message])?;
@@ -708,9 +709,11 @@ async fn execute_positions(rt: &Rt) -> Result<Js, Thrown> {
     Ok(Js::Undefined)
 }
 async fn fetch_listen_key(rt: &Rt) -> Result<Js, Thrown> {
-    let reply =
-        await_js(rt.call_path("parent.xhr.post", vec![rt.global("ENDPOINTS.LISTEN_KEY")?])?)
-            .await?;
+    let reply = await_js(rt.call_path(
+        "parent.xhr.post",
+        vec![rt.global("ENDPOINTS")?.get("LISTEN_KEY")?],
+    )?)
+    .await?;
     let data = reply.get("data")?;
     rt.call_path("scheduleListenKeyRefresh", vec![Js::Number(1_800_000.)])?;
     data.get("listenKey")
@@ -725,16 +728,20 @@ async fn update_listen_key(rt: &Rt) -> Result<Js, Thrown> {
         return Ok(Js::Undefined);
     }
     let result = async {
-        await_js(rt.call_path("parent.xhr.put", vec![rt.global("ENDPOINTS.LISTEN_KEY")?])?).await?;
+        await_js(rt.call_path(
+            "parent.xhr.put",
+            vec![rt.global("ENDPOINTS")?.get("LISTEN_KEY")?],
+        )?)
+        .await?;
         rt.call_path("scheduleListenKeyRefresh", vec![Js::Number(1_800_000.)])?;
         rt.this.set("keepaliveFailing", Js::Bool(false))
     }
     .await;
     if let Err(error) = result {
-        let message = Js::str(&format!(
-            "Binance COIN-M user data stream keepalive failed: {}",
-            error_text(&error)?
-        ));
+        let message = ops::add(
+            &Js::str("Binance COIN-M user data stream keepalive failed: "),
+            &error_text(rt, &error)?,
+        )?;
         if flag(rt, "keepaliveFailing")? {
             rt.call_path(
                 "parent.log",

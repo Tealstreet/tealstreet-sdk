@@ -156,5 +156,18 @@ let cases=0;
   assert.equal(p.store.positions[0].contracts,0.004);release([]);await pending;
   assert.equal(fullUpdates,0);assert.equal(p.store.positions[0].contracts,0.004);assert.equal(s.positionFetchInFlight,false);cases++;
  }
- assert.equal(cases,9);console.log('Maintained inverse socket classes/imported algorithms: 9 actual source groups PASS (wire/data/candle/depth/fill/inverse-position/retry/keepalive/stale-REST); Base IO ports only.');
+ {
+  const p=parent(true),s=new Public(p);
+  s.onMessage({data:'{"e":"24hrTicker","s":"BTCUSD_PERP","c":"50020.5","P":"-1.25","v":"9","q":"1","extra":"\\ud800"}'});
+  assert.equal(p.store.tickersBySymbol[SYMBOL].last,50020.5,'maintained source accepts escaped lone surrogate in ignored field');cases++;
+ }
+ {
+  for(const method of ['connectAndSubscribe','updateListenKey'])for(const structured of [false,true]){
+   timers=new Map();const p=parent(),s=new Private(p);const value=structured?new Error('\ud800'):'\ud800';
+   p.xhr={async post(){throw value;},async put(){throw value;}};
+   await s[method]();const prefix=method==='connectAndSubscribe'?'Binance COIN-M user data stream unavailable: ':'Binance COIN-M user data stream keepalive failed: ';
+   assert.equal(s.errors[0],prefix+'\ud800');assert.equal(s.errors[0].charCodeAt(prefix.length),0xd800);
+  }cases++;
+ }
+ assert.equal(cases,11);console.log('Maintained inverse socket classes/imported algorithms: 11 actual source groups PASS (streams, timers, stale REST, UTF16 frame/warnings); Base IO ports only.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -9,7 +9,7 @@ kind = "class"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::new"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket.dispose"
@@ -17,7 +17,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::new"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket.connectAndSubscribe"
@@ -25,7 +25,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::connect"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::connect. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::connect. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket.onOpen"
@@ -33,7 +33,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::new"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#detachSocket"
@@ -41,7 +41,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::detach"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::detach. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::detach. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket.onMessage"
@@ -49,7 +49,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::on_message"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::on_message. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::on_message. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket.ping"
@@ -57,7 +57,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::new"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#getOrderRejectReason"
@@ -65,7 +65,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::reject_reason"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::reject_reason. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::reject_reason. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket.handleOrderEvents"
@@ -73,7 +73,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::orders"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::orders. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::orders. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket.handleAccountEvents"
@@ -81,7 +81,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::accounts"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::accounts. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::accounts. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#throttledFetchPositions"
@@ -89,7 +89,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::throttle_positions"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::throttle_positions. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::throttle_positions. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#executePositionFetch"
@@ -97,7 +97,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::execute_positions"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::execute_positions. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::execute_positions. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#fetchListenKey"
@@ -105,7 +105,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::fetch_listen_key"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::fetch_listen_key. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::fetch_listen_key. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#scheduleListenKeyRefresh"
@@ -113,7 +113,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::schedule_refresh"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::schedule_refresh. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::schedule_refresh. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#updateListenKey"
@@ -121,7 +121,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::update_listen_key"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::update_listen_key. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::update_listen_key. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#throttledFetchOrders"
@@ -129,7 +129,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::new"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::new. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
 
 [[symbol]]
 ts = "BinanceInversePrivateWebsocket#fetchThrottledOrders"
@@ -137,4 +137,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/inverse/ws_private.rs::fetch_orders"
 status = "ported"
-note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::fetch_orders. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (9 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
+note = "Concrete source member installed on the real inverse receiver at safe-cex-venue-binance/src/inverse/ws_private.rs::fetch_orders. tests/inverse_socket_binding.rs executes production constructor, BaseWebSocket, Store and HTTP boundaries; tests/inverse-socket-source.cjs executes unchanged maintained classes/imported algorithms (11 source groups). Arrow callbacks retain their lexical socket. Listen-key timers remain core-owned; native raw fill contracts, large IDs and inverse position conversion are witnessed. Scoped evidence covers the named cases, not exhaustive input or feature coverage."
