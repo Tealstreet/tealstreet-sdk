@@ -5180,3 +5180,7 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
         }
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/public_listener_aliases.rs"]
+mod public_listener_aliases;
