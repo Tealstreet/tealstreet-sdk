@@ -288,3 +288,9 @@ queue drivers delegate to `pendingJobs`. Missing/malformed receipts from older
 addons fail closed. This certifies SDK ExchangeRuntime work, not arbitrary
 external Tokio tasks or transport internals. Existing reports without this field
 retain their earlier, narrower qualification; do not promote them retroactively.
+
+`unknownTasks` records each unclassified producer's source location and observed
+`waitHint` for investigation. A hint never exempts work. Reviewed timers with an
+asynchronous callback switch to finite work before entering that callback, so a
+later sleep inside it still blocks drain. Waking a reviewed idle task makes it
+blocking immediately, before its next poll; cancellation removes its receipt.
