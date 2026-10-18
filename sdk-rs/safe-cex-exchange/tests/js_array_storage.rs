@@ -326,3 +326,63 @@ fn array_freeze_blocks_builtin_mutations_without_detaching_original_alias() {
         expected("frozenBuiltins")
     );
 }
+
+#[test]
+fn array_length_coercion_observes_two_conversions_and_intervening_reentry() {
+    let mut outcomes = vec![];
+    for mode in ["stable", "mismatch", "throws"] {
+        let array = Js::array(vec![Js::Number(1.0), Js::Number(2.0), Js::Number(3.0)]);
+        let token = Js::object(vec![]);
+        let input = Js::object(vec![]);
+        let Js::Object(receiver) = &input else {
+            unreachable!()
+        };
+        let receiver = Rc::downgrade(receiver);
+        let events = Rc::new(RefCell::new(vec![]));
+        let observed = events.clone();
+        let changed = array.clone();
+        let thrown = token.clone();
+        input
+            .define(
+                "valueOf",
+                Js::function("valueOf", move |this, _| {
+                    assert!(this.same_reference(&Js::Object(receiver.upgrade().unwrap())));
+                    let call = {
+                        let mut events = observed.borrow_mut();
+                        events.push(number(&changed.get("length")?) as usize);
+                        events.len()
+                    };
+                    if call == 1 {
+                        changed.set("5", Js::Number(99.0))?;
+                    }
+                    if call == 2 {
+                        if mode == "mismatch" {
+                            return Ok(Js::Number(3.0));
+                        }
+                        if mode == "throws" {
+                            return Err(Thrown::new(thrown.clone()));
+                        }
+                    }
+                    Ok(Js::Number(2.0))
+                }),
+            )
+            .unwrap();
+        let error = array.set("length", input).err().map(|error| {
+            if error.value.same_reference(&token) {
+                "original".to_owned()
+            } else {
+                error.value.get("name").unwrap().to_display()
+            }
+        });
+        outcomes.push(json!({
+            "mode": mode, "events": &*events.borrow(), "error": error,
+            "length": number(&array.get("length").unwrap()) as usize,
+            "own5": array.has_own("5"),
+        }));
+    }
+    assert_eq!(
+        json!(outcomes),
+        expected("lengthCoercion"),
+        "ARRAY_STORAGE ToUint32 then ToNumber both observe the original input; reentry and abrupt effects remain"
+    );
+}

@@ -72,4 +72,21 @@ const frozenBuiltins = {
   refused: frozenRefused, retainedIndex: Object.hasOwn(frozen, '0'),
   length: frozen.length, json: JSON.stringify(frozen),
 };
-process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins}));
+const lengthCoercion = [];
+for (const mode of ['stable', 'mismatch', 'throws']) {
+  const array = [1, 2, 3], token = {}, events = [];
+  const value = {valueOf() {
+    events.push(array.length);
+    if (events.length === 1) array[5] = 99;
+    if (events.length === 2) {
+      if (mode === 'mismatch') return 3;
+      if (mode === 'throws') throw token;
+    }
+    return 2;
+  }};
+  let error = null;
+  try { array.length = value; }
+  catch (thrown) { error = thrown === token ? 'original' : thrown.name; }
+  lengthCoercion.push({mode, events, error, length: array.length, own5: Object.hasOwn(array, '5')});
+}
+process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins, lengthCoercion}));
