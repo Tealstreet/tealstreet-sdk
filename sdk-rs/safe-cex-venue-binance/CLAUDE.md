@@ -743,3 +743,12 @@ distinguishes transport rejection from malformed fulfilled-body validation.
 `scripts/snapshot-rejection-fixture-control.py` compiles the old fulfilled fixture,
 requires that assertion to fail and restores the genuine rejection path. This is
 a fixture-semantics check, separate from the two production continuation controls.
+
+The legacy `public_message`, `private_message`, `spot_public_message` and
+`public_candle_delegate` callback extractions have no production callers and were
+removed with `message_entry` and its standalone oracle/control receipts. All
+nine mapped source members retain their existing concrete native class bodies.
+Use `private_classes --features native` for actual native private frame/Store,
+public ticker generations, candle delegation/cleanup and depth recovery proofs.
+Registry/N-API construction reaches those concrete classes. The current wasm FFI
+exports only `parity_probe`/`version`, with no legacy message entry.
