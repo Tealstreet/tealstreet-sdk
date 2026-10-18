@@ -1,0 +1,82 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/binance/binanceinverse.ws-public.ts"
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.connectAndSubscribe"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.onOpen"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.subscribe"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.onMessage"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.handleTickerStreamEvents"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.handleMarkPriceStreamEvents"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.handleBookTickersStreamEvents"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.listenOHLCV"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePublicWebsocket.listenOrderBook"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

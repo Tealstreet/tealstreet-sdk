@@ -405,5 +405,14 @@ impl Exchange for OkxExchange {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
+#[path = "../../tests/support/binding_harness.rs"]
+mod binding_harness;
+
+#[cfg(test)]
 #[path = "../../tests/support/callback_binding.rs"]
 mod callback_binding;
+
+#[cfg(test)]
+#[path = "../../tests/support/amendment_binding.rs"]
+mod amendment_binding;

@@ -158,7 +158,7 @@ Venue code implements hooks that receive validated payloads; callers invoke the
 base entrypoints with ordinary `PlaceOrderOpts`. No venue constructs the private
 validated fields. This example runs as a crate doctest: it constructs the production Store and all
 five BaseExchange arguments, places one order and one native batch, and verifies
-a rejected batch sends nothing. The recording runtime implements all ten host
+a rejected batch sends nothing. The recording runtime implements the required host
 methods explicitly; its unused I/O paths panic rather than pretending to work.
 
 ```rust
@@ -167,6 +167,7 @@ use safe_cex_exchange::{
     client_order_id::{pattern_client_order_id_rule, ClientOrderIdRuleOverrides},
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedOrder, ValidatedBatch},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    js_runtime::value::Js,
 };
 use safe_cex_store::{store::DefaultStore, Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, PlaceOrderOpts};
@@ -183,12 +184,12 @@ impl ExchangeRuntime for RecordingRuntime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected detached task")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[Js]) {}
     fn unique_id(&self) -> String { "fixture-id".into() }
     fn is_worker(&self) -> bool { false }
     fn random(&self) -> f64 { 0.5 }
     fn report_exception(&self, error: &ExchangeError, _: &Value) { eprintln!("{}: {}", error.name, error.message); }
-    fn report_raw_exception(&self, _: &Value, _: &Value) { panic!("unexpected raw exception report") }
+    fn report_raw_exception(&self, _: &Js, _: &Value) { panic!("unexpected raw exception report") }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker request")
     }
@@ -1647,3 +1648,9 @@ listener arguments, including Unicode, NUL, empty strings and formatting tokens.
 `scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
 missing classifications or changed default bodies; the receiver classification
 applies only to this typed forwarding method.
+
+The shared JS Axios factory records each dispatched request in the existing
+HTTP_STATS singleton after proxy authorization, including rejected HTTP statuses.
+Its normal response interceptor preserves the source absence of recordError.
+The native runtime request-counter regression uses actual HTTP200/404 receipts;
+it fails with an unchanged total on the previous factory.
