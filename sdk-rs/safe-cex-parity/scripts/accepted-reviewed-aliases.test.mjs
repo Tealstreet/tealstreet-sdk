@@ -127,4 +127,37 @@ test('reviewed generic aliases return only their spec-owned fixed instantiation'
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, canonical: 'core::option::Option' } }), /canonical root must be the compiler target root/);
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, unsized: true } }), /only rootless dyn targets are unsized/);
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, extra: 1 } }), /unsupported spec fields/);
+
+  const canonical = 'indexmap::map::IndexMap';
+  const target = { resolved_path: { path: canonical, args: { angle_bracketed: {
+    args: [{ type: { resolved_path: { path: 'alloc::string::String', args: null } } },
+      { type: { generic: 'T' } }], constraints: [],
+  } } } };
+  const registered = { ...alias, name: 'control::RegisteredMap',
+    generics: { params: [structuredClone(alias.generics.params[1])], where_predicates: [] },
+    rawTarget: target, target };
+  const selected = { ...spec, canonical, generics: registered.generics, suffix: '<::serde_json::Value>', rawTarget: target, target,
+    expectedType: '::indexmap::IndexMap<::std::string::String, ::serde_json::Value>' };
+  const registrySpecs = { [registered.name]: selected };
+  const compilerPath = '/compiled/libindexmap.rmeta';
+  const registryContext = { macroOrigins: ['serde_json'],
+    packageMetadata: { dependencies: [{ name: 'indexmap', rename: null, kind: null, req: '=2.14.2' }] },
+    externalTypeAliases: [{ name: registered.name, canonical, kind: 'struct', compilerPath,
+      artifact: { kind: 'registry', compilerPath,
+        packageId: 'registry+https://github.com/rust-lang/crates.io-index#indexmap@2.14.2' } }],
+  };
+  assert.equal(reviewedGenericAliasProbe(registered, undefined, registryContext, registrySpecs).expectedType, selected.expectedType);
+  for (const mutate of [
+    item => { item.packageMetadata.dependencies = []; },
+    item => { item.packageMetadata.dependencies[0].req = '^2.14'; },
+    item => { item.externalTypeAliases[0].artifact.packageId = 'registry+https://example.test#indexmap@2.14.1'; },
+    item => { item.externalTypeAliases[0].artifact.packageId = 'registry+https://example.test#other@2.14.2'; },
+    item => { item.externalTypeAliases[0].artifact.compilerPath = '/other/libindexmap.rmeta'; },
+    item => { item.externalTypeAliases[0].kind = 'trait'; },
+    item => { item.externalTypeAliases[0].artifact.kind = 'unknown'; },
+  ]) {
+    const changed = structuredClone(registryContext); mutate(changed);
+    assert.throws(() => reviewedGenericAliasProbe(registered, undefined, changed, registrySpecs), /canonical root needs actual compiler identity/);
+  }
+  assert.equal(reviewedGenericAliasProbe({ ...registered, name: 'control::UnregisteredMap' }, undefined, registryContext, registrySpecs), undefined);
 });

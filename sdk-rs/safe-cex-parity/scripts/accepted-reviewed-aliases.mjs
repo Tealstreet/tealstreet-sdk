@@ -13,6 +13,17 @@ function rootPath(type) {
   return type?.resolved_path?.path;
 }
 
+function registeredRegistryRoot(row, canonical, packageMetadata) {
+  if (row.kind !== 'struct' || row.artifact?.kind !== 'registry') return false;
+  const identity = row.artifact.packageId?.match(/^registry\+[^#]+#([^@#]+)@([^@#]+)$/);
+  const crateName = canonical.split('::')[0];
+  const dependencies = (packageMetadata?.dependencies ?? []).filter(dependency =>
+    dependency.kind === null && (dependency.rename ?? dependency.name).replaceAll('-', '_') === crateName);
+  return Boolean(identity && dependencies.length === 1 &&
+    dependencies[0].name === identity[1] && dependencies[0].req === `=${identity[2]}` &&
+    typeof row.compilerPath === 'string' && row.compilerPath === row.artifact.compilerPath);
+}
+
 export function reviewedGenericAliasProbe(alias, contract, context, specs = productionSpecs) {
   const spec = specs[alias.name];
   if (!spec) return undefined;
@@ -32,7 +43,7 @@ export function reviewedGenericAliasProbe(alias, contract, context, specs = prod
   assert.ok(Array.isArray(context.externalTypeAliases), `${label}: actual artifact context required`);
   const roots = context.externalTypeAliases.filter(row => row.name === alias.name && row.canonical === spec.canonical);
   const external = spec.canonical.split('::')[0] !== alias.name.split('::')[0];
-  assert.ok(spec.unsized || ((!external || roots.length) && roots.every(row => ['sysroot', 'workspace'].includes(row.artifact?.kind))), `${label}: canonical root needs actual compiler identity`);
+  assert.ok(spec.unsized || ((!external || roots.length) && roots.every(row => ['sysroot', 'workspace'].includes(row.artifact?.kind) || registeredRegistryRoot(row, spec.canonical, context.packageMetadata))), `${label}: canonical root needs actual compiler identity`);
   return {
     suffix: spec.suffix,
     canonical: spec.canonical,
