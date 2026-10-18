@@ -709,9 +709,11 @@ async fn execute_positions(rt: &Rt) -> Result<Js, Thrown> {
     Ok(Js::Undefined)
 }
 async fn fetch_listen_key(rt: &Rt) -> Result<Js, Thrown> {
-    let reply =
-        await_js(rt.call_path("parent.xhr.post", vec![rt.global("ENDPOINTS.LISTEN_KEY")?])?)
-            .await?;
+    let reply = await_js(rt.call_path(
+        "parent.xhr.post",
+        vec![rt.global("ENDPOINTS")?.get("LISTEN_KEY")?],
+    )?)
+    .await?;
     let data = reply.get("data")?;
     rt.call_path("scheduleListenKeyRefresh", vec![Js::Number(1_800_000.)])?;
     data.get("listenKey")
@@ -726,7 +728,11 @@ async fn update_listen_key(rt: &Rt) -> Result<Js, Thrown> {
         return Ok(Js::Undefined);
     }
     let result = async {
-        await_js(rt.call_path("parent.xhr.put", vec![rt.global("ENDPOINTS.LISTEN_KEY")?])?).await?;
+        await_js(rt.call_path(
+            "parent.xhr.put",
+            vec![rt.global("ENDPOINTS")?.get("LISTEN_KEY")?],
+        )?)
+        .await?;
         rt.call_path("scheduleListenKeyRefresh", vec![Js::Number(1_800_000.)])?;
         rt.this.set("keepaliveFailing", Js::Bool(false))
     }
