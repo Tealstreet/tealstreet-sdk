@@ -380,3 +380,7 @@ mod fix_audit_tests;
 #[cfg(test)]
 #[path = "../../tests/support/history_row_binding.rs"]
 mod history_row_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "native_error_tests.rs"]
+mod native_error_tests;
