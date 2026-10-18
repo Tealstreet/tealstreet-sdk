@@ -68,3 +68,18 @@ The reused bridge witness retains its no-response assertion through the current
 retained_response_input accessor after the old response field was removed; this
 is test API drift, with no production behavior change. Body controls and final
 normal-merge gates remain required before READY.
+
+Four independent compiled body controls now pass. Each class constructor was
+changed to a different real family, and State's asset-price lookup was changed
+to a constant USD lookup. Each fault produced a named `function output mismatch`
+for its owner while the three sibling owners remained GREEN. Every fault was
+restored byte for byte, followed by a full native4 GREEN replay. The final
+restored source SHA256 is
+`8f1f92222b832385c15a86d23d5831f94c9b2e5507e10568ee8ce466b9b6d80e`.
+The missing-contract replay also completed through the full canonical inventory:
+all four owners produced named unclassified results before their records were
+added. Neither compiler failures nor infrastructure failures count as RED.
+
+The CI wiring suite passes376 tests. This new venue integration target is covered
+by the existing Binance `--all-targets -- --include-ignored` registration; no parity
+Node test was added or renamed, so the fixed parity-test expected list is unchanged.
