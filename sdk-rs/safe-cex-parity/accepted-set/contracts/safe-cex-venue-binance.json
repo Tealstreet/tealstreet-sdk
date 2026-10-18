@@ -25774,7 +25774,7 @@
       }
     },
     "evidence": "Actual production response validator for Futures/PM/Spot. Successful nonempty slices assert original array storage identity before observation; null rejection retains the native error name. No custom collection or arbitrary property claim.",
-    "call": "{use safe_cex_venue_binance::public_rest::RestVenue;let venue=match $value[\"venue\"].as_str().unwrap(){\"futures\"=>RestVenue::Futures,\"pm\"=>RestVenue::PM,_=>RestVenue::Spot};match $type(venue,\"/fixture\",$value.get(\"value\")){Ok(rows)=>{let original=$value[\"value\"].as_array().unwrap();assert_eq!(rows.len(),original.len());if !rows.is_empty(){assert!(std::ptr::eq(rows.as_ptr(),original.as_ptr()));}serde_json::json!({\"value\":rows})},Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "call": "{use crate::public_rest::RestVenue;let venue=match $value[\"venue\"].as_str().unwrap(){\"futures\"=>RestVenue::Futures,\"pm\"=>RestVenue::PM,_=>RestVenue::Spot};match $type(venue,\"/fixture\",$value.get(\"value\")){Ok(rows)=>{let original=$value[\"value\"].as_array().unwrap();assert_eq!(rows.len(),original.len());if !rows.is_empty(){assert!(std::ptr::eq(rows.as_ptr(),original.as_ptr()));}serde_json::json!({\"value\":rows})},Err(e)=>serde_json::json!({\"name\":e.name})}}",
     "cases": [
       {
         "input": {
@@ -26141,7 +26141,7 @@
       }
     },
     "evidence": "Actual production private mapper executed directly on two maintained normal fetchMarkets rows (BTC/ETH); expected identity/raw fields and five native numeric bits come from actual TS Futures fetchMarkets. PM missing filters separately returns None. This is finite stock JSON/UTF8 data, not arbitrary JS input acceptance or alias equivalence.",
-    "call": "{use safe_cex_venue_binance::public_rest::RestVenue;let venue=if $value[\"venue\"]==\"pm\"{RestVenue::PM}else{RestVenue::Futures};match $type(venue,&$value[\"market\"],$value[\"brackets\"].as_array().unwrap()){Ok(Some(m))=>serde_json::json!({\"id\":m.id,\"symbol\":m.symbol,\"base\":m.base,\"quote\":m.quote,\"active\":m.active,\"isSpot\":m.is_spot,\"bits\":[m.precision.amount,m.precision.price,m.amount.min,m.amount.max,m.leverage_min].map(|n|if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())}),\"leverageMax\":m.leverage_max}),Ok(None)=>serde_json::json!({\"missing\":true}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "call": "{use crate::public_rest::RestVenue;let venue=if $value[\"venue\"]==\"pm\"{RestVenue::PM}else{RestVenue::Futures};match $type(venue,&$value[\"market\"],$value[\"brackets\"].as_array().unwrap()){Ok(Some(m))=>serde_json::json!({\"id\":m.id,\"symbol\":m.symbol,\"base\":m.base,\"quote\":m.quote,\"active\":m.active,\"isSpot\":m.is_spot,\"bits\":[m.precision.amount,m.precision.price,m.amount.min,m.amount.max,m.leverage_min].map(|n|if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())}),\"leverageMax\":m.leverage_max}),Ok(None)=>serde_json::json!({\"missing\":true}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
     "cases": [
       {
         "input": {
@@ -26605,7 +26605,7 @@
       }
     },
     "evidence": "Actual private mapper called with typed MarketIdentity and maintained normal response rows. Actual TS Futures and Spot fetchTickers independently supply eleven numeric outputs; native f64 bits and absent auxiliary fields are observed before JSON. Stock JSON/UTF8 profile, not arbitrary property/accessor admission.",
-    "call": "{let m=safe_cex_venue_binance::public_rest::MarketIdentity{id:$value[\"id\"].as_str().unwrap().into(),symbol:$value[\"symbol\"].as_str().unwrap().into()};match $type(&m,&$value[\"book\"],&$value[\"daily\"],&$value[\"price\"],$value[\"spot\"].as_bool().unwrap()){Ok(t)=>serde_json::json!({\"id\":t.id,\"symbol\":t.symbol,\"bits\":[t.bid,t.ask,t.last,t.mark,t.index,t.percentage,t.funding_rate,t.funding_time,t.volume,t.quote_volume,t.open_interest].map(|n|if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())}),\"midAbsent\":t.mid_price.is_none(),\"timestampAbsent\":t.timestamp.is_none(),\"infoAbsent\":t.info.is_none()}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "call": "{let m=crate::public_rest::MarketIdentity{id:$value[\"id\"].as_str().unwrap().into(),symbol:$value[\"symbol\"].as_str().unwrap().into()};match $type(&m,&$value[\"book\"],&$value[\"daily\"],&$value[\"price\"],$value[\"spot\"].as_bool().unwrap()){Ok(t)=>serde_json::json!({\"id\":t.id,\"symbol\":t.symbol,\"bits\":[t.bid,t.ask,t.last,t.mark,t.index,t.percentage,t.funding_rate,t.funding_time,t.volume,t.quote_volume,t.open_interest].map(|n|if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())}),\"midAbsent\":t.mid_price.is_none(),\"timestampAbsent\":t.timestamp.is_none(),\"infoAbsent\":t.info.is_none()}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
     "cases": [
       {
         "input": {
