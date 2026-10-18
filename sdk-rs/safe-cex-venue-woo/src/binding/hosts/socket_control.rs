@@ -352,11 +352,21 @@ fn update_order_book_by_price(a: Vec<Js>) -> Result<Js, Thrown> {
                 ("amount", amount),
                 ("total", Js::Number(0.0)),
             ]);
-            levels.splice_array(left as usize, 0, vec![level])?;
+            levels.splice_array(
+                levels.get("length")?.to_number()? as usize,
+                left as usize,
+                0,
+                vec![level],
+            )?;
             left as f64
         }
         Some(i) if zero => {
-            levels.splice_array(i as usize, 1, vec![])?;
+            levels.splice_array(
+                levels.get("length")?.to_number()? as usize,
+                i as usize,
+                1,
+                vec![],
+            )?;
             -1.0
         }
         Some(i) => {

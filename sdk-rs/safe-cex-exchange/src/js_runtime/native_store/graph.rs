@@ -143,6 +143,38 @@ fn row(value: &Js, index: usize) -> Result<Js, Thrown> {
     value.get(&index.to_string())
 }
 
+// ToPropertyKey keeps a Symbol primitive instead of applying ToString to it.
+fn id_key(value: &Js) -> Result<Js, Thrown> {
+    let primitive = if matches!(value, Js::Object(_) | Js::Function(_) | Js::Array(_)) {
+        value.ordinary_to_primitive(["toString", "valueOf"])?
+    } else {
+        value.clone()
+    };
+    if matches!(primitive, Js::SymbolIterator) {
+        Ok(primitive)
+    } else {
+        primitive.to_js_string().map(Js::String)
+    }
+}
+
+fn set_id_key(table: &Js, id: &Js, value: Js) -> Result<(), Thrown> {
+    let key = id_key(id)?;
+    if matches!(key, Js::SymbolIterator) {
+        // These private dictionaries have a null prototype and writable slots.
+        table.define_property_for(
+            &key,
+            &Js::object(vec![
+                ("value", value),
+                ("writable", Js::Bool(true)),
+                ("enumerable", Js::Bool(true)),
+                ("configurable", Js::Bool(true)),
+            ]),
+        )
+    } else {
+        table.set_key(key.as_str().expect("string property key"), value)
+    }
+}
+
 fn id_index(items: &Js) -> Result<Js, Thrown> {
     let out = Js::object(vec![]);
     out.set_prototype(Js::Null)?;
@@ -151,7 +183,7 @@ fn id_index(items: &Js) -> Result<Js, Thrown> {
         let index = next;
         next += 1;
         let key = row(items, index)?.get("id")?;
-        out.set_key(&key.to_js_string()?, Js::Number(index as f64))?;
+        set_id_key(&out, &key, Js::Number(index as f64))?;
     }
     Ok(out)
 }
@@ -164,14 +196,14 @@ fn id_lookup(items: &Js) -> Result<Js, Thrown> {
         let index = next;
         next += 1;
         let key = row(items, index)?.get("id")?;
-        out.set_key(&key.to_js_string()?, Js::Bool(true))?;
+        set_id_key(&out, &key, Js::Bool(true))?;
     }
     Ok(out)
 }
 
 fn find(items: &Js, id: &Js, index: Option<&Js>) -> Result<Option<usize>, Thrown> {
     if let Some(index) = index {
-        let hit = index.get_key(&id.to_js_string()?)?;
+        let hit = index.get_property(&id_key(id)?)?;
         return Ok(hit.as_f64().filter(|n| *n >= 0.0).map(|n| n as usize));
     }
     // findIndex visits holes, unlike forEach/filter.
@@ -1092,7 +1124,7 @@ impl Graph {
         while at < length(&self.get("orders")?)? {
             let item = row(&self.get("orders")?, at)?;
             if ids
-                .get_property(&item.get("id")?)?
+                .get_property(&id_key(&item.get("id")?)?)?
                 .strict_equals(&Js::Bool(true))
             {
                 self.update_in_array(
@@ -1139,7 +1171,7 @@ impl Graph {
             "filter",
             vec![Js::function("keepOrder", move |_, args| {
                 Ok(Js::Bool(
-                    !ids.get_property(&arg(&args, 0).get("id")?)?
+                    !ids.get_property(&id_key(&arg(&args, 0).get("id")?)?)?
                         .strict_equals(&Js::Bool(true)),
                 ))
             })],
@@ -1212,10 +1244,7 @@ impl Graph {
                     self.update_in_array(key, Some(hit), &value)?;
                 } else {
                     if let Some(ref index) = index {
-                        index.set_key(
-                            &value.get("id")?.to_js_string()?,
-                            self.get(key)?.get("length")?,
-                        )?;
+                        set_id_key(index, &value.get("id")?, self.get(key)?.get("length")?)?;
                     }
                     let value = if key == "positions" {
                         value.spread_object()?
