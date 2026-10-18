@@ -404,3 +404,11 @@ The two native receiver tests in `adapter_classes.rs` cover strict UTF-16
 comparison and own-field forwarding, including native cell identity, presence,
 number bits and nullish refusal. These entries classify existing receiver roles;
 they do not widen the adapter's prepared-data profile.
+
+`SigningRecord<V>` is live in the WebSocket signing parameter union. Its accepted
+alias registration fixes one `RetainedJsonInput` instantiation of the real
+Rc/RefCell/ordered-pair container, with exact source/expanded compiler targets.
+Native decoder observations check UTF-16 keys, duplicate-key order, values,
+shared ownership and mutation visibility. A separate actual `SigningRecord<Js>`
+witness retains nonfinite values, own undefined and native cell identity;
+neither witness claims a universal decoder for every generic value type.

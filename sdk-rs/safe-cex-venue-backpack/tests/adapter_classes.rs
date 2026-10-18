@@ -660,3 +660,76 @@ fn native_field_receiver_forwards_own_cells_without_projection() {
         assert!(value.field("x").unwrap().is_undefined());
     }
 }
+
+#[test]
+fn native_signing_record_alias_preserves_shared_ordered_cells() {
+    use safe_cex_venue_backpack::signing::{BackpackSigningParams, SigningRecord};
+    let value = Native::object(vec![
+        ("text", Native::utf16(&[0xd800])),
+        ("nan", Native::Number(f64::NAN)),
+        ("infinity", Native::Number(f64::INFINITY)),
+        ("undefined", Native::Undefined),
+    ]);
+    let record: SigningRecord<Native> = Rc::new(RefCell::new(vec![
+        (vec![0xdfff], value.clone()),
+        (vec![0xdfff], Native::Number(-0.0)),
+    ]));
+    let BackpackSigningParams::Object(shared) = BackpackSigningParams::object(record.clone())
+    else {
+        panic!("source object arm")
+    };
+    assert!(Rc::ptr_eq(&record, &shared));
+    assert_eq!(
+        shared
+            .borrow()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>(),
+        [vec![0xdfff], vec![0xdfff]]
+    );
+    assert!(shared.borrow()[0].1.same_reference(&value));
+    assert!(matches!(shared.borrow()[1].1, Native::Number(n) if n.to_bits()==(-0.0f64).to_bits()));
+    record.borrow_mut().push((vec![97], Native::Bool(true)));
+    assert_eq!(shared.borrow().len(), 3);
+    assert_eq!(
+        shared.borrow()[0]
+            .1
+            .field("text")
+            .unwrap()
+            .string()
+            .unwrap(),
+        [0xd800]
+    );
+    assert!(matches!(shared.borrow()[0].1.field("nan").unwrap(), Native::Number(n) if n.is_nan()));
+    assert!(
+        matches!(shared.borrow()[0].1.field("infinity").unwrap(), Native::Number(n) if n==f64::INFINITY)
+    );
+    assert!(shared.borrow()[0].1.has_own("undefined"));
+    assert!(
+        shared.borrow()[0]
+            .1
+            .field("undefined")
+            .unwrap()
+            .is_undefined()
+    );
+}
+
+#[test]
+fn native_signing_record_container_decodes_ordered_utf16_pairs() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    use safe_cex_venue_backpack::signing::SigningRecord;
+    let record: SigningRecord<Input> =
+        serde_json::from_str("[[[55296],-0.0],[[55296],true]]").unwrap();
+    let rows = record.borrow();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].0, [0xd800]);
+    assert_eq!(rows[1].0, [0xd800]);
+    assert_eq!(rows[0].1.as_f64().unwrap().to_bits(), (-0.0f64).to_bits());
+    assert!(matches!(rows[1].1, Input::Bool(true)));
+    for raw in ["null", "{}", "[[[65536],0]]", "[[[-1],0]]", "[[[97]]]"] {
+        assert!(
+            serde_json::from_str::<SigningRecord<Input>>(raw).is_err(),
+            "{raw}"
+        );
+    }
+}
