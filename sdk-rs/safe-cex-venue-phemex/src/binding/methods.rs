@@ -156,7 +156,9 @@ fn async_method(mut h: Host, name: &'static str, a: Vec<Js>) -> JsFuture<'static
                 let s = arg(&a, 0);
                 let mut orders = vec![];
                 for o in rows(&h.store("orders")?)? {
-                    if o.get("symbol")?.strict_equals(&s) {
+                    if o.get("symbol")?.strict_equals(&s)
+                        && !safe_cex_exchange::js_runtime::store::is_terminal_order(&o)?
+                    {
                         orders.push(o)
                     }
                 }

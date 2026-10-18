@@ -412,6 +412,8 @@ pub async fn cancel_close(
     for i in 0..len {
         let o = orders.get(&i.to_string())?;
         if o.read("symbol")?.same(&opts.read("symbol")?)
+            && !safe_cex_exchange::js_runtime::store::is_terminal_order(&o)
+                .map_err(Failure::from)?
             && o.read("close")?.same(&EventValue::Bool(true))
             && !o.read("amount")?.truthy()
             && o.read("type")?.same(&opts.read("type")?)

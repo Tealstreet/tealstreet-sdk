@@ -248,10 +248,12 @@ impl StoreState {
         let mut changed = false;
         let mut kept = Vec::with_capacity(incoming.len());
         for order in incoming {
-            if !terminal(order.status) && self.is_remembered_terminal(&order.id, now) {
+            if !is_terminal_order_status(order.status)
+                && self.is_remembered_terminal(&order.id, now)
+            {
                 changed = true;
                 if let Some(current) = self.orders.iter().find(|o| o.id == order.id)
-                    && terminal(current.status)
+                    && is_terminal_order_status(current.status)
                 {
                     kept.push(current.clone());
                 }
@@ -267,7 +269,7 @@ impl StoreState {
         ids: &[&str],
         status: OrderStatus,
     ) -> Result<(), &'static str> {
-        if !terminal(status) {
+        if !is_terminal_order_status(status) {
             return Err("terminal status must be closed or canceled");
         }
         let now = (self.now)();
@@ -474,7 +476,9 @@ fn empty_request_counts() -> RequestOutcomeCounts {
         other: 0.0,
     }
 }
-fn terminal(status: impl Into<safe_cex_types::ModelField<OrderStatus>>) -> bool {
+pub fn is_terminal_order_status(
+    status: impl Into<safe_cex_types::ModelField<OrderStatus>>,
+) -> bool {
     let status = status.into();
     matches!(
         status,

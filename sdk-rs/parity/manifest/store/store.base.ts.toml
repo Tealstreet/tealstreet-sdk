@@ -1,14 +1,14 @@
 [file]
 ts = "packages/safe-cex/src/store/store.base.ts"
-rust_files = [ "safe-cex-store/src/model_patch.rs", "safe-cex-store/src/store.rs" ]
+rust_files = [ "safe-cex-venue-bitget/src/cancellation.rs", "safe-cex-exchange/src/js_runtime/store.rs", "safe-cex-store/src/model_patch.rs", "safe-cex-store/src/store.rs" ]
 
 [[symbol]]
 ts = "isTerminalOrder"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-store/src/store.rs::is_terminal_order_status", "safe-cex-exchange/src/js_runtime/store.rs::is_terminal_order", "safe-cex-venue-bitget/src/cancellation.rs::CancellationHost::is_terminal_order" ]
+status = "ported"
+note = "Rename: isTerminalOrder -> safe-cex-store/src/store.rs::is_terminal_order_status. The Bitget host method supplies the same predicate through its mandatory capability. One shared terminal predicate over Closed/Canceled. Native Js bridge reads status once and treats unrecognized string/non-string statuses as nonterminal, matching Set.has; getter failures propagate. Typed callers pass retained ModelField status directly."
 
 [[symbol]]
 ts = "PACKED_TICKER_FIELDS"

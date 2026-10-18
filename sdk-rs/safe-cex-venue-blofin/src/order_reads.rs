@@ -317,7 +317,7 @@ pub async fn fetch_orders_with_retry<E: std::fmt::Display>(
         let outcome=async{
    let orders=three(fetch_normal_orders(store,xhr,host),fetch_algo_orders(store,xhr,host),fetch_trigger_orders(store,xhr,host)).await?;
    let orders=add_inline_tpsl_fallback_orders(&orders,host.now).map_err(ServiceError::Coercion)?;
-   if orders.is_empty()&&!store.orders().is_empty(){log(host.service,"Warning: fetchOrders returned empty but store had orders. Could be valid or API issue.")?;}Ok(orders)
+   if orders.is_empty()&&store.orders().iter().any(|order| !safe_cex_store::store::is_terminal_order_status(order.status)){log(host.service,"Warning: fetchOrders returned empty but store had orders. Could be valid or API issue.")?;}Ok(orders)
   }.await;
         match outcome {
             Ok(orders) => return Ok(orders),

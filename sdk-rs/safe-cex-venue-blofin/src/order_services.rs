@@ -361,7 +361,9 @@ pub async fn cancel_symbol_orders<E, F: Future<Output = Result<(), E>>>(
     let orders = store
         .orders()
         .iter()
-        .filter(|o| o.symbol == symbol)
+        .filter(|o| {
+            o.symbol == symbol && !safe_cex_store::store::is_terminal_order_status(o.status)
+        })
         .cloned()
         .collect();
     cancel_orders(orders).await

@@ -68,6 +68,7 @@ pub trait CancellationHost {
     fn spread(&self, order: &Self::Order) -> Result<Self::Order, Self::Error>;
     fn id(&self, order: &Self::Order) -> Result<CancelKey, Self::Error>;
     fn with_id(&self, spread: Self::Order, id: CancelKey) -> Self::Order;
+    fn is_terminal_order(&self, order: &Self::Order) -> Result<bool, Self::Error>;
     fn symbol(&self, order: &Self::Order) -> Result<CancelKey, Self::Error>;
     fn info_order_id(&self, order: &Self::Order) -> Result<Self::Value, Self::Error>;
     fn info_client_oid(&self, order: &Self::Order) -> Result<Self::Value, Self::Error>;
@@ -383,7 +384,7 @@ pub async fn cancel_symbol_orders<H: CancellationHost>(
             let Some(o) = stored.borrow().get(index).cloned() else {
                 continue;
             };
-            if h.symbol(&o)? == symbol {
+            if h.symbol(&o)? == symbol && !h.is_terminal_order(&o)? {
                 orders.push(o);
             }
         }

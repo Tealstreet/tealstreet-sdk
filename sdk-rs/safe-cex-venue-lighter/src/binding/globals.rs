@@ -309,14 +309,10 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
                 is_lighter_account_tier_eligible_for_partner_attribution(tier(&arg(&a, 0))?),
             ))
         }),
-        // ts: store.base isTerminalOrder
         helper("isTerminalOrder", |a| {
-            let status = arg(&a, 0).get("status")?;
-            let status = status.as_str().map(|s| String::from_utf16_lossy(s));
-            Ok(Js::Bool(matches!(
-                status.as_deref(),
-                Some("closed" | "canceled")
-            )))
+            Ok(Js::Bool(
+                safe_cex_exchange::js_runtime::store::is_terminal_order(&arg(&a, 0))?,
+            ))
         }),
     ];
     for (name, function) in helpers {

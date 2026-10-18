@@ -348,6 +348,7 @@ pub(crate) fn socket_ops(scope: &OkxScope) -> Rc<SocketEventOps<Js, Thrown>> {
 pub(crate) fn mutation_ops(scope: &OkxScope) -> Rc<OrderMutationOps<Js, Thrown>> {
     let s = scope.clone();
     Rc::new(OrderMutationOps {
+        is_terminal_order: Rc::new(safe_cex_exchange::js_runtime::store::is_terminal_order),
         value: market_ops(scope),
         has: Rc::new(|k, v| Ok(v.has_own(k))),
         filter: Rc::new(|v, f| {

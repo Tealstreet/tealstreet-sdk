@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 pub struct OrderMutationOps<V, E> {
     pub value: Rc<MarketAccountOps<V, E>>,
+    pub is_terminal_order: Rc<dyn Fn(&V) -> Result<bool, E>>,
     pub has: Rc<dyn Fn(&str, &V) -> Result<bool, E>>,
     pub filter: Rc<dyn Fn(V, ReadMapper<V, E>) -> Result<V, E>>,
     pub find: Rc<dyn Fn(V, ReadMapper<V, E>) -> Result<V, E>>,
@@ -379,10 +380,9 @@ pub async fn cancel_symbol_orders<V: Clone + 'static, E: 'static>(
     let orders = (h.filter)(
         orders,
         Rc::new(move |o| {
-            Ok((ops.value.boolean)((ops.value.equal)(
-                &(ops.value.get)(&o, "symbol")?,
-                &symbol,
-            )))
+            let selected = (ops.value.equal)(&(ops.value.get)(&o, "symbol")?, &symbol)
+                && !(ops.is_terminal_order)(&o)?;
+            Ok((ops.value.boolean)(selected))
         }),
     )?;
     let value = call(&h, "this.cancelOrders", || Ok(vec![orders]))?;

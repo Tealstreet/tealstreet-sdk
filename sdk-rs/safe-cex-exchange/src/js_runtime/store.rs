@@ -413,3 +413,13 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     );
     s
 }
+
+pub fn is_terminal_order(order: &Js) -> Result<bool, Thrown> {
+    let status = order.get("status")?;
+    let status = if matches!(status, Js::String(_)) {
+        to_typed::<OrderStatus>(&status).ok()
+    } else {
+        None
+    };
+    Ok(safe_cex_store::store::is_terminal_order_status(status))
+}

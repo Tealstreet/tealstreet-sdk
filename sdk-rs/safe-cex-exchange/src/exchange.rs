@@ -1463,7 +1463,10 @@ impl BaseExchange {
             .store
             .orders()
             .iter()
-            .filter(|order| order.symbol == symbol)
+            .filter(|order| {
+                order.symbol == symbol
+                    && !safe_cex_store::store::is_terminal_order_status(order.status)
+            })
             .cloned()
             .collect();
         if !orders.is_empty() {
@@ -1481,6 +1484,7 @@ impl BaseExchange {
             .store
             .orders()
             .iter()
+            .filter(|order| !safe_cex_store::store::is_terminal_order_status(order.status))
             .filter_map(|order| {
                 seen.insert(order.symbol.clone())
                     .then_some(order.symbol.clone())
