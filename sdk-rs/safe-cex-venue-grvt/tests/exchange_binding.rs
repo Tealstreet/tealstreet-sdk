@@ -1151,3 +1151,119 @@ fn socket_candles_keep_source_aliases_time_units_and_cleanup() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use std::{cell::Cell, rc::Rc};
+    let source = ticker_coercion::source("grvt");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 1000);
+    for name in [ExchangeName::Grvt] {
+        let mut opts = options();
+        opts.public_data_only = Some(true);
+        let h = harness(name, opts, script);
+        h.drive(h.venue().start()).unwrap();
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        let seed = ticker_coercion::seed("grvt");
+        let markets = seed
+            .iter()
+            .map(|ticker| {
+                serde_json::from_value(serde_json::json!({
+            "id":ticker.id,"symbol":ticker.symbol,"base":"fixture","quote":"USDT","active":true,
+            "precision":{"amount":0.01,"price":0.25},
+            "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+        })).unwrap()
+            })
+            .collect();
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert!(
+            h.venue()
+                .base()
+                .get_socket(SocketSlot::Public)
+                .unwrap()
+                .is_connected()
+        );
+        let socket = h.runtime.sockets.borrow()[0].1.clone();
+        let candle_callbacks = Rc::new(Cell::new(0));
+        let cleanups: Vec<_> = seed
+            .iter()
+            .map(|ticker| {
+                let received = candle_callbacks.clone();
+                h.venue()
+                    .listen_ohlcv(
+                        serde_json::from_value(json!({"symbol":ticker.symbol,"interval":"1m"}))
+                            .unwrap(),
+                        Rc::new(move |_| received.set(received.get() + 1)),
+                    )
+                    .unwrap()
+            })
+            .collect();
+        for case in source["cases"].as_array().unwrap() {
+            let mut case_seed = seed.clone();
+            for ticker in &mut case_seed {
+                ticker.last = case["priorLast"].as_f64().unwrap();
+            }
+            candle_callbacks.set(0);
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(case_seed),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .events
+                    .borrow_mut()
+                    .push_back(message(frame.as_str().unwrap().into()));
+                h.runtime.pump();
+            }
+            assert!(
+                h.runtime.reports.borrow().is_empty(),
+                "ticker reports: {:?}",
+                h.runtime.reports.borrow()
+            );
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+            let expected_callbacks = if case["channel"].as_str().unwrap().starts_with("candle") {
+                3
+            } else {
+                0
+            };
+            assert_eq!(
+                candle_callbacks.get(),
+                expected_callbacks,
+                "native ticker candle listener count"
+            );
+            assert_eq!(
+                case["candleCallbacks"].as_u64().unwrap(),
+                expected_callbacks
+            );
+        }
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        for cleanup in cleanups {
+            cleanup().unwrap();
+        }
+        h.venue().dispose().unwrap();
+    }
+}

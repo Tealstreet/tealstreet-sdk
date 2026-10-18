@@ -1545,3 +1545,14 @@ fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
     assert!(h.runtime.reports.borrow().is_empty());
     h.venue().dispose().unwrap();
 }
+
+#[path = "support/ticker_coercion_binding.rs"]
+mod ticker_coercion_binding;
+
+#[test]
+fn production_ticker_coercion_hyro_matches_constructed_typescript() {
+    if configured_child("production_ticker_coercion_hyro_matches_constructed_typescript") {
+        return;
+    }
+    ticker_coercion_binding::run(ExchangeName::Hyrotrader, "hyrotrader", 88);
+}
