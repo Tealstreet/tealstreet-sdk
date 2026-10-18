@@ -78,9 +78,17 @@ their 173 raw-text/native observations and grouped String-frontdoor control.
 `DECISION_CONTRACT_REVIEW.md` records eight account/exchange decision contracts,
 their 98 fixed TS/native observations and five isolated compiled controls.
 
+
+`ACCOUNT_FUNCTION_CONTRACT_REVIEW.md` reviews eleven remaining account, signing
+and Serde/error adapter functions. The selected runner requires all 131 native
+observations and replays 68 maintained-source expectations. Its grouped compiled
+control must fail every real owner, then pass after exact restoration. Bootstrap
+rustdoc artifacts stay in the separate `target/accepted-inventory` directory.
+
 `EXCHANGE_HELPER_CONTRACT_REVIEW.md` records twelve further production helper
 contracts, direct native fields/effects and the source checks for their 48 cases.
 The selected runner covers those twelve owners; the other full-matrix obligations remain.
+
 
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
@@ -176,6 +184,10 @@ behavior, requiring a compiled native failure and exact restored pass.
 companions and their direct shape/native-value witnesses. The focused
 `scripts/accepted-wire-contracts.mjs` retains all 608 observations and every
 compiler field, including each separately executed public-wrapper boundary.
+
+`RUNTIME_HELPER_CONTRACT_REVIEW.md` records six generic runtime-helper contracts,
+45 maintained-source/native cases and six compiled production-body controls.
+Their selected runner isolates rustdoc artifacts from the normal probe build.
 
 `ALTERNATE_OWNER_CONTRACT_REVIEW.md` records the assigned thirty-three-owner
 cohort: eleven Deserialize carriers, fourteen raw-input runtime owners and eight

@@ -4312,3 +4312,44 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn native_http_factory_updates_global_request_counts() {
+    use safe_cex_exchange::{
+        http::HTTP_STATS, js_runtime::client::factory, native::native_runtime,
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(
+        tokio::task::LocalSet::new().run_until(async {
+            let runtime = native_runtime();
+            let owner = factory_owner(runtime.clone());
+            let before = HTTP_STATS.lock().unwrap().get_stats(runtime.now_ms())["total"].as_u64().unwrap();
+            for status in [200, 404] {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let origin = format!("http://{}", listener.local_addr().unwrap());
+                let server = tokio::task::spawn_local(async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut bytes = Vec::new();
+                    while !bytes.windows(4).any(|part| part == b"\r\n\r\n") {
+                        let mut part = [0; 4096];
+                        let count = stream.read(&mut part).await.unwrap();
+                        assert!(count > 0);
+                        bytes.extend_from_slice(&part[..count]);
+                    }
+                    assert!(String::from_utf8_lossy(&bytes).starts_with("GET /stats "));
+                    stream.write_all(format!("HTTP/1.1 {status} Source fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let xhr = factory::create(host, &safe_cex_transport::DirectTransport,
+                    Js::object(vec![("baseURL", Js::str(&origin))]),
+                    &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]), &owner).unwrap();
+                assert_eq!(await_js(xhr.call_method("get", vec![Js::str("/stats")]).unwrap()).await.is_ok(), status == 200);
+                server.await.unwrap();
+            }
+            let after = HTTP_STATS.lock().unwrap().get_stats(runtime.now_ms())["total"].as_u64().unwrap();
+            assert!(after >= before + 2, "both actual native HTTP attempts update the exported global tracker: {before} -> {after}");
+        })
+    );
+}

@@ -509,6 +509,9 @@ uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witnes
 compares26 maintained-source identifiers, including safe-range and canonical-decimal
 boundaries, without replacing the rule or its operation table.
 
+The live order-page reader passes truthy message/meta.message values directly to
+the shared Raw(Js) reporter. Non-string errors must retain completed pages;
+`binding_orders` covers actual signed pagination, original emitted text and fallbacks.
 
 The constructed ticker census in `tests/binding_streams.rs::production_ticker_coercion_matches_constructed_typescript`
 uses the maintained TS exchange and DefaultStore via `parity/scripts/ticker-strict-source.cjs`.
