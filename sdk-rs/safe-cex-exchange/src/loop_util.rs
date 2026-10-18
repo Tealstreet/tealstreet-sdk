@@ -1,10 +1,19 @@
 //! Source loop scheduler; the host supplies browser scheduling and function source.
+use crate::{
+    eager::start_eager,
+    js_runtime::{
+        promise::Promise,
+        value::{Js, Thrown},
+    },
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
+};
 use std::{cell::RefCell, collections::HashSet, future::Future, pin::Pin, rc::Rc};
 type Callback = Rc<dyn Fn()>;
 type Sleep = Rc<dyn Fn(f64) -> Pin<Box<dyn Future<Output = Result<(), String>>>>>;
 type Schedule = Rc<dyn Fn(Callback) -> Result<(), String>>;
 #[derive(Clone)]
 pub struct LoopHost {
+    pub runtime: Rc<dyn ExchangeRuntime>,
     pub sleep: Sleep,
     /// Evaluated after sleep: window && document && visibilityState === visible.
     pub document_visible: Rc<dyn Fn() -> bool>,
@@ -27,24 +36,45 @@ fn with_logged<T>(operation: impl FnOnce(&RefCell<HashSet<Vec<u16>>>) -> T) -> T
     thread_local! { static LOGGED: RefCell<HashSet<Vec<u16>>> = RefCell::new(HashSet::new()); }
     LOGGED.with(operation)
 }
-pub async fn loop_once(
+pub fn loop_once(
     callback: Callback,
     source: &[u16],
     min_interval: Option<f64>,
     host: &LoopHost,
-) -> Result<(), String> {
-    let effective = match min_interval {
-        Some(interval) if interval > 0.0 => interval,
-        _ => {
-            warn_missing_interval(source, host);
-            5000.0
+) -> ExchangeFuture<'static, ()> {
+    let host = host.clone();
+    let source = source.to_vec();
+    let runtime = host.runtime.clone();
+    start_eager(&runtime, async move {
+        if min_interval == Some(f64::INFINITY) {
+            return Ok(());
         }
-    };
-    (host.sleep)(effective).await?;
-    if (host.document_visible)() {
-        (host.request_animation_frame)(callback)?;
-    } else {
-        (host.set_timeout_zero)(callback)?;
-    }
-    Ok(())
+        let effective = match min_interval {
+            Some(interval) if interval > 0.0 => interval,
+            _ => {
+                warn_missing_interval(&source, &host);
+                5000.0
+            }
+        };
+        let sleep = (host.sleep)(effective);
+        let slept = Promise::spawn(
+            &host.runtime,
+            Box::pin(async move {
+                sleep
+                    .await
+                    .map_err(|error| Thrown::from(ExchangeError::new(error)))?;
+                Ok(Js::Undefined)
+            }),
+        );
+        slept
+            .wait()
+            .await
+            .map_err(|error| error.to_exchange_error())?;
+        if (host.document_visible)() {
+            (host.request_animation_frame)(callback).map_err(ExchangeError::new)?;
+        } else {
+            (host.set_timeout_zero)(callback).map_err(ExchangeError::new)?;
+        }
+        Ok(())
+    })
 }
