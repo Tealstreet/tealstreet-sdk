@@ -9,7 +9,15 @@ in [P1A_FIELDS.md](P1A_FIELDS.md) and gate evidence in
 in [`../parity/MANIFEST-SPEC.md`](../parity/MANIFEST-SPEC.md) and cited by
 anchor; the closed-typed-output boundary in particular is a declaration, not a
 per-row argument, and it **excludes open-String fields, which carry the wire
-value**.
+value**. The coordinator's 2026-10-18 ingress ruling permits one explicit text
+projection: isolated UTF-16 surrogate units become U+FFFD when a retained value
+enters a typed Rust String or String key. Valid scalar text is unchanged. Raw
+RetainedJsonInput and model info keep their original units, including lone-unit
+keys, through the native payload marker; do not normalize the retained tree.
+This keeps a lone escaped unit from rejecting an entire otherwise valid batch.
+The real HTTP/client/Store proof is exchange's js_json_parse target; it executes
+the maintained TS Store over seven independent text profiles and checks both
+typed replacement and retained raw/info units before any JSON projection.
 
 Retained JSON projection tests pin two native array elements and two object members,
 with independent source/native lengths and executed comparison counts. Consuming-empty,
@@ -226,3 +234,13 @@ native numbers, undefined and UTF16 before serialization; `into_value` is a real
 JSON boundary, never an intermediate model conversion. The native Serde marker
 and InfoRecord codecs preserve own undefined without exposing marker objects in
 wire JSON. The single retained JSON writer lives below Num in this crate.
+
+Market.runtime is the shared carrier for runtime type/spot/swap/future/contract/
+linear/inverse properties constructed outside the maintained TS Market declaration.
+Its serializer writes these optional fields on the Market object; its private
+object decoder reads the same flattened keys. Precision base/quote, price max and
+cost limits are likewise optional runtime fields on the canonical nested models.
+The static TS declaration projection omits them; native output and numeric ingress
+retain them. Other venue constructors explicitly leave these fields absent.
+The recorded public-market addon regression executes the actual Backpack and
+Crypto.com TS constructors and compiled native binding against identical HTTP bytes.

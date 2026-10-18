@@ -278,6 +278,8 @@ fn derivative_market(
         active: prop(Some(m), "status")?.and_then(Value::as_str) == Some("TRADING"),
         is_spot: None,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: vf(amt, "stepSize")?,
             price: vf(p, "tickSize")?,
         },
@@ -317,6 +319,8 @@ fn spot_market(m: &Value) -> Result<RestMarket, Failure> {
         active: prop(Some(m), "status")?.and_then(Value::as_str) == Some("TRADING"),
         is_spot: Some(true),
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: if amount_step > 0.0 {
                 amount_step
             } else {

@@ -1864,3 +1864,9 @@ covers HMAC hex/base64 and Stark felt-pair requests, using the existing runtime-
 Promise machinery for completion and errors. The Paradex native binding witness
 uses real NativeRuntime/reqwest and a loopback config/auth origin; maintained Node
 SDK code independently builds and signs Order, ModifyOrder and JWT preimages.
+
+Array.join retains UTF16 units through both separator and element coercion;
+UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
+`native_array_join_preserves_utf16_elements_separators_and_coercions` compares
+eight independent Node cases directly as native code units, including holes,
+nullish values, default separators, nested arrays and custom ToString results.
