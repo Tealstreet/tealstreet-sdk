@@ -601,6 +601,42 @@ fn place_order_signs_a_cloid_order_and_returns_the_resting_oid() {
 }
 
 #[test]
+fn cloid_audit_exported_placement_produces_boolean_record_inputs() {
+    let f = started();
+    for reduce_only in [false, true] {
+        for side in ["buy", "sell"] {
+            for kind in ["limit", "stop_market"] {
+                let opts = serde_json::from_value(json!({
+                    "symbol":"BTC-PERP", "type":kind, "side":side,
+                    "amount":0.01, "price":60000, "reduceOnly":reduce_only,
+                }))
+                .unwrap();
+                let before = f.routes.count("exchange:order");
+                let ids = f
+                    .host
+                    .block_on(f.exchange.base().place_order(&*f.exchange, opts))
+                    .unwrap();
+                assert_eq!(ids, ["777"]);
+                assert_eq!(f.routes.count("exchange:order"), before + 1);
+                let body = last_body(&f, "exchange:order");
+                let wire = &body["action"]["orders"][0];
+                assert_eq!(
+                    wire["r"],
+                    json!(reduce_only),
+                    "HL_CLOID_AUDIT exported {kind}/{side} producer"
+                );
+                assert!(
+                    wire["c"]
+                        .as_str()
+                        .is_some_and(safe_cex_venue_hyperliquid::cloid::is_hyperliquid_cloid)
+                );
+                assert!(body["signature"]["r"].is_string());
+            }
+        }
+    }
+}
+
+#[test]
 fn cancel_orders_posts_one_cancel_per_order() {
     let f = started();
     let order: safe_cex_types::Order = serde_json::from_value(json!({

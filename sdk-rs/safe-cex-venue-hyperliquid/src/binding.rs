@@ -1,6 +1,10 @@
 //! Production `impl Exchange` for HyperliquidExchange. The constructor runs the
 //! ported class constructor inside the realm; every trait method invokes the
 //! instance's ported method and converts its result at the typed boundary.
+#[cfg(test)]
+#[path = "../tests/support/cloid_audit.rs"]
+mod cloid_audit;
+
 use crate::{
     cloid::hyperliquid_client_order_id_rule,
     core_exchange_class,
