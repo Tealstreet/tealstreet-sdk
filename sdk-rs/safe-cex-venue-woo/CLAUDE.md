@@ -519,6 +519,10 @@ The inactive V3 account/private-order/write closure and orphan request DTO are
 retired after TS/Rust caller checks. All 12 remaining inactive assigned rows are
 ACCEPT; the live rows are tracked in FIX_AUDIT_LEDGER.md. See ACCOUNT_WRITE_REVIEW.md.
 
+The three live ticker FIX-audit rows accept the existing decision-3 typed boundary
+with current constructed-source/socket/Store evidence. LIVE_TICKER_REVIEW.md records
+the exact mappings, original subscriber failures and native numeric observations.
+
 The three order tables and mapLimitOrder FIX-audit leads are accepted against the
 constructed exchange, including inherited referent identity and live info aliases.
 See LIVE_ORDER_REVIEW.md; typed own-entry slices do not replace runtime lookup.
