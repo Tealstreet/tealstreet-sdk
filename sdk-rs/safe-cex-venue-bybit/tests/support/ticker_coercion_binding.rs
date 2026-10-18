@@ -78,7 +78,7 @@ pub fn run(name: ExchangeName, source_name: &str, count: usize) {
                 .unwrap();
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),

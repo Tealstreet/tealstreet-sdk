@@ -299,7 +299,7 @@ pub fn handle_tickers_event(
     }
     let symbol = safe_cex_num::js_string(Some(symbol))
         .map_err(|error| TickerEventError::Source(error.message.to_owned()))?;
-    let ticker = store.lookup_ticker_by_symbol(&symbol);
+    let ticker = store.lookup_ticker_by_symbol(&symbol)?;
     if !ticker.is_truthy() {
         return Ok(());
     }
@@ -337,10 +337,7 @@ pub fn handle_tickers_event(
         // NaN/Infinity; JSON would collapse these to null before the Store saw them.
         update.set_number(target, number);
     }
-    let Some(id) = ticker
-        .update_id()
-        .map_err(|error| TickerEventError::Source(error.message.to_owned()))?
-    else {
+    let Some(id) = ticker.update_id()? else {
         return Ok(());
     };
     let updated: Result<(), safe_cex_store::StoreMutationError> = store.update_ticker(&id, &update);
@@ -480,5 +477,11 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
             safe_cex_transport::socket::SocketFrame::Text(text) => on_message(socket, text),
             _ => Ok(()),
         }
+    }
+}
+
+impl From<safe_cex_types::StoreReadError> for TickerEventError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error.into())
     }
 }

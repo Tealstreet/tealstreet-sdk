@@ -188,6 +188,26 @@ impl fmt::Debug for Thrown {
 
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
+        // Store read failures carry arbitrary native throws below this layer.
+        // Recover before creating diagnostics or reading any cause properties.
+        if let Some(origin) = &error.origin {
+            let read = origin
+                .error()
+                .downcast_ref::<safe_cex_types::StoreReadError>()
+                .or_else(|| {
+                    match origin
+                        .error()
+                        .downcast_ref::<safe_cex_store::StoreMutationError>()
+                    {
+                        Some(safe_cex_store::StoreMutationError::Access(error)) => Some(error),
+                        _ => None,
+                    }
+                });
+            if let Some(cause) = read.and_then(|read| read.native_cause().downcast_ref::<Thrown>())
+            {
+                return cause.clone();
+            }
+        }
         let value = error_object(&error.name, &error.message);
         if let Some(cause) = error.origin.as_ref().and_then(|origin| {
             let original = origin.error();
@@ -1132,6 +1152,16 @@ impl Js {
                     String::from_utf16_lossy(key)
                 )));
             }
+            if let Js::String(units) = self
+                && (key == utf16("length").as_ref()
+                    || array_index(key).is_some_and(|index| index < units.len()))
+            {
+                return Err(Thrown::type_error(&format!(
+                    "Cannot assign to read only property '{}' of string '{}'",
+                    String::from_utf16_lossy(key),
+                    self.to_display()
+                )));
+            }
             // Strict-mode [[Set]] on a primitive throws; Map/Set/Promise expandos are unsupported.
             return Err(Thrown::type_error(&format!(
                 "Cannot create property '{}' on {} '{}'",
@@ -1280,6 +1310,12 @@ impl Js {
         Ok(self.clone())
     }
     pub(super) fn freeze(&self) -> Result<Js, Thrown> {
+        self.set_integrity(true)
+    }
+    pub(super) fn seal(&self) -> Result<Js, Thrown> {
+        self.set_integrity(false)
+    }
+    fn set_integrity(&self, frozen: bool) -> Result<Js, Thrown> {
         self.prevent_extensions()?;
         if let Some(props) = self.own_props() {
             for property in props.borrow_mut().values_mut() {
@@ -1287,7 +1323,7 @@ impl Js {
                     Prop::Data(value) => {
                         *property = Prop::DataDescriptor {
                             value: value.clone(),
-                            writable: false,
+                            writable: !frozen,
                             enumerable: true,
                             configurable: false,
                         }
@@ -1297,7 +1333,9 @@ impl Js {
                         configurable,
                         ..
                     } => {
-                        *writable = false;
+                        if frozen {
+                            *writable = false;
+                        }
                         *configurable = false;
                     }
                     Prop::Accessor { configurable, .. } => *configurable = false,

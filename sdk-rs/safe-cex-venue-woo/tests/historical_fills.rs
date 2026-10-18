@@ -102,7 +102,7 @@ fn venue(public: bool, throw: bool, logs: Rc<RefCell<Vec<Value>>>) -> Venue {
     let base = BaseExchange::new(
         ExchangeName::Woo,
         serde_json::from_value(json!({"key":"test-key","secret":"test-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         runtime,
         ExchangeSettings::default(),
     );

@@ -15,7 +15,7 @@ use safe_cex_types::{
     Position, StoreDataLoaded, Ticker, ValidateAccountResult,
 };
 use serde_json::Value;
-use std::{cell::OnceCell, rc::Rc};
+use std::rc::Rc;
 
 fn store_err(e: safe_cex_store::StoreMutationError) -> ExchangeError {
     e.into()
@@ -43,32 +43,28 @@ impl BitunixVenue {
         let me = self.clone();
         safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
-            Ok(crate::rest_reads::fetch_markets(
-                || me.base.store.markets().to_vec(),
+            crate::rest_reads::fetch_markets(
+                || Ok(me.base.store.markets()?),
                 read,
                 |e: &Fault| me.runtime.console("error", &e.0.js_error_string()),
                 |message| me.runtime.console("warning", message),
             )
-            .await)
+            .await
+            .map_err(|error: Fault| error.0)
         })
     }
     pub(crate) fn fetch_tickers(self: &Rc<Self>) -> ExchangeFuture<'static, Vec<Ticker>> {
         let me = self.clone();
         safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
-            let markets: OnceCell<Vec<Market>> = OnceCell::new();
-            Ok(crate::rest_reads::fetch_tickers(
-                || me.base.store.tickers().to_vec(),
-                |symbol| {
-                    markets
-                        .get_or_init(|| me.base.store.markets().to_vec())
-                        .iter()
-                        .find(|m| m.symbol == symbol)
-                },
+            crate::rest_reads::fetch_tickers(
+                || Ok(me.base.store.tickers()?),
+                |symbol| Ok(me.base.store.markets_by_symbol()?.get(symbol).cloned()),
                 read,
                 |e: &Fault| me.trace(&e.0),
             )
-            .await)
+            .await
+            .map_err(|error: Fault| error.0)
         })
     }
     pub(crate) fn fetch_balance(
@@ -77,11 +73,10 @@ impl BitunixVenue {
         let me = self.clone();
         safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
-            let positions: OnceCell<Vec<Position>> = OnceCell::new();
             let mut mode = me.account_mode();
-            let (balance, rows) = crate::rest_reads::fetch_balance(
-                || me.base.store.balance().clone(),
-                || positions.get_or_init(|| me.base.store.positions().to_vec()),
+            let result = crate::rest_reads::fetch_balance(
+                || Ok(me.base.store.balance()?),
+                || Ok(me.base.store.positions()?),
                 &mut mode,
                 read,
                 |e: &Fault| {
@@ -92,8 +87,8 @@ impl BitunixVenue {
                 },
             )
             .await;
-            let rows = rows.to_vec();
             me.set_account_mode(mode);
+            let (balance, rows) = result.map_err(|error: Fault| error.0)?;
             Ok((balance, rows))
         })
     }
@@ -109,19 +104,20 @@ impl BitunixVenue {
         let me = self.clone();
         safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
-            Ok(crate::position_reads::fetch_positions(
+            crate::position_reads::fetch_positions(
                 read,
                 |symbol| me.symbol_setting(symbol),
                 || me.account_mode(),
                 || {
-                    me.base
+                    Ok(me
+                        .base
                         .store
-                        .markets()
+                        .markets()?
                         .iter()
                         .map(|m| m.symbol.clone())
-                        .collect()
+                        .collect())
                 },
-                || me.base.store.positions().to_vec(),
+                || Ok(me.base.store.positions()?),
                 |e: &Fault| {
                     me.runtime.console(
                         "error",
@@ -129,7 +125,8 @@ impl BitunixVenue {
                     )
                 },
             )
-            .await)
+            .await
+            .map_err(|error: Fault| error.0)
         })
     }
     /// symbolSettings.get(symbol) as (marginType, leverage)
@@ -212,7 +209,7 @@ impl BitunixVenue {
             let contracts: Vec<f64> = me
                 .base
                 .store
-                .positions()
+                .positions()?
                 .iter()
                 .map(|p| p.contracts)
                 .collect();
@@ -275,8 +272,8 @@ impl BitunixVenue {
     ) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
         safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
-            let markets = me.base.store.markets().to_vec();
-            let positions = me.base.store.positions().to_vec();
+            let markets = me.base.store.markets()?.to_vec();
+            let positions = me.base.store.positions()?.to_vec();
             let xhr = me.xhr();
             crate::rest_writes::set_leverage::<Fault, _, _>(
                 &symbol,
@@ -399,7 +396,7 @@ impl BitunixVenue {
                     );
                     Ok(())
                 },
-                || Ok(me.base.store.positions().to_vec()),
+                || Ok(me.base.store.positions()?.to_vec()),
                 |p: &Position, s| Ok(p.symbol == s),
                 |p, leverage, margin| {
                     let mut value = crate::adapter::to_input(&p)?;
@@ -492,7 +489,7 @@ impl crate::event_models::FillHistoryHost for FillFrame {
             .venue
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&symbol)
             .cloned();
         Ok(market.map(|m| crate::adapter::to_input(&m)).transpose()?)
@@ -582,7 +579,7 @@ impl crate::session_control::ExchangeSessionHost for Session {
         Ok(self.venue.public_only())
     }
     fn loaded(&mut self) -> Result<Data, ExchangeError> {
-        Ok(Data::Loaded(self.venue.base.store.loaded().clone()))
+        Ok(Data::Loaded(self.venue.base.store.loaded()?.clone()))
     }
     fn update(
         &mut self,

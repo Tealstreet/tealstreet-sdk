@@ -106,7 +106,7 @@ where
             .unwrap_or_else(|| Value::Array(Vec::new()));
         let mut resolve = |contract: &str| {
             Ok(store
-                .markets_by_symbol()
+                .markets_by_symbol()?
                 .get(&contract.to_uppercase())
                 .map(|market| market.symbol.clone()))
         };
@@ -145,9 +145,11 @@ where
     }
 }
 
-pub fn fetch_spot_positions(store: &dyn Store) -> Vec<Position> {
+pub fn fetch_spot_positions(
+    store: &dyn Store,
+) -> Result<Vec<Position>, safe_cex_types::StoreReadError> {
     let mut positions = Vec::new();
-    for market in store.markets().iter() {
+    for market in store.markets()?.iter() {
         if !market.active {
             continue;
         }
@@ -173,7 +175,7 @@ pub fn fetch_spot_positions(store: &dyn Store) -> Vec<Position> {
             });
         }
     }
-    positions
+    Ok(positions)
 }
 
 /// `KrakenExchange.fetchLeverageSettings`, with the exchange-owned Map operations supplied.

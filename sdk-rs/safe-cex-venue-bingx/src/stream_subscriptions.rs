@@ -174,7 +174,7 @@ impl BingxSubscriptions {
             "1w" => "1week",
             _ => unreachable!("closed timeframe"),
         };
-        let symbol = venue_symbol(&self.stream.parent, &opts.symbol);
+        let symbol = venue_symbol(&self.stream.parent, &opts.symbol)?;
         let topic = format!("market.kline.{symbol}.{unit}.trade.utc+8");
         let parser: MessageCallback = Rc::new(move |rows| {
             let row = rows
@@ -194,7 +194,7 @@ impl BingxSubscriptions {
         symbol: &str,
         callback: BookCallback,
     ) -> Result<Cleanup, ExchangeError> {
-        let native = venue_symbol(&self.stream.parent, symbol);
+        let native = venue_symbol(&self.stream.parent, symbol)?;
         let topic = format!("market.depth.{native}.step0.level100");
         let book = Rc::new(RefCell::new(OrderBook {
             bids: vec![],

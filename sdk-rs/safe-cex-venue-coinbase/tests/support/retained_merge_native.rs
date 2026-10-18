@@ -2,6 +2,7 @@ use super::{CoinbaseDependencies, CoinbaseExchange};
 use crate::{
     cdp_signing::CdpSigningCache, starbase_public_frames::CoinbaseStarbaseFrameValue as Frame,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeRuntime;
 use safe_cex_exchange::{
     js_runtime::{
@@ -10,7 +11,7 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_store::Store;
 use safe_cex_types::{ExchangeName, ExchangeOptions, Order};
 use std::{cell::RefCell, process::Command, rc::Rc, sync::Arc};
 #[path = "retained_info.rs"]

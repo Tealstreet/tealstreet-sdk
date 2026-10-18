@@ -57,7 +57,7 @@ pub fn run_with_http<F: Future<Output = Value>>(
             selector,
             serde_json::from_value(json!(venue)).unwrap(),
             serde_json::from_value(json!({"key":"receipt","secret":"receipt"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             deps,
         )
         .unwrap();

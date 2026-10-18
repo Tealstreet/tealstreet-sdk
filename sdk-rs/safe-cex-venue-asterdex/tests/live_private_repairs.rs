@@ -1,11 +1,12 @@
 #[path = "support/repair_runtime.rs"]
 mod host;
 use host::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Order, Position, StoreDataLoaded, StoreSubscriberError};
 use safe_cex_venue_asterdex::private_repairs::{PrivateRepairs, RepairParent, RepairState};
 use serde_json::{Value, json};
@@ -191,9 +192,9 @@ fn run(case: &Value) -> Trace {
             }
             "snapshot" => snapshots.push(Snapshot {
                 state: f.repairs.state(),
-                positions: f.store.positions().to_vec(),
-                orders: f.store.orders().to_vec(),
-                loaded: f.store.loaded().clone(),
+                positions: f.store.positions().unwrap().to_vec(),
+                orders: f.store.orders().unwrap().to_vec(),
+                loaded: f.store.loaded().unwrap().clone(),
                 timers: f.runtime.timers(),
                 requests: f.parent.requests.borrow().len(),
                 notifications: f.notifications.get(),

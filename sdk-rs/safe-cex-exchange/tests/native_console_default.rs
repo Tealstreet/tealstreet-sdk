@@ -1,11 +1,11 @@
 //! Typed runtime console and BaseExchange logs reach the production native sink.
 #![cfg(all(feature = "native", not(target_arch = "wasm32")))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     native::native_runtime,
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use std::{cell::RefCell, process::Command, rc::Rc};
 
@@ -166,6 +166,98 @@ fn native_report_context_uses_terminal_json_without_changing_retained_input() {
         String::from_utf8(child.stderr).unwrap(),
         format!(
             "[safe-cex uncaught] Error: typed {json}\n[safe-cex uncaught] raw {json}\n[safe-cex uncaught] Error: undefined undefined\n[safe-cex uncaught] Error: invalid <TypeError: Invalid retained numeric lexeme>\n"
+        )
+    );
+}
+
+#[test]
+fn native_error_diagnostics_read_data_without_executing_user_hooks() {
+    use safe_cex_exchange::js_runtime::value::{Js, Prop, Thrown, utf16};
+    use std::cell::Cell;
+    const CHILD: &str = "SAFE_CEX_ERROR_DIAGNOSTIC_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let calls = Rc::new(Cell::new(0));
+        let poison = Js::object(vec![]);
+        let parent = Js::object(vec![("name", Js::str("InheritedError"))]);
+        let Js::Object(parent_data) = &parent else {
+            unreachable!()
+        };
+        parent_data.props.borrow_mut().insert(
+            utf16("message"),
+            Prop::DataDescriptor {
+                value: Js::String(vec![0xd800, 120, 0xdc00].into()),
+                writable: true,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+        let error = Js::object_with_class("Error", vec![]);
+        let Js::Object(data) = &error else {
+            unreachable!()
+        };
+        *data.proto.borrow_mut() = Some(parent.clone());
+        let runtime = native_runtime();
+        runtime.console_values("error", std::slice::from_ref(&error));
+        assert!(matches!(parent_data.props.borrow().get(&utf16("message")),
+            Some(Prop::DataDescriptor { value: Js::String(text), enumerable: false, .. })
+                if text.as_ref() == [0xd800, 120, 0xdc00]));
+        let seen = calls.clone();
+        let cause = poison.clone();
+        error
+            .define_accessor(
+                "message",
+                Some(Rc::new(move |_| {
+                    seen.set(seen.get() + 1);
+                    Err(Thrown::new(cause.clone()))
+                })),
+                None,
+            )
+            .unwrap();
+        runtime.console_values("error", std::slice::from_ref(&error));
+        error.delete(&utf16("message")).unwrap();
+        error.set("message", Js::Number(7.0)).unwrap();
+        runtime.console_values("error", std::slice::from_ref(&error));
+        error.set("name", Js::str("")).unwrap();
+        error.set("message", Js::str("only message")).unwrap();
+        runtime.console_values("error", std::slice::from_ref(&error));
+        error.delete(&utf16("name")).unwrap();
+        error.delete(&utf16("message")).unwrap();
+        parent.delete(&utf16("name")).unwrap();
+        parent.delete(&utf16("message")).unwrap();
+        *parent_data.proto.borrow_mut() = Some(error.clone());
+        runtime.console_values("error", std::slice::from_ref(&error));
+        *parent_data.proto.borrow_mut() = None;
+        assert_eq!(
+            calls.get(),
+            0,
+            "terminal diagnostics must never execute user getters"
+        );
+        assert!(!parent_data.props.borrow().contains_key(&utf16("message")));
+        return;
+    }
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "native_error_diagnostics_read_data_without_executing_user_hooks",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&child.stdout),
+        String::from_utf8_lossy(&child.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(child.stderr).unwrap(),
+        concat!(
+            "[safe-cex error] InheritedError: \u{fffd}x\u{fffd}\n",
+            "[safe-cex error] InheritedError\n",
+            "[safe-cex error] InheritedError\n",
+            "[safe-cex error] only message\n",
+            "[safe-cex error] Error\n",
         )
     );
 }

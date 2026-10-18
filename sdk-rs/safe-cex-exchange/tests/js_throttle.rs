@@ -186,7 +186,7 @@ fn fixture() -> (Rc<Runtime>, Rc<ScopeShared<()>>) {
     let shared = Rc::new(ScopeShared::new(
         runtime.clone(),
         Rc::new(Http(runtime.clone())),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         Js::object(vec![]),
         (),
     ));
@@ -265,7 +265,7 @@ setTimeout(()=>{trace.push(['result',f.flush()]);console.log(JSON.stringify(trac
         let shared = Rc::new(ScopeShared::new(
             native,
             host,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));

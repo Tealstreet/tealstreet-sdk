@@ -1,11 +1,12 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
     JsJsonValue,
     numeric_ingress::{JsNumberInput, js_from_value},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     IncomeCategory, IncomeRecord, MarginType, Market, Position, PositionMode, PositionSide,
 };
@@ -288,7 +289,7 @@ fn spot_positions_live_oracle() {
     for case in cardinality::cases("reads", "positions", oracle()) {
         let store = DefaultStore::new();
         install(&store, &case["markets"]);
-        let positions = reads::fetch_spot_positions(&store);
+        let positions = reads::fetch_spot_positions(&store).unwrap();
         cardinality::native_len(
             positions.len(),
             &case["result"],

@@ -4,18 +4,23 @@ use safe_cex_types::{PositionProvenance, PositionRecord, PositionRecordState, Po
 
 pub struct FoldPositionAdapterDeps<'a> {
     pub account: &'a str,
-    pub resolve_settle_currency: &'a mut dyn FnMut(&str) -> String,
+    pub resolve_settle_currency:
+        &'a mut dyn FnMut(&str) -> Result<String, crate::runtime::ExchangeError>,
     pub resolve_funding: Option<&'a mut dyn FnMut(&PositionInterval) -> FundingAttribution>,
 }
 pub fn map_folded_interval(
     interval: &PositionInterval,
     deps: &mut FoldPositionAdapterDeps<'_>,
-) -> Option<PositionRecord> {
-    let closed_at = interval.closed_at?;
+) -> Result<Option<PositionRecord>, crate::runtime::ExchangeError> {
+    let Some(closed_at) = interval.closed_at else {
+        return Ok(None);
+    };
     if interval.closed_size <= 0. || interval.closed_size.is_nan() {
-        return None;
+        return Ok(None);
     }
-    let realized_pnl = interval.realized_pnl?;
+    let Some(realized_pnl) = interval.realized_pnl else {
+        return Ok(None);
+    };
     let funding = deps
         .resolve_funding
         .as_mut()
@@ -32,8 +37,8 @@ pub fn map_folded_interval(
         safe_cex_num::js_number_string(interval.opened_at),
         safe_cex_num::js_number_string(closed_at)
     );
-    let settle_currency = (deps.resolve_settle_currency)(&interval.symbol);
-    Some(PositionRecord {
+    let settle_currency = (deps.resolve_settle_currency)(&interval.symbol)?;
+    Ok(Some(PositionRecord {
         key,
         account: deps.account.into(),
         symbol: interval.symbol.clone(),
@@ -59,5 +64,5 @@ pub fn map_folded_interval(
         provenance: PositionProvenance::Derived,
         source_axis: PositionSourceAxis::Fills,
         close_count: 1.,
-    })
+    }))
 }

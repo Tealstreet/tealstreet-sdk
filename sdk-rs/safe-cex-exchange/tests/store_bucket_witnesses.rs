@@ -1,4 +1,6 @@
-use safe_cex_store::{StoreUpdate, returns::calculate_returns, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
+use safe_cex_store::{StoreUpdate, returns::calculate_returns};
 use safe_cex_types::{Order, Position};
 use serde_json::Value;
 #[test]
@@ -6,7 +8,7 @@ fn batch_threshold_and_returns_truthiness_are_preserved_from_actual_source() {
     let out = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/bucket_witnesses.mjs"
+            "/../safe-cex-store/tests/bucket_witnesses.mjs"
         ))
         .output()
         .unwrap();
@@ -32,7 +34,7 @@ fn batch_threshold_and_returns_truthiness_are_preserved_from_actual_source() {
                 )
                 .unwrap();
             store.add_or_update_orders(incoming).unwrap();
-            let prices: Vec<_> = store.orders().iter().map(|o| o.price).collect();
+            let prices: Vec<_> = store.orders().unwrap().iter().map(|o| o.price).collect();
             let expected: Vec<f64> = serde_json::from_value(row["prices"].clone()).unwrap();
             assert_eq!(prices, expected, "BUCKET-WITNESS batch duplicate threshold");
         } else {

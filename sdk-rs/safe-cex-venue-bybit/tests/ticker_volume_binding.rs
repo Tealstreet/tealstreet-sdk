@@ -66,7 +66,7 @@ fn ticker_volumes(name: ExchangeName, secondary: bool, swapped: bool) {
                 json!({"topic":format!("tickers.{symbol}"),"data":data}).to_string(),
             )));
         h.runtime.pump();
-        let tickers = h.store.tickers();
+        let tickers = h.store.tickers().unwrap();
         assert_eq!(
             (tickers[0].volume, tickers[0].quote_volume),
             expected,

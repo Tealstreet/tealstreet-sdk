@@ -31,7 +31,7 @@ where
         let data = pending.await?;
         (|| {
             let Some(data) = truthy_input(data)? else {
-                return Ok(store.balance().clone());
+                return Ok(store.balance()?.clone());
             };
             format_balance(&data, store, local_to_utc, report)
         })()
@@ -55,7 +55,7 @@ where
         let data = pending.await?;
         (|| {
             let Some(data) = truthy_input(data)? else {
-                return Ok(store.positions().to_vec());
+                return Ok(store.positions()?.to_vec());
             };
             format_positions(&data, store, symbols, local_to_utc, report)
         })()
@@ -78,7 +78,7 @@ where
         let data = pending.await?;
         (|| {
             let Some(data) = truthy_input(data)? else {
-                return Ok(Some(store.positions().to_vec()));
+                return Ok(Some(store.positions()?.to_vec()));
             };
             format_open_positions(&data, store, local_to_utc, report)
         })()
@@ -101,7 +101,7 @@ where
         let data = pending.await?;
         (|| {
             let Some(data) = truthy_input(data)? else {
-                return Ok(Some(store.orders().to_vec()));
+                return Ok(Some(store.orders()?.to_vec()));
             };
             format_orders(&data, store, local_to_utc, report)
         })()

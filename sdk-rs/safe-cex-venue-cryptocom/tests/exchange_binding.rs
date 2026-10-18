@@ -182,7 +182,9 @@ fn fetch_orders_merges_regular_and_advanced_books() {
     assert_eq!(only(&h, "/private/get-open-orders"), json!({}));
     only(&h, "/private/advanced/get-open-orders");
     assert!(
-        safe_cex_store::Store::orders(h.store.as_ref()).is_empty(),
+        safe_cex_store::Store::orders(h.store.as_ref())
+            .unwrap()
+            .is_empty(),
         "fetchOrders stays pure"
     );
 }
@@ -211,7 +213,9 @@ fn fetch_positions_maps_signed_quantity() {
     );
     only(&h, "/private/get-positions");
     assert!(
-        safe_cex_store::Store::positions(h.store.as_ref()).is_empty(),
+        safe_cex_store::Store::positions(h.store.as_ref())
+            .unwrap()
+            .is_empty(),
         "fetchPositions stays pure"
     );
 }
@@ -261,7 +265,9 @@ fn validate_account_returns_the_balance_on_success() {
         "validation preserves exact currency field names"
     );
     assert_eq!(
-        safe_cex_store::Store::balance(h.store.as_ref()).total,
+        safe_cex_store::Store::balance(h.store.as_ref())
+            .unwrap()
+            .total,
         0.0,
         "fetchBalance stays pure during validation"
     );
@@ -533,7 +539,12 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
         http.ok("POST", "/private/user-balance", balance());
     });
     h.drive(h.venue().start()).expect("start");
-    assert_eq!(safe_cex_store::Store::markets(h.store.as_ref()).len(), 1);
+    assert_eq!(
+        safe_cex_store::Store::markets(h.store.as_ref())
+            .unwrap()
+            .len(),
+        1
+    );
     let urls: Vec<String> = h
         .runtime
         .sockets
@@ -543,9 +554,14 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
         .collect();
     assert!(urls.iter().any(|u| u.ends_with("/market")), "{urls:?}");
     assert!(urls.iter().any(|u| u.ends_with("/user")), "{urls:?}");
-    assert_eq!(safe_cex_store::Store::orders(h.store.as_ref()).len(), 2);
+    assert_eq!(
+        safe_cex_store::Store::orders(h.store.as_ref())
+            .unwrap()
+            .len(),
+        2
+    );
     assert_eq!(h.http.calls("/private/get-positions").len(), 1);
-    let balance = safe_cex_store::Store::balance(h.store.as_ref());
+    let balance = safe_cex_store::Store::balance(h.store.as_ref()).unwrap();
     assert_eq!(balance.total, 123.0, "tick stores the REST balance");
     let usd = &balance.currencies.as_ref().expect("currencies")["USD"];
     assert!(
@@ -738,7 +754,7 @@ fn constructing_another_venue_name_is_refused() {
     let result = safe_cex_venue_cryptocom::binding::exchange::CryptocomExchange::new(
         ExchangeName::Kraken,
         opts,
-        std::rc::Rc::new(safe_cex_store::store::DefaultStore::new()),
+        std::rc::Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies {
             runtime,
             http,
@@ -788,7 +804,11 @@ fn disposal_during_fetch_markets_stops_start_before_store_update() {
     h.venue().dispose().expect("dispose while HTTP is pending");
     released.set(true);
     h.drive(start).expect("disposed start resolves");
-    assert!(safe_cex_store::Store::markets(h.store.as_ref()).is_empty());
+    assert!(
+        safe_cex_store::Store::markets(h.store.as_ref())
+            .unwrap()
+            .is_empty()
+    );
     assert!(h.http.calls("/public/get-tickers").is_empty());
     assert!(h.runtime.sockets.borrow().is_empty());
 }
@@ -885,13 +905,17 @@ fn public_only_start_skips_private_sockets_and_rest() {
     });
     h.drive(h.venue().start()).expect("public-only start");
     h.runtime.pump();
-    assert_eq!(safe_cex_store::Store::markets(h.store.as_ref()).len(), 1);
+    assert_eq!(
+        safe_cex_store::Store::markets(h.store.as_ref())
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(h.http.requests.borrow().iter().all(|r| r.method == "GET"));
     assert_eq!(h.runtime.sockets.borrow().len(), 1);
     assert!(h.runtime.sockets.borrow()[0].0.ends_with("/market"));
-    let loaded = safe_cex_store::Store::loaded(h.store.as_ref());
+    let loaded = safe_cex_store::Store::loaded(h.store.as_ref()).unwrap();
     assert!(loaded.orders && loaded.positions && loaded.balance);
-    drop(loaded);
     h.venue().dispose().expect("dispose");
 }
 
@@ -1135,6 +1159,7 @@ fn live_order(id: &str, status: &str, filled: &str) -> Value {
 
 fn stored_order(h: &Harness, id: &str) -> Order {
     safe_cex_store::Store::orders(h.store.as_ref())
+        .unwrap()
         .iter()
         .find(|o| o.id == id)
         .unwrap_or_else(|| panic!("private order {id} reached Store"))
@@ -1198,6 +1223,7 @@ fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
     );
     assert!(
         !safe_cex_store::Store::orders(h.store.as_ref())
+            .unwrap()
             .iter()
             .any(|o| o.id == "unknown")
     );
@@ -1252,7 +1278,7 @@ fn private_position_frames_update_hedged_sides_and_remove_zero_quantity() {
              "update_timestamp_ms":89}
         ]}}),
     );
-    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    let positions = safe_cex_store::Store::positions(h.store.as_ref()).unwrap();
     assert_eq!(
         positions.len(),
         2,
@@ -1303,7 +1329,9 @@ fn private_position_frames_update_hedged_sides_and_remove_zero_quantity() {
         {"instrument_name":SYMBOL,"quantity":"0","cost":"0"}]}}),
     );
     assert!(
-        safe_cex_store::Store::positions(h.store.as_ref()).is_empty(),
+        safe_cex_store::Store::positions(h.store.as_ref())
+            .unwrap()
+            .is_empty(),
         "flat frame removes both sides"
     );
     h.venue().dispose().expect("dispose");
@@ -1324,7 +1352,7 @@ fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates()
             ]
         }]}}),
     );
-    let balance = safe_cex_store::Store::balance(h.store.as_ref());
+    let balance = safe_cex_store::Store::balance(h.store.as_ref()).unwrap();
     assert_eq!(
         (balance.total, balance.free, balance.used, balance.upnl),
         (200.0, 140.0, 60.0, -6.0)
@@ -1337,15 +1365,19 @@ fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates()
         }),
         "WS currency shape follows source, replacing REST available/locked"
     );
-    let before = serde_json::to_value(&*balance).unwrap();
+    let before = serde_json::to_value(&balance).unwrap();
     drop(balance);
-    assert!(safe_cex_store::Store::loaded(h.store.as_ref()).balance);
+    assert!(
+        safe_cex_store::Store::loaded(h.store.as_ref())
+            .unwrap()
+            .balance
+    );
     private_frame(
         &h,
         json!({"code":0,"result":{"channel":"user.balance","data":[]}}),
     );
     assert_eq!(
-        serde_json::to_value(&*safe_cex_store::Store::balance(h.store.as_ref())).unwrap(),
+        serde_json::to_value(safe_cex_store::Store::balance(h.store.as_ref()).unwrap()).unwrap(),
         before
     );
     h.venue().dispose().expect("dispose");
@@ -1475,7 +1507,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     });
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    let template = h.store.markets()[0].clone();
+    let template = h.store.markets().unwrap()[0].clone();
     let markets = ticker_coercion::seed("cryptocom")
         .into_iter()
         .map(|ticker| {
@@ -1517,7 +1549,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),

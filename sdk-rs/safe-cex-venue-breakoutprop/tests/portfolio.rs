@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref};
-use safe_cex_store::{StoreUpdate, store::DefaultStore};
+use safe_cex_store::StoreUpdate;
 use safe_cex_types::{Balance, ModelField, Order, Position};
 use safe_cex_venue_breakoutprop::portfolio::*;
 use serde_json::{Value, json};
@@ -361,7 +362,7 @@ fn fallback_snapshot_boundary() {
             assert_eq!(returned.free, 123.0);
             assert_eq!(expected["observed"], 123, "source_balance_fallback_alias");
             assert_eq!(
-                safe_cex_store::Store::balance(&store).free,
+                safe_cex_store::Store::balance(&store).unwrap().free,
                 893.0,
                 "owned_balance_fallback"
             );
@@ -376,7 +377,7 @@ fn fallback_snapshot_boundary() {
                 "source_orders_fallback_alias"
             );
             assert_eq!(
-                safe_cex_store::Store::orders(&store)[0].id,
+                safe_cex_store::Store::orders(&store).unwrap()[0].id,
                 "cached-order",
                 "owned_orders_fallback"
             );

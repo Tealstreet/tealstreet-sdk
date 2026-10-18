@@ -183,12 +183,12 @@ fn private_rows_preserve_lookup_order_and_typed_null_coercion_failures() {
                 );
                 failures += 1;
                 assert_eq!(
-                    store.orders().len(),
+                    store.orders().unwrap().len(),
                     0,
                     "private native refusal leaves no order write"
                 );
                 assert_eq!(
-                    store.positions().len(),
+                    store.positions().unwrap().len(),
                     0,
                     "private native refusal leaves no position write"
                 );
@@ -196,7 +196,7 @@ fn private_rows_preserve_lookup_order_and_typed_null_coercion_failures() {
                 result.unwrap();
                 if scenario == "contract-only" {
                     if kind == "position" {
-                        let positions = store.positions();
+                        let positions = store.positions().unwrap();
                         assert_eq!(positions.len(), 1);
                         assert_eq!(
                             positions[0].contracts.to_bits(),
@@ -204,7 +204,7 @@ fn private_rows_preserve_lookup_order_and_typed_null_coercion_failures() {
                             "private native outer position symbol only"
                         );
                     } else {
-                        let orders = store.orders();
+                        let orders = store.orders().unwrap();
                         assert_eq!(orders.len(), 1);
                         assert_eq!(
                             orders[0].amount.to_bits(),
@@ -213,8 +213,8 @@ fn private_rows_preserve_lookup_order_and_typed_null_coercion_failures() {
                         );
                     }
                 } else {
-                    assert_eq!(store.orders().len(), 0);
-                    assert_eq!(store.positions().len(), 0);
+                    assert_eq!(store.orders().unwrap().len(), 0);
+                    assert_eq!(store.positions().unwrap().len(), 0);
                 }
             }
             reads_total += store.market_reads.get();

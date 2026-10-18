@@ -127,14 +127,29 @@ fn compare_ascending(a: &Js, b: &Js) -> Result<Ordering, Thrown> {
     Ok(Ordering::Equal)
 }
 
-fn uniq_by(values: Vec<Js>, by: &Js) -> Result<Js, Thrown> {
+pub(super) fn uniq_by(values: &Js, by: &Js) -> Result<Js, Thrown> {
     let mut seen: Vec<Js> = vec![];
     let mut out = vec![];
-    for v in values {
+    if !values.truthy() || !values.get("length")?.truthy() {
+        return Ok(Js::array(out));
+    }
+    // Lodash captures length, but reads each reached slot after the preceding
+    // iteratee. Eager collection would retain a row replaced by an id getter.
+    let length = values.get("length")?;
+    let mut at = 0;
+    while super::ops::less_than(&Js::Number(at as f64), &length)? {
+        let v = values.get(&at.to_string())?;
+        at += 1;
         let key = iteratee(by, v.clone())?;
         if !seen.iter().any(|s| s.same_value_zero(&key)) {
             seen.push(key);
-            out.push(v);
+            // Lodash normalizes the returned value only, after the iteratee
+            // has observed the original signed zero.
+            out.push(if matches!(v, Js::Number(number) if number == 0.0) {
+                Js::Number(0.0)
+            } else {
+                v
+            });
         }
     }
     Ok(Js::array(out))
@@ -1447,8 +1462,8 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         }
         Ok(total)
     });
-    let uniq = func("uniq", |a| uniq_by(list(&arg(&a, 0)), &Js::Undefined));
-    let uniq_by_fn = func("uniqBy", |a| uniq_by(list(&arg(&a, 0)), &arg(&a, 1)));
+    let uniq = func("uniq", |a| uniq_by(&arg(&a, 0), &Js::Undefined));
+    let uniq_by_fn = func("uniqBy", |a| uniq_by(&arg(&a, 0), &arg(&a, 1)));
     let order_by_fn = func("orderBy", |a| {
         order_by(&arg(&a, 0), &arg(&a, 1), &arg(&a, 2))
     });
@@ -1751,7 +1766,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 merged.push(if fresh { found } else { update });
             }
             merged.extend(existing);
-            uniq_by(merged, &Js::str("id"))
+            uniq_by(&Js::array(merged), &Js::str("id"))
         }),
     );
 
