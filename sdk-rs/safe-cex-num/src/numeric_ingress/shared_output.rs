@@ -451,6 +451,12 @@ impl JsNumberOutput for safe_cex_types::NumericValue {
 
 impl JsNumberOutput for safe_cex_types::MarketRuntime {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { kind, spot, swap, future, contract, linear, inverse });
+        crate::js_number_output!(self, struct { kind, spot, swap, future, contract, linear, inverse, fees });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::MarketFees {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { maker, taker });
     }
 }

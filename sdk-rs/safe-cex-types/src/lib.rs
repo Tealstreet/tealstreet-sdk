@@ -307,6 +307,13 @@ pub struct MarketLimits {
     pub cost: Option<MarketLimitsLeverage>,
 }
 
+/// Runtime fee object constructed by venue market mappers.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MarketFees {
+    pub maker: f64,
+    pub taker: f64,
+}
+
 /// Extra properties constructed by venue TypeScript at runtime, beyond Market's declaration.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -360,6 +367,12 @@ pub struct MarketRuntime {
         skip_serializing_if = "Option::is_none"
     )]
     pub inverse: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fees: Option<MarketFees>,
 }
 
 #[derive(Debug, Clone, PartialEq, TS)]
@@ -3363,6 +3376,18 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::MarketFees")]
+    struct WireMarketFees {
+        maker: f64,
+        taker: f64,
+    }
+    impl<'de> serde::Deserialize<'de> for super::MarketFees {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireMarketFees::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::MarketRuntime")]
     #[serde(rename_all = "camelCase")]
     struct WireMarketRuntime {
@@ -3415,6 +3440,8 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         inverse: Option<bool>,
+        #[serde(default, deserialize_with = "deserialize_present")]
+        fees: Option<super::MarketFees>,
     }
     impl<'de> serde::Deserialize<'de> for super::MarketRuntime {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

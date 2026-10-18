@@ -250,3 +250,9 @@ The static TS declaration projection omits them; native output and numeric ingre
 retain them. Other venue constructors explicitly leave these fields absent.
 The recorded public-market addon regression executes the actual Backpack and
 Crypto.com TS constructors and compiled native binding against identical HTTP bytes.
+
+MarketRuntime.fees retains the undeclared Paradex market literal's maker/taker
+number object through the same flattened Market boundary. MarketFees requires an
+object with both numeric fields; absence remains absent for other venues. The
+static generated TS Market declaration is unchanged. The recorded public-market
+addon regression compares all 66 Paradex markets against actual maintained TS.
