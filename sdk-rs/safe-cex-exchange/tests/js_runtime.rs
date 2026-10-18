@@ -4379,3 +4379,17 @@ fn native_http_factory_updates_global_request_counts() {
         })
     );
 }
+
+#[test]
+fn native_accessor_integrity_failure_propagates_from_base_assembly() {
+    let globals = Js::object(vec![]);
+    safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&globals, std::rc::Weak::new());
+    let object = globals.get("Object").unwrap();
+    let error = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+        object.call_method("freeze", vec![receiver.clone()])?;
+        Ok(())
+    })
+    .err()
+    .expect("frozen supplied receiver must refuse assembly");
+    assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
+}

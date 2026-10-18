@@ -25429,7 +25429,7 @@
         },
         "input": "observed",
         "reason": "Actual property definition replaces an accessor without invoking its setter; reads the stored payload and keys before serialization.",
-        "call": "{let object=$type::object(vec![]);let writes=std::rc::Rc::new(std::cell::Cell::new(0));let captured=writes.clone();object.define_accessor(\"target\",Some(std::rc::Rc::new(|_|Ok(super::Js::Bool(true)))),Some(std::rc::Rc::new(move|_,_|{captured.set(captured.get()+1);Ok(())})));let key=$value[\"key\"].as_str().unwrap();object.define(key,super::Js::Number($value[\"number\"].as_f64().unwrap())).unwrap();serde_json::json!({\"numberBits\":object.get(key).unwrap().to_number().unwrap().to_bits().to_string(),\"setterCalls\":writes.get(),\"keys\":object.own_keys().iter().map(|key|key.to_vec()).collect::<Vec<_>>()})}",
+        "call": "{let object=$type::object(vec![]);let writes=std::rc::Rc::new(std::cell::Cell::new(0));let captured=writes.clone();object.define_accessor(\"target\",Some(std::rc::Rc::new(|_|Ok(super::Js::Bool(true)))),Some(std::rc::Rc::new(move|_,_|{captured.set(captured.get()+1);Ok(())}))).expect(\"fresh accessor witness target\");let key=$value[\"key\"].as_str().unwrap();object.define(key,super::Js::Number($value[\"number\"].as_f64().unwrap())).unwrap();serde_json::json!({\"numberBits\":object.get(key).unwrap().to_number().unwrap().to_bits().to_string(),\"setterCalls\":writes.get(),\"keys\":object.own_keys().iter().map(|key|key.to_vec()).collect::<Vec<_>>()})}",
         "cases": [
           {
             "input": {
@@ -25557,13 +25557,37 @@
                 }
               ]
             ],
-            "output": null,
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
             "is_c_variadic": false
           }
         },
         "input": "observed",
         "reason": "Registers real getter/setter closures, invokes both through native property operations, and observes the actual captured cell.",
-        "call": "{let object=$type::object(vec![]);let key=$value[\"key\"].as_str().unwrap();let cell=std::rc::Rc::new(std::cell::Cell::new($value[\"before\"].as_f64().unwrap()));let get=cell.clone();let set=cell.clone();object.define_accessor(key,Some(std::rc::Rc::new(move|_|Ok(super::Js::Number(get.get())))),Some(std::rc::Rc::new(move|_,value|{set.set(value.to_number()?);Ok(())})));let before=object.get(key).unwrap().to_number().unwrap().to_bits().to_string();object.set(key,super::Js::Number($value[\"after\"].as_f64().unwrap())).unwrap();serde_json::json!({\"beforeBits\":before,\"afterBits\":object.get(key).unwrap().to_number().unwrap().to_bits().to_string(),\"cellBits\":cell.get().to_bits().to_string()})}",
+        "call": "{let object=$type::object(vec![]);let key=$value[\"key\"].as_str().unwrap();let cell=std::rc::Rc::new(std::cell::Cell::new($value[\"before\"].as_f64().unwrap()));let get=cell.clone();let set=cell.clone();object.define_accessor(key,Some(std::rc::Rc::new(move|_|Ok(super::Js::Number(get.get())))),Some(std::rc::Rc::new(move|_,value|{set.set(value.to_number()?);Ok(())}))).expect(\"fresh accessor witness target\");let before=object.get(key).unwrap().to_number().unwrap().to_bits().to_string();object.set(key,super::Js::Number($value[\"after\"].as_f64().unwrap())).unwrap();serde_json::json!({\"beforeBits\":before,\"afterBits\":object.get(key).unwrap().to_number().unwrap().to_bits().to_string(),\"cellBits\":cell.get().to_bits().to_string()})}",
         "cases": [
           {
             "input": {
