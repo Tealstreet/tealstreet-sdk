@@ -14,7 +14,7 @@ const endpoints=load('packages/http-over-websocket/src/tunnelEndpoints.ts','');
 const metadata=ts.createSourceFile('metadata.ts',fs.readFileSync(root+'/packages/safe-cex/src/exchangeMetadata.ts','utf8'),ts.ScriptTarget.Latest,true);
 let names=[];
 function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(metadata)==='exchangeMetadata'){let value=node.initializer;while(ts.isAsExpression(value)||ts.isSatisfiesExpression(value))value=value.expression;names=value.properties.map(property=>property.name.text);}ts.forEachChild(node,visit);}
-visit(metadata);assert.equal(names.length,48,'independent metadata-key floor');
+visit(metadata);assert.equal(names.length,49,'independent metadata-key floor');
 const table=load(p+'routing/routingTable.ts',{'@tealstreet/http-over-websocket/src/egressRegion':egress,'../../../exchangeMetadata':{exchangeMetadata:Object.fromEntries(names.map(name=>[name,{}]))}});
 const routing=load(p+'routing/resolveExchangeRouting.ts',{'@tealstreet/http-over-websocket/src/tunnelEndpoints':endpoints,'../transportResolution':pools,'./routingTable':table});
 const diag=load('packages/safe-cex/src/utils/venueRestDiagnostics.ts',{'./unknownSendOutcome':load('packages/safe-cex/src/utils/unknownSendOutcome.ts')});
@@ -79,7 +79,7 @@ const directProvider=load('packages/safe-cex/src/transport/direct.ts').directTra
   const options={tealstreetProxy,tealstreetWsRoute,proxyRegion,bybitSiteId};
   routes.push({exchange,options,expected:routing.resolveExchangeRouting(exchange,options)});
  }
- assert.equal(routes.length,1152,'independent routing floor (48*2*2*3*2)');
+ assert.equal(routes.length,1176,'independent routing floor (49*2*2*3*2)');
  const direct={name:directProvider.name,...directProvider.rest(cases[0])};
  process.stdout.write(JSON.stringify({pools,cases:observations,auth,resolutions,connections,times,routes,direct}));
 })().catch(error=>{console.error(error);process.exitCode=1;});

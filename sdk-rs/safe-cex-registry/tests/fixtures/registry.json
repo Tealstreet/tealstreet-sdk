@@ -20,6 +20,11 @@
     "constructor": "BinanceExchange"
   },
   {
+    "name": "binanceinverse",
+    "module": "./binance/binanceinverse.exchange",
+    "constructor": "BinanceInverseExchange"
+  },
+  {
     "name": "binancepm",
     "module": "./binance/binancepm.exchange",
     "constructor": "BinancePMExchange"
