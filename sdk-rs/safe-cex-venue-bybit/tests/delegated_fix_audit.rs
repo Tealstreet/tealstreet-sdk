@@ -121,7 +121,19 @@ fn delegated_history_all_refused_is_empty_without_an_extra_recovery() {
                 recovery_row("bad1", json!(true)), recovery_row("bad2", json!(["USDT"]))]}),
             );
         });
-        assert!(read(&h).is_empty(), "BYBIT-HISTORY-ALL-REFUSED");
+        // Primary/demo have a short -> extended recovery only when no bounds were supplied.
+        // A nonempty raw recovery must win that decision even if output admission refuses all rows.
+        let query = if h.venue().base().name == ExchangeName::Bybitinverse {
+            options()
+        } else {
+            serde_json::from_value(json!({"symbol":"BTCUSD"})).unwrap()
+        };
+        assert!(
+            h.drive(h.venue().fetch_historical_fills(query))
+                .unwrap()
+                .is_empty(),
+            "BYBIT-HISTORY-ALL-REFUSED"
+        );
         assert_eq!(refusals(&h).len(), 2);
         assert_eq!(
             h.wire.calls("/v5/order/history").len(),
