@@ -250,3 +250,8 @@ varies independently across eight malformed/coercion values, while every native
 Ticker number is compared by bits with the maintained constructed TS exchange
 and DefaultStore. The control runner swaps last/mark in the live packed mapper
 and requires a compiled native assertion failure followed by exact restoration.
+
+Hosted-signature fixtures use the shared wake-aware Release gate. The native
+registry private-socket witness holds the real signer future, observes user.auth
+only after its wake, and requires the server auth acknowledgement before aop_p
+subscription.

@@ -5,6 +5,7 @@ mod release {
         "/../test-support/release.rs"
     ));
 }
+pub use release::Release;
 mod virtual_time {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
