@@ -185,7 +185,7 @@ fn create_websocket(core: &Rc<SocketCore>, args: &[Js]) -> Result<Js, Thrown> {
         if capable && !supplied.is_nullish() {
             let headers = supplied.get("headers").map_err(core_error)?;
             let headers = if headers.is_callable() {
-                headers.construct(vec![], None).map_err(core_error)?
+                headers.call(Js::Undefined, vec![]).map_err(core_error)?
             } else {
                 headers
             };
