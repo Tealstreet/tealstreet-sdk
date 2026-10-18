@@ -26,6 +26,11 @@ if (args.includes('--expect-unclassified')) {
     failure.includes('unclassified deserializable type'))));
   console.log('Both generic decoder owners fail missing classification by name.');
 } else {
-  for (const result of results) assert.deepEqual(result.failures, [], result.name);
+  for (const result of results) {
+    assert.deepEqual(result.failures, [], result.name);
+    assert.notEqual(result.classificationOnly, true, result.name);
+    assert.notEqual(result.observed, false, result.name);
+    assert.equal(result.configuration.target, 'native', result.name);
+  }
   console.log('Both generic decoder contracts pass.');
 }
