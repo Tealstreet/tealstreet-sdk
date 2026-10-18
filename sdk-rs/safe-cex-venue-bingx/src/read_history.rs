@@ -534,19 +534,12 @@ impl BingxReadHistory {
                     }
                     let mut loaded = owner.reads.base.store.loaded()?.clone();
                     loaded.balance = true;
-                    owner
-                        .reads
-                        .base
-                        .store
-                        .update(
-                            StoreUpdate {
-                                balance: Some((*balance).clone()),
-                                loaded: Some(loaded),
-                                ..Default::default()
-                            },
-                            false,
-                        )
-                        .map_err(ExchangeError::from)?;
+                    safe_cex_exchange::native_store::update_balance_and_loaded(
+                        owner.reads.base.store.as_ref(),
+                        &balance,
+                        &loaded,
+                    )
+                    .map_err(ExchangeError::from)?;
                 }
                 let positions = owner.reads.fetch_positions(None).await?;
                 if owner.reads.base.is_disposed() {
