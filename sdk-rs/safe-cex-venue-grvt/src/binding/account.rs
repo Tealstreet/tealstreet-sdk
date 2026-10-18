@@ -34,7 +34,7 @@ impl AccountHost for Host {
         value(ops::greater_than(&number, &Js::Number(0.0)))
     }
     fn symbol_set(&self, values: Js) -> JsResult<Js> {
-        self.global_call("Set", vec![values])
+        value(value(self.0.global("Set"))?.construct(vec![values], None))
     }
     fn has_symbol(&self, set: &Js, key: Js) -> JsResult<Js, bool> {
         value(set.call_method("has", vec![key])).map(|v| v.truthy())
