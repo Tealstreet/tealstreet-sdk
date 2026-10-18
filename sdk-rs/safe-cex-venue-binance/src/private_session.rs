@@ -187,18 +187,13 @@ impl Default for ConnectState {
         }
     }
 }
-pub type KeyFuture = Pin<Box<dyn Future<Output = Result<String, Failure>>>>;
 pub type NativeKeyFuture = Pin<Box<dyn Future<Output = Result<EventValue, Failure>>>>;
 pub type RetryAction = Rc<dyn Fn() -> Result<(), Failure>>;
 pub trait ConnectBindings {
     fn state(&self) -> &ConnectState;
     fn options(&self) -> Result<EventValue, Failure>;
     fn clear_timeout(&self, ticket: EventValue) -> Result<(), Failure>;
-    fn fetch_key(&self) -> Result<KeyFuture, Failure>;
-    fn fetch_native_key(&self) -> Result<NativeKeyFuture, Failure> {
-        let future = self.fetch_key()?;
-        Ok(Box::pin(async move { future.await.map(string) }))
-    }
+    fn fetch_native_key(&self) -> Result<NativeKeyFuture, Failure>;
     fn emit(&self, message: String) -> Result<(), Failure>;
     fn log(&self, message: String, severity: LogSeverity) -> Result<(), Failure>;
     fn set_timeout(&self, action: RetryAction, delay: f64) -> Result<EventValue, Failure>;
