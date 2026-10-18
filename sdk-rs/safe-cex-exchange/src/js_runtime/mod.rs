@@ -19,3 +19,6 @@ mod throttle;
 pub mod value;
 
 pub mod collections;
+
+#[cfg(test)]
+mod iterator_record_tests;
