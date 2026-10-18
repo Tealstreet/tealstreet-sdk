@@ -38,6 +38,16 @@ const routes = new Map([
     assert.equal(calls[3].params.quantity,'2');
     assert.equal(calls[3].params.price,'5000.2');
     assert.deepEqual(ids,['9007199254740993']);
+    routes.set('/dapi/v1/openOrders', '{"code":-2011,"msg":"\\ud800"}');
+    let rejected;
+    try { await venue.xhr.get('/dapi/v1/openOrders'); } catch (error) { rejected = error; }
+    assert.equal(rejected.name, 'Error');
+    assert.equal(rejected.message.charCodeAt(0), 0xd800);
+    assert.equal(rejected.message.length, 1);
+    assert.equal(rejected.message, rejected.response.data.msg);
+    assert.equal(rejected.code, -2011);
+    assert.equal(rejected.__binanceEmitted, true);
+    assert.equal(calls.length, 5);
     process.stdout.write(JSON.stringify({markets,positions,ids,order:{quantity:calls[3].params.quantity,positionSide:calls[3].params.positionSide,price:calls[3].params.price}}));
   } finally { venue.dispose(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

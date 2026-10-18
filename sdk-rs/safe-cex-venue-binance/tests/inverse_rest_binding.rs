@@ -62,6 +62,56 @@ fn constructor_installs_source_clients_and_live_read_methods() {
     }
     assert!(h.http.sent.lock().unwrap().is_empty());
 }
+
+#[test]
+fn signed_response_error_keeps_native_utf16_message_and_response() {
+    let h = harness(options(), |wire| {
+        wire.encoded(
+            "GET",
+            "/dapi/v1/openOrders",
+            br#"{"code":-2011,"msg":"\ud800"}"#,
+        )
+    });
+    let pending = h
+        .exchange
+        .receiver()
+        .get("xhr")
+        .unwrap()
+        .call_method("get", vec![Js::str("/dapi/v1/openOrders")])
+        .unwrap();
+    let error = h
+        .drive(Box::pin(async move { Ok(await_js(pending).await) }))
+        .unwrap()
+        .unwrap_err();
+    let message = error.value.get("message").unwrap();
+    assert_eq!(
+        message.as_str().unwrap().as_ref(),
+        &[0xd800_u16],
+        "native Error must retain source message code units"
+    );
+    assert!(
+        message.strict_equals(
+            &error
+                .value
+                .get("response")
+                .unwrap()
+                .get("data")
+                .unwrap()
+                .get("msg")
+                .unwrap()
+        )
+    );
+    assert!(
+        error
+            .value
+            .get("name")
+            .unwrap()
+            .strict_equals(&Js::str("Error"))
+    );
+    assert_eq!(error.value.get("code").unwrap().as_f64(), Some(-2011.0));
+    assert!(error.value.get("__binanceEmitted").unwrap().truthy());
+    assert_eq!(h.http.calls("/dapi/v1/openOrders").len(), 1);
+}
 #[test]
 fn markets_use_coin_m_endpoints_filters_and_signed_account_brackets() {
     let h = harness(options(), |wire| {

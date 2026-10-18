@@ -285,9 +285,10 @@ pub(crate) fn create(rt: &Rt, options: Js, public: bool) -> Result<Js, Thrown> {
                             safe_cex_exchange::js_runtime::scope::scope_of(&weak)?
                                 .call_path("emitAndLogError", vec![message.clone()])?;
                         }
-                        let error = Thrown::error(
-                            "Error",
-                            &String::from_utf16_lossy(&message.to_js_string()?),
+                        let error = Thrown::new(
+                            safe_cex_exchange::js_runtime::scope::scope_of(&weak)?
+                                .global("Error")?
+                                .call(Js::Undefined, vec![message])?,
                         );
                         error.value.set("code", code)?;
                         error.value.set("response", response)?;

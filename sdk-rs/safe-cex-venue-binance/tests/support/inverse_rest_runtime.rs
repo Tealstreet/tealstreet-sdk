@@ -212,8 +212,15 @@ impl WsRuntime for Runtime {
 pub struct Http {
     pub sent: Mutex<Vec<RestRequest>>,
     routes: Mutex<Vec<(String, String, VecDeque<(u16, Value)>)>>,
+    encoded: Mutex<Vec<(String, String, Vec<u8>)>>,
 }
 impl Http {
+    pub fn encoded(&self, method: &str, path: &str, body: &[u8]) {
+        self.encoded
+            .lock()
+            .unwrap()
+            .push((method.into(), path.into(), body.to_vec()));
+    }
     pub fn route(&self, method: &str, path: &str, status: u16, value: Value) {
         let mut routes = self.routes.lock().unwrap();
         if let Some((_, _, queue)) = routes.iter_mut().find(|(m, p, _)| m == method && p == path) {
@@ -250,6 +257,21 @@ impl RestAdapter for Http {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         self.sent.lock().unwrap().push(request.clone());
         let path = request.url.split('?').next().unwrap();
+        if let Some((_, _, body)) = self
+            .encoded
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(method, p, _)| request.method.eq_ignore_ascii_case(method) && p == path)
+        {
+            let response = RestResponse {
+                status: 200,
+                reason: None,
+                headers: [("content-type".into(), "application/json".into())].into(),
+                body: RestResponseBody::Encoded(body.clone()),
+            };
+            return Box::pin(async move { Ok(response) });
+        }
         let mut routes = self.routes.lock().unwrap();
         let route = routes
             .iter_mut()

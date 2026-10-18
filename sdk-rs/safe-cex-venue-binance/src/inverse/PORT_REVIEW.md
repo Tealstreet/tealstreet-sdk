@@ -32,6 +32,18 @@ The following are measured receipts, not completeness claims:
   BaseExchange, Store, API and sockets. Only the terminal Axios adapter is
   scripted. The native comparison uses the same response records and reads
   native contract bits before comparing the finite JSON result graph.
+- A real encoded HTTP error envelope with an escaped lone UTF-16 surrogate
+  compiled RED: the new Error message contained U+FFFD instead of U+D800.
+  Using the installed native Error constructor restores the exact source code
+  unit and retains name, code, response and the emission marker. The complete
+  maintained source oracle independently asserts those Error fields.
+- The order witness replays25 maintained-source cases for split/attached orders,
+  batch IDs/errors, cancellation grouping/partial progress, amendment ordering,
+  leverage clamps and confirmed mode/margin transitions. Five compiled mutations
+  (quantity, cancellation status, amendment price, leverage and mode) fail the
+  actual native binding and pass after exact restoration. The missing groupBy
+  import was itself a compiled production failure before the shared native
+  grouping adapter was bound; no source order body was replaced by a fixture.
 - The existing Binance generator owns the inverse constants and strict remote
   wire records. Its compiled live-source comparison checks all12 exported
   tables/constants and22 endpoint entries. Separate native record assertions
