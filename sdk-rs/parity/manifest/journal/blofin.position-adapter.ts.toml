@@ -16,7 +16,7 @@ kind = "type"
 layer = "adapted"
 rs = "safe-cex-venue-blofin/src/position_adapter.rs::BlofinPositionAdapterDeps"
 status = "divergent"
-note = "CHOSEN: borrowed account and infallible native resolver callbacks preserve the declared dependency shapes. Arbitrary callback throws or malformed dynamic callback results are excluded because native callers use typed shared models."
+note = "FIX-audit adjudication (2026-10-18; sdk-rs/parity/BLOFIN_FIX_AUDIT.md): ACCEPT production reachability: `journal` executes the real SDK historical-position reader and its actual typed account/symbol/settle-currency closures. The source account/key/settleCurrency and base-unit closedSize=2 match despite market contractSize=1000. The producer supplies no contractSize callback; arbitrary throwing or malformed replacement callbacks are not installed by this binding. Existing generic-domain refusal remains documented, rather than widening the shared carrier. Independent existing typed/alias/ingress profiles remain; the following pre-audit timing text is historical, not a current unresolved claim. Historical note: CHOSEN: borrowed account and infallible native resolver callbacks preserve the declared dependency shapes. Arbitrary callback throws or malformed dynamic callback results are excluded because native callers use typed shared models."
 
 [[symbol]]
 ts = "mapBlofinPositionHistory"
