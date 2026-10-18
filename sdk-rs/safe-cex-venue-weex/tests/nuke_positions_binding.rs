@@ -59,12 +59,13 @@ fn nuke_replacement(empty: bool) {
     assert!(
         !h.store
             .positions()
+            .unwrap()
             .iter()
             .any(|p| p.id == "retired-hedged-position"),
         "source Store.update replaces the snapshot"
     );
     assert_eq!(
-        &*h.store.positions(),
+        &*h.store.positions().unwrap(),
         expected.as_slice(),
         "exact refetched snapshot, including fake zero rows"
     );

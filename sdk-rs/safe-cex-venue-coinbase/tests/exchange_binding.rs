@@ -113,7 +113,7 @@ fn reads_are_pure_and_preserve_native_fields() {
         false,
     )
     .unwrap();
-    let before = h.store.orders().len();
+    let before = h.store.orders().unwrap().len();
     let tickers = h.drive(h.venue().fetch_tickers()).unwrap();
     assert_eq!(tickers[0].last, 123.5);
     assert_eq!(tickers[0].percentage, 2.5);
@@ -129,8 +129,8 @@ fn reads_are_pure_and_preserve_native_fields() {
             .len(),
         5
     );
-    assert_eq!(h.store.orders().len(), before);
-    assert!(h.store.tickers().is_empty());
+    assert_eq!(h.store.orders().unwrap().len(), before);
+    assert!(h.store.tickers().unwrap().is_empty());
     let balance = h.drive(h.exchange.fetch_balance()).unwrap();
     assert_eq!(balance.total, 0.0);
     assert_eq!(
@@ -204,11 +204,11 @@ fn writes_use_native_client_id_and_real_reconciliation() {
         "2.5"
     );
     assert_eq!(
-        h.store.orders()[0].parent_id.as_deref(),
+        h.store.orders().unwrap()[0].parent_id.as_deref(),
         Some("synthetic-caller-id")
     );
     h.drive(h.venue().cancel_orders(vec![order()])).unwrap();
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
     assert_eq!(
         h.http.calls("/api/v3/brokerage/orders/batch_cancel")[0].data,
         json!({"order_ids":["order-synthetic"]})
@@ -248,7 +248,7 @@ fn starts_both_sockets_and_disposes_the_same_owned_connections() {
     let h = harness(ExchangeName::Coinbase, options(), script);
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    assert!(h.store.loaded().markets);
+    assert!(h.store.loaded().unwrap().markets);
     let sockets = h.runtime.sockets.borrow();
     assert_eq!(sockets.len(), 2);
     let public = sockets
@@ -477,7 +477,7 @@ fn native_number_bits_survive_reads_and_tick_store_publication() {
         for _ in 0..20 {
             h.runtime.advance(250.0);
         }
-        let tickers = h.store.tickers();
+        let tickers = h.store.tickers().unwrap();
         assert!(!tickers.is_empty());
         if price == "-0" {
             assert_eq!(tickers[0].last.to_bits(), (-0.0_f64).to_bits());
@@ -700,8 +700,8 @@ fn startup_publication_keeps_store_subscriber_cause_after_commit() {
         &StoreSubscriberError::new("synthetic subscriber failure").with_cause(cause)
     );
     assert_eq!(later.get(), 0);
-    assert!(h.store.loaded().markets);
-    assert_eq!(h.store.markets().len(), 1);
+    assert!(h.store.loaded().unwrap().markets);
+    assert_eq!(h.store.markets().unwrap().len(), 1);
     assert!(h.runtime.sockets.borrow().is_empty());
 }
 #[test]
@@ -872,7 +872,11 @@ fn uuid_binding_mints_source_client_ids() {
         uuid_entropy(&h);
         let before = h.runtime.random_calls.get();
         assert_eq!(
-            h.venue().base().mint_client_order_id(place()).unwrap(),
+            h.venue()
+                .base()
+                .mint_client_order_id(place())
+                .unwrap()
+                .unwrap(),
             expected["minted"].as_str().unwrap()
         );
         assert_eq!(h.runtime.random_calls.get() - before, 21);
@@ -902,7 +906,7 @@ fn uuid_binding_generated_order_ids_reach_actual_http() {
         assert_eq!(calls[0].data["client_order_id"], expected["minted"]);
         assert!(h.runtime.random_values.borrow().is_empty());
         assert_eq!(
-            h.store.orders()[0].parent_id.as_deref(),
+            h.store.orders().unwrap()[0].parent_id.as_deref(),
             expected["minted"].as_str()
         );
     }
@@ -1088,7 +1092,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                     )));
                 h.runtime.pump();
             }
-            ticker_coercion::assert_native(&h.store.tickers(), case);
+            ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
         }
         assert_eq!(
             h.runtime

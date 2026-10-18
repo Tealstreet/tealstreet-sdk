@@ -6,6 +6,18 @@ and its more specific utility guidance; do not duplicate them here.
 preserved defects, representation boundaries, and inverse refusal rationale.
 Run package-local Rust tests and strict clippy, plus the workspace parity gates.
 
+The sole production `DefaultStore` now lives in `safe_cex_exchange::native_store`.
+This lower crate owns the `Store` protocol, typed patch admission and pure helpers;
+it has no dependency on exchange-core. Graph-backed reads and `serialize` return
+owned `Result` projections using the preserving-undefined codec. `native_owner`
+is required: a native facade refuses an unsupported owner rather than creating
+an independent material copy. `BalanceHandle` captures one native referent and
+projects only when its fallible `read` is requested. The lower protocol exposes only an opaque
+owner capability: it cannot construct a second graph. `StoreReadError` carries
+the property/projection phase and original native cause; its diagnostics never
+read cause properties. Typed patch admission remains separate from raw native
+property mutations, so its error adapters do not replace source throw values.
+
 Default oracle comparisons are frozen snapshots. The ignored `live_snapshots`
 gate executes every generator with `--check`; CI runs all targets with
 `--include-ignored`, including the in-memory derived gate. See DERIVED_PARITY
@@ -37,9 +49,11 @@ still supply finite JSON fields; `ModelPatch::set_number` retains native NaN,
 infinities and signed zero, and `set_native` replaces a typed nested field without
 serializing it. These operations return `StoreMutationError`; its Patch variant retains the original `StorePatchError`, and callers handle the origin explicitly. Known-field validation is staged before committing any model or batch, so an error changes no state, alias, counter or notification. PatchSource is sealed to stable JSON-map and ModelPatch sources.
 Malformed nonempty legacy delta indices return StorePatchError rather than panic; empty and info-only deltas remain no-ops before row access. The separate preexisting packed-delta malformed-index and short-value panic findings remain open.
-No target model is serialized during a patch. Ticker/BBO patches use this same
-representation directly, independently of the collection mutation path. Cached
-ticker aliases copy numeric bits even when +0 and -0 compare equal.
+Typed patch admission projects the reached model, validates a staged candidate,
+and encodes only the admitted touched fields into the canonical graph. Raw native
+facade updates bypass that typed admission and use the same source mutation
+algorithm directly, preserving partial writes and property getter/setter order.
+Native aliases retain numeric bits even when +0 and -0 compare equal.
 
 The typed patch boundary is CHOSEN: unknown keys are omitted and invalid known
 field shapes return errors rather than inhabiting the closed model. TypeScript's

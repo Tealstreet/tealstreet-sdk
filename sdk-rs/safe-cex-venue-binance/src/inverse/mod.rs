@@ -80,7 +80,7 @@ impl BinanceInverseExchange {
             },
             from_typed(&shared.extra.name).map_err(|e| e.to_exchange_error())?,
             from_typed(&shared.extra.options).map_err(|e| e.to_exchange_error())?,
-            store::facade(store),
+            store::facade(store)?,
             |receiver| {
                 for name in [
                     "positionStateVersion",

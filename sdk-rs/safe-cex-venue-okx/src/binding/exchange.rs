@@ -104,7 +104,7 @@ impl OkxExchange {
         };
         let h = lifecycle_ops(&constructing);
         let (js_name, js_options) = (js(&name)?, js(&options)?);
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         let receiver = match shared.extra.variant() {
             Variant::Global | Variant::Eu => {
                 family_lifecycle::new_exchange(&h, js_name, js_options, js_store)
@@ -422,3 +422,8 @@ mod callback_binding;
 #[cfg(test)]
 #[path = "../../tests/support/amendment_binding.rs"]
 mod amendment_binding;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/divergence_binding.rs"]
+mod divergence_binding;

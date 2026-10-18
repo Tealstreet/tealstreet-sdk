@@ -81,9 +81,7 @@ fn actual_raw_reads() {
         let trace = RefCell::new(Vec::<Value>::new());
         let errors = RefCell::new(Vec::<Value>::new());
         let mut error = ExchangeError::new("fallback-message");
-        error.response = Some(
-            json!({"data":{"msg":match scenario{"empty-msg"=>json!(""),"numeric-msg"=>json!(19),"object-msg"=>json!({"detail":"object"}),_=>json!("venue-message")}}}),
-        );
+        error = error.with_retained_response((json!({"data":{"msg":match scenario{"empty-msg"=>json!(""),"numeric-msg"=>json!(19),"object-msg"=>json!({"detail":"object"}),_=>json!("venue-message")}}})).into());
         let mut logger_error = ExchangeError::new("logger-failure");
         logger_error.store_subscriber_ids = vec![317];
         let session = || {

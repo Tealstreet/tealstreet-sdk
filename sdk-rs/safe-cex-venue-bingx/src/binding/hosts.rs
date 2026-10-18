@@ -38,15 +38,23 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
             .and_then(|v| safe_cex_exchange::js_runtime::value::to_json(&v).ok())
     };
     native.is_axios_error = e.value.get("isAxiosError").is_ok_and(|v| v.truthy());
-    native.response = field("response");
-    if let Some(response) = native.response.as_mut()
-        && let Some(serde_json::Value::String(raw)) = response.get("data")
-    {
-        response["data"] = safe_cex_exchange::runtime::response_json_view(
-            &safe_cex_transport::RestResponseBody::Transformed(
-                safe_cex_transport::how::big_int_as_string_json_parse(raw),
-            ),
-        );
+    let response = match e.value.get("response") {
+        Ok(value) => value,
+        Err(cause) => return cause.into(),
+    };
+    if !response.is_nullish() {
+        let mut response = match safe_cex_exchange::js_runtime::value::to_retained_input(&response)
+        {
+            Ok(value) => value,
+            Err(cause) => return cause.into(),
+        };
+        if let Some(safe_cex_types::retained_json::RetainedJsonInput::Text(raw)) =
+            response.get("data")
+        {
+            let parsed = safe_cex_transport::how::big_int_as_string_json_parse_utf16(raw);
+            *response.get_mut("data").expect("existing data field") = parsed;
+        }
+        native = native.with_retained_response(response);
     }
     native.config = field("config");
     native.request = field("request");
@@ -72,7 +80,7 @@ impl Host {
         options: ExchangeOptions,
         store: Rc<dyn Store>,
         deps: BingxDependencies,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, ExchangeError> {
         let scope = Rc::new(ScopeShared::new(
             deps.runtime,
             deps.http,
@@ -88,7 +96,10 @@ impl Host {
                 safe_cex_exchange::js_runtime::value::from_typed(&options)
                     .expect("serializable options"),
             ),
-            ("store", safe_cex_exchange::js_runtime::store::facade(store)),
+            (
+                "store",
+                safe_cex_exchange::js_runtime::store::facade(store).map_err(error)?,
+            ),
         ]);
         let weak = Rc::downgrade(&scope);
         parent
@@ -104,7 +115,7 @@ impl Host {
             .expect("fresh extensible accessor target");
         let public = sockets::base_websocket(&scope.sockets, parent.clone());
         let private = sockets::base_websocket(&scope.sockets, parent);
-        Rc::new(Self {
+        Ok(Rc::new(Self {
             public_close: public.get("onClose").expect("base close"),
             private_close: private.get("onClose").expect("base close"),
             public,
@@ -117,7 +128,7 @@ impl Host {
             blobs: Rc::default(),
             tasks: Rc::default(),
             private_listeners: RefCell::default(),
-        })
+        }))
     }
     pub fn base(&self) -> &Rc<BaseExchange> {
         self.scope

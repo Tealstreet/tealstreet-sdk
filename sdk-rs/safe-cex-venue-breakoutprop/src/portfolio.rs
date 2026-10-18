@@ -36,7 +36,7 @@ fn native_open_positions(
         if portfolio.is_nullish() {
             return Ok(None);
         }
-        let tickers = store.tickers_by_symbol();
+        let tickers = store.tickers_by_symbol()?;
         let rows = portfolio.get("positions")?;
         if rows.is_nullish() {
             rows.get("map")?;
@@ -111,7 +111,7 @@ fn native_open_positions(
             report(&error.message)?;
             Ok(Some(
                 store
-                    .positions()
+                    .positions()?
                     .iter()
                     .map(from_typed)
                     .collect::<Result<_, _>>()?,
@@ -207,7 +207,7 @@ pub fn format_balance(
     match result {
         Err(error) if !projection_refusal => {
             report(&error.message)?;
-            Ok(store.balance().clone())
+            Ok(store.balance()?.clone())
         }
         value => value,
     }
@@ -230,7 +230,7 @@ pub fn format_positions(
         symbols
     } else {
         default_symbols = store
-            .markets()
+            .markets()?
             .iter()
             .map(|m| m.symbol.clone())
             .collect::<Vec<_>>();
@@ -362,7 +362,7 @@ pub fn format_orders(
         Ok(rows) => rows,
         Err(error) => {
             report(&error.message)?;
-            return Ok(Some(store.orders().to_vec()));
+            return Ok(Some(store.orders()?.to_vec()));
         }
     };
     if let Some(error) = refusal {

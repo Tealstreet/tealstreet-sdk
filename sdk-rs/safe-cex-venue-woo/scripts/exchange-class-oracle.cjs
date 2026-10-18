@@ -3,7 +3,7 @@ const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
 const file=path.resolve(__dirname,'../../../packages/safe-cex/src/exchanges/woo/woo.exchange.ts');
 const ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true),klass=ast.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='WOOXExchange');assert(klass);
 const code=ts.transpileModule(klass.getText(ast).replace(/^export /,'this.C='),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-if (process.argv.includes('--bound-response') || process.argv.includes('--fix-audit-boundary')) {
+if (process.argv.includes('--bound-response') || process.argv.includes('--fix-audit-boundary') || process.argv.includes('--schedule-cancel')) {
   const utilityFile = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/woo/woo.utils.ts');
   const utility = {exports: {}, require: require('./oracle-runtime.cjs')};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(utilityFile, 'utf8'), {
@@ -12,8 +12,21 @@ if (process.argv.includes('--bound-response') || process.argv.includes('--fix-au
   const constructed = [], trace = [];
   let subscriptions = 0;
   const clients = [{id:31}, {id:37}, {id:41}], proxy = {id:43};
-  class BaseExchange {
-    constructor(name, options) { assert.equal(name, 'woo'); this.options = options; constructed.push(this); }
+  let ScheduleBase = class {};
+  if (process.argv.includes('--schedule-cancel')) {
+    const baseFile = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/base.ts');
+    const baseAst = ts.createSourceFile(baseFile, fs.readFileSync(baseFile, 'utf8'), ts.ScriptTarget.Latest, true);
+    const base = baseAst.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'BaseExchange');
+    const member = base.members.find(n => n.name?.getText(baseAst) === 'scheduleCancel');
+    assert(member && ts.isPropertyDeclaration(member));
+    const scope = {};
+    vm.runInNewContext(ts.transpileModule(`class ScheduleBase { ${member.getText(baseAst)} } this.ScheduleBase = ScheduleBase;`, {
+      compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS},
+    }).outputText, scope);
+    ScheduleBase = scope.ScheduleBase;
+  }
+  class BaseExchange extends ScheduleBase {
+    constructor(name, options) { super(); assert.equal(name, 'woo'); this.options = options; constructed.push(this); }
     on(name, handler) { assert.equal(name, 'fill'); assert.equal(typeof handler, 'function'); subscriptions++; }
   }
   const bound = {
@@ -33,6 +46,15 @@ if (process.argv.includes('--bound-response') || process.argv.includes('--fix-au
     assert.equal(instance.xhr, clients[0]); assert.equal(instance._primaryXhr, clients[1]);
     assert.equal(instance._secondaryXhr, clients[2]); assert.equal(instance._proxyEnforcedXhr, proxy);
     assert.equal(instance.publicWebsocket.owner, instance); assert.equal(instance.privateWebsocket.owner, instance);
+  }
+  if (process.argv.includes('--schedule-cancel')) {
+    (async () => {
+      for (const value of [undefined, null, 0, NaN]) {
+        await assert.rejects(owner.scheduleCancel(value), error => error.name === 'Error' && error.message === 'Not implemented');
+      }
+      process.stdout.write(JSON.stringify({name: 'Error', message: 'Not implemented', cases: 4}));
+    })().catch(error => { console.error(error); process.exitCode = 1; });
+    return;
   }
   if (process.argv.includes('--fix-audit-boundary')) {
     const directory = path.dirname(file), visited = new Set();

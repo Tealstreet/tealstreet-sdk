@@ -17,7 +17,8 @@ use napi::{
 };
 use safe_cex_registry::native_account::{
     NativeAccount, NativeAccountFuture, NativeAccountSpec, native_account_call,
-    native_account_event, native_account_watch, open_native_account,
+    native_account_event, native_account_replay_control, native_account_watch,
+    open_native_account_with_replay,
 };
 use safe_cex_registry::native_value::NativeValue;
 use std::{
@@ -39,6 +40,7 @@ pub struct NativeAccountInit {
     pub exchange: String,
     pub options: JsData,
     pub account_name: Option<String>,
+    pub replay_epoch_ms: Option<f64>,
 }
 
 enum Command {
@@ -54,6 +56,11 @@ enum Command {
         id: u32,
         method: String,
         args: Vec<NativeValue>,
+        reply: Reply<JsData>,
+    },
+    Replay {
+        id: u32,
+        request: NativeValue,
         reply: Reply<JsData>,
     },
     SignerAvailable {
@@ -99,6 +106,9 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
         let hyperliquid_limiter = safe_cex_registry::native_host::hyperliquid_rate_limiter();
         let mut accounts: HashMap<u32, Open> = HashMap::new();
         let mut next = 1u32;
+        // Replay clock overrides are thread-local and intended for one isolated
+        // diagnostic process. Never admit another account after a replay host.
+        let mut replay_host_used = false;
         while let Some(command) = receiver.recv().await {
             match command {
                 Command::Open {
@@ -109,6 +119,15 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                     on_store,
                     reply,
                 } => {
+                    // VirtualClock is thread-local: a replay account must be the
+                    // only account on this host until it is closed.
+                    if replay_host_used || (init.replay_epoch_ms.is_some() && !accounts.is_empty())
+                    {
+                        let _ =
+                            reply.send(Err(host_error("replay requires an isolated native host")));
+                        continue;
+                    }
+                    replay_host_used |= init.replay_epoch_ms.is_some();
                     let opened = open(
                         init,
                         sign,
@@ -154,6 +173,17 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                     tokio::task::spawn_local(async move {
                         let _ = reply.send(operation.await);
                     });
+                }
+                Command::Replay { id, request, reply } => {
+                    if let Some(open) = accounts.get(&id) {
+                        let operation =
+                            native_account_replay_control(open.account.clone(), request);
+                        tokio::task::spawn_local(async move {
+                            let _ = reply.send(operation.await.map(JsData));
+                        });
+                    } else {
+                        let _ = reply.send(Err(account_closed_error(id)));
+                    }
                 }
                 Command::SignerAvailable {
                     id,
@@ -260,6 +290,13 @@ fn open(
     on_store: Notify,
     hyperliquid_limiter: Rc<safe_cex_registry::native_host::HyperliquidRateLimiter>,
 ) -> Result<Open, NativeValue> {
+    if init.replay_epoch_ms.is_some_and(|epoch| {
+        !epoch.is_finite() || epoch < 0.0 || epoch.fract() != 0.0 || epoch > 8.64e15
+    }) {
+        return Err(host_error(
+            "replay epoch must be an integer JavaScript timestamp",
+        ));
+    }
     let options = init.options.0;
     let sign = sign.map(Rc::new);
     let proxy_token = proxy_token.map(Rc::new);
@@ -296,14 +333,17 @@ fn open(
         init.account_name.clone(),
         on_event.clone(),
     ));
-    let account = open_native_account(NativeAccountSpec {
-        hyperliquid_limiter,
-        exchange: init.exchange,
-        options,
-        account_name: init.account_name,
-        sign: sign_source,
-        proxy_token: proxy_source,
-    })?;
+    let account = open_native_account_with_replay(
+        NativeAccountSpec {
+            hyperliquid_limiter,
+            exchange: init.exchange,
+            options,
+            account_name: init.account_name,
+            sign: sign_source,
+            proxy_token: proxy_source,
+        },
+        init.replay_epoch_ms,
+    )?;
     let event_startup = startup.clone();
     let watched_account = Rc::downgrade(&account);
     let unwatch = native_account_watch(
@@ -439,4 +479,18 @@ pub fn signer_available<'env>(
 #[napi_derive::napi]
 pub fn native_account_close<'env>(env: &'env Env, id: u32) -> napi::Result<PromiseRaw<'env, ()>> {
     settle(env, move |reply| Command::Close { id, reply })
+}
+
+/// Diagnostic replay host control. Refuses ordinary live accounts.
+#[napi_derive::napi]
+pub fn native_account_replay<'env>(
+    env: &'env Env,
+    id: u32,
+    request: JsData,
+) -> napi::Result<PromiseRaw<'env, JsData>> {
+    settle(env, move |reply| Command::Replay {
+        id,
+        request: request.0,
+        reply,
+    })
 }

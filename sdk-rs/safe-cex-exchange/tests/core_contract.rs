@@ -209,12 +209,12 @@ fn minted_id_split_uses_amount_precision_identity() {
         opts.client_order_id = None;
         opts.amount = 5.49;
         assert_eq!(
-            venue.base.mint_client_order_id(&opts).as_deref(),
+            venue.base.mint_client_order_id(&opts).unwrap().as_deref(),
             Some("good-minted"),
             "mint split uses amount precision, not price precision"
         );
         opts.amount = 5.51;
-        assert_eq!(venue.base.mint_client_order_id(&opts), None);
+        assert_eq!(venue.base.mint_client_order_id(&opts).unwrap(), None);
     }
 }
 #[test]
@@ -902,7 +902,7 @@ fn dynamic_leverage_hook_preserves_venue_override_and_default_store_commit() {
             base: BaseExchange::new(
                 ExchangeName::Binance,
                 serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 Rc::new(Runtime(Cell::new(0))),
                 ExchangeSettings::default(),
             ),
@@ -919,7 +919,7 @@ fn dynamic_leverage_hook_preserves_venue_override_and_default_store_commit() {
         "default leverage must dispatch max-leverage hook"
     );
     assert_eq!(
-        default.base.store.fetched_leverage()["BTC"].sell_leverage,
+        default.base.store.fetched_leverage().unwrap()["BTC"].sell_leverage,
         25.0,
         "default leverage must commit to production Store"
     );
@@ -929,7 +929,7 @@ fn dynamic_leverage_hook_preserves_venue_override_and_default_store_commit() {
         .unwrap()
         .unwrap();
     assert_eq!((value.buy_leverage, value.sell_leverage), (7.0, 9.0));
-    assert!(venue.base().store.fetched_leverage().is_empty());
+    assert!(venue.base().store.fetched_leverage().unwrap().is_empty());
     assert_eq!(
         ready(dynamic.fetch_leverage_for_symbol("reject".into()))
             .unwrap_err()

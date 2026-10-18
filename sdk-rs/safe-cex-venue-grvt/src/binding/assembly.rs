@@ -475,7 +475,7 @@ mod private_scalar_tests {
         let shared = Rc::new(Shared::new(
             Rc::new(fixture::Runtime::default()),
             Rc::new(fixture::Http::default()),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             Extra {
                 builder_error_proto: Js::object(vec![]),

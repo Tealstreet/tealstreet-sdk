@@ -76,7 +76,7 @@ fn base(logs: Rc<RefCell<Vec<Value>>>, throw: bool) -> Rc<BaseExchange> {
     let base = Rc::new(BaseExchange::new(
         ExchangeName::Woo,
         serde_json::from_value(json!({"key":"test","secret":"test"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         Rc::new(Runtime {
             logs,
             serial: Cell::new(0),

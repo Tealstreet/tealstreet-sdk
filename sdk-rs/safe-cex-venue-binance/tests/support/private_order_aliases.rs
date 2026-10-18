@@ -110,7 +110,7 @@ fn owner(http: Arc<Http>, runtime: Rc<Runtime>) -> Rc<ExchangeOwner> {
         None,
         safe_cex_exchange::native::NativeHttpEvents::default(),
     );
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     safe_cex_store::Store::update(store.as_ref(), safe_cex_store::StoreUpdate {
         markets: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.1},"limits":{"amount":{"min":0.1,"max":100},"leverage":{"min":1,"max":100}}})).unwrap()]),
         tickers: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","bid":99,"ask":101,"last":100,"mark":100,"index":100,"percentage":0,"volume":0,"quoteVolume":0,"fundingRate":0,"fundingTime":0,"openInterest":0})).unwrap()]),
@@ -177,7 +177,7 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
     assert!(poll(&runtime, &mut call).is_pending());
     assert_eq!(http.count("/fapi/v1/order"), 1);
     assert_eq!(
-        owner.base.store.orders()[0].status,
+        owner.base.store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Open
     );
     let request = http.requests.lock().unwrap()[0].clone();
@@ -190,7 +190,7 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
         EventValue::Undefined
     ));
     assert_eq!(
-        owner.base.store.orders()[0].status,
+        owner.base.store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Canceled
     );
     owner.dispose().unwrap();
@@ -245,6 +245,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
                 .base
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|row| row.status == OrderStatus::Open)
         );
@@ -268,6 +269,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
                 .base
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|row| row.status == OrderStatus::Open)
         );
@@ -276,13 +278,12 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
         assert_eq!(result.is_ok(), algo_status == 200);
         if let Err(error) = &result {
             let response = error
-                .response
-                .as_ref()
+                .response_json_view()
                 .expect("retained HTTP rejection response");
             assert_eq!(response["status"], 500);
             assert_eq!(response["data"]["msg"], "algo refused");
         }
-        let rows = owner.base.store.orders();
+        let rows = owner.base.store.orders().unwrap();
         assert_eq!(rows.len(), 3);
         for row in rows.iter() {
             let expected =
@@ -304,7 +305,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
             "errors":errors.borrow().len(),
         });
         if let Err(error) = &result {
-            let response = error.response.as_ref().unwrap();
+            let response = error.response_json_view().unwrap();
             observed["status"] = response["status"].clone();
             observed["msg"] = response["data"]["msg"].clone();
         }
@@ -525,7 +526,7 @@ fn native_private_handler_and_event_array_keep_numeric_fields_before_transport()
     ])
     .unwrap();
     assert_eq!(
-        owner.base.store.orders()[0].filled.to_bits(),
+        owner.base.store.orders().unwrap()[0].filled.to_bits(),
         (-0.0f64).to_bits()
     );
     let rows: EventArray = owner.private.parent.orders().unwrap();
@@ -572,4 +573,82 @@ fn native_bulk_placement_retains_post_result_until_signed_http_settles() {
     assert_eq!(text(&rows[0]), "9007199254740993");
     assert_eq!(http.count("/fapi/v1/order"), 1);
     owner.dispose().unwrap();
+}
+
+#[test]
+fn native_cancel_symbol_reports_retained_messages_like_constructed_typescript() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/cancel-message-source.cjs"
+        ))
+        .output()
+        .expect("constructed source cancel message profile");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 2);
+    for (index, raw) in [
+        (1, r#"{"msg":"ordinary failure"}"#),
+        (0, r#"{"msg":"\ud800raw\udfff"}"#),
+    ] {
+        let runtime = Rc::new(Runtime::default());
+        let http = Arc::new(Http::default());
+        http.response("/fapi/v1/allOpenOrders", 200, json!({}));
+        http.routes
+            .lock()
+            .unwrap()
+            .insert("/fapi/v1/algoOpenOrders".into(), (400, raw.into()));
+        let owner = owner(http.clone(), runtime.clone());
+        let errors = events(&owner, "error");
+        let error = run(
+            &runtime,
+            owner.invoke(Method::CancelSymbol, vec![string("BTCUSDT")]),
+        )
+        .unwrap_err();
+        assert_eq!(http.count("/fapi/v1/allOpenOrders"), 1);
+        assert_eq!(http.count("/fapi/v1/algoOpenOrders"), 1);
+        for request in http.requests.lock().unwrap().iter() {
+            assert!(request.method.eq_ignore_ascii_case("DELETE"));
+            assert!(request.url.contains("symbol=BTCUSDT"));
+            assert!(request.url.contains("signature="));
+        }
+        let observed: Vec<Vec<u16>> = errors
+            .borrow()
+            .iter()
+            .enumerate()
+            .map(|(event, args)| {
+                assert_eq!(
+                    args.len(),
+                    source[index]["arity"][event].as_u64().unwrap() as usize
+                );
+                args[0].as_str().expect("native emitted String").to_vec()
+            })
+            .collect();
+        let expected: Vec<Vec<u16>> =
+            serde_json::from_value(source[index]["emitted"].clone()).unwrap();
+        assert_eq!(
+            observed, expected,
+            "Binance cancel retained message UTF16 case {index}"
+        );
+        assert!(error.origin.is_some(), "case {index}: {error:?}");
+        let origin = error
+            .origin
+            .as_ref()
+            .expect("original transport authority")
+            .error();
+        let failure = origin
+            .downcast_ref::<safe_cex_transport::RestFailure>()
+            .expect("original RestFailure");
+        let response = failure.response.as_ref().expect("original HTTP response");
+        assert_eq!(response.status, 400);
+        assert!(
+            matches!(&response.body, RestResponseBody::Transformed(data) if data.get("msg") == Some(&safe_cex_types::retained_json::RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap().get("msg").unwrap().clone())),
+            "Binance original response retained after configured transform"
+        );
+        owner.dispose().unwrap();
+    }
 }

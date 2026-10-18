@@ -40,5 +40,11 @@
       "core::clone::Clone"
     ],
     "reason": "Reviewed subscriber_error.rs at integration 58a679f782: public new/with_response construct reusable callback-failure data, and with_cause attaches an optional Rc<dyn Error>. Derived Clone copies String and optional JSON response storage while retaining the exact Rc cause identity; it neither reruns the callback nor creates a one-use validation witness. Native assertions distinguish separate response storage and observe shared cause metadata through Error::source. Opaque cause state remains shared, so this is not a universal deep-copy claim; see sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
+  "safe_cex_types::store_access::StoreReadError": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed canonical Store source store_access.rs: derived Clone retains the same opaque Rc cause and typed boundary phase. It neither inspects cause getters nor grants one-use authority. The actual captured-balance/native facade witness checks a cloned projection failure retains phase and exact cause pointer after the Store owner is dropped."
   }
 }

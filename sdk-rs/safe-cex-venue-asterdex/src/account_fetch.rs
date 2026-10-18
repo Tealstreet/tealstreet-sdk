@@ -138,7 +138,7 @@ impl AccountFetch {
             if self.owner.is_disposed() || version != self.balance_state_version.get() {
                 return Ok(false);
             }
-            let mut loaded = self.owner.store.loaded().clone();
+            let mut loaded = self.owner.store.loaded()?.clone();
             loaded.balance = true;
             self.owner.store.update(
                 StoreUpdate {
@@ -202,7 +202,7 @@ impl AccountFetch {
             let positions = data.as_array().ok_or_else(|| {
                 mapper_error(("TypeError", "positions.forEach is not a function".into()))
             })?;
-            let mode = helpers::get_account_position_mode(self.owner.store.options().is_hedged);
+            let mode = helpers::get_account_position_mode(self.owner.store.options()?.is_hedged);
             let mut leverage_by_symbol = BTreeMap::new();
             for pos in positions {
                 if pos.is_null() {
@@ -239,7 +239,7 @@ impl AccountFetch {
                 if parse_float(&amount) == 0.0 {
                     continue;
                 }
-                let position = helpers::transform_position(pos, &self.owner.store.positions())
+                let position = helpers::transform_position(pos, &self.owner.store.positions()?)
                     .map_err(mapper_error)?;
                 // uniqBy keeps the first real position, before all placeholders.
                 if !result.iter().any(|old: &Position| old.id == position.id) {
@@ -249,7 +249,7 @@ impl AccountFetch {
             for market in self
                 .owner
                 .store
-                .markets()
+                .markets()?
                 .iter()
                 .filter(|m| m.active && m.is_spot != Some(true) && selected(&m.symbol))
             {
@@ -474,7 +474,7 @@ impl AccountFetch {
     ) -> Result<(), ExchangeError> {
         let result = async {
             let (min, max) = {
-                let markets = self.owner.store.markets_by_symbol();
+                let markets = self.owner.store.markets_by_symbol()?;
                 let market = markets.get(symbol).ok_or_else(|| {
                     ExchangeError::new(format!("Market {symbol} not found, cannot set leverage"))
                 })?;

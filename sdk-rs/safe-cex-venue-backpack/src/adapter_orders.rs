@@ -49,12 +49,12 @@ impl BackpackExchange {
         let xhr = self.xhr.clone();
         let log = self.clone();
         crate::account_reads::cancel_all_orders(
-            move || Ok(len.base.store.markets().len()),
+            move || Ok(len.base.store.markets()?.len()),
             move |i| {
                 Ok(element
                     .base
                     .store
-                    .markets()
+                    .markets()?
                     .get(i)
                     .cloned()
                     .map(|m| std::future::ready(Ok(m))))
@@ -177,7 +177,7 @@ impl BackpackExchange {
             Ok(self
                 .base
                 .store
-                .markets()
+                .markets()?
                 .iter()
                 .find(|m| m.symbol == s)
                 .map(|m| crate::batch_orders::BatchMarket {
@@ -297,11 +297,10 @@ impl BackpackExchange {
 
 fn validation_failure(e: ExchangeError) -> crate::account_reads::ValidationFailure {
     std::rc::Rc::new(std::cell::RefCell::new(JsJsonValue::Object(vec![
-        ("message".into(), JsJsonValue::String(e.message)),
+        ("message".into(), JsJsonValue::String(e.message.clone())),
         (
             "response".into(),
-            e.metadata
-                .response
+            e.response_json_view()
                 .map(Into::into)
                 .unwrap_or(JsJsonValue::Undefined),
         ),

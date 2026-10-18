@@ -1,10 +1,11 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::*,
     socket_lifecycle::SocketSlot,
     websocket::*,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     DirectTransport, RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider,
@@ -261,6 +262,7 @@ fn venue_with_adapter(
         },
         Rc::new(|_, _| panic!("no externalPublicData configured")),
     )
+    .unwrap()
 }
 #[test]
 fn native_constructor_registers_both_sockets_and_private_dispatch_uses_exchange_store() {
@@ -372,7 +374,7 @@ fn registered_public_ticker_route_commits_before_original_subscriber_throw() {
     public
         .on_message(&SocketFrame::Text(r#"{"channel":"rs.ping"}"#.into()))
         .unwrap();
-    let market = venue.base().store.markets()[0].clone();
+    let market = venue.base().store.markets().unwrap()[0].clone();
     let ticker = safe_cex_venue_mexc::utils::normalize_ticker(
         json!({"symbol":"BTC_USDT","lastPrice":17,"bid1":16,"ask1":18})
             .as_object()
@@ -409,7 +411,7 @@ fn registered_public_ticker_route_commits_before_original_subscriber_throw() {
     }));
     let error=public.on_message(&SocketFrame::Text(json!({"channel":"push.ticker","symbol":"BTC_USDT","data":{"lastPrice":29,"bid1":28,"ask1":30}}).to_string())).unwrap_err();
     assert_eq!(
-        venue.base().store.tickers()[0].last.to_bits(),
+        venue.base().store.tickers().unwrap()[0].last.to_bits(),
         29_f64.to_bits(),
         "MEXC public route committed native price"
     );

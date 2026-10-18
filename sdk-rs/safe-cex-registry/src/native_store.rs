@@ -136,9 +136,12 @@ impl NativeStoreDelivery {
             && !exchange.base().is_disposed()
             && let Some(store) = self.store.upgrade()
         {
-            self.deliver(store.serialize(), true)?;
+            self.deliver(store.serialize()?, true)?;
         }
         Ok(())
+    }
+    pub(super) fn reset_replay_throttle(&self) {
+        self.throttle.cancel();
     }
     pub fn cancel(&self) {
         self.active.set(false);

@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, StoreSubscriberError};
 use safe_cex_venue_bitrue::{leverage_reads::*, wire::OpaqueValue};
 use serde_json::{Value, json};
@@ -142,7 +143,7 @@ fn leverage_reads_match_actual_typescript() {
             }
             "fetchSymbolMaxLeverage" => {
                 counts[1] += 1;
-                json!({"kind":"number","bits":bits(run(fetch_symbol_max_leverage(&store,symbol,public,get)))})
+                json!({"kind":"number","bits":bits(run(fetch_symbol_max_leverage(&store,symbol,public,get)).unwrap())})
             }
             "updateSymbolMetadata" => {
                 counts[2] += 1;
@@ -183,7 +184,7 @@ fn leverage_reads_match_actual_typescript() {
             2,
             "BITRUE-LEVERAGE-READ source markets {index}"
         );
-        let actual = store.markets();
+        let actual = store.markets().unwrap();
         assert_eq!(
             actual.len(),
             expected.len(),
@@ -266,7 +267,7 @@ fn leverage_reads_match_actual_typescript() {
                 "CHOSEN iterative bracket maximum"
             ),
             "fetchSymbolMaxLeverage" => assert_eq!(
-                run(fetch_symbol_max_leverage(&store, "BTC", false, get)),
+                run(fetch_symbol_max_leverage(&store, "BTC", false, get)).unwrap(),
                 3.0,
                 "CHOSEN iterative public maximum"
             ),
@@ -274,7 +275,7 @@ fn leverage_reads_match_actual_typescript() {
             _ => panic!("unknown supplement method"),
         }
         assert_eq!(
-            store.markets()[0].limits.leverage.max,
+            store.markets().unwrap()[0].limits.leverage.max,
             3.0,
             "CHOSEN iterative maximum commits"
         );

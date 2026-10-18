@@ -36,7 +36,7 @@ fn private_order(status: &str, filled: &str) -> Value {
 fn private_order_frame_commits_the_real_mapped_order() {
     let h = started_private_fixture();
     private_frame(&h, private_order("NEW", "0"));
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let order = orders
         .iter()
         .find(|order| order.id == "frame-order")
@@ -74,6 +74,7 @@ fn private_fill_frame_closes_the_order_and_emits_the_fill() {
     assert_eq!(
         h.store
             .orders()
+            .unwrap()
             .iter()
             .find(|order| order.id == "frame-order")
             .unwrap()
@@ -93,7 +94,7 @@ fn private_position_frame_commits_before_the_delayed_rest_heal() {
         &h,
         json!({"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTC-USDT","ps":"BOTH","pa":"4","ep":"123","up":"7","liqp":"60","mt":"isolated"}]}}),
     );
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let position = positions
         .iter()
         .find(|p| p.symbol == "BTCUSDT" && p.side == PositionSide::Long)
@@ -109,14 +110,14 @@ fn private_position_frame_commits_before_the_delayed_rest_heal() {
 #[test]
 fn balance_only_account_frame_preserves_the_source_rest_owned_balance() {
     let h = started_private_fixture();
-    let before = h.store.balance().clone();
+    let before = h.store.balance().unwrap().clone();
     assert_eq!(before.total, 10.0);
     // TS handles position-shaped account rows only; balance remains REST-owned.
     private_frame(
         &h,
         json!({"e":"ACCOUNT_UPDATE","a":{"B":[{"a":"USDT","wb":"999","cw":"777"}]}}),
     );
-    assert_eq!(*h.store.balance(), before);
+    assert_eq!(h.store.balance().unwrap(), before);
     done(&h);
 }
 
@@ -139,10 +140,10 @@ fn refused_market_row_emits_its_value_and_returns_empty_fresh_markets() {
             Ok(())
         }),
     );
-    let before = h.store.markets().to_vec();
+    let before = h.store.markets().unwrap().to_vec();
     let markets = h.drive(h.venue().fetch_markets()).unwrap();
     assert!(markets.is_empty());
-    assert_eq!(h.store.markets().as_ref(), before.as_slice());
+    assert_eq!(h.store.markets().unwrap().as_slice(), before.as_slice());
     assert!(
         errors
             .borrow()

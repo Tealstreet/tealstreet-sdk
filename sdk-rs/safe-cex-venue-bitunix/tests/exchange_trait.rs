@@ -137,7 +137,7 @@ fn public_market_data_uses_futures_frames_and_distinct_candle_volumes() {
         (1700000060000.0, 102.0, 8.0)
     );
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         102.0,
         "candle parser updates the real ticker before callback"
     );
@@ -158,7 +158,7 @@ fn public_market_data_uses_futures_frames_and_distinct_candle_volumes() {
         json!({"time":1700000120000u64,"open":"100","high":"104","low":"99","close":"103","volume":"9"}),
     );
     assert_eq!((books.borrow().len(), candles.borrow().len()), (2, 1));
-    assert_eq!(store.tickers()[0].last, 102.0);
+    assert_eq!(store.tickers().unwrap()[0].last, 102.0);
     venue.dispose().unwrap();
 }
 
@@ -291,7 +291,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
 
     // 3 start (public-data-only fixture: markets, tickers, then account slots loaded)
     drive(&rt, venue.start()).unwrap();
-    let loaded = store.loaded().clone();
+    let loaded = store.loaded().unwrap().clone();
     assert!(loaded.markets && loaded.tickers, "start loads public state");
     assert!(
         loaded.orders && loaded.balance,
@@ -446,6 +446,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     assert!(
         store
             .orders()
+            .unwrap()
             .iter()
             .all(|o| o.status == safe_cex_types::OrderStatus::Canceled)
     );
@@ -460,6 +461,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     assert!(
         store
             .positions()
+            .unwrap()
             .iter()
             .all(|p: &Position| p.leverage == 5.0),
         "both legs updated"
@@ -469,7 +471,10 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     drive(&rt, venue.change_position_mode(false, None)).unwrap();
     let body = sent(&calls(&wire), "POST", HEDGE).expect("hedge-mode POST");
     assert_eq!(body, json!({"positionMode":"ONE_WAY"}));
-    assert!(!store.options().is_hedged, "isHedged setting follows");
+    assert!(
+        !store.options().unwrap().is_hedged,
+        "isHedged setting follows"
+    );
 
     // 13 change_margin_type
     drive(&rt, venue.change_margin_type(true, Some("BTCUSDT".into()))).unwrap();
@@ -541,6 +546,7 @@ fn bound_defaults_beyond_the_sixteen_reach_their_ported_bodies() {
     assert!(
         store2
             .positions()
+            .unwrap()
             .iter()
             .all(|p| p.leverage == 25.0
                 && p.margin_type == Some(safe_cex_types::MarginType::Isolated))
@@ -742,13 +748,13 @@ fn signed_start_logs_in_on_the_private_socket_before_its_ping_loop() {
         rt.now.set(rt.now.get() + 1000.0);
         rt.pump();
     }
-    let loaded = store.loaded().clone();
+    let loaded = store.loaded().unwrap().clone();
     assert!(
         loaded.orders && loaded.balance && loaded.positions,
         "signed start loads account state"
     );
     assert!(
-        !store.options().is_hedged,
+        !store.options().unwrap().is_hedged,
         "fetchPositionMode reads ONE_WAY from the account row"
     );
     let dialed = rt.dialed.borrow();
@@ -806,4 +812,77 @@ fn signed_start_logs_in_on_the_private_socket_before_its_ping_loop() {
         "no unhandled task errors: {:?}",
         rt.errors.borrow()
     );
+}
+
+#[test]
+fn position_adapter_dependencies_use_real_account_and_store_quote_resolution() {
+    let (venue, rt, store, wire) = support::fixture_with(false);
+    let mut markets = store.markets().unwrap().to_vec();
+    markets[0].quote = "USDC".into();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let rows: Vec<Value> = ["BTCUSDT", "ETHUSDT"]
+        .into_iter()
+        .map(|symbol| {
+            json!({
+                "positionId":format!("dependency-{symbol}"), "symbol":symbol, "qty":"2", "maxQty":"3",
+                "entryPrice":"100", "closePrice":"110", "side":"BUY", "positionMode":"HEDGE",
+                "leverage":"20", "fee":"2", "funding":"1", "realizedPNL":"8",
+                "ctime":"1700000000000", "mtime":"1700000100000"
+            })
+        })
+        .collect();
+    script(
+        &wire,
+        "/api/v1/futures/position/get_history_positions",
+        json!({"code":0,"data":{"positionList":rows,"total":"2"}}),
+    );
+    let account = "history-account-α";
+    let records = drive(
+        &rt,
+        venue.fetch_historical_positions(safe_cex_exchange::journal::HistoricalPositionOptions {
+            account: account.into(),
+            from: None,
+            to: None,
+        }),
+    )
+    .unwrap();
+    assert_eq!(records.len(), 2);
+    for (record, symbol, quote) in [
+        (&records[0], "BTCUSDT", "USDC"),
+        (&records[1], "ETHUSDT", "USDT"),
+    ] {
+        assert_eq!(record["account"], account);
+        assert_eq!(record["symbol"], symbol);
+        assert_eq!(
+            record["settleCurrency"], quote,
+            "actual dependency reads Store then source USDT fallback"
+        );
+        assert_eq!(
+            record["key"],
+            format!("{account}|{symbol}|long|dependency-{symbol}")
+        );
+        assert_eq!(
+            record["realizedPnl"], 10.0,
+            "production dependency keeps realized-is-net-of-funding false"
+        );
+        assert_eq!(record["fees"], 2.0);
+        assert_eq!(record["funding"], 1.0);
+    }
+    let requests = wire.requests.lock().unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.url == "/api/v1/futures/position/get_history_positions")
+        .unwrap();
+    assert_eq!(request.headers["api-key"], "fixture-key");
+    assert_eq!(request.headers["sign"].len(), 64);
+    drop(requests);
+    venue.dispose().unwrap();
 }

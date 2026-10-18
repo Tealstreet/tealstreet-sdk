@@ -98,7 +98,7 @@ impl BitgetExchange {
         };
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         let receiver = match variant {
             Variant::Classic => {
                 assembly::BitgetExchange::new(rt.clone(), js_name, js_options, js_store)

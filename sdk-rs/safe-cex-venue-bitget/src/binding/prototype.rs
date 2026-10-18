@@ -130,8 +130,8 @@ pub(crate) fn install(rt: &Rt) {
                 let symbol = text(&arg(&a, 0))?;
                 let margin = text(&rt.this.get("apiMarginCoin")?)?;
                 let store = rt.shared.store.clone();
-                let markets = store.markets();
-                let by_symbol = store.markets_by_symbol();
+                let markets = store.markets()?;
+                let by_symbol = store.markets_by_symbol()?;
                 let found =
                     crate::market::resolve_market(&symbol, &margin, &markets, |s| by_symbol.get(s));
                 match found {
@@ -149,7 +149,7 @@ pub(crate) fn install(rt: &Rt) {
             Js::function("calculateUpnlFromLastPrice", move |_, a| {
                 let positions: Vec<safe_cex_types::Position> = to_typed(&arg(&a, 0))?;
                 let store = rt.shared.store.clone();
-                let tickers = store.tickers_by_symbol();
+                let tickers = store.tickers_by_symbol()?;
                 Ok(Js::Number(crate::pnl::calculate_upnl_from_last_price(
                     &positions,
                     |s| tickers.get(s).map(|t| t.last),
@@ -164,7 +164,7 @@ pub(crate) fn install(rt: &Rt) {
             "getMarginCoinForSymbol",
             Js::function("getMarginCoinForSymbol", move |_, a| {
                 let symbol = text(&arg(&a, 0))?;
-                let by_symbol = store.markets_by_symbol();
+                let by_symbol = store.markets_by_symbol()?;
                 Ok(Js::str(&crate::market::get_margin_coin_for_symbol(
                     &symbol,
                     |s| by_symbol.get(s),

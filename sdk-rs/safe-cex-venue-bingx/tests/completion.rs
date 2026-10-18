@@ -3,13 +3,14 @@ mod oracle_clock;
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
 use safe_cex_num::{JsRootCollator, js_string};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestBody, RestRequest,
     retry::{ClassifiedRequest, ReadClassification},
@@ -186,7 +187,7 @@ impl ReadTransport for Transport {
         Box::pin(async move {
             if host.input["reject"] == true && r.url == "/openApi/swap/v1/trade/amend" {
                 let mut e = ExchangeError::new("transport cause");
-                e.response = Some(json!({"data":{"msg":"wire denied"}}));
+                e = e.with_retained_response((json!({"data":{"msg":"wire denied"}})).into());
                 return Err(e);
             }
             let data = match r.url.as_str() {
@@ -291,7 +292,7 @@ impl ApiHost for ApiImport {
         assert_eq!(n, 3, "BINGX-C imported retry count");
         for (data, rejected) in signature_corpus() {
             assert_eq!(
-                signature(&data).unwrap(),
+                signature(&data.clone().into()).unwrap(),
                 rejected,
                 "BINGX-C retry signature predicate {data}"
             );
@@ -747,9 +748,20 @@ fn run(case: &Value) {
         }
     };
     let clock = clock.finish();
-    let mut native_orders = json!(s.orders().iter().map(order_value).collect::<Vec<_>>());
+    let mut native_orders = json!(
+        s.orders()
+            .unwrap()
+            .iter()
+            .map(order_value)
+            .collect::<Vec<_>>()
+    );
     clock.normalize_orders(&mut native_orders, &case["orders"]);
-    for (native, expected) in s.orders().iter().zip(case["orders"].as_array().unwrap()) {
+    for (native, expected) in s
+        .orders()
+        .unwrap()
+        .iter()
+        .zip(case["orders"].as_array().unwrap())
+    {
         for (field, n) in [
             ("price", native.price.to_number()),
             ("amount", native.amount),
@@ -790,7 +802,7 @@ fn run(case: &Value) {
             "BINGX-C direct native retained info"
         );
     }
-    let native_balance = s.balance();
+    let native_balance = s.balance().unwrap();
     assert_eq!(
         native_balance.info,
         case["balance"].get("info").cloned().map(Into::into),
@@ -808,7 +820,7 @@ fn run(case: &Value) {
             "BINGX-C direct native balance {field} {method}"
         );
     }
-    let loaded = s.loaded();
+    let loaded = s.loaded().unwrap();
     for (field, value) in [
         ("orders", loaded.orders),
         ("balance", loaded.balance),
@@ -854,13 +866,13 @@ fn run(case: &Value) {
         "BINGX-C native orders {method}"
     );
     assert_eq!(
-        serde_json::to_value(&*s.loaded()).unwrap(),
+        serde_json::to_value(s.loaded().unwrap()).unwrap(),
         case["loaded"],
         "BINGX-C loaded {method}"
     );
-    let b = s.balance();
+    let b = s.balance().unwrap();
     assert_eq!(
-        observe(&serde_json::to_value(&*b).unwrap()),
+        observe(&serde_json::to_value(&b).unwrap()),
         observe(&case["balance"]),
         "BINGX-C native balance {method}"
     );
@@ -1206,7 +1218,7 @@ fn signature_rejection_predicate_matches_actual_typescript() {
     let mut inputs = vec![];
     for (data, rejected) in signature_corpus() {
         assert_eq!(
-            is_bingx_signature_rejection(&data).unwrap(),
+            is_bingx_signature_rejection(&data.clone().into()).unwrap(),
             rejected,
             "BINGX-C native signature predicate {data}"
         );

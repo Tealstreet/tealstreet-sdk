@@ -1,7 +1,8 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::js_coercion::JsCoercionError;
 use safe_cex_types::{MarginType, Market, Position, PositionMode, PositionSide};
 use safe_cex_venue_blofin::positions::*;
@@ -211,6 +212,7 @@ fn live_positions_corpus() {
             }
             let actual = match result {
                 Ok(rows) => json!({"ok":rows.into_iter().map(native).collect::<Vec<_>>()}),
+                Err(PositionMapError::Store(e)) => panic!("unexpected fixture Store failure: {e}"),
                 Err(PositionMapError::Coercion(e)) => {
                     json!({"error":e.name,"message":e.message,"identity":false})
                 }

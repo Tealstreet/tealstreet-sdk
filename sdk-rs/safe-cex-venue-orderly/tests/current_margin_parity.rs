@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{MarginType, Position};
 use safe_cex_venue_orderly::margin::get_current_margin_type;
 use serde_json::Value;
@@ -83,7 +84,7 @@ fn actual_typescript_current_margin_corpus() {
         )
         .expect("populate fixture Store");
         assert_eq!(
-            get_current_margin_type(row["symbol"].as_str().unwrap(), &cache, &store),
+            get_current_margin_type(row["symbol"].as_str().unwrap(), &cache, &store).unwrap(),
             margin(&row["expected"]),
             "current-margin/native/{label}"
         );

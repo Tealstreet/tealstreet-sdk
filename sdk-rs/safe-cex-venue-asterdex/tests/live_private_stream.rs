@@ -4,6 +4,7 @@ mod retained_assert;
 #[allow(dead_code)]
 #[path = "support/subscription_runtime.rs"]
 mod host;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask, LogSeverity},
@@ -12,7 +13,7 @@ use safe_cex_exchange::{
         WsSocket,
     },
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::{Balance, ExchangeName, ExchangeOptions, Order, Position};
 use safe_cex_venue_asterdex::{
@@ -278,9 +279,10 @@ impl PrivateStreamParent for Parent {
         Ok(())
     }
     fn emit_fill(&self, f: &PrivateFill) -> Result<(), ExchangeError> {
-        self.events
-            .borrow_mut()
-            .push(Event::Fill(f.clone(), self.store().orders().to_vec()));
+        self.events.borrow_mut().push(Event::Fill(
+            f.clone(),
+            self.store().orders().unwrap().to_vec(),
+        ));
         Ok(())
     }
     fn emit_positions(&self, p: &[Position]) -> Result<(), ExchangeError> {
@@ -297,9 +299,10 @@ impl PrivateStreamParent for Parent {
         Ok(())
     }
     fn emit_account(&self, d: &Value) -> Result<(), ExchangeError> {
-        self.events
-            .borrow_mut()
-            .push(Event::Account(d.clone(), self.store().balance().clone()));
+        self.events.borrow_mut().push(Event::Account(
+            d.clone(),
+            self.store().balance().unwrap().clone(),
+        ));
         Ok(())
     }
 }
@@ -539,8 +542,8 @@ fn snapshot(s: &PrivateStream, p: &Parent, e: &Value, label: &str) {
     number(p.pv.get(), &e["pv"], &format!("{label} position version"));
     number(p.bv.get(), &e["bv"], &format!("{label} balance version"));
     let store = p.store();
-    let orders = store.orders();
-    let positions = store.positions();
+    let orders = store.orders().unwrap();
+    let positions = store.positions().unwrap();
     assert_eq!(
         orders.len(),
         e["orders"].as_array().unwrap().len(),
@@ -557,7 +560,7 @@ fn snapshot(s: &PrivateStream, p: &Parent, e: &Value, label: &str) {
     for (p, e) in positions.iter().zip(e["positions"].as_array().unwrap()) {
         position(p, e, label);
     }
-    balance(&store.balance(), &e["balance"], label);
+    balance(&store.balance().unwrap(), &e["balance"], label);
 }
 const NAMES: &[(&str, &str, usize)] = &[
     ("construct-close-dispose", "lifecycle", 4),
@@ -694,7 +697,7 @@ fn family(family: &str) {
             );
         }
         if name == "message-routing" {
-            let b = p.store().balance().clone();
+            let b = p.store().balance().unwrap().clone();
             assert_eq!(b.total, 10.0, "native outbound balance total");
             assert_eq!(b.free, 8.0, "native outbound balance free");
             assert_eq!(b.used, 2.0, "native outbound balance used");
@@ -937,7 +940,7 @@ fn disclosed_native_boundaries_are_observable() {
         )
         .unwrap()
     );
-    let current = p.store().balance().clone();
+    let current = p.store().balance().unwrap().clone();
     let currencies = current.currencies.unwrap();
     assert_eq!(
         currencies.keys().map(String::as_str).collect::<Vec<_>>(),
@@ -989,7 +992,7 @@ fn disclosed_native_boundaries_are_observable() {
         error.message,
         "Unknown order type cannot enter native OrderType"
     );
-    assert!(p.store().orders().is_empty());
+    assert!(p.store().orders().unwrap().is_empty());
     assert_eq!(source["orderType"], "UNRECOGNIZED");
     s.dispose();
 }

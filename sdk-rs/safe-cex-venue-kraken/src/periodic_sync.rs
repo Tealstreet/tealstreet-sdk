@@ -25,7 +25,7 @@ pub trait TickHost {
     ) -> Result<ExchangeFuture<'static, Rc<Self::Positions>>, ExchangeError>;
     fn fetch_balance(&self) -> Result<ExchangeFuture<'static, Rc<Self::Balance>>, ExchangeError>;
     fn balance_truthy(&self, balance: &Self::Balance) -> bool;
-    fn loaded(&self) -> StoreDataLoaded;
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError>;
     fn update(
         &self,
         update: TickUpdate<Self::Orders, Self::Positions, Self::Balance>,
@@ -50,7 +50,7 @@ async fn sync<H: TickHost + ?Sized + 'static>(host: Rc<H>) -> Result<(), Exchang
     let orders = host.start_then(Box::pin(async move {
         let orders = fetched.await?;
         orders_host.update(TickUpdate::Orders(orders))?;
-        let mut loaded = orders_host.loaded();
+        let mut loaded = orders_host.loaded()?;
         loaded.orders = true;
         orders_host.update(TickUpdate::Loaded(loaded))
     }))?;
@@ -59,7 +59,7 @@ async fn sync<H: TickHost + ?Sized + 'static>(host: Rc<H>) -> Result<(), Exchang
     let positions = host.start_then(Box::pin(async move {
         let positions = fetched.await?;
         positions_host.update(TickUpdate::Positions(positions))?;
-        let mut loaded = positions_host.loaded();
+        let mut loaded = positions_host.loaded()?;
         loaded.positions = true;
         positions_host.update(TickUpdate::Loaded(loaded))
     }))?;
@@ -68,7 +68,7 @@ async fn sync<H: TickHost + ?Sized + 'static>(host: Rc<H>) -> Result<(), Exchang
     let balance = host.start_then(Box::pin(async move {
         let balance = fetched.await?;
         if balance_host.balance_truthy(&balance) {
-            let mut loaded = balance_host.loaded();
+            let mut loaded = balance_host.loaded()?;
             loaded.balance = true;
             balance_host.update(TickUpdate::Balance(balance, loaded))?;
         }

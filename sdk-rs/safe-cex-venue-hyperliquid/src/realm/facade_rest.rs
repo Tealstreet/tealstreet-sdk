@@ -46,38 +46,7 @@ fn arg(args: &[Value], i: usize) -> Value {
 }
 
 pub(crate) fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
-    let cause = error.origin.as_ref().and_then(|origin| {
-        let failure = origin
-            .error()
-            .downcast_ref::<safe_cex_transport::RestFailure>()?;
-        let safe_cex_transport::TransportError::Rejected(origin) =
-            failure.transport_error.as_deref()?
-        else {
-            return None;
-        };
-        origin
-            .error()
-            .downcast_ref::<safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError>()
-    });
-    let e = match cause {
-        Some(cause) => super::imports_venue::signing_error(r, cause.clone()),
-        None => r.error(&error.message),
-    };
-    if error.name != "Error" {
-        r.define_hidden(&e, PropKey::str("name"), Value::str(&error.name));
-    }
-    if let Some(code) = &error.code {
-        let code = match r.restore_typed_value(code) {
-            Ok(code) => code,
-            Err(cause) => return cause,
-        };
-        r.define_hidden(&e, PropKey::str("code"), code);
-    }
-    if let Some(response) = &error.response {
-        let response = r.from_serde(response);
-        r.define_hidden(&e, PropKey::str("response"), response);
-    }
-    e
+    r.from_exchange_error(error)
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
