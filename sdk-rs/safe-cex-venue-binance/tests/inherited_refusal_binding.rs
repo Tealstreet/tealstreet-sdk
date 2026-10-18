@@ -1,5 +1,5 @@
 // Actual native venue methods and terminal host only.
-#![cfg(feature = "native")]
+#![cfg(all(feature = "native", not(target_arch = "wasm32")))]
 #[path = "support/inverse_rest_runtime.rs"]
 mod host;
 use safe_cex_exchange::native_store::DefaultStore;
