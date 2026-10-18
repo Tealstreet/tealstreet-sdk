@@ -57,4 +57,9 @@ for(const [profile,value] of conversionProfiles) {
  coercions.push(result);
 }
 assert.equal(coercions.length,20);
-process.stdout.write(JSON.stringify({cases,patches,coercions}));
+const configurations=profiles.map(([profile,value])=>{
+ const store=new Store(),input={probe:value};store.update({zkLinkConfig:input});
+ return {profile,input:native(input),stored:native(store.zkLinkConfig)};
+});
+assert.equal(configurations.length,13);
+process.stdout.write(JSON.stringify({cases,patches,coercions,configurations}));

@@ -182,3 +182,14 @@ actual method retains runtime value; a source String(data.msg) mutation executed
 and failed the same assertion. Restored test passes. Map-only record negatives
 and optional non-null balance remain enforced. This does not repair Kucoin
 callers, core raw-value emitter inputs, non-JSON functions or alias identity.
+
+## Retained model info
+
+The actual maintained DefaultStore corpus covers five models across thirteen
+presence/native-value profiles, four patch paths across the same profiles, and
+twenty Number/parseFloat/String profiles. The production Store facade and shared
+native codecs retain NaN bits, infinities, signed zero, own undefined and lone
+UTF16 text/keys before JSON.stringify projection. The scoped compiler inventory
+contains 230 owners; twelve selected production decoder owners and five outbound
+classifications pass the actual native contract runner. No decoder exemption is
+used for the new info visitors or native payload decoder.
