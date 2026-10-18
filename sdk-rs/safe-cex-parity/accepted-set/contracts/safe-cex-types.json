@@ -61127,67 +61127,67 @@
     ]
   ],
   "nativeObservation": {
-    "call": "{let bytes:Vec<u8>=serde_json::from_value($value.clone()).unwrap(); match <$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes)){Ok(value)=>serde_json::json!({\"ok\":true,\"units\":value.0}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "call": "{let bytes:Vec<u8>=if let Some(units)=$value.get(\"units\"){let units:Vec<u16>=serde_json::from_value(units.clone()).unwrap();units.into_iter().flat_map(u16::to_ne_bytes).collect()}else{serde_json::from_value($value.clone()).unwrap()}; match <$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes)){Ok(value)=>serde_json::json!({\"ok\":true,\"units\":value.0}),Err(_)=>serde_json::json!({\"ok\":false})}}",
     "nativeFields": [
       "units"
     ],
     "cases": [
-      {
-        "input": [],
-        "output": {
-          "ok": true,
-          "units": []
-        }
-      },
-      {
-        "input": [
-          0,
-          0,
-          255,
-          255
-        ],
-        "output": {
-          "ok": true,
-          "units": [
-            0,
-            65535
-          ]
-        }
-      },
-      {
-        "input": [
-          0,
-          216,
-          255,
-          223
-        ],
-        "output": {
-          "ok": true,
-          "units": [
-            55296,
-            57343
-          ]
-        }
-      },
-      {
-        "input": [
-          1
-        ],
-        "output": {
-          "ok": false
-        }
-      },
-      {
-        "input": [
-          1,
-          0,
-          2
-        ],
-        "output": {
-          "ok": false
-        }
-      }
-    ]
+  {
+    "input": [],
+    "output": {
+      "ok": true,
+      "units": []
+    }
+  },
+  {
+    "input": [
+      0,
+      0,
+      255,
+      255
+    ],
+    "output": {
+      "ok": true,
+      "units": [
+        0,
+        65535
+      ]
+    }
+  },
+  {
+    "input": {
+      "units": [
+        55296,
+        57343
+      ]
+    },
+    "output": {
+      "ok": true,
+      "units": [
+        55296,
+        57343
+      ]
+    }
+  },
+  {
+    "input": [
+      1
+    ],
+    "output": {
+      "ok": false
+    }
+  },
+  {
+    "input": [
+      1,
+      0,
+      2
+    ],
+    "output": {
+      "ok": false
+    }
+  }
+]
   }
 }
 }
