@@ -229,3 +229,29 @@ fn descriptor_admission_observes_getter_validation_before_setter() {
             .same_reference(&token)
     );
 }
+
+#[test]
+fn descriptor_reflection_rejects_null_before_key_coercion() {
+    let object = object_builtin();
+    let reads = Rc::new(RefCell::new(0));
+    let effects = reads.clone();
+    let key = Js::object(vec![(
+        "toString",
+        Js::function("toString", move |_, _| {
+            *effects.borrow_mut() += 1;
+            Ok(Js::str("x"))
+        }),
+    )]);
+    let error = object
+        .call_method("getOwnPropertyDescriptor", vec![Js::Null, key])
+        .unwrap_err();
+    assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
+    assert_eq!(
+        *reads.borrow(),
+        0,
+        "JS_PROPERTIES reflection null refusal precedes key coercion"
+    );
+    let expected = Command::new("node").arg("-e").arg("let reads=0;try{Object.getOwnPropertyDescriptor(null,{toString(){reads++;return 'x';}});}catch(e){if(!(e instanceof TypeError))throw e;}console.log(reads);").output().unwrap();
+    assert!(expected.status.success());
+    assert_eq!(String::from_utf8(expected.stdout).unwrap().trim(), "0");
+}

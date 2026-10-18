@@ -644,6 +644,11 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 "getOwnPropertyDescriptor",
                 Js::function("getOwnPropertyDescriptor", |_, args| {
                     let target = arg(&args, 0);
+                    if target.is_nullish() {
+                        return Err(Thrown::type_error(
+                            "Cannot convert undefined or null to object",
+                        ));
+                    }
                     let key = arg(&args, 1).to_js_string()?;
                     target.own_property_descriptor(&key)
                 }),
