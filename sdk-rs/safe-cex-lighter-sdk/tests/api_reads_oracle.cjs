@@ -31,9 +31,22 @@ for(const payload of [{success:true,data:{retained:true}},{code:'200',bids:[]},{
  let result;try{result={ok:encode(hexFn(input))};}catch(e){result={error:e.message};}wire.push({mode,input:encode(input),calls,result});}
  const reflective=vm.runInContext(compile(classDecl(ref,'ReferralApi').getText(ref))+'\nReferralApi',context),instance=new reflective({get(){}});
  const reflection={keys:Object.keys(instance),clientEnumerable:Object.getOwnPropertyDescriptor(instance,'client').enumerable,methodEnumerable:Object.getOwnPropertyDescriptor(reflective.prototype,'getReferralPoints').enumerable,instanceof:instance instanceof reflective,clientDeletable:delete instance.client};
+ const constructorCalls=[];
+ const makeClient=label=>({get(url,config){constructorCalls.push({label,url,index:config.params.accountIndex});return Promise.resolve({success:true,data:{label}});}});
+ const original=makeClient('first'),replacement=makeClient('second'),constructed=new reflective(original);
+ const descriptor=Object.getOwnPropertyDescriptor(constructed,'client');
+ assert.equal(constructed.client,original);assert.equal(constructorCalls.length,0);
+ const firstResult=await constructed.getReferralPoints(1n);
+ assert.equal(Reflect.set(constructed,'client',replacement),true);
+ assert.equal(constructed.client,replacement);
+ const secondResult=await constructed.getReferralPoints(2n);
+ assert.equal(Reflect.deleteProperty(constructed,'client'),true);
+ await assert.rejects(constructed.getReferralPoints(3n),error=>error.name==='TypeError');
+ const constructorOwnership={sameClient:descriptor.value===original,enumerable:descriptor.enumerable,writable:descriptor.writable,configurable:descriptor.configurable,results:[firstResult.label,secondResult.label],calls:constructorCalls,deleted:!Object.hasOwn(constructed,'client')};
+ assert.deepEqual(constructorCalls,[{label:'first',url:'/api/v1/referral/points',index:'1'},{label:'second',url:'/api/v1/referral/points',index:'2'}]);
  vm.runInContext("BigInt.prototype.toString=function(){return 'patched-bigint';};Number.prototype.toString=function(){return 'patched-number';}",context);
  const overrides=[];
  for(const kind of Object.keys(fns)){const c=cases.find(c=>c.kind===kind),calls=[];const client={get:(url,cfg)=>{calls.push([url,cfg]);return Promise.resolve(c.payload);}},axios={get:(url,cfg)=>{calls.push([url,cfg]);return Promise.resolve({data:c.payload});}};let outcome;try{await fns[kind].apply({client,axiosInstance:axios},c.args);outcome={ok:true};}catch(e){outcome={error:e.message};}overrides.push({kind,calls:encode(calls),outcome});}
  context.btoa=s=>Buffer.from(s,'latin1').toString('base64');context.parseInt=()=>17;const wireOverride=encode(hexFn('00ff'));
- process.stdout.write(JSON.stringify({cases:output,wire,wireOverride,reflection,overrides,referralClass:classDecl(ref,'ReferralApi').members.map(m=>m.name?.text??'constructor')}));
+ process.stdout.write(JSON.stringify({cases:output,wire,wireOverride,reflection,constructorOwnership,overrides,referralClass:classDecl(ref,'ReferralApi').members.map(m=>m.name?.text??'constructor')}));
 })().catch(e=>{console.error(e);process.exitCode=1;});
