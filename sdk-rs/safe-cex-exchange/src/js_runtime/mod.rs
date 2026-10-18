@@ -4,6 +4,7 @@
 pub mod base_exchange;
 pub mod builtins;
 pub mod client;
+pub mod for_in;
 pub mod globals;
 pub mod iterator;
 pub(crate) mod jobs;
