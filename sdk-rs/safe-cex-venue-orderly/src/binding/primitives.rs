@@ -593,7 +593,30 @@ impl crate::public_feeds::FeedHost for Host {
     }
 }
 impl crate::stream_reports::ReportHost for Host {
-    fn ticker_patch_refusal(&self, symbol: &[u16], fields: &[(&str, V)]) -> R<Option<String>> {
+    fn ticker_patch_refusal(
+        &self,
+        error: &Thrown,
+        symbol: &[u16],
+        fields: &[(&str, V)],
+    ) -> R<Option<String>> {
+        let Some(native) = error.native.as_ref() else {
+            return Ok(None);
+        };
+        if !native.store_subscriber_ids.is_empty() {
+            return Ok(None);
+        }
+        let Some(safe_cex_store::StoreMutationError::Patch(patch)) =
+            native.origin.as_ref().and_then(|origin| {
+                origin
+                    .error()
+                    .downcast_ref::<safe_cex_store::StoreMutationError>()
+            })
+        else {
+            return Ok(None);
+        };
+        if patch.is_type_error() || !fields.iter().any(|(field, _)| *field == patch.field()) {
+            return Ok(None);
+        }
         for (field, value) in fields {
             if !matches!(&**value, Js::Number(_)) {
                 let rendered = self.global("JSON.stringify", vec![value.clone()])?;
