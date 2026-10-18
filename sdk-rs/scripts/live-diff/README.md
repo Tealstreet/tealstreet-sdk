@@ -206,8 +206,11 @@ under the replay clock, through the real production throttle.
 
 Missing/extra frames, unfinished handlers, unread control frames and clock
 rollback fail closed. An ack-only instrument tape proves receipt wiring but
-provides no ticker/orderbook/candle coverage or 60-second venue result. Full
-venue comparisons await the shared Store hot-path repair before being rerun.
+provides no ticker/orderbook/candle coverage or 60-second venue result.
+The [post-emitter checkpoint](evidence/streams-post-emitter-2026-10-19.json)
+records verified Binance and Bybit drain, repeatable channel matches and the
+remaining metadata differences. OKX and Hyperliquid are explicitly pending in
+that checkpoint; it does not claim four-venue completion.
 
 The addon bytes are copied before child startup; the recorded SHA identifies the
 loaded snapshot even if another lane rebuilds the supplied addon path.
