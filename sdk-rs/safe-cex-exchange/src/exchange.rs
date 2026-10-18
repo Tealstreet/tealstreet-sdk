@@ -1088,7 +1088,7 @@ impl BaseExchange {
         };
         let legacy = extra.spread_object()?;
         for key in ["sentryTags", "sentryExtra", "suppressConsoleLog"] {
-            legacy.delete(&key.encode_utf16().collect::<Vec<_>>());
+            legacy.delete(&key.encode_utf16().collect::<Vec<_>>())?;
         }
         let msg = msg.filter(|text| !text.is_empty()).map(Js::str);
         let context = Js::object(vec![]);

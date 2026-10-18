@@ -52,9 +52,14 @@ fn native(mode: &str, missing: bool) -> Value {
         assert!(!d.get("configurable").unwrap().truthy());
         assert!(d.get("writable").unwrap().truthy());
     }
-    target.delete(&utf16(if missing { "missing" } else { "held" }));
-    marker.set("after", Js::Bool(true)).unwrap();
-    json!({"after":marker.get("after").unwrap().truthy(),"held":target.has_own("held"),"identity":target.get("held").unwrap().same_reference(&token)})
+    let deletion = (|| {
+        target.delete(&utf16(if missing { "missing" } else { "held" }))?;
+        marker.set("after", Js::Bool(true))
+    })();
+    let error = deletion
+        .err()
+        .map(|error| error.value.get("name").unwrap().to_display());
+    json!({"error":error,"after":marker.get("after").unwrap().truthy(),"held":target.has_own("held"),"identity":target.get("held").unwrap().same_reference(&token)})
 }
 #[test]
 fn strict_delete_of_frozen_property_stops_before_the_following_write() {
@@ -65,6 +70,7 @@ fn strict_delete_of_frozen_property_stops_before_the_following_write() {
         actual["after"], expected["after"],
         "DELETE_STRICT frozen property must throw before subsequent source statement"
     );
+    assert_eq!(actual["error"], expected["error"]);
     assert_eq!(actual["held"], expected["held"]);
     assert_eq!(actual["identity"], expected["identity"]);
 }
@@ -77,6 +83,7 @@ fn strict_delete_of_sealed_property_stops_before_the_following_write() {
         actual["after"], expected["after"],
         "DELETE_STRICT sealed property must throw before subsequent source statement"
     );
+    assert_eq!(actual["error"], expected["error"]);
     assert_eq!(actual["held"], expected["held"]);
     assert_eq!(actual["identity"], expected["identity"]);
 }
