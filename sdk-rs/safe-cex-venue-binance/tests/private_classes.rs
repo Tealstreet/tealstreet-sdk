@@ -3,6 +3,9 @@ mod canonical_value;
 #[cfg(feature = "native")]
 #[path = "support/lifecycle_aliases.rs"]
 mod lifecycle_aliases;
+#[cfg(feature = "native")]
+#[path = "support/public_frame_guard.rs"]
+mod public_frame_guard;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -5465,3 +5468,141 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
 #[cfg(feature = "native")]
 #[path = "support/snapshot_future_binding.rs"]
 mod snapshot_future_binding;
+
+#[cfg(feature = "native")]
+#[path = "support/public_listener_aliases.rs"]
+mod public_listener_aliases;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_leverage_aliases_update_account_market_overlay() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{Arc, Mutex};
+    struct Brackets(Arc<Mutex<Vec<RestRequest>>>);
+    impl RestAdapter for Brackets {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.lock().unwrap().push(request);
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: None,
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(
+                    serde_json::to_vec(&json!([
+                        {"symbol":"BTCUSDT","brackets":[{"initialLeverage":"125"}]},
+                        {"symbol":"ETHUSDT","brackets":[{"initialLeverage":0}]}
+                    ]))
+                    .unwrap(),
+                ),
+            })))
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM] {
+        let runtime = Rc::new(Runtime::default());
+        let calls = Arc::<Mutex<Vec<RestRequest>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Brackets(calls.clone())),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let markets: Vec<safe_cex_types::Market> = ["BTCUSDT", "ETHUSDT", "SOLUSDT"].into_iter().map(|symbol|
+            serde_json::from_value(json!({"id":symbol,"symbol":symbol,"base":symbol.trim_end_matches("USDT"),"quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.01},"limits":{"amount":{"min":0.01,"max":9},"leverage":{"min":1,"max":3},"price":{"min":0.1,"max":999999}}})).unwrap()
+        ).collect();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(if venue == Venue::PM {
+                "binancepm"
+            } else {
+                "binance"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store,
+            dependencies,
+        )
+        .unwrap();
+        let publications = Rc::new(Cell::new(0));
+        let notifications = publications.clone();
+        let unsubscribe = owner.base.store.subscribe(Box::new(move |_, from_worker| {
+            assert!(!from_worker);
+            notifications.set(notifications.get() + 1);
+            Ok(())
+        }));
+        let operation = owner.invoke(Method::Overlay, vec![]);
+        run(
+            &runtime,
+            safe_cex_venue_binance::class_jobs::reaction(operation),
+        )
+        .unwrap();
+        let observed = owner.base.store.markets();
+        assert_eq!(
+            observed.len(),
+            markets.len(),
+            "overlay preserves market count {venue:?}"
+        );
+        assert_eq!(
+            observed[0].limits.leverage.max, 125.0,
+            "the actual leverage future publishes its account-specific maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[1].limits.leverage.max, 3.0,
+            "zero bracket leaves the original maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[2].limits.leverage.max, 3.0,
+            "absent bracket leaves the original maximum {venue:?}"
+        );
+        for (actual, seed) in observed.iter().zip(&markets) {
+            let mut expected = seed.clone();
+            if expected.symbol == "BTCUSDT" {
+                expected.limits.leverage.max = 125.0;
+            }
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(expected).unwrap(),
+                "overlay preserves every other market field {venue:?}"
+            );
+        }
+        drop(observed);
+        assert_eq!(
+            publications.get(),
+            1,
+            "one live Store publication {venue:?}"
+        );
+        unsubscribe();
+        let requests = calls.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "the actual leverage loader starts exactly one native request {venue:?}"
+        );
+        let (path, query) = requests[0].url.split_once('?').unwrap();
+        assert_eq!(
+            path,
+            if venue == Venue::PM {
+                "/papi/v1/um/leverageBracket"
+            } else {
+                "/fapi/v1/leverageBracket"
+            }
+        );
+        assert!(query.contains("timestamp="));
+        assert!(query.contains("signature="));
+        assert!(runtime.reported.borrow().is_empty());
+        drop(requests);
+        owner.dispose().unwrap();
+    }
+}

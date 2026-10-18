@@ -589,6 +589,11 @@ updates independently, requires the named native assertion to fail, restores exa
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
 
+The account leverage aliases are native computation capabilities. The constructed
+Futures/PM overlay witness checks signed bracket requests, Store publication and
+unchanged market fields. `scripts/account-leverage-alias-contracts.mjs` measures
+their actual native traits with the maintained authenticated compiler context.
+
 ### Position snapshot callback alias receipts
 
 `position_snapshots::{Emit,Log}` are executable capabilities captured from the
@@ -671,6 +676,13 @@ macro provenance across each source scope; wildcard imports can hide that proof
 even when the current business logic compiles. Import changes also require review
 of any affected source pins; nested helper bodies keep their existing contracts.
 
+The public frame RAII guard lives at module scope so compiler discovery covers
+its lifetime and Drop implementation. The native `public_frame_guard` test in
+`private_classes` checks packet release after success, rejection and unwind,
+original failure identity and the next real Store ticker update for all families.
+`scripts/public-frame-guard-controls.py` removes the actual pop, requires a compiled
+packet-retention failure and restores the exact source before requiring GREEN.
+
 The private-construction Clone reviews in the Binance construction policy cover
 three reusable capabilities: the inverse listener retry context, shared class
 settlement observations and captured private arrows with their receiver/base
@@ -695,3 +707,15 @@ failure, restores exact production bytes and requires GREEN after each fault.
 classifies only `SnapshotFuture`/`SnapshotRequestFuture`; those classification
 receipts are distinct from executing the real continuations and do not classify
 the response payloads or unrelated aliases.
+The seven `public_listeners` aliases have a finite compiler-authenticated review
+in `scripts/public-listener-alias-contracts.mjs`. `Book` is an actual map decoder,
+with native per-level binary64 observations and Rc identity; the six callable,
+future and sequence-state capabilities retain their individual role reviews.
+`tests/support/public_listener_aliases.rs` constructs the real native dependencies
+for Futures/PM/Spot. It advances the virtual timer before subscription, holds
+terminal snapshot HTTP while two frames buffer, checks the exact endpoint and
+flat query, then checks one retained book through live updates and cleanup.
+`NativeListenerOperations::get_snapshot` passes raw query fields to `run_request`:
+the latter installs GET args into config.params, so callers must not wrap again.
+Separate compiled semantic controls require named native failures and exact
+source restoration for every reviewed alias.
