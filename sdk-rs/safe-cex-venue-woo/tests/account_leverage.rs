@@ -1,3 +1,5 @@
+#[path = "support/retained_input_observations.rs"]
+mod retained_input_observations;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str};
 use safe_cex_types::object_map::JsObjectMap;
 use safe_cex_venue_woo::{
@@ -158,7 +160,12 @@ fn error_guards_and_account_validators_native_before_source() {
         "WOO-GUARD native UTF16 key order"
     );
 
-    let lone = js_from_str::<JsNumberInput>(r#""\ud800""#).unwrap_err();
+    let lone = js_from_str::<JsNumberInput>(r#""\ud800""#).unwrap();
+    assert_eq!(
+        retained_input_observations::text_at(r#""\ud800""#, &[]),
+        vec![0xd800]
+    );
+    let lone = lone.decode::<String>().unwrap_err();
     assert!(
         lone.to_string()
             .contains("invalid utf-16: lone surrogate found"),
@@ -168,7 +175,15 @@ fn error_guards_and_account_validators_native_before_source() {
         js_from_str::<String>(r#""\ud800""#).is_err(),
         "WOO-GUARD native returned string cannot materialize"
     );
-    let lone_key = js_from_str::<JsNumberInput>(r#"{"\ud800":1}"#).unwrap_err();
+    let lone_key = js_from_str::<JsNumberInput>(r#"{"\ud800":1}"#).unwrap();
+    let safe_cex_types::retained_json::RetainedJsonInput::Object(fields) =
+        retained_input_observations::capture(r#"{"\ud800":1}"#)
+    else {
+        panic!("retained object shape")
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].0, vec![0xd800]);
+    let lone_key = lone_key.decode::<JsObjectMap<JsNumberInput>>().unwrap_err();
     assert!(
         lone_key
             .to_string()

@@ -483,6 +483,8 @@ fn response_value(
     for (name, value) in &response.headers {
         headers.write(name, string(value));
     }
+    let headers = safe_cex_exchange::js_runtime::client::axios_headers_from(&headers)
+        .map_err(|error| exchange_failure(error.into()))?;
     Ok(record([
         (
             "data",
@@ -499,7 +501,26 @@ fn response_value(
         ("config", config_value(config)?),
     ]))
 }
-fn error_value(error: &Failure) -> EventValue {
+fn response_from_error(error: &Failure) -> Result<Option<EventValue>, Failure> {
+    error
+        .response
+        .clone()
+        .map(|response| {
+            let response = EventValue::from_json(response);
+            if !response.nullish() {
+                let headers = response.read("headers")?;
+                if !headers.nullish() {
+                    let headers =
+                        safe_cex_exchange::js_runtime::client::axios_headers_from(&headers)
+                            .map_err(|error| exchange_failure(error.into()))?;
+                    response.write("headers", headers);
+                }
+            }
+            Ok(response)
+        })
+        .transpose()
+}
+fn error_value(error: &Failure) -> Result<EventValue, Failure> {
     let value = record([
         ("message", string(&error.message)),
         ("name", string(&error.name)),
@@ -507,12 +528,9 @@ fn error_value(error: &Failure) -> EventValue {
     value.write("code", error.code.clone().unwrap_or(EventValue::Undefined));
     value.write(
         "response",
-        error
-            .response
-            .clone()
-            .map_or(EventValue::Undefined, EventValue::from_json),
+        response_from_error(error)?.unwrap_or(EventValue::Undefined),
     );
-    value
+    Ok(value)
 }
 /// None asks the caller to resend once: a response interceptor saw a signature rejection.
 async fn respond(
@@ -559,7 +577,7 @@ async fn respond(
                 api_outcome(outcome, None)
             }
             (ResponseStage::Api(_, Some(failed)), Err(error)) => {
-                api_outcome(failed(error_value(&error), &mut bindings)?, Some(error))
+                api_outcome(failed(error_value(&error)?, &mut bindings)?, Some(error))
             }
             (ResponseStage::Api(_, None), Err(error)) => Err(error),
             (ResponseStage::Guard(success, _), Ok(response)) => success(response),
@@ -856,6 +874,30 @@ impl FactoryBindings for Factorizer<'_> {
 }
 
 impl ExchangeImports for NativeImports {
+    fn weight_error_response(&self, error: &Failure) -> Result<Option<EventValue>, Failure> {
+        response_from_error(error)
+    }
+    fn weight_header_get_member(
+        &self,
+        headers: &EventValue,
+    ) -> Result<crate::request_weight::HeaderGetMember, Failure> {
+        use crate::request_weight::HeaderGetMember;
+        let get = headers.read("get")?;
+        if !get.is_callable() {
+            return Ok(HeaderGetMember::NotCallable);
+        }
+        let receiver = headers.clone();
+        Ok(HeaderGetMember::Callable(Rc::new(move |name| {
+            let value = get
+                .call(receiver.clone(), vec![string(name)])
+                .map_err(|error| exchange_failure(error.into()))?;
+            if value.nullish() {
+                Ok(None)
+            } else {
+                to_json(&value).map(Some)
+            }
+        })))
+    }
     fn factory(
         &self,
         venue: Venue,
@@ -1347,10 +1389,7 @@ impl ListenerHost for NativeListenerOperations {
         }
         .map(|(_, path)| *path)
         .ok_or_else(|| failure("generated ORDERBOOK endpoint"))?;
-        let args = record([(
-            "params",
-            record([("symbol", string(symbol)), ("limit", number(limit))]),
-        )]);
+        let args = record([("symbol", string(symbol)), ("limit", number(limit))]);
         Ok(Box::pin(run_request(
             imports,
             client,
