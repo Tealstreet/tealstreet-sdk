@@ -1145,7 +1145,11 @@ Array and accessor descriptors share this checked property machinery; arrays now
 retain sparse indexed/named slots and a virtual length in one ArrayData owner.
 Existing host define_accessor remains the fallible host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
-redefinition matrix; the native error test covers Polymarket's enhanced message.
+redefinition matrix, including empty and sparse array targets. Array observations
+retain holes, own undefined and negative-zero bits before JSON, and check hidden
+readonly properties plus rejected writes, deletes and redefinitions. Malformed
+descriptors still leave targets unchanged. The native error test covers
+Polymarket's enhanced message.
 
 The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,

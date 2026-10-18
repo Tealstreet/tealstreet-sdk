@@ -1,5 +1,5 @@
 use safe_cex_exchange::js_runtime::{
-    globals::install_builtins,
+    globals::{install_builtins, stringify_json},
     value::{Js, Prop, Thrown, from_json, to_json, utf16},
 };
 use serde_json::{Value, json};
@@ -296,7 +296,90 @@ fn invalid_descriptors_leave_target_unchanged() {
         assert!(define(&define_property, &object, descriptor).is_err());
         assert!(!object.has_own("x"));
     }
-    for target in [Js::Undefined, Js::Null, Js::Number(1.0), Js::array(vec![])] {
+    for target in [Js::Undefined, Js::Null, Js::Number(1.0)] {
         assert!(define(&define_property, &target, Js::object(vec![])).is_err());
     }
+}
+
+#[test]
+fn array_target_descriptors_preserve_slots_and_flags_like_node() {
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_data_descriptors_oracle.cjs"
+        ))
+        .arg("--array-targets")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let globals = Js::object(vec![]);
+    install_builtins::<()>(&globals, std::rc::Weak::new());
+    let object = globals.get("Object").unwrap();
+    let define_property = object.get("defineProperty").unwrap();
+    let mut actual = vec![];
+    for target in [
+        Js::array(vec![]),
+        Js::holey_array(vec![Some(Js::Number(-0.0)), None, Some(Js::Undefined)]),
+    ] {
+        let before = stringify_json(&target).unwrap();
+        let keys = target.own_keys();
+        for descriptor in [
+            Js::Undefined,
+            Js::Null,
+            Js::Number(1.0),
+            Js::object(vec![("get", Js::Number(1.0))]),
+        ] {
+            assert!(define(&define_property, &target, descriptor).is_err());
+            assert!(!target.has_own("x"));
+            assert_eq!(target.own_keys(), keys);
+            assert_eq!(stringify_json(&target).unwrap(), before);
+        }
+        let returned = define(&define_property, &target, Js::object(vec![])).unwrap();
+        let descriptor = object
+            .call_method(
+                "getOwnPropertyDescriptor",
+                vec![target.clone(), Js::str("x")],
+            )
+            .unwrap();
+        // Observe native presence and numeric bits before the explicit JSON boundary.
+        let negative_zero = match target.get("0").unwrap() {
+            Js::Number(value) => value.to_bits() == (-0.0f64).to_bits(),
+            _ => false,
+        };
+        let flags: Vec<bool> = ["writable", "enumerable", "configurable"]
+            .into_iter()
+            .map(|key| descriptor.get(key).unwrap().truthy())
+            .collect();
+        let write = target.set("x", Js::Number(1.0)).unwrap_err();
+        let delete = target.delete(&utf16("x")).unwrap_err();
+        let redefine = define(
+            &define_property,
+            &target,
+            Js::object(vec![("value", Js::Number(1.0))]),
+        )
+        .unwrap_err();
+        let errors: Vec<_> = [write, delete, redefine]
+            .iter()
+            .map(|error| error.value.get("name").unwrap().to_display())
+            .collect();
+        actual.push(json!({
+            "same": returned.same_reference(&target),
+            "keys": target.own_keys().iter().map(|key| String::from_utf16(key).unwrap()).collect::<Vec<_>>(),
+            "flags": flags,
+            "own": target.has_own("x"),
+            "undefined": descriptor.get("value").unwrap().is_undefined() && target.get("x").unwrap().is_undefined(),
+            "length": target.get("length").unwrap().to_number().unwrap() as u32,
+            "hole": !target.has_own("1"),
+            "ownUndefined": target.has_own("2") && target.get("2").unwrap().is_undefined(),
+            "negativeZero": negative_zero,
+            "errors": errors,
+            "wire": String::from_utf16(&stringify_json(&target).unwrap().unwrap()).unwrap(),
+        }));
+    }
+    assert_eq!(json!(actual), expected);
 }
