@@ -29,16 +29,16 @@ fn empty_market_mode_change_updates_the_store_in_its_call_prefix() {
     let source = source();
     assert_eq!(source["prefix"], true);
     let host = support::harness(support::options(), |_| {});
-    assert!(!host.store.options().is_hedged);
+    assert!(!host.store.options().unwrap().is_hedged);
     let pending = host.exchange.change_position_mode(true, None);
     assert_eq!(
-        host.store.options().is_hedged,
+        host.store.options().unwrap().is_hedged,
         source["prefix"].as_bool().unwrap(),
         "WEEX-SDK-PREFIX actual member executes before caller polling"
     );
     host.drive(pending).unwrap();
     assert_eq!(
-        host.store.options().is_hedged,
+        host.store.options().unwrap().is_hedged,
         source["settled"].as_bool().unwrap()
     );
     assert_eq!(host.http.sent.lock().unwrap().len(), 0);

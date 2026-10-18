@@ -236,7 +236,7 @@ fn real_http_surrogate_market_batch_reaches_the_production_store() {
             facade
                 .call_method("update", vec![Js::object(vec![("markets", data)])])
                 .expect("lone surrogate in one typed String must not reject the market batch");
-            let rows = production.markets();
+            let rows = production.markets().unwrap();
             assert_eq!(
                 rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
                 ["before", "middle", "after"]

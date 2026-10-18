@@ -156,6 +156,7 @@ fn listener_failure_alias_is_the_exact_actual_dispatch_failure() {
             let exchange = owner(name);
             let public = exchange.class.public_websocket.borrow().clone().unwrap();
             let failure: ListenerFailure = Rc::new(PublicStreamFailure {
+                native: None,
                 name: "TypeError".into(),
                 message: "alias listener failure".into(),
             });
