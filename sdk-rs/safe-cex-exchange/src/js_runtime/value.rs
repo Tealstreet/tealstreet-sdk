@@ -47,6 +47,7 @@ pub struct FunctionData {
     pub name: Str,
     pub call: NativeFn,
     pub props: RefCell<IndexMap<Str, Prop>>,
+    pub proto: RefCell<Option<Js>>,
 }
 
 #[derive(Clone)]
@@ -59,7 +60,7 @@ pub enum Js {
     Number(f64),
     BigInt(Rc<num_bigint::BigInt>),
     /// Retained native intrinsic referent shared with core socket statistics.
-    /// This is a data/reference capability, not an executable JS function body.
+    /// Function call/bind/toString and the empty Function prototype execute here.
     Builtin(safe_cex_num::BuiltinReference),
     String(Str),
     Array(Rc<RefCell<Vec<Option<Js>>>>),
@@ -382,17 +383,19 @@ impl Js {
             name: utf16(name),
             call: Rc::new(call),
             props: RefCell::new(IndexMap::new()),
+            proto: RefCell::new(
+                safe_cex_num::PrototypeRealm::current()
+                    .reference(safe_cex_num::ProtoMember::Constructor)
+                    .prototype()
+                    .map(Js::Builtin),
+            ),
         }))
     }
     pub fn constructor(
         name: &str,
         call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
     ) -> Js {
-        Js::Function(Rc::new(FunctionData {
-            name: utf16(name),
-            call: Rc::new(call),
-            props: RefCell::new(IndexMap::new()),
-        }))
+        Self::function(name, call)
     }
     pub fn new_map() -> Js {
         Js::Map(Rc::default())
@@ -609,7 +612,7 @@ impl Js {
                 .borrow()
                 .as_ref()
                 .is_none_or(Js::has_implicit_string_prototype),
-            Js::Function(_) => true,
+            Js::Function(_) => false,
             _ => false,
         }
     }
@@ -620,6 +623,11 @@ impl Js {
                 .borrow()
                 .as_ref()
                 .is_some_and(Js::string_prototype_is_null),
+            Js::Function(function) => function
+                .proto
+                .borrow()
+                .as_ref()
+                .is_none_or(Js::string_prototype_is_null),
             Js::Null => true,
             _ => false,
         }
@@ -727,6 +735,15 @@ impl Js {
         }
     }
 
+    fn prototype(&self) -> Option<Js> {
+        match self {
+            Js::Object(object) => object.proto.borrow().clone(),
+            Js::Function(function) => function.proto.borrow().clone(),
+            Js::Builtin(reference) => reference.prototype().map(Js::Builtin),
+            _ => None,
+        }
+    }
+
     /// [[Get]] including array/string length and index, accessors and prototype.
     pub fn get(&self, key: &str) -> Result<Js, Thrown> {
         self.get_key(&utf16(key))
@@ -737,19 +754,12 @@ impl Js {
     fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
         match self {
             Js::Builtin(reference) => {
-                let key = String::from_utf16(key).map_err(|_| {
-                    Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary")
-                })?;
+                let Ok(key) = String::from_utf16(key) else {
+                    return Ok(Js::Undefined);
+                };
                 // Object.prototype's legacy accessor observes the original receiver.
-                if key == "__proto__"
-                    && !self.same_reference(receiver)
-                    && reference.member()
-                        == safe_cex_num::BuiltinIdentity::Object(
-                            safe_cex_num::ProtoMember::Prototype,
-                        )
-                    && let Js::Object(object) = receiver
-                {
-                    return Ok(object.proto.borrow().clone().unwrap_or(Js::Null));
+                if key == "__proto__" && !reference.own_fields().contains_key(&key) {
+                    return Ok(receiver.prototype().unwrap_or(Js::Null));
                 }
                 return Ok(Js::from_prototype(reference.get(&key)));
             }
@@ -819,17 +829,9 @@ impl Js {
                     if key == utf16("name").as_ref() {
                         return Ok(Js::String(function.name.clone()));
                     }
-                    return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
                 }
-                if let Js::Object(o) = self
-                    && let Some(proto) = o.proto.borrow().clone()
-                {
+                if let Some(proto) = self.prototype() {
                     return proto.get_key_receiver(key, receiver);
-                }
-                if let Js::Function(f) = self
-                    && key == utf16("name").as_ref()
-                {
-                    return Ok(Js::String(f.name.clone()));
                 }
                 Ok(Js::Undefined)
             }
@@ -911,28 +913,10 @@ impl Js {
             )));
         };
         let existing = props.borrow().get(key).cloned();
-        if existing.is_none()
-            && key == utf16("__proto__").as_ref()
-            && let Js::Object(object) = self
-            && matches!(&*object.proto.borrow(), Some(Js::Builtin(reference))
-                if reference.member() == safe_cex_num::BuiltinIdentity::Object(safe_cex_num::ProtoMember::Prototype))
-        {
-            if value.is_object() || matches!(value, Js::Null) {
-                *object.proto.borrow_mut() = if matches!(value, Js::Null) {
-                    None
-                } else {
-                    Some(value)
-                };
-            }
-            return Ok(());
-        }
         // Inherited setters receive the original receiver; inherited read-only data
         // properties refuse an own shadow, as ordinary strict-mode [[Set]] does.
         if existing.is_none() {
-            let mut ancestor = match self {
-                Js::Object(object) => object.proto.borrow().clone(),
-                _ => None,
-            };
+            let mut ancestor = self.prototype();
             while let Some(parent) = ancestor {
                 let inherited = parent
                     .own_props()
@@ -948,10 +932,38 @@ impl Js {
                     Some(_) => break,
                     None => {}
                 }
-                ancestor = match parent {
-                    Js::Object(object) => object.proto.borrow().clone(),
-                    _ => None,
-                };
+                if let Js::Builtin(reference) = &parent {
+                    if String::from_utf16(key)
+                        .is_ok_and(|key| reference.own_fields().contains_key(&key))
+                    {
+                        break;
+                    }
+                    if key == utf16("__proto__").as_ref()
+                        && reference.member()
+                            == safe_cex_num::BuiltinIdentity::Object(
+                                safe_cex_num::ProtoMember::Prototype,
+                            )
+                    {
+                        if !value.is_object() && !matches!(value, Js::Null) {
+                            return Ok(());
+                        }
+                        let mut candidate = Some(value.clone());
+                        while let Some(parent) = candidate {
+                            if parent.same_reference(self) {
+                                return Err(Thrown::type_error("Cyclic __proto__ value"));
+                            }
+                            candidate = parent.prototype();
+                        }
+                        let target = match self {
+                            Js::Object(object) => &object.proto,
+                            Js::Function(function) => &function.proto,
+                            _ => unreachable!(),
+                        };
+                        *target.borrow_mut() = (!matches!(value, Js::Null)).then_some(value);
+                        return Ok(());
+                    }
+                }
+                ancestor = parent.prototype();
             }
         }
         match existing {
@@ -1084,12 +1096,14 @@ impl Js {
             return true;
         }
         match self {
-            Js::Object(object) => object
-                .proto
-                .borrow()
-                .as_ref()
-                .is_some_and(|p| p.has_property(key)),
-            _ => false,
+            Js::Function(_) if key == utf16("name").as_ref() => true,
+            Js::Builtin(reference) => String::from_utf16(key).is_ok_and(|key| {
+                reference.own_fields().contains_key(&key)
+                    || !matches!(reference.get(&key), safe_cex_num::PrototypeValue::Undefined)
+            }),
+            _ => self
+                .prototype()
+                .is_some_and(|parent| parent.has_property(key)),
         }
     }
     pub fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
@@ -1245,6 +1259,57 @@ impl Js {
     pub fn call(&self, this: Js, args: Vec<Js>) -> Result<Js, Thrown> {
         match self {
             Js::Function(f) => (f.call)(this, args),
+            Js::Builtin(reference) => match reference.member() {
+                safe_cex_num::BuiltinIdentity::FunctionPrototype => Ok(Js::Undefined),
+                safe_cex_num::BuiltinIdentity::FunctionMethod(
+                    safe_cex_num::FunctionMethod::Call,
+                ) => {
+                    if !this.is_callable() {
+                        return Err(Thrown::type_error(
+                            "Function.prototype.call requires a callable receiver",
+                        ));
+                    }
+                    this.call(arg(&args, 0), args.into_iter().skip(1).collect())
+                }
+                safe_cex_num::BuiltinIdentity::FunctionMethod(
+                    safe_cex_num::FunctionMethod::Bind,
+                ) => {
+                    if !this.is_callable() {
+                        return Err(Thrown::type_error("Bind must be called on a function"));
+                    }
+                    let proto = this.prototype();
+                    let bound_this = arg(&args, 0);
+                    let bound_args: Vec<Js> = args.into_iter().skip(1).collect();
+                    let target_name = this.get("name")?;
+                    let mut name: Vec<u16> = "bound ".encode_utf16().collect();
+                    if let Js::String(target_name) = target_name {
+                        name.extend_from_slice(&target_name);
+                    }
+                    Ok(Js::Function(Rc::new(FunctionData {
+                        name: name.into(),
+                        call: Rc::new(move |_, args| {
+                            let mut combined = bound_args.clone();
+                            combined.extend(args);
+                            this.call(bound_this.clone(), combined)
+                        }),
+                        props: RefCell::default(),
+                        proto: RefCell::new(proto),
+                    })))
+                }
+                safe_cex_num::BuiltinIdentity::FunctionMethod(
+                    safe_cex_num::FunctionMethod::ToString,
+                ) => {
+                    if !this.is_callable() {
+                        return Err(Thrown::type_error(
+                            "Function.prototype.toString requires a callable receiver",
+                        ));
+                    }
+                    this.intrinsic_string().map(Js::String)
+                }
+                _ => Err(Thrown::type_error(
+                    "Intrinsic function execution is not bound",
+                )),
+            },
             other => Err(Thrown::type_error(&format!(
                 "{} is not a function",
                 other.to_display()
