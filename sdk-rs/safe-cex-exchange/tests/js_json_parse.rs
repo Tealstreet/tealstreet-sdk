@@ -209,7 +209,7 @@ fn real_http_surrogate_market_batch_reaches_the_production_store() {
             ]),
         );
         let production = Rc::new(DefaultStore::new());
-        let facade = store::facade(production.clone());
+        let facade = store::facade(production.clone()).unwrap();
         for case in cases {
             let pending = xhr.call_method("get", vec![Js::str("/markets")]).unwrap();
             let response = await_js(&runtime, pending).await.unwrap();
