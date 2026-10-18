@@ -58,6 +58,8 @@ fn cached_market() -> RestMarket {
         active: false,
         is_spot: None,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: 1.0,
             price: 2.0,
         },

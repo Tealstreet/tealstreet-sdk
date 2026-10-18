@@ -103,16 +103,20 @@ pub(crate) fn normalize_market_row(
         Err(refusal) => return Ok(Err(refusal)),
     };
     Ok(Ok(Market {
+        runtime: Default::default(),
         id: symbol.clone(),
         symbol,
         base,
         quote,
         active: value.get("forwardContractFlag") != Some(&Input::Bool(false)),
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: amount_step,
             price: price_step,
         },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount {
                 min: min_amount,
                 max: max_amount,

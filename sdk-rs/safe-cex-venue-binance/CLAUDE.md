@@ -537,6 +537,13 @@ Binance ledger ids arrive as JSON numbers and the class keeps them raw as TS
 does; `income_records` projects them through `String()` only at the typed
 `IncomeRecord` boundary (trait income methods, pager, fold).
 
+The six private-event value owners have individual typed rendering, construction,
+property-selection and iteration roles; their classification receipts do not
+execute decoders. `PRIVATE_EVENT_ROLE_REVIEW.md` records actual native private
+message/Store witnesses, current-realm referent identity and later-mutation
+observations, plus six independent compiled faults with exact restoration. Keep
+the existing EventArray alias and both local-helper/external receiver pins exact.
+
 The family value graph is the canonical `js_runtime::value::Js`: `EventValue`
 is an alias and `EventOps` retains the decoded-data operations without separate
 storage. Closed categorical constructors now create source string primitives.
@@ -1015,6 +1022,14 @@ production-body controls in scripts/public-listener-function-controls.py, with
 named native failures and byte-exact restoration passes. The canonical scoped
 runner is scripts/public-listener-function-contracts.mjs; the seven existing
 alias reviews and separate Book decoder remain unchanged.
+
+`class_jobs::Settlement<T>` has an exact typed Future::poll contract, separate
+from its existing Clone construction review and the native future alias. The
+classification receipt does not execute a decoder. SETTLEMENT_REVIEW.md describes
+the actual native held listen-key/cloned-handle witness and direct eager-job
+identity/wakeup checks. Keep scripts/settlement-controls.py's independently
+compiled Pending fault, bounded native failure and exact restoration pass; use
+scripts/settlement-contracts.mjs for the canonical one-owner receipt.
 
 Four unused ExchangeState forwarding methods are retired; source rows now map
 only to the canonical order_logic/request_weight helpers. The actual interceptor
