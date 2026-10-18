@@ -135,7 +135,7 @@ impl<'de> serde::Deserialize<'de> for Units {
                 f.write_str("UTF-16 code units")
             }
             fn visit_bytes<E: de::Error>(self, bytes: &[u8]) -> Result<Units, E> {
-                if bytes.len() % 2 != 0 {
+                if !bytes.len().is_multiple_of(2) {
                     return Err(E::custom("invalid retained UTF-16 bytes"));
                 }
                 Ok(Units(

@@ -72,10 +72,10 @@ impl<'de> Deserializer<'de> for Payload {
         _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
-        if _name == UTF16_UNITS {
-            if let Self::Units(units) | Self::Value(Input::Text(units)) = self {
-                return visit_units(&units, visitor);
-            }
+        if _name == UTF16_UNITS
+            && let Self::Units(units) | Self::Value(Input::Text(units)) = self
+        {
+            return visit_units(&units, visitor);
         }
         visitor.visit_newtype_struct(self)
     }
