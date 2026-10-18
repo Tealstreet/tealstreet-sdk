@@ -17816,7 +17816,122 @@
         }
       }
     ],
-    "evidence": "asterdex.exchange.ts fetchOrderBook pure depth projection: parseFloat, stable descending bids/ascending asks, cumulative price-times-amount totals. Every actual native level field is observed as bits including negative zero and non-finite values; networking is outside this owner. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. Numeric projections retain finite/infinite and signed-zero bits; NaN is classified without imposing engine-specific payload/sign bits."
+    "evidence": "asterdex.exchange.ts fetchOrderBook pure depth projection: parseFloat, stable descending bids/ascending asks, cumulative price-times-amount totals. Every actual native level field is observed as bits including negative zero and non-finite values; networking is outside this owner. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. Numeric projections retain finite/infinite and signed-zero bits; NaN is classified without imposing engine-specific payload/sign bits. The separate nativeObservation now executes the same real production function on independently authored distinct values; it observes returned native fields/bits, including signed zero, nonfinite arithmetic or retained-prefix coercion failure as applicable, and never serializes/redecodes an owner.",
+    "nativeObservation": {
+      "call": "{ let levels=|name:&str| $value[name].as_array().unwrap().iter().map(|row|(row[0].as_str().unwrap().to_owned(),row[1].as_str().unwrap().to_owned())).collect::<Vec<_>>(); let bids=levels(\"bids\"); let asks=levels(\"asks\"); let book=$type(&bids,&asks); let project=|rows:&[safe_cex_types::OrderBookOrders], field:usize| rows.iter().map(|row|format!(\"{:016x}\",match field {0=>row.price,1=>row.amount,_=>row.total}.to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":true,\"bidPrices\":project(&book.bids,0),\"bidAmounts\":project(&book.bids,1),\"bidTotals\":project(&book.bids,2),\"askPrices\":project(&book.asks,0),\"askAmounts\":project(&book.asks,1),\"askTotals\":project(&book.asks,2)}) }",
+      "nativeFields": [
+        "bidPrices",
+        "bidAmounts",
+        "bidTotals",
+        "askPrices",
+        "askAmounts",
+        "askTotals"
+      ],
+      "cases": [
+        {
+          "input": {
+            "bids": [
+              [
+                "10",
+                "2"
+              ],
+              [
+                "9",
+                "3"
+              ]
+            ],
+            "asks": [
+              [
+                "12",
+                "1.5"
+              ],
+              [
+                "11",
+                "4"
+              ]
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bidPrices": [
+              "4024000000000000",
+              "4022000000000000"
+            ],
+            "bidAmounts": [
+              "4000000000000000",
+              "4008000000000000"
+            ],
+            "bidTotals": [
+              "4034000000000000",
+              "4047800000000000"
+            ],
+            "askPrices": [
+              "4026000000000000",
+              "4028000000000000"
+            ],
+            "askAmounts": [
+              "4010000000000000",
+              "3ff8000000000000"
+            ],
+            "askTotals": [
+              "4046000000000000",
+              "404f000000000000"
+            ]
+          }
+        },
+        {
+          "input": {
+            "bids": [
+              [
+                "3",
+                "-0"
+              ],
+              [
+                "2.5",
+                "4"
+              ]
+            ],
+            "asks": [
+              [
+                "-0",
+                "2"
+              ],
+              [
+                "5",
+                "Infinity"
+              ]
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bidPrices": [
+              "4008000000000000",
+              "4004000000000000"
+            ],
+            "bidAmounts": [
+              "8000000000000000",
+              "4010000000000000"
+            ],
+            "bidTotals": [
+              "0000000000000000",
+              "4024000000000000"
+            ],
+            "askPrices": [
+              "8000000000000000",
+              "4014000000000000"
+            ],
+            "askAmounts": [
+              "4000000000000000",
+              "7ff0000000000000"
+            ],
+            "askTotals": [
+              "0000000000000000",
+              "7ff0000000000000"
+            ]
+          }
+        }
+      ]
+    }
   },
   "safe_cex_venue_asterdex::exchange_helpers::balance_from_account_response": {
     "category": "decoder",
@@ -17978,7 +18093,61 @@
         }
       }
     ],
-    "evidence": "asterdex.exchange.ts fetchBalance: each account field applies source truthy fallback then parseFloat, used margin sums in source order. Every native field is observed including numeric bits and absent metadata/options; conversion errors retain their kind. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. Numeric projections retain finite/infinite and signed-zero bits; NaN is classified without imposing engine-specific payload/sign bits."
+    "evidence": "asterdex.exchange.ts fetchBalance: each account field applies source truthy fallback then parseFloat, used margin sums in source order. Every native field is observed including numeric bits and absent metadata/options; conversion errors retain their kind. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. Numeric projections retain finite/infinite and signed-zero bits; NaN is classified without imposing engine-specific payload/sign bits. The separate nativeObservation now executes the same real production function on independently authored distinct values; it observes returned native fields/bits, including signed zero, nonfinite arithmetic or retained-prefix coercion failure as applicable, and never serializes/redecodes an owner.",
+    "nativeObservation": {
+      "call": "match $type(&$value) { Ok(balance)=>serde_json::json!({\"ok\":true,\"totalBits\":format!(\"{:016x}\",balance.total.to_bits()),\"freeBits\":format!(\"{:016x}\",balance.free.to_bits()),\"usedBits\":format!(\"{:016x}\",balance.used.to_bits()),\"upnlBits\":format!(\"{:016x}\",balance.upnl.to_bits())}), Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) }",
+      "nativeFields": [
+        "totalBits",
+        "freeBits",
+        "usedBits",
+        "upnlBits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "totalWalletBalance": "101.25",
+            "availableBalance": "44.5",
+            "totalInitialMargin": "2.75",
+            "totalOpenOrderInitialMargin": "0.125",
+            "totalUnrealizedProfit": "-6.5"
+          },
+          "output": {
+            "ok": true,
+            "totalBits": "4059500000000000",
+            "freeBits": "4046400000000000",
+            "usedBits": "4007000000000000",
+            "upnlBits": "c01a000000000000"
+          }
+        },
+        {
+          "input": {
+            "totalWalletBalance": "-0",
+            "availableBalance": "32tail",
+            "totalInitialMargin": "1.5",
+            "totalOpenOrderInitialMargin": "2.25",
+            "totalUnrealizedProfit": "Infinity"
+          },
+          "output": {
+            "ok": true,
+            "totalBits": "8000000000000000",
+            "freeBits": "4040000000000000",
+            "usedBits": "400e000000000000",
+            "upnlBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": {
+            "totalWalletBalance": {
+              "toString": null
+            }
+          },
+          "output": {
+            "ok": false,
+            "error": "TypeError"
+          }
+        }
+      ]
+    }
   },
   "safe_cex_venue_asterdex::exchange_helpers::reverse_map_order_status": {
     "category": "decoder",
@@ -19117,7 +19286,109 @@
         }
       }
     ],
-    "evidence": "asterdex.exchange.ts collectOpenInterestFromPayload: root/data/data-array admission, Number conversion, strict string/nonempty symbol, finite filtering, insertion-order overwrite and mutations retained before a later conversion failure. Shared numeric ingress observes map values directly as bits. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission."
+    "evidence": "asterdex.exchange.ts collectOpenInterestFromPayload: root/data/data-array admission, Number conversion, strict string/nonempty symbol, finite filtering, insertion-order overwrite and mutations retained before a later conversion failure. Shared numeric ingress observes map values directly as bits. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. The separate nativeObservation now executes the same real production function on independently authored distinct values; it observes returned native fields/bits, including signed zero, nonfinite arithmetic or retained-prefix coercion failure as applicable, and never serializes/redecodes an owner.",
+    "nativeObservation": {
+      "call": "{ let mut map=serde_json::Map::new(); if let Some(seed)=$value.get(\"seed\") { for row in seed.as_array().unwrap() { map.insert(row[0].as_str().unwrap().to_owned(),row[1].clone()); } } let result=$type($value.get(\"payload\"),&mut map); let symbols=map.keys().cloned().collect::<Vec<_>>(); let value_bits=map.values().map(|value|format!(\"{:016x}\",safe_cex_num::numeric_ingress::js_value_as_f64(value).unwrap().to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":result.is_ok(),\"symbols\":symbols,\"valueBits\":value_bits,\"error\":result.err().map(|error|error.name)}) }",
+      "nativeFields": [
+        "symbols",
+        "valueBits",
+        "error"
+      ],
+      "cases": [
+        {
+          "input": {
+            "payload": {
+              "data": [
+                {
+                  "symbol": "ETH",
+                  "openInterest": "2.5"
+                },
+                {
+                  "symbol": "BTC",
+                  "openInterest": "0x10"
+                },
+                {
+                  "symbol": "ETH",
+                  "openInterest": 7
+                }
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "symbols": [
+              "ETH",
+              "BTC"
+            ],
+            "valueBits": [
+              "401c000000000000",
+              "4030000000000000"
+            ],
+            "error": null
+          }
+        },
+        {
+          "input": {
+            "seed": [
+              [
+                "EXIST",
+                11
+              ],
+              [
+                "KEEP",
+                3
+              ]
+            ],
+            "payload": {
+              "symbol": "EXIST",
+              "openInterest": "-0"
+            }
+          },
+          "output": {
+            "ok": true,
+            "symbols": [
+              "EXIST",
+              "KEEP"
+            ],
+            "valueBits": [
+              "8000000000000000",
+              "4008000000000000"
+            ],
+            "error": null
+          }
+        },
+        {
+          "input": {
+            "payload": [
+              {
+                "symbol": "GOOD",
+                "openInterest": 2.25
+              },
+              {
+                "symbol": "BAD",
+                "openInterest": {
+                  "toString": null
+                }
+              },
+              {
+                "symbol": "LATE",
+                "openInterest": 3
+              }
+            ]
+          },
+          "output": {
+            "ok": false,
+            "symbols": [
+              "GOOD"
+            ],
+            "valueBits": [
+              "4002000000000000"
+            ],
+            "error": "TypeError"
+          }
+        }
+      ]
+    }
   },
   "safe_cex_venue_asterdex::account_helpers::parse_order_number": {
     "category": "decoder",
@@ -19458,5 +19729,569 @@
       }
     ],
     "evidence": "asterdex.ws-private.ts mirrorCumulativeOrderFill filled/amount lexical initializers use parseFloat(orderData.z/q || \"0\"). Fixture field domain is explicitly z/q and the source oracle executes those actual AST expressions. Every numeric result/error kind is observed natively; this is not permission for the enclosing receiver or lexical decoders. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. Numeric projections retain finite/infinite and signed-zero bits; NaN is classified without imposing engine-specific payload/sign bits."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_depth_snapshot": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_depth_snapshot",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::OrderBook",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "match $type(&$value) { Some(book)=>{ let project=|rows:&[safe_cex_types::OrderBookOrders], field:usize| rows.iter().map(|row|format!(\"{:016x}\",match field {0=>row.price,1=>row.amount,_=>row.total}.to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":true,\"bidPrices\":project(&book.bids,0),\"bidAmounts\":project(&book.bids,1),\"bidTotals\":project(&book.bids,2),\"askPrices\":project(&book.asks,0),\"askAmounts\":project(&book.asks,1),\"askTotals\":project(&book.asks,2)}) }, None=>serde_json::json!({\"ok\":false}) }",
+    "cases": [
+      {
+        "input": {
+          "b": [
+            [
+              "9",
+              "3"
+            ],
+            [
+              "10",
+              "2"
+            ]
+          ],
+          "a": [
+            [
+              "12",
+              "1.5"
+            ],
+            [
+              "11",
+              "4"
+            ]
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bidPrices": [
+            "4024000000000000",
+            "4022000000000000"
+          ],
+          "bidAmounts": [
+            "4000000000000000",
+            "4008000000000000"
+          ],
+          "bidTotals": [
+            "4000000000000000",
+            "4014000000000000"
+          ],
+          "askPrices": [
+            "4026000000000000",
+            "4028000000000000"
+          ],
+          "askAmounts": [
+            "4010000000000000",
+            "3ff8000000000000"
+          ],
+          "askTotals": [
+            "4010000000000000",
+            "4016000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "0x10",
+              "1.25"
+            ]
+          ],
+          "a": [
+            [
+              "17",
+              "2.5"
+            ]
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bidPrices": [
+            "4030000000000000"
+          ],
+          "bidAmounts": [
+            "3ff4000000000000"
+          ],
+          "bidTotals": [
+            "3ff4000000000000"
+          ],
+          "askPrices": [
+            "4031000000000000"
+          ],
+          "askAmounts": [
+            "4004000000000000"
+          ],
+          "askTotals": [
+            "4004000000000000"
+          ]
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "1",
+              "2"
+            ]
+          ],
+          "a": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "2",
+              "1"
+            ]
+          ],
+          "a": [
+            [
+              "2",
+              "3"
+            ]
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "1",
+              "0"
+            ]
+          ],
+          "a": [
+            [
+              "2",
+              "3"
+            ]
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "1",
+              "2",
+              "3"
+            ]
+          ],
+          "a": [
+            [
+              "2",
+              "3"
+            ]
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "Infinity",
+              "2"
+            ]
+          ],
+          "a": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "-0",
+              "2"
+            ]
+          ],
+          "a": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              "1",
+              " "
+            ]
+          ],
+          "a": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "b": [
+            [
+              1,
+              "2"
+            ]
+          ],
+          "a": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "match $type(&$value) { Some(book)=>{ let project=|rows:&[safe_cex_types::OrderBookOrders], field:usize| rows.iter().map(|row|format!(\"{:016x}\",match field {0=>row.price,1=>row.amount,_=>row.total}.to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":true,\"bidPrices\":project(&book.bids,0),\"bidAmounts\":project(&book.bids,1),\"bidTotals\":project(&book.bids,2),\"askPrices\":project(&book.asks,0),\"askAmounts\":project(&book.asks,1),\"askTotals\":project(&book.asks,2)}) }, None=>serde_json::json!({\"ok\":false}) }",
+      "nativeFields": [
+        "bidPrices",
+        "bidAmounts",
+        "bidTotals",
+        "askPrices",
+        "askAmounts",
+        "askTotals"
+      ],
+      "cases": [
+        {
+          "input": {
+            "b": [
+              [
+                "9",
+                "3"
+              ],
+              [
+                "10",
+                "2"
+              ]
+            ],
+            "a": [
+              [
+                "12",
+                "1.5"
+              ],
+              [
+                "11",
+                "4"
+              ]
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bidPrices": [
+              "4024000000000000",
+              "4022000000000000"
+            ],
+            "bidAmounts": [
+              "4000000000000000",
+              "4008000000000000"
+            ],
+            "bidTotals": [
+              "4000000000000000",
+              "4014000000000000"
+            ],
+            "askPrices": [
+              "4026000000000000",
+              "4028000000000000"
+            ],
+            "askAmounts": [
+              "4010000000000000",
+              "3ff8000000000000"
+            ],
+            "askTotals": [
+              "4010000000000000",
+              "4016000000000000"
+            ]
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "0x10",
+                "1.25"
+              ]
+            ],
+            "a": [
+              [
+                "17",
+                "2.5"
+              ]
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bidPrices": [
+              "4030000000000000"
+            ],
+            "bidAmounts": [
+              "3ff4000000000000"
+            ],
+            "bidTotals": [
+              "3ff4000000000000"
+            ],
+            "askPrices": [
+              "4031000000000000"
+            ],
+            "askAmounts": [
+              "4004000000000000"
+            ],
+            "askTotals": [
+              "4004000000000000"
+            ]
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "1",
+                "2"
+              ]
+            ],
+            "a": []
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "2",
+                "1"
+              ]
+            ],
+            "a": [
+              [
+                "2",
+                "3"
+              ]
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "1",
+                "0"
+              ]
+            ],
+            "a": [
+              [
+                "2",
+                "3"
+              ]
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "1",
+                "2",
+                "3"
+              ]
+            ],
+            "a": [
+              [
+                "2",
+                "3"
+              ]
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "Infinity",
+                "2"
+              ]
+            ],
+            "a": [
+              [
+                "3",
+                "4"
+              ]
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "-0",
+                "2"
+              ]
+            ],
+            "a": [
+              [
+                "3",
+                "4"
+              ]
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                "1",
+                " "
+              ]
+            ],
+            "a": [
+              [
+                "3",
+                "4"
+              ]
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "b": [
+              [
+                1,
+                "2"
+              ]
+            ],
+            "a": [
+              [
+                "3",
+                "4"
+              ]
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "evidence": "Reviewed public_depth_snapshot and its live caller AsterDEXPublicWebsocket.handleDepthSnapshot: raw JSON levels enter the actual production function. Native observations inspect each price/amount/cumulative-amount total as binary64 bits before owner serialization, with unsorted/fractional/hex positives and malformed, empty, crossed, zero, nonfinite and non-string refusal cases. Expectations are independently authored from source arithmetic, not captured production output. tests/live_ws_helpers.rs::public_depth_snapshot_matches_typescript supplies the maintained-source counterpart. No host, transport, or callback is stubbed by this contract."
   }
 }
