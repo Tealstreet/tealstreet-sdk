@@ -259,6 +259,7 @@ try {
   await Promise.all(replaySessions.map((s) => s.call('begin')));
   const results = await Promise.all(
     replaySessions.map(async (s) => {
+      const replayStarted = performance.now();
       const receipt = await s.relay.playControlled({
         advance: (at) => s.call('advance', [at]),
         receipt: () => s.call('receipt'),
@@ -274,9 +275,10 @@ try {
       }
       barrier.durationMs = performance.now() - barrierStart;
       const value = await s.call('drain');
+      const replayWallMs = performance.now() - replayStarted;
       await s.close();
       sessions.splice(sessions.indexOf(s), 1);
-      return { receipt, barrier, value };
+      return { receipt, barrier, value, replayWallMs };
     }),
   );
   const receipts = results.map((r) => r.receipt),
@@ -297,6 +299,7 @@ try {
       implementation: s.implementation,
       receipt: receipts[i],
       startMs: s.startMs,
+      replayWallMs: results[i].replayWallMs,
       fixture,
       outputHash: hash(bytes),
       outputCount: values[i].outputs.length,
