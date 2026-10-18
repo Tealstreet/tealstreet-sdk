@@ -21,6 +21,23 @@ The shared boundary eagerly polls the typed body to its first real suspension. I
 
 - AsterDEX: `tests/eager_sdk_binding.rs` executes NativeRuntime, the constructed venue, production HTTP host, signing and reqwest against a local HTTP server. The whole maintained TS class proves validation logs before caller polling and discarded getAccount/changePositionMode promises complete their HTTP and Store work. Both native assertions fail on the frozen deferred wrapper. The repaired common invoke/unit helpers call the existing JS member immediately and await that same Promise; no extra spawn is introduced. This measures the SDK boundary, not every deeper socket/error claim.
 
+- Bybit: common `invoke` / `invoke_unit` and the specialized `get_account` path
+  now capture the actual installed member result before boxing its waiter and
+  await the same canonical Promise. Native SDK value/unit/account prefix checks
+  compile RED on the deferred wrapper. A public discarded orders waiter still
+  completes both real signed settle-coin reads after a held first response.
+  Constructed primary/demo/inverse/spot balance probes retain native raw
+  identity and the source disposal guard; existing installed reinit continuations
+  already survive waiter drop. See `safe-cex-venue-bybit/DIVERGENCE_FIX_AUDIT.md`.
+
+- Polymarket: `binding/exchange::eager_tests` drives the actual constructed SDK
+  and live API on NativeRuntime. Both shared invoke helpers originally compiled
+  RED before observer polling (missing Gamma xhr call / leverage warning). They
+  now call the actual member before boxing and await its existing Promise. A held
+  xhr response completes token maps and preserves the metadata alias after the
+  SDK waiter drops. The obsolete typed timestamp helper was deleted; its original
+  20/512 source cases now exercise the live API, with eager and identity checks.
+
 ## All production implementations at the frozen baseline
 
 Counts are implementation counts: seven typed-async implementations, sixteen deferred-JS implementations, two deferred-Realm implementations, three eager-JS implementations, three distinct mixed implementations, and one synchronous refusal. BloFin and WEEX are included in their original baseline categories, with fixes described above. “Eager JS invocation” describes only the common call boundary and is not a blanket ACCEPT for every method.
@@ -63,6 +80,18 @@ Counts are implementation counts: seven typed-async implementations, sixteen def
 Backpack creates some HTTP operations before returning its task; Coinbase has its own already-created Promise family; MEXC mixes direct typed readers with `exchange_binding::{typed,unit}`. Their exact deeper files are recorded in the table. Hyperliquid’s two implementations share the async Realm invoke boundary and must preserve its driver/identity semantics. The three Binance linear-family implementations share `exchange_trait::{call,unit,income_call}`; Binance inverse uses a separate in-family binding that already calls the member synchronously. TxFlow’s phase-zero preflight refusal is synchronous and does not establish coverage for unimplemented future REST methods.
 
 Refresh this snapshot only after reviewing changed wrapper bodies. Its hashes identify the inspected baseline; they are not an allowlist or a policy exemption. Source drift alone must not silently turn a candidate into an executed verdict.
+
+Shared socket entrypoints also require an eager prefix. BaseWebSocket now starts
+preparation/dial through the existing OwnedTasks registry and canonical
+`eager::start_eager`; Bitget secondary and Backpack public prove the real ready
+host prefix. This is a core dial boundary, not a new venue SDK wrapper family.
+The shared native plain-socket boundary additionally exposes one CONNECTING
+handle while its owned eager handshake is pending. Actual native Bitget
+onMarketsChanged observes that handle, preserves the source topic and follows
+the existing send/reconnect Error/Close path before upgrade completion. This
+closes the separately compiled held-handshake finding; it adds no per-venue
+scheduler. See `safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md` and exchange-core's
+WS_CONTRACT.md for source/native witnesses and independent controls.
 
 ## Native final-handle destruction
 

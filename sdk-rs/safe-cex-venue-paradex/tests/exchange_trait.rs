@@ -89,7 +89,7 @@ fn public_socket_subscribes_and_delivers_throttled_source_tickers() {
         "latest source update delivered at trailing edge"
     );
     assert_eq!(store.tickers().unwrap()[0].ask, 123.75);
-    assert_eq!(store.tickers().unwrap()[0].index, 121.125);
+    assert_eq!(store.tickers().unwrap()[0].index, Some(121.125));
     assert!(
         runtime.errors.borrow().is_empty(),
         "feed callback errors: {:?}",
@@ -2008,4 +2008,182 @@ fn actual_source_order_info_preserves_native_metadata() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "3");
+}
+
+#[test]
+fn candle_audit_failure_reports_only_and_preserves_polling_and_shared_cleanup() {
+    use std::{cell::RefCell, rc::Rc};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/candle-audit-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["reads"].as_array().unwrap().len(), 5);
+    assert_eq!(source["remainingTimers"], 0);
+    let (venue, runtime, store, wire) =
+        support::fixture_with(json!({"key":"","secret":"","publicDataOnly":true}), script);
+    drive(&runtime, venue.start()).unwrap();
+    let tickers = json!(store.tickers().unwrap());
+    let loaded = json!(store.loaded().unwrap());
+    let app_errors = Rc::new(RefCell::new(Vec::new()));
+    let sink = app_errors.clone();
+    venue.base().on_args(
+        "error",
+        Rc::new(move |_, args| {
+            sink.borrow_mut().push(args.len());
+            Ok(())
+        }),
+    );
+    for path in ["/markets/klines", "/tradingview/history"] {
+        wire.statuses.borrow_mut().insert(path.into(), 400);
+        wire.responses
+            .borrow_mut()
+            .insert(path.into(), json!({"message":"candle terminal failure"}));
+    }
+    let first = Rc::new(RefCell::new(Vec::new()));
+    let sink = first.clone();
+    let cleanup_first = venue
+        .listen_ohlcv(
+            typed(json!({"symbol":"BTC-USD-PERP","interval":"1m"})),
+            Rc::new(move |row| sink.borrow_mut().push(row.close)),
+        )
+        .unwrap();
+    let second = Rc::new(RefCell::new(Vec::new()));
+    let sink = second.clone();
+    let cleanup_second = venue
+        .listen_ohlcv(
+            typed(json!({"symbol":"BTC-USD-PERP","interval":"1m"})),
+            Rc::new(move |row| sink.borrow_mut().push(row.close)),
+        )
+        .unwrap();
+    let started = runtime.now.get();
+    let pump = |offset| {
+        runtime.now.set(started + offset);
+        for _ in 0..32 {
+            runtime.pump();
+        }
+    };
+    let candle_requests = || {
+        wire.requests
+            .borrow()
+            .iter()
+            .filter(|request| {
+                request.url.starts_with("/markets/klines?")
+                    || request.url.starts_with("/tradingview/history?")
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    pump(0.0);
+    assert!(first.borrow().is_empty() && second.borrow().is_empty());
+    assert_eq!(
+        candle_requests().len(),
+        2,
+        "both actual REST endpoints reject"
+    );
+    assert_eq!(
+        runtime.errors.borrow().len(),
+        1,
+        "detached failure has one diagnostic report"
+    );
+    assert!(runtime.errors.borrow()[0].contains("candle terminal failure"));
+    assert!(
+        app_errors.borrow().is_empty(),
+        "poll diagnostic must not emit an app error"
+    );
+    assert_eq!(
+        json!(store.tickers().unwrap()),
+        tickers,
+        "failed poll must not change Store"
+    );
+    assert_eq!(json!(store.loaded().unwrap()), loaded);
+    wire.statuses.borrow_mut().clear();
+    wire.responses.borrow_mut().insert(
+        "/markets/klines".into(),
+        json!({"results":[[1700000000000.0,101,105,100,102,7]]}),
+    );
+    pump(2999.0);
+    assert_eq!(
+        candle_requests().len(),
+        2,
+        "no poll before source's three-second deadline"
+    );
+    pump(3000.0);
+    assert_eq!(*first.borrow(), vec![102.0]);
+    assert_eq!(*second.borrow(), vec![102.0]);
+    pump(6000.0);
+    assert_eq!(first.borrow().len(), 1, "unchanged candle is suppressed");
+    cleanup_first().unwrap();
+    wire.responses.borrow_mut().insert(
+        "/markets/klines".into(),
+        json!({"results":[[1700000000000.0,101,105,100,104,7]]}),
+    );
+    pump(9000.0);
+    cleanup_second().unwrap();
+    pump(12000.0);
+    assert_eq!(
+        *first.borrow(),
+        source["first"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        *second.borrow(),
+        source["second"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    );
+    let requests = candle_requests();
+    let source_reads = source["reads"].as_array().unwrap();
+    assert_eq!(
+        requests.len(),
+        source_reads.len(),
+        "cleanup cancels the shared poll"
+    );
+    for (request, expected) in requests.iter().zip(source_reads) {
+        assert_eq!(
+            request.url.split('?').next().unwrap(),
+            expected["url"].as_str().unwrap()
+        );
+        let expected_end = started + expected["at"].as_f64().unwrap() - 1700000000000.0;
+        let parameter = if request.url.starts_with("/markets/klines?") {
+            "end_at"
+        } else {
+            "to"
+        };
+        let expected_end = if parameter == "to" {
+            (expected_end / 1000.0).floor()
+        } else {
+            expected_end
+        };
+        assert_eq!(
+            trait_request_query(request, parameter)
+                .parse::<f64>()
+                .unwrap(),
+            expected_end
+        );
+    }
+    assert!(app_errors.borrow().is_empty());
+    assert_eq!(
+        runtime.errors.borrow().len(),
+        1,
+        "recovery adds no diagnostic failures"
+    );
+    assert_eq!(json!(store.tickers().unwrap()), tickers);
+    assert_eq!(json!(store.loaded().unwrap()), loaded);
+    venue.dispose().unwrap();
 }

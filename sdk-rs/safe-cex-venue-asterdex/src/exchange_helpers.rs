@@ -392,7 +392,7 @@ pub fn transform_ticker(
         ask: 0.0,
         last: parse_float(&ticker.last_price),
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         timestamp: None,
         percentage: parse_float(&ticker.price_change_percent),

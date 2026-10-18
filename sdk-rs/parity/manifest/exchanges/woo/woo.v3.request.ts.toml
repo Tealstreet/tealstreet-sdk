@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.request.ts"
-rust_files = [ "safe-cex-venue-woo/src/v3_request.rs" ]
+rust_files = []
 
 [[symbol]]
 ts = "WooV3RequestAuth"
@@ -13,10 +13,10 @@ note = "ACCEPT: no production TS importer/caller or Rust runtime caller uses thi
 [[symbol]]
 ts = "WooV3RequestInput"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_request.rs::WooV3RequestInput"
-status = "divergent"
-note = "CHOSEN: exact existing method/endpoint enums and map-only optional non-null ordered query/body maps. JsNumberInput retains their numeric events. The query values are opaque JSON rather than the source scalar/array/undefined union: this intentionally widens static query shape and omits executable/undefined host values, using the existing JsNumberInput descriptor maps instead of a venue-local object/value ABI. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3PreparedRequest"

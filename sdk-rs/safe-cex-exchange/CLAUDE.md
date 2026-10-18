@@ -1,5 +1,15 @@
 # Exchange core contract
 
+The native Axios factory enhances rejections before venue interceptors, using
+the maintained helper's field order and live message getter. Its originalError
+Error snapshot excludes the self-reference under decision 2; existing owned
+metadata preserves diagnostics, extra/config data and nearest-response authority.
+Executable config capabilities retain the owned-data boundary. Constructed Aster
+and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+The typed REST host recovers owned callback errors through the canonical
+ExchangeError-to-Thrown conversion and attaches the effective request config.
+The Bitget owned-transport regression pins retry eligibility after that boundary.
+
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
@@ -12,6 +22,9 @@ granular writes mutate existing rows, while full replacement and reset publish
 new generations. Retained values have no back-reference to the Store owner.
 Native mutations use the shared property/iterator algorithms and notify the live
 ordered listener registry. Typed subscribers project only at their reached slot.
+Notification transport retains the complete typed boundary in the existing opaque
+error origin before recovery, preserving nested subscriber IDs and the original
+cause without rebuilding the thrown value or replaying getters.
 Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
@@ -116,6 +129,15 @@ Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
+Opt-in replay hosts register the canonical per-dial parser counters when a
+BaseWebSocket is constructed. The host retains only those counters, never the
+socket/parent owner. Diagnostic enumeration therefore includes nested sockets and
+disposed dial histories independently of exchange health/watchdog groups. Do not
+register nested business sockets as top-level slots to expose replay receipts.
+The recorded Binance addon regression checks both TLS/parser paths while keeping
+source-correct public grouping; the per-dial unit test checks counter identity
+and owner release with retained history. Ordinary hosts do not register histories.
+
 Synchronous venue `WsProtocol::connect_and_subscribe` implementations call
 `socket.start_websocket(url, protocols, options)`. The core owns the dial task,
 its cancellation and error diagnostics; the venue never retains its handle and
@@ -902,11 +924,14 @@ actual-source scheduling and returned-array witnesses.
 
 ## Shared income range paging
 
-`income_paging::paginate_income_range` owns no executor or transport. Its awaited
-fetch callback returns the shared typed ledger; its awaited delay operation
-receives the original f64, leaving host timer conversion explicit. Only fetch
-failures are caught: the branch becomes incomplete, while delay failures escape.
-Caller drop cancels its owned pending callback future.
+`income_paging::paginate_income_range` requires its owning runtime and owned
+fetch/delay callbacks. Canonical start_eager starts the first fetch at invocation
+and retains the walk after waiter drop; each fetch and delay uses the same
+Promise await boundary. The delay receives the original f64, leaving host timer
+conversion explicit. Fetch failures mark the branch incomplete; delay failures
+escape with their original metadata. tests/income_paging compares the maintained
+source with NativeRuntime after dropping an unpolled waiter, and retains the
+existing request, deduplication, output-bit and delay-error corpus.
 
 The pending-window stack is LIFO. Direction reads use the original global range,
 not the current subwindow; page length includes unusable rows. Identity retains
@@ -914,8 +939,10 @@ both PnL and commission from the same bill, keeps the first duplicate, and stabl
 newest-first sorting preserves insertion order on timestamp ties. No termination
 guard repairs source floating-point nonprogress for non-advancing chunks.
 
-Typed `IncomeRecord` excludes nullish/coercible/open source records and UTF-16
-lone surrogates. Returned records and options are owned rather than live aliases.
+Typed `IncomeRecord` excludes nullish/coercible/open source records. The canonical
+native String decoder replaces isolated UTF-16 units at the approved typed
+boundary; direct Serde JSON input remains a separate decoder. Returned records
+and options are owned rather than live aliases.
 These are declared choices, not source-equivalence claims for arbitrary objects.
 The six existing income-paging manifest rows own the shared implementation;
 binance, bitget, kraken and weex each have one separate wrapper call to adopt.
@@ -1905,6 +1932,18 @@ UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
+`js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
+and the Vec<Market> info boundary. `tests/large_payload_source.mjs` captures
+maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Use `cargo run --release -p safe-cex-exchange --features native --example
+large_payload_decode` with LARGE_PAYLOAD_MANIFEST and LARGE_PAYLOAD_OUTPUT to
+measure the same recorded probe with the production allocator. The test binary
+has a counting allocator and must not supply production CPU ratios. Report CPU
+medians and spread from at least three interleaved control/candidate runs;
+input restoration and complete output observations stay outside timed phases.
+Native observation files encode UTF-16, own undefined and f64 bits explicitly so
+before/after byte comparisons do not hide lossy JSON projections.
+
 ## Retained error responses
 
 Local `Thrown` conversions retain the original JS value in the existing opaque
@@ -1939,6 +1978,11 @@ boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
 
+Store payload ticker baselines retain nullable index prices. The maintained worker
+advances its baseline for number-to-null transitions but omits non-number deltas;
+null-to-number emits the new number. Preserve this source behavior. The live
+store_payload oracle pins both transitions and unchanged-null packed arrays.
+
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.
 Typed subscribers remain explicit projection boundaries at their reached slots;
@@ -1966,3 +2010,31 @@ materialization follows that source chain and the canonical retained response.
 Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
 signed requests before JSON. Original JS object identity remains an owned-tree residual.
 
+
+
+The mapped closed-position resolver requires a runtime and retained static fetch
+callbacks. It starts its selected fetch during invocation with `start_eager`;
+the runtime owns continuation after the waiter/source drop. Fetch and resolver
+Promise boundaries share the canonical driver. `closed_position_timing` checks
+six maintained-source profiles with NativeRuntime; the separate typed result
+surrogate/alias boundary remains in CLOSED_POSITIONS_AUDIT.md.
+
+The mapped loop utility requires its owning runtime on LoopHost and starts via
+start_eager. Its sleep Promise preserves the source await fence even for ready
+leaves, and waiter drop leaves the continuation alive. Positive infinity disables
+all loop host effects; remaining_utils compares invocation, continuation and
+callback scheduling with the maintained TypeScript function in Node.
+
+
+Native replay receipts include raw ExchangeRuntime tasks as well as canonical
+Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
+awakened tasks block drain. Reviewed timer/socket reader tasks qualify as waiting
+only at their actual pending sleep/receive leaves; pending handler HTTP/auth work
+still blocks. Waking invalidates the waiting observation before repoll. The sole
+Promise driver delegates to the separately counted canonical queue (including
+checkpoint callbacks). Completion and cancellation release records without
+retaining account/task bodies. This instrumentation runs only on explicit replay
+hosts; it does not cover arbitrary external Tokio tasks or transport internals.
+The public probe requires the versioned raw receipt and refuses older addons.
+Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
+the private wake-race witness checks the pre-repoll fence.

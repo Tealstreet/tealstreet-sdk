@@ -137,3 +137,77 @@ fn metadata_aliases_keep_native_units_cache_identity_and_signed_fields() {
     assert_eq!(replaced.borrow()[0].leverage.to_bits(), 17.0f64.to_bits());
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn configured_class_fields_and_owned_arrows_match_successful_source() {
+    let run = std::process::Command::new("node")
+        .args(["--import", "tsx"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/exchange-class-oracle.cjs"
+        ))
+        .arg("--class-state")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&run.stdout).unwrap();
+    let first = harness::harness(ExchangeName::Woo, harness::options(), |_| {});
+    let second = harness::harness(ExchangeName::Woo, harness::options(), |_| {});
+    let a = &first.exchange.rt.this;
+    let b = &second.exchange.rt.this;
+    let mut names: Vec<_> = source["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 86);
+    let mut actual: Vec<_> = a
+        .own_keys()
+        .iter()
+        .map(|s| String::from_utf16(s).unwrap())
+        .filter(|key| names.contains(&key.as_str()))
+        .collect();
+    names.sort();
+    actual.sort();
+    assert_eq!(actual, names, "every maintained class field is installed");
+    assert_eq!(source["arrows"].as_array().unwrap().len(), 68);
+    for name in source["arrows"].as_array().unwrap() {
+        let name = name.as_str().unwrap();
+        let member = a.get(name).unwrap();
+        assert!(
+            a.has_own(name) && member.type_of() == "function",
+            "installed {name}"
+        );
+        assert!(
+            !member.same_reference(&b.get(name).unwrap()),
+            "fresh arrow {name}"
+        );
+    }
+    for name in source["maps"].as_array().unwrap() {
+        let name = name.as_str().unwrap();
+        let map = a.get(name).unwrap();
+        assert_eq!(
+            map.get("size").unwrap().as_f64().unwrap().to_bits(),
+            0.0f64.to_bits()
+        );
+        assert!(
+            !map.same_reference(&b.get(name).unwrap()),
+            "fresh collection {name}"
+        );
+    }
+    assert_eq!(a.get("getPositionMode").unwrap().type_of(), "function");
+    let class = first.exchange.rt.global("WOOXExchange").unwrap();
+    for (name, number) in source["constants"].as_object().unwrap() {
+        assert_eq!(
+            class.get(name).unwrap().as_f64().unwrap().to_bits(),
+            number.as_f64().unwrap().to_bits()
+        );
+    }
+    first.venue().dispose().unwrap();
+    second.venue().dispose().unwrap();
+}

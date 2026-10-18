@@ -266,21 +266,81 @@ impl From<ExchangeError> for Thrown {
                             .expect("fresh error metadata property");
                     }
                 }
-                for field in ["stack", "cause", "isAxiosError"] {
+                for field in [
+                    "stack",
+                    "cause",
+                    "isAxiosError",
+                    "enhancedMessage",
+                    "context",
+                    "originalError",
+                ] {
                     if let Some(cell) = cause.value().get(field) {
                         value
                             .define(field, cell.to_js())
                             .expect("fresh retained error property");
                     }
                 }
+                if matches!(
+                    cause.value().get("originalErrorIsError"),
+                    Some(OwnedJsValue::Bool(true))
+                ) {
+                    let snapshot = value.get("originalError").expect("captured original error");
+                    let original = error_object(
+                        &snapshot.get("name").expect("name").to_display(),
+                        &snapshot.get("message").expect("message").to_display(),
+                    );
+                    for (key, cell) in snapshot.own_entries().expect("captured error fields") {
+                        if key.as_ref() == "name".encode_utf16().collect::<Vec<_>>()
+                            && cell.strict_equals(&original.get("name").expect("name"))
+                        {
+                            continue;
+                        }
+                        if !value.own_keys().contains(&key) {
+                            value
+                                .define_key(&key, cell.clone())
+                                .expect("fresh error snapshot data");
+                        }
+                        original
+                            .define_key(&key, cell)
+                            .expect("fresh original error snapshot");
+                    }
+                    value
+                        .define("originalError", original)
+                        .expect("fresh original error snapshot");
+                }
+                if cause.value().get("enhancedMessage").is_some()
+                    && matches!(cause.value().get("message"), Some(OwnedJsValue::String(units)) if String::from_utf16_lossy(units) == error.message)
+                {
+                    value
+                        .define_accessor(
+                            "message",
+                            Some(Rc::new(|this| {
+                                let message = this.get("enhancedMessage")?;
+                                if message.truthy() {
+                                    Ok(message)
+                                } else {
+                                    this.get("originalError")?.get("message")
+                                }
+                            })),
+                            None,
+                        )
+                        .expect("fresh enhanced error accessor");
+                }
                 break;
             }
             source = original.source();
         }
         if let Some(response) = error.retained_response_input() {
+            let response = from_retained_input(response);
             value
-                .define("response", from_retained_input(response))
+                .define("response", response.clone())
                 .expect("fresh retained response property");
+            let original = value.get("originalError").expect("fresh error field");
+            if matches!(&original, Js::Object(object) if object.class == "Error") {
+                original
+                    .define("response", response)
+                    .expect("fresh original response property");
+            }
         }
         if let Some(code) = &error.code {
             value
@@ -1089,7 +1149,7 @@ impl Js {
             _ => {}
         }
         if let Js::Object(data) = self
-            && key == utf16("next").as_ref()
+            && key == [b'n' as u16, b'e' as u16, b'x' as u16, b't' as u16]
             && data.iterator_next.borrow().is_some()
             && !data.props.borrow().contains_key(key)
         {
@@ -1723,33 +1783,47 @@ impl Js {
                 let Some(props) = self.own_props() else {
                     return vec![];
                 };
-                let keys: Vec<Str> = props
-                    .borrow()
-                    .iter()
-                    .filter(|(_, p)| {
-                        !matches!(
-                            p,
-                            Prop::DataDescriptor {
-                                enumerable: false,
-                                ..
-                            } | Prop::Accessor {
-                                enumerable: false,
-                                ..
-                            }
-                        )
-                    })
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                let mut indexed: Vec<(usize, Str)> = keys
-                    .iter()
-                    .filter_map(|k| array_index(k).map(|i| (i, k.clone())))
-                    .collect();
-                indexed.sort_by_key(|(i, _)| *i);
-                let mut out: Vec<Str> = indexed.into_iter().map(|(_, k)| k).collect();
-                out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
-                out
+                Self::enumerable_property_indices(props)
+                    .into_iter()
+                    .map(|(key, _)| key)
+                    .collect()
             }
         }
+    }
+    fn enumerable_property_indices(props: &RefCell<IndexMap<Str, Prop>>) -> Vec<(Str, usize)> {
+        let props = props.borrow();
+        let count = props
+            .values()
+            .filter(|prop| {
+                !matches!(
+                    prop,
+                    Prop::DataDescriptor {
+                        enumerable: false,
+                        ..
+                    } | Prop::Accessor {
+                        enumerable: false,
+                        ..
+                    }
+                )
+            })
+            .count();
+        let mut keys = Vec::with_capacity(count);
+        for (index, (key, prop)) in props.iter().enumerate() {
+            if !matches!(
+                prop,
+                Prop::DataDescriptor {
+                    enumerable: false,
+                    ..
+                } | Prop::Accessor {
+                    enumerable: false,
+                    ..
+                }
+            ) {
+                keys.push((key.clone(), index));
+            }
+        }
+        keys.sort_by_key(|(key, _)| array_index(key).unwrap_or(usize::MAX));
+        keys
     }
     /// Object.getOwnPropertyNames: own string keys, enumerable or not, in
     /// OrdinaryOwnPropertyKeys order; array and string `length` follows the indices.
@@ -1825,6 +1899,77 @@ impl Js {
     }
     /// Object spread / Object.assign source read: own enumerable values in key order.
     pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
+        if let Some(props) = self.own_props() {
+            let data_entries = {
+                let props = props.borrow();
+                let mut count = 0;
+                let mut accessors = false;
+                for prop in props.values() {
+                    match prop {
+                        Prop::Data(_)
+                        | Prop::DataDescriptor {
+                            enumerable: true, ..
+                        } => count += 1,
+                        Prop::Accessor {
+                            enumerable: true, ..
+                        } => accessors = true,
+                        _ => {}
+                    }
+                }
+                if accessors {
+                    None
+                } else {
+                    let mut entries = Vec::with_capacity(count);
+                    for (key, prop) in props.iter() {
+                        if let Prop::Data(value)
+                        | Prop::DataDescriptor {
+                            value,
+                            enumerable: true,
+                            ..
+                        } = prop
+                        {
+                            entries.push((key.clone(), value.clone()));
+                        }
+                    }
+                    Some(entries)
+                }
+            };
+            if let Some(mut entries) = data_entries {
+                entries.sort_by_key(|(key, _)| array_index(key).unwrap_or(usize::MAX));
+                return Ok(entries);
+            }
+            let keys = Self::enumerable_property_indices(props);
+            let mut entries = Vec::with_capacity(keys.len());
+            let mut indices_valid = true;
+            for (key, index) in keys {
+                let value = if indices_valid {
+                    match &props
+                        .borrow()
+                        .get_index(index)
+                        .expect("unmodified property index")
+                        .1
+                    {
+                        Prop::Data(value) | Prop::DataDescriptor { value, .. } => {
+                            Some(value.clone())
+                        }
+                        Prop::Accessor { .. } => None,
+                    }
+                } else {
+                    None
+                };
+                let value = match value {
+                    Some(value) => value,
+                    None => {
+                        // A getter can reorder or replace later properties.
+                        // Subsequent reads must use their live keys.
+                        indices_valid = false;
+                        self.get_key(&key)?
+                    }
+                };
+                entries.push((key, value));
+            }
+            return Ok(entries);
+        }
         self.own_keys()
             .into_iter()
             .map(|k| {

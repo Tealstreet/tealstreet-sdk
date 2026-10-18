@@ -44,19 +44,21 @@ fn read_thrown(error: StoreReadError) -> Thrown {
 fn mutation_thrown(error: StoreMutationError) -> Thrown {
     match error {
         StoreMutationError::Access(error) => read_thrown(error),
+        notification @ StoreMutationError::Notification(_) => {
+            let mut native = crate::runtime::ExchangeError::from(notification.clone());
+            // Materialize the same value before attaching the complete typed
+            // boundary. The flattened metadata alone cannot recover nested IDs.
+            let mut thrown = Thrown::from(native.clone());
+            native.origin = Some(crate::runtime::ExchangeErrorOrigin::new(notification));
+            thrown.native = Some(Rc::new(native));
+            thrown
+        }
         other => Thrown::from(crate::runtime::ExchangeError::from(other)),
     }
 }
 
 fn mutation_error(error: Thrown) -> StoreMutationError {
     if let Some(native) = &error.native {
-        if let (Some(id), Some(cause)) = (
-            native.store_subscriber_ids.last(),
-            native.store_subscriber_cause.as_ref(),
-        ) {
-            return safe_cex_store::StoreNotificationError::from_subscriber(*id, cause.clone())
-                .into();
-        }
         if let Some(origin) = &native.origin {
             if let Some(error) = origin.error().downcast_ref::<StoreMutationError>() {
                 return error.clone();
@@ -64,6 +66,13 @@ fn mutation_error(error: Thrown) -> StoreMutationError {
             if let Some(error) = origin.error().downcast_ref::<StoreReadError>() {
                 return error.clone().into();
             }
+        }
+        if let (Some(id), Some(cause)) = (
+            native.store_subscriber_ids.last(),
+            native.store_subscriber_cause.as_ref(),
+        ) {
+            return safe_cex_store::StoreNotificationError::from_subscriber(*id, cause.clone())
+                .into();
         }
     }
     property(error).into()

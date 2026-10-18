@@ -109,3 +109,91 @@ fn native_parser_preserves_raw_and_escaped_units_without_typed_depth_budget() {
     assert!(Input::parse_json(&units(&text)).is_ok());
     assert!(serde_json::from_str::<Input>(&text).is_err());
 }
+
+#[test]
+fn native_payload_stream_preserves_all_units_and_rejects_malformed_units() {
+    use safe_cex_types::retained_json::deserialize_native_payload;
+    let units: Vec<u16> = (0..=u16::MAX).collect();
+    let decoded =
+        deserialize_native_payload(Input::Text(units.clone()).into_native_payload()).unwrap();
+    assert_eq!(decoded, Input::Text(units.clone()));
+    let keyed = Input::Object(vec![(units.clone(), Input::Text(units))]);
+    let decoded = deserialize_native_payload(keyed.clone().into_native_payload()).unwrap();
+    assert_eq!(
+        decoded, keyed,
+        "all UTF-16 keys and values survive packed native capture"
+    );
+    for (raw, expected) in [
+        (r#"["Text",[0,65535,3.0,-0.0]]"#, Some(vec![0, 65535, 3, 0])),
+        (r#"[{"Text":null},[0]]"#, None),
+        (r#"[3,[0]]"#, None),
+        (r#"[false,[0]]"#, None),
+        (r#"["Text",[-1]]"#, None),
+        (r#"["Text",[65536]]"#, None),
+        (r#"["Text",[1.5]]"#, None),
+        (r#"["Text",[null]]"#, None),
+        (r#"["Text",[true]]"#, None),
+        (r#"["Text",["1"]]"#, None),
+        (r#"["Text",[1e400]]"#, None),
+        (r#"["Text",[1],false]"#, None),
+        (r#"["Object",[[[-1],["Null",null]]]]"#, None),
+    ] {
+        let mut decoder = serde_json::Deserializer::from_str(raw);
+        let actual = deserialize_native_payload(&mut decoder);
+        match expected {
+            Some(units) => assert_eq!(actual.unwrap(), Input::Text(units), "{raw}"),
+            None => assert!(actual.is_err(), "invalid payload accepted: {raw}"),
+        }
+    }
+}
+
+#[test]
+fn native_payload_stream_retains_numeric_bits_presence_and_serde_wrappers() {
+    use safe_cex_types::retained_json::deserialize_native_payload;
+    use serde::Deserialize;
+    let original = Input::Object(vec![(
+        vec![0xd800],
+        Input::Array(vec![
+            Input::Undefined,
+            Input::Float(f64::from_bits(0x7ff8000000000042)),
+            Input::Float(-0.0),
+            Input::Float(f64::INFINITY),
+            Input::Lexeme("-1e400".into()),
+        ]),
+    )]);
+    let decoded = deserialize_native_payload(original.into_native_payload()).unwrap();
+    let Input::Object(entries) = decoded else {
+        panic!("object")
+    };
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].0, [0xd800]);
+    let Input::Array(values) = &entries[0].1 else {
+        panic!("array")
+    };
+    assert_eq!(values.len(), 5);
+    assert_eq!(values[0], Input::Undefined);
+    for (value, bits) in
+        values[1..4]
+            .iter()
+            .zip([0x7ff8000000000042, 0x8000000000000000, 0x7ff0000000000000])
+    {
+        let Input::Float(value) = value else {
+            panic!("number")
+        };
+        assert_eq!(value.to_bits(), bits);
+    }
+    assert_eq!(values[4], Input::Lexeme("-1e400".into()));
+    let optional =
+        Option::<Vec<serde_json::Value>>::deserialize(Input::Null.into_native_payload()).unwrap();
+    assert_eq!(
+        optional.unwrap(),
+        [serde_json::json!("Null"), serde_json::Value::Null]
+    );
+    #[derive(Deserialize)]
+    struct Wrapped(Vec<serde_json::Value>);
+    let wrapped = Wrapped::deserialize(Input::Null.into_native_payload()).unwrap();
+    assert_eq!(
+        wrapped.0,
+        [serde_json::json!("Null"), serde_json::Value::Null]
+    );
+}

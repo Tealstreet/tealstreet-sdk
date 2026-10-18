@@ -124,7 +124,7 @@ impl TransactionClient {
             client.create_order(&params, &nonce)
         })
     }
-    fn create_order(
+    pub(crate) fn create_order(
         &self,
         params: &CreateOrderParams,
         nonce: &BigInt,
@@ -195,35 +195,43 @@ impl TransactionClient {
         same_side: Rc<dyn Fn(usize, usize) -> bool>,
     ) -> ObjectPromise<L2CreateGroupedOrdersTxInfo> {
         self.after_nonce(self.get_next_nonce(false), move |client, nonce| {
-            let clock = || client.config.runtime.now_millis();
-            let payload = build_grouped_orders_with_side_comparison(
-                &client.context(&clock),
-                client.config.crypto.as_ref(),
-                &params,
-                &nonce,
-                same_side.as_ref(),
-            )?;
-            let signed = sign_create_order_transaction(
-                client.config.crypto.as_ref(),
-                &client.config.private_key,
-                &payload.message_hex,
-                payload.l2_attributes_message_hex.as_deref(),
-            )?;
-            Ok(L2CreateGroupedOrdersTxInfo {
-                header: client.header(
-                    payload.message_hex,
-                    signed.signature,
-                    nonce,
-                    Some(payload.expired_at),
-                ),
-                grouped_order_details: GroupedOrderDetails {
-                    grouping_type: params.grouping_type,
-                    orders: payload.orders,
-                    integrator_account_index: payload.integrator_account_index,
-                    integrator_maker_fee: payload.integrator_maker_fee,
-                    integrator_taker_fee: payload.integrator_taker_fee,
-                },
-            })
+            client.grouped_orders(params, nonce, same_side)
+        })
+    }
+    pub(crate) fn grouped_orders(
+        &self,
+        params: CreateGroupedOrdersParams,
+        nonce: BigInt,
+        same_side: Rc<dyn Fn(usize, usize) -> bool>,
+    ) -> SigningResult<L2CreateGroupedOrdersTxInfo> {
+        let clock = || self.config.runtime.now_millis();
+        let payload = build_grouped_orders_with_side_comparison(
+            &self.context(&clock),
+            self.config.crypto.as_ref(),
+            &params,
+            &nonce,
+            same_side.as_ref(),
+        )?;
+        let signed = sign_create_order_transaction(
+            self.config.crypto.as_ref(),
+            &self.config.private_key,
+            &payload.message_hex,
+            payload.l2_attributes_message_hex.as_deref(),
+        )?;
+        Ok(L2CreateGroupedOrdersTxInfo {
+            header: self.header(
+                payload.message_hex,
+                signed.signature,
+                nonce,
+                Some(payload.expired_at),
+            ),
+            grouped_order_details: GroupedOrderDetails {
+                grouping_type: params.grouping_type,
+                orders: payload.orders,
+                integrator_account_index: payload.integrator_account_index,
+                integrator_maker_fee: payload.integrator_maker_fee,
+                integrator_taker_fee: payload.integrator_taker_fee,
+            },
         })
     }
     fn header(
@@ -255,22 +263,29 @@ impl TransactionClient {
         params: CancelOrderParams,
     ) -> ObjectPromise<L2CancelOrderTxInfo> {
         self.after_nonce(self.get_next_nonce(false), move |client, nonce| {
-            let clock = || client.config.runtime.now_millis();
-            let payload = build_cancel_order_data(&client.context(&clock), &params, &nonce)?;
-            let signed = client.sign(&payload.message_hex)?;
-            Ok(L2CancelOrderTxInfo {
-                header: client.header(
-                    payload.message_hex.encode_utf16().collect(),
-                    signed.signature,
-                    nonce,
-                    Some(payload.expired_at.clone()),
-                ),
-                cancel_details: CancelDetails {
-                    order_id: params.order_id,
-                    market_id: params.market_id,
-                    expired_at: Some(payload.expired_at),
-                },
-            })
+            client.cancel_order(params, nonce)
+        })
+    }
+    pub(crate) fn cancel_order(
+        &self,
+        params: CancelOrderParams,
+        nonce: BigInt,
+    ) -> SigningResult<L2CancelOrderTxInfo> {
+        let clock = || self.config.runtime.now_millis();
+        let payload = build_cancel_order_data(&self.context(&clock), &params, &nonce)?;
+        let signed = self.sign(&payload.message_hex)?;
+        Ok(L2CancelOrderTxInfo {
+            header: self.header(
+                payload.message_hex.encode_utf16().collect(),
+                signed.signature,
+                nonce,
+                Some(payload.expired_at.clone()),
+            ),
+            cancel_details: CancelDetails {
+                order_id: params.order_id,
+                market_id: params.market_id,
+                expired_at: Some(payload.expired_at),
+            },
         })
     }
     // ts: TransactionClient.getTransferTransaction
@@ -279,17 +294,24 @@ impl TransactionClient {
         params: TransferParams,
     ) -> ObjectPromise<L2TransferTxInfo> {
         self.after_nonce(self.get_next_nonce(false), move |client, nonce| {
-            let clock = || client.config.runtime.now_millis();
-            let data = build_transfer_data(&client.context(&clock), &params, &nonce);
-            let signed = client.sign(&data)?;
-            Ok(L2TransferTxInfo {
-                header: client.header(data.encode_utf16().collect(), signed.signature, nonce, None),
-                transfer_details: TransferDetails {
-                    to_account_index: params.to_account_index,
-                    amount: params.amount,
-                    token_id: params.token_id.unwrap_or(0.0),
-                },
-            })
+            client.transfer(params, nonce)
+        })
+    }
+    pub(crate) fn transfer(
+        &self,
+        params: TransferParams,
+        nonce: BigInt,
+    ) -> SigningResult<L2TransferTxInfo> {
+        let clock = || self.config.runtime.now_millis();
+        let data = build_transfer_data(&self.context(&clock), &params, &nonce);
+        let signed = self.sign(&data)?;
+        Ok(L2TransferTxInfo {
+            header: self.header(data.encode_utf16().collect(), signed.signature, nonce, None),
+            transfer_details: TransferDetails {
+                to_account_index: params.to_account_index,
+                amount: params.amount,
+                token_id: params.token_id.unwrap_or(0.0),
+            },
         })
     }
     // ts: TransactionClient.getUpdateLeverageTransaction
@@ -298,26 +320,33 @@ impl TransactionClient {
         params: UpdateLeverageParams,
     ) -> ObjectPromise<L2UpdateLeverageTxInfo> {
         self.after_nonce(self.get_next_nonce(false), move |client, nonce| {
-            let clock = || client.config.runtime.now_millis();
-            let payload = build_update_leverage_data(&client.context(&clock), &params, &nonce)?;
-            let signed = client.sign(&payload.message_hex)?;
-            Ok(L2UpdateLeverageTxInfo {
-                header: client.header(
-                    payload.message_hex.encode_utf16().collect(),
-                    signed.signature,
-                    nonce,
-                    Some(payload.expired_at.clone()),
-                ),
-                leverage_details: LeverageDetails {
-                    market_id: params.market_id,
-                    initial_margin_fraction: payload.initial_margin_fraction,
-                    margin_mode: params.margin_mode,
-                    expired_at: Some(payload.expired_at),
-                },
-            })
+            client.update_leverage(params, nonce)
         })
     }
-    fn approve_integrator(
+    pub(crate) fn update_leverage(
+        &self,
+        params: UpdateLeverageParams,
+        nonce: BigInt,
+    ) -> SigningResult<L2UpdateLeverageTxInfo> {
+        let clock = || self.config.runtime.now_millis();
+        let payload = build_update_leverage_data(&self.context(&clock), &params, &nonce)?;
+        let signed = self.sign(&payload.message_hex)?;
+        Ok(L2UpdateLeverageTxInfo {
+            header: self.header(
+                payload.message_hex.encode_utf16().collect(),
+                signed.signature,
+                nonce,
+                Some(payload.expired_at.clone()),
+            ),
+            leverage_details: LeverageDetails {
+                market_id: params.market_id,
+                initial_margin_fraction: payload.initial_margin_fraction,
+                margin_mode: params.margin_mode,
+                expired_at: Some(payload.expired_at),
+            },
+        })
+    }
+    pub(crate) fn approve_integrator(
         &self,
         params: ApproveIntegratorParams,
         nonce: BigInt,

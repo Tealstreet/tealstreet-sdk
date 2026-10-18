@@ -105,6 +105,54 @@ fn json_builtin_retains_lone_surrogate_units_and_matches_native_parse() {
                 );
             }
         }
+        let ordered = json
+            .call_method(
+                "parse",
+                vec![Js::utf16(&units(&source["ordering"]["text"]))],
+            )
+            .unwrap();
+        assert_eq!(observe(&ordered), source["ordering"]["value"]);
+        assert_eq!(ordered.own_keys().len(), 11);
+        let changing = Js::object(vec![
+            ("z", Js::Number(3.0)),
+            ("tail", Js::Number(4.0)),
+            ("0", Js::Number(0.0)),
+        ]);
+        shared
+            .globals
+            .get("Object")
+            .unwrap()
+            .call_method(
+                "defineProperty",
+                vec![
+                    changing.clone(),
+                    Js::str("hidden"),
+                    Js::object(vec![
+                        ("value", Js::Number(55.0)),
+                        ("configurable", Js::Bool(true)),
+                    ]),
+                ],
+            )
+            .unwrap();
+        changing
+            .define_accessor(
+                "1",
+                Some(Rc::new(|receiver| {
+                    receiver.delete(&"tail".encode_utf16().collect::<Vec<_>>())?;
+                    receiver.set("tail", Js::Number(99.0))?;
+                    receiver.set("z", Js::Number(33.0))?;
+                    Ok(Js::Number(1.0))
+                })),
+                None,
+            )
+            .unwrap();
+        let captured = safe_cex_exchange::js_runtime::value::to_retained_input(&changing).unwrap();
+        let restored = safe_cex_exchange::js_runtime::value::from_retained_input(captured);
+        assert_eq!(
+            observe(&restored),
+            source["changed"],
+            "getter mutations retain live property reads"
+        );
     });
 }
 #[test]
@@ -342,5 +390,126 @@ fn json_builtin_preserves_every_escaped_utf16_code_unit() {
                 "native JSON escape {unit:04x}"
             );
         }
+    });
+}
+
+mod allocation_profile {
+    use std::{
+        alloc::{GlobalAlloc, Layout, System},
+        cell::Cell,
+    };
+    thread_local! { static BYTES: Cell<Option<usize>> = const { Cell::new(None) }; }
+    pub struct Counting;
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            BYTES.with(|bytes| bytes.set(bytes.get().map(|n| n + layout.size())));
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            BYTES.with(|bytes| bytes.set(bytes.get().map(|n| n + size)));
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+    }
+    pub fn measure<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        BYTES.with(|bytes| bytes.set(Some(0)));
+        let value = f();
+        let bytes = BYTES.with(|bytes| bytes.replace(None).unwrap());
+        (value, bytes)
+    }
+}
+#[global_allocator]
+static ALLOCATOR: allocation_profile::Counting = allocation_profile::Counting;
+
+#[test]
+fn native_market_info_decode_does_not_expand_each_utf16_unit_into_a_value() {
+    let info = (0..16)
+        .map(|n| (format!("field{n}"), Value::String("x".repeat(256))))
+        .collect::<serde_json::Map<_, _>>();
+    let market = json!({"id":"BTC","symbol":"BTCUSD","base":"BTC","quote":"USD",
+        "active":true,"precision":{"price":0.1,"amount":1},
+        "limits":{"amount":{"min":1,"max":1000},"leverage":{"min":1,"max":100}},"info":info});
+    let text = serde_json::to_string(&vec![market; 200]).unwrap();
+    run(async {
+        let runtime = native_runtime();
+        let http = client::rest_http_host(
+            runtime.clone(),
+            Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+        );
+        let shared = Rc::new(ScopeShared::new(
+            runtime,
+            http,
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+            Js::object(vec![]),
+            (),
+        ));
+        globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+        let parsed = shared
+            .globals
+            .get("JSON")
+            .unwrap()
+            .call_method("parse", vec![Js::str(&text)])
+            .unwrap();
+        let (decoded, allocated) = allocation_profile::measure(|| {
+            safe_cex_exchange::js_runtime::value::to_typed::<Vec<safe_cex_types::Market>>(&parsed)
+        });
+        let decoded = decoded.unwrap();
+        assert_eq!(decoded.len(), 200);
+        for market in &decoded {
+            assert_eq!(market.id, "BTC");
+            assert_eq!(market.precision.price.to_bits(), 0.1f64.to_bits());
+            assert_eq!(
+                market.info.as_ref().unwrap().clone().into_value().unwrap(),
+                Value::Object(info.clone())
+            );
+        }
+        eprintln!(
+            "market_info_decode input_bytes={} allocated_bytes={allocated}",
+            text.len()
+        );
+        assert!(
+            allocated < text.len() * 11 / 2,
+            "typed capture exceeds its allocation budget: {allocated} allocated bytes for {} input bytes",
+            text.len()
+        );
+    });
+}
+
+#[test]
+fn native_json_string_parser_avoids_geometric_buffer_growth() {
+    let content = "unescaped market metadata ".repeat(8000);
+    let text = Js::str(&format!("\"{content}\""));
+    run(async {
+        let runtime = native_runtime();
+        let http = client::rest_http_host(
+            runtime.clone(),
+            Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+        );
+        let shared = Rc::new(ScopeShared::new(
+            runtime,
+            http,
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+            Js::object(vec![]),
+            (),
+        ));
+        globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+        let json = shared.globals.get("JSON").unwrap();
+        let (parsed, allocated) =
+            allocation_profile::measure(|| json.call_method("parse", vec![text]));
+        assert_eq!(
+            parsed.unwrap().to_js_string().unwrap().as_ref(),
+            content.encode_utf16().collect::<Vec<_>>()
+        );
+        eprintln!(
+            "json_string_parse input_bytes={} allocated_bytes={allocated}",
+            content.len()
+        );
+        assert!(
+            allocated < content.len() * 5,
+            "parser geometrically reallocates unescaped text: {allocated} allocated bytes for {} ASCII bytes",
+            content.len()
+        );
     });
 }

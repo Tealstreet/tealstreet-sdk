@@ -181,19 +181,17 @@ comparisons, including 3000 halfway/adjacent cases and 512 deterministic finite
 bit patterns. The six precision controls cover four production branches and
 source cardinality with an independent performed-comparison guard.
 
-The first REST body is `public_reads::get_server_time`, over an injected shared
-HttpClient. This scalar slice alone does not assemble factory, constructor,
-authentication, retry, or interceptors. This boundary accepts encoded JSON numbers and current native
-numbers through shared numeric ingress, never guessing that transformed strings
-should be parsed again. Non-number current data is an explicit CHOSEN refusal
-(the actual TS getter returns it unchanged). HTTP failures retain the entire
-shared RestFailure; decode refusal retains its response and method request.
-The public-reads oracle extracts and executes the original method and ENDPOINTS
-declaration once per corpus. Three body provenances cover each of 20 cases;
-42 bit comparisons,18 refusals and three failure metadata comparisons are fixed
-independently of capture length. This scalar slice introduces no collection
-decoder or two-axis precision field.
+The historical typed `public_reads::get_server_time` helper had no production
+callers and has been deleted. The TS row now names the live API branch in
+`binding/members.rs::api_read`. Its original 20-case and 512-case source oracles
+are exercised by `binding/exchange::eager_tests` through the constructed API,
+including immediate xhr invocation, exact numeric bits and raw result/rejection
+identity. The old typed-only refusal expectations are retired with the unused
+helper. See [EAGER_FIX_AUDIT.md](EAGER_FIX_AUDIT.md).
 
+The shared SDK invoke/invoke_unit calls its existing JS member before boxing the
+Rust waiter and awaits that same Promise. No extra Promise or venue scheduler is
+introduced; pending/dropped observers retain the source continuation.
 
 Four further public REST bodies map `getMarkets`, `getOrderBook`, `getOrderBooks`
 and `getPrices` through the same injected HttpClient and current-data decoder.

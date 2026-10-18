@@ -1,11 +1,11 @@
-use crate::runtime::{ExchangeError, ExchangeRuntime, ExchangeTask};
+use crate::runtime::{ExchangeError, ExchangeRuntime, ExchangeTask, RuntimeTaskKind};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     future::Future,
     pin::Pin,
     rc::{Rc, Weak},
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
 };
 
 type Work = Pin<Box<dyn Future<Output = ()>>>;
@@ -44,6 +44,7 @@ struct Slot {
     future: RefCell<Option<Work>>,
     host: RefCell<Option<Box<dyn ExchangeTask>>>,
     cleanup: RefCell<Option<OnFinish>>,
+    waker: RefCell<Option<Waker>>,
 }
 impl Slot {
     fn finish(&self, cancelled: bool) {
@@ -59,6 +60,10 @@ impl Slot {
         }
         drop(future);
         drop(host);
+        let waker = self.waker.borrow_mut().take();
+        if let Some(waker) = waker {
+            waker.wake();
+        }
         if let Some(cleanup) = cleanup {
             cleanup(cancelled);
         }
@@ -87,7 +92,41 @@ impl OwnedTasks {
         build: impl FnOnce(OwnedOperation) -> Work,
         cleanup: impl FnOnce(bool) + 'static,
     ) -> OwnedOperation {
-        self.start_inner(runtime, build, cleanup)
+        self.start_classified(runtime, RuntimeTaskKind::Finite, build, cleanup)
+    }
+    pub(crate) fn start_classified<R: ExchangeRuntime + ?Sized>(
+        self: &Rc<Self>,
+        runtime: &R,
+        kind: RuntimeTaskKind,
+        build: impl FnOnce(OwnedOperation) -> Work,
+        cleanup: impl FnOnce(bool) + 'static,
+    ) -> OwnedOperation {
+        self.start_inner(
+            |work| Some(runtime.spawn_classified(kind, work)),
+            build,
+            cleanup,
+        )
+    }
+    /// Register cancellation before the canonical Promise driver runs the prefix.
+    /// The registry owns the actual body, so cancelling drops pending I/O even
+    /// though dropping a Promise waiter alone never cancels its producer.
+    pub(crate) fn start_eager(
+        self: &Rc<Self>,
+        runtime: &Rc<dyn ExchangeRuntime>,
+        build: impl FnOnce(OwnedOperation) -> Work,
+        cleanup: impl FnOnce(bool) + 'static,
+    ) -> OwnedOperation {
+        self.start_inner(
+            |work| {
+                drop(crate::eager::start_eager(runtime, async move {
+                    work.await;
+                    Ok(())
+                }));
+                None
+            },
+            build,
+            cleanup,
+        )
     }
     /// Work representing a discarded source promise is retained independently
     /// of an exchange/socket lifecycle owner until the host settles or drops it.
@@ -97,9 +136,17 @@ impl OwnedTasks {
     ) -> OwnedOperation {
         Self::detached().start(runtime, |_| future, |_| {})
     }
-    fn start_inner<R: ExchangeRuntime + ?Sized>(
+    pub(crate) fn start_promise_driver<R: ExchangeRuntime + ?Sized>(runtime: &R, future: Work) {
+        Self::detached().start_classified(
+            runtime,
+            RuntimeTaskKind::PromiseDriver,
+            |_| future,
+            |_| {},
+        );
+    }
+    fn start_inner(
         self: &Rc<Self>,
-        runtime: &R,
+        launch: impl FnOnce(Work) -> Option<Box<dyn ExchangeTask>>,
         build: impl FnOnce(OwnedOperation) -> Work,
         cleanup: impl FnOnce(bool) + 'static,
     ) -> OwnedOperation {
@@ -120,6 +167,7 @@ impl OwnedTasks {
             future: RefCell::new(None),
             host: RefCell::new(None),
             cleanup: RefCell::new(Some(Box::new(cleanup))),
+            waker: RefCell::default(),
         });
         self.slots.borrow_mut().insert(id, slot.clone());
         let future = build(operation.clone());
@@ -128,18 +176,20 @@ impl OwnedTasks {
             return operation;
         }
         *slot.future.borrow_mut() = Some(future);
-        let host = runtime.spawn_local(Box::pin(Driver {
+        let host = launch(Box::pin(Driver {
             operation: operation.clone(),
             slot: slot.clone(),
             owner_lease: self.retain_owner.then(|| self.clone()),
         }));
-        if slot.terminal.get() {
-            if slot.cancelled.get() {
-                host.cancel();
+        if let Some(host) = host {
+            if slot.terminal.get() {
+                if slot.cancelled.get() {
+                    host.cancel();
+                }
+                drop(host);
+            } else {
+                *slot.host.borrow_mut() = Some(host);
             }
-            drop(host);
-        } else {
-            *slot.host.borrow_mut() = Some(host);
         }
         operation
     }
@@ -164,8 +214,9 @@ impl OwnedTasks {
         }
         let mut deadline = now + period_ms as f64;
         let task_runtime = runtime.clone();
-        Ok(self.start(
+        Ok(self.start_classified(
             runtime.as_ref(),
+            RuntimeTaskKind::Timer,
             move |operation| {
                 Box::pin(async move {
                     let result = async {
@@ -289,6 +340,7 @@ impl Future for Driver {
             this.owner_lease.take();
             return Poll::Ready(());
         }
+        *this.slot.waker.borrow_mut() = Some(cx.waker().clone());
         let future = this.slot.future.borrow_mut().take();
         let Some(mut future) = future else {
             this.owner_lease.take();

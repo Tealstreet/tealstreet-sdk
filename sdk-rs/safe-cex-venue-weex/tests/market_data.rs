@@ -182,7 +182,7 @@ fn market_data_matches_actual_typescript() {
                         ("ask", value.ask),
                         ("last", value.last),
                         ("mark", value.mark),
-                        ("index", value.index),
+                        ("index", value.index.unwrap()),
                         ("percentage", value.percentage),
                         ("openInterest", value.open_interest),
                         ("fundingRate", value.funding_rate),

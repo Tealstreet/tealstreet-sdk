@@ -49,14 +49,14 @@ impl HyperliquidExchange {
                         ticker.last,
                         ticker.mid_price.unwrap_or(f64::NAN),
                         ticker.mark,
-                        ticker.index,
+                        ticker.index.unwrap_or(f64::NAN),
                     ]
                 } else {
                     [
                         ticker.mark,
                         ticker.last,
                         ticker.mid_price.unwrap_or(f64::NAN),
-                        ticker.index,
+                        ticker.index.unwrap_or(f64::NAN),
                     ]
                 }
             });
@@ -268,7 +268,7 @@ mod tests {
                 ticker.last = nums[0];
                 ticker.mid_price = Some(nums[1]);
                 ticker.mark = nums[2];
-                ticker.index = nums[3];
+                ticker.index = Some(nums[3]);
                 Store::update(
                     store.as_ref(),
                     StoreUpdate {

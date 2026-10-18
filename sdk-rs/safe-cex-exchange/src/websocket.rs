@@ -2,7 +2,9 @@
 use crate::owned_tasks::{OwnedOperation, OwnedTasks};
 #[cfg(test)]
 use crate::runtime::ExchangeTask;
-use crate::runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, LogSeverity};
+use crate::runtime::{
+    ExchangeError, ExchangeFuture, ExchangeRuntime, LogSeverity, RuntimeTaskKind,
+};
 use safe_cex_store::Store;
 pub use safe_cex_transport::relay::{
     FreshHeadersProvider, UpgradeHeaders, WebSocketConnectionOptions,
@@ -66,6 +68,8 @@ pub trait WsRuntime: ExchangeRuntime {
     fn frame_receipts_enabled(&self) -> bool {
         false
     }
+    /// Retain replay counters independently of exchange-level socket grouping.
+    fn register_frame_receipts(&self, _receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>) {}
 }
 pub trait WsParent {
     fn name(&self) -> &str;
@@ -696,7 +700,7 @@ pub struct FrameDrainReceipt {
 
 pub struct BaseWebSocket {
     pub id: u64,
-    frame_receipts: RefCell<Vec<FrameDrainReceipt>>,
+    frame_receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>,
     identity: Rc<()>,
     parent: Rc<dyn WsParent>,
     runtime: Rc<dyn WsRuntime>,
@@ -721,9 +725,13 @@ impl BaseWebSocket {
         runtime: Rc<dyn WsRuntime>,
         protocol: Rc<dyn WsProtocol>,
     ) -> Rc<Self> {
+        let frame_receipts = Rc::default();
+        if runtime.frame_receipts_enabled() {
+            runtime.register_frame_receipts(Rc::clone(&frame_receipts));
+        }
         Rc::new(Self {
             id,
-            frame_receipts: RefCell::default(),
+            frame_receipts,
             identity: Rc::new(()),
             parent,
             runtime,
@@ -1236,7 +1244,8 @@ impl BaseWebSocket {
     }
     /// Own preparation (for example a REST bullet-token fetch) and the dial as
     /// one cancellable task. None means the venue has handled a no-dial outcome.
-    /// The closure is invoked only inside the core-owned task, never by the venue.
+    /// Preparation starts eagerly through the shared Promise boundary; the
+    /// socket registry still cancels the actual preparation/dial body.
     pub fn start_prepared_websocket<F, P>(self: &Rc<Self>, prepare: P)
     where
         F: Future<Output = Result<Option<PreparedWebSocket>, ExchangeError>> + 'static,
@@ -1247,37 +1256,43 @@ impl BaseWebSocket {
         }
         let generation = self.reserve_socket_generation();
         let weak = Rc::downgrade(self);
-        self.spawn_owned(Box::pin(async move {
-            let Some(socket) = weak.upgrade() else {
-                return;
-            };
-            if socket.is_disposed() || socket.state.borrow().generation != generation {
-                return;
-            }
-            let result = async {
-                let Some(prepared) = prepare().await? else {
-                    return Ok(());
+        self.spawn_owned_kind(
+            Box::pin(async move {
+                let Some(socket) = weak.upgrade() else {
+                    return;
                 };
                 if socket.is_disposed() || socket.state.borrow().generation != generation {
-                    return Ok(());
+                    return;
                 }
-                socket
-                    .create_websocket_for_generation(
-                        prepared.url,
-                        prepared.protocols,
-                        prepared.options,
-                        Some(generation),
-                    )
-                    .await
-            }
-            .await;
-            if let Err(error) = result
-                && !socket.is_disposed()
-                && socket.state.borrow().generation == generation
-            {
-                socket.report_callback_result(socket.handle_web_socket_error(&error.to_string()));
-            }
-        }));
+                let result = async {
+                    let Some(prepared) = prepare().await? else {
+                        return Ok(());
+                    };
+                    if socket.is_disposed() || socket.state.borrow().generation != generation {
+                        return Ok(());
+                    }
+                    socket
+                        .create_websocket_for_generation(
+                            prepared.url,
+                            prepared.protocols,
+                            prepared.options,
+                            Some(generation),
+                        )
+                        .await
+                }
+                .await;
+                if let Err(error) = result
+                    && !socket.is_disposed()
+                    && socket.state.borrow().generation == generation
+                {
+                    socket
+                        .report_callback_result(socket.handle_web_socket_error(&error.to_string()));
+                }
+            }),
+            false,
+            true,
+            RuntimeTaskKind::Finite,
+        );
     }
     pub async fn create_websocket(
         self: &Rc<Self>,
@@ -1400,53 +1415,58 @@ impl BaseWebSocket {
                 state.relay_open = false;
             }
             let weak = Rc::downgrade(self);
-            self.spawn_owned(Box::pin(async move {
-                loop {
-                    let event = socket.next_event().await;
-                    let Some(owner) = weak.upgrade() else {
-                        socket.terminate();
-                        socket.close();
-                        break;
-                    };
-                    if owner.is_disposed() || owner.state.borrow().generation != generation {
-                        socket.terminate();
-                        socket.close();
-                        break;
-                    }
-                    match event {
-                        Ok(WsEvent::Open) => {
-                            owner.dispatch_open(generation).await;
+            self.spawn_owned_kind(
+                Box::pin(async move {
+                    loop {
+                        let event = socket.next_event().await;
+                        let Some(owner) = weak.upgrade() else {
+                            socket.terminate();
+                            socket.close();
+                            break;
+                        };
+                        if owner.is_disposed() || owner.state.borrow().generation != generation {
+                            socket.terminate();
+                            socket.close();
+                            break;
                         }
-                        Ok(WsEvent::Message(frame)) => {
-                            owner.direct_fallback.borrow_mut().on_message();
-                            if let Err(error) = owner.on_message(&frame) {
-                                owner.report_callback_result(
-                                    owner.handle_web_socket_error(&error.to_string()),
-                                );
+                        match event {
+                            Ok(WsEvent::Open) => {
+                                owner.dispatch_open(generation).await;
                             }
-                        }
-                        Ok(WsEvent::Error(error)) => {
-                            owner.report_callback_result(owner.handle_web_socket_error(&error))
-                        }
-                        Ok(WsEvent::Close { code, reason }) => {
-                            owner.report_callback_result(
-                                owner.received_transport_close(code, &reason),
-                            );
-                            if !socket.is_reconnecting() {
+                            Ok(WsEvent::Message(frame)) => {
+                                owner.direct_fallback.borrow_mut().on_message();
+                                if let Err(error) = owner.on_message(&frame) {
+                                    owner.report_callback_result(
+                                        owner.handle_web_socket_error(&error.to_string()),
+                                    );
+                                }
+                            }
+                            Ok(WsEvent::Error(error)) => {
+                                owner.report_callback_result(owner.handle_web_socket_error(&error))
+                            }
+                            Ok(WsEvent::Close { code, reason }) => {
+                                owner.report_callback_result(
+                                    owner.received_transport_close(code, &reason),
+                                );
+                                if !socket.is_reconnecting() {
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                owner.report_callback_result(
+                                    owner
+                                        .handle_web_socket_error(&error.to_string())
+                                        .and_then(|()| owner.transport_close(Some(1006), "")),
+                                );
                                 break;
                             }
                         }
-                        Err(error) => {
-                            owner.report_callback_result(
-                                owner
-                                    .handle_web_socket_error(&error.to_string())
-                                    .and_then(|()| owner.transport_close(Some(1006), "")),
-                            );
-                            break;
-                        }
                     }
-                }
-            }));
+                }),
+                false,
+                false,
+                RuntimeTaskKind::SocketReader,
+            );
         }
         Ok(())
     }
@@ -1638,6 +1658,8 @@ impl BaseWebSocket {
                 }
             }),
             true,
+            false,
+            RuntimeTaskKind::Finite,
         );
         Ok(())
     }
@@ -2463,12 +2485,14 @@ impl BaseWebSocket {
     // Task handles are socket-owned: closing host I/O need not wake a pending
     // receive or auth future. Never call cancellation/drop while holding state.
     fn spawn_owned(self: &Rc<Self>, future: Pin<Box<dyn Future<Output = ()>>>) -> OwnedOperation {
-        self.spawn_owned_kind(future, false)
+        self.spawn_owned_kind(future, false, false, RuntimeTaskKind::Finite)
     }
     fn spawn_owned_kind(
         self: &Rc<Self>,
         future: Pin<Box<dyn Future<Output = ()>>>,
         relay: bool,
+        eager: bool,
+        kind: RuntimeTaskKind,
     ) -> OwnedOperation {
         let (key, generation) = {
             let mut state = self.state.borrow_mut();
@@ -2484,16 +2508,19 @@ impl BaseWebSocket {
             key: SocketTaskKey::Owned(key),
             completed: completed.clone(),
         };
-        let task = self.owned_tasks.start(
-            self.runtime.as_ref(),
-            |_| {
-                Box::pin(async move {
-                    future.await;
-                    guard.complete();
-                })
-            },
-            |_| {},
-        );
+        let build = move |_| {
+            Box::pin(async move {
+                future.await;
+                guard.complete();
+            }) as Pin<Box<dyn Future<Output = ()>>>
+        };
+        let task = if eager {
+            let runtime: Rc<dyn ExchangeRuntime> = self.runtime.clone();
+            self.owned_tasks.start_eager(&runtime, build, |_| {})
+        } else {
+            self.owned_tasks
+                .start_classified(self.runtime.as_ref(), kind, build, |_| {})
+        };
         let operation = task.clone();
         // A host may poll inline, including invoking dispose before returning
         // its handle. In either case it must not install a stale handle.
@@ -2583,8 +2610,9 @@ impl BaseWebSocket {
             completed: completed.clone(),
         };
         let sleep = self.runtime.sleep(delay.max(0.0).ceil() as u64);
-        let task = self.owned_tasks.start(
+        let task = self.owned_tasks.start_classified(
             self.runtime.as_ref(),
+            RuntimeTaskKind::Timer,
             |_| {
                 Box::pin(async move {
                     if sleep.await.is_err() {
@@ -2921,6 +2949,7 @@ mod tests {
     #[derive(Default)]
     struct Runtime {
         now: Rc<Cell<f64>>,
+        frame_histories: RefCell<Vec<Rc<RefCell<Vec<FrameDrainReceipt>>>>>,
         jobs: RefCell<Vec<Job>>,
         inline_spawn: Cell<bool>,
         fail_sleep: Cell<bool>,
@@ -3041,6 +3070,9 @@ mod tests {
     impl WsRuntime for Runtime {
         fn frame_receipts_enabled(&self) -> bool {
             true
+        }
+        fn register_frame_receipts(&self, receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>) {
+            self.frame_histories.borrow_mut().push(receipts);
         }
         fn transport(&self) -> Arc<dyn TransportProvider> {
             if self.relaying.get() {
@@ -3720,7 +3752,10 @@ mod tests {
                 1,
                 "REST preparation must be core-owned: {mode}"
             );
-            assert_eq!(polls.get() > 0, mode != "unpolled");
+            assert!(
+                polls.get() > 0,
+                "preparation prefix runs before caller polling: {mode}"
+            );
             let weak = Rc::downgrade(&socket);
             socket.dispose();
             drop(socket);
@@ -3844,13 +3879,10 @@ mod tests {
             );
             let weak = Rc::downgrade(&socket);
             socket.dispose();
-            assert!(
-                runtime
-                    .jobs
-                    .borrow()
-                    .iter()
-                    .all(|(_, cancelled)| cancelled.get()),
-                "dispose must cancel the dial task"
+            assert_eq!(
+                runtime.dial_drops.get(),
+                1,
+                "dispose must drop the actual eager dial before the scheduler runs"
             );
             drop(socket);
             runtime.pump(); // The host drops cancelled TASKS, without polling the dial again.
@@ -3859,7 +3891,7 @@ mod tests {
                 weak.upgrade().is_none(),
                 "pending dial retained disposed socket"
             );
-            assert_eq!(runtime.dial_drops.get(), usize::from(mode != "unpolled"));
+            assert_eq!(runtime.dial_drops.get(), 1);
         }
     }
     #[test]
@@ -3883,6 +3915,11 @@ mod tests {
     #[test]
     fn frame_receipts_count_processed_messages_separately_for_each_dial() {
         let (socket, _, runtime, protocol) = fixture();
+        assert_eq!(runtime.frame_histories.borrow().len(), 1);
+        assert!(Rc::ptr_eq(
+            &runtime.frame_histories.borrow()[0],
+            &socket.frame_receipts
+        ));
         run(socket.create_websocket("wss://first".into(), vec![], None)).unwrap();
         runtime.pump();
         socket.on_message(&SocketFrame::Text("one".into())).unwrap();
@@ -3924,6 +3961,22 @@ mod tests {
             (receipts[1].close_consumed, receipts[1].close_processed),
             (1, 1)
         );
+        let weak = Rc::downgrade(&socket);
+        socket.dispose();
+        runtime.pump();
+        drop(socket);
+        assert!(
+            weak.upgrade().is_none(),
+            "replay counters retain no socket owner"
+        );
+        let history = runtime.frame_histories.borrow();
+        let retained = history[0].borrow();
+        assert_eq!(
+            retained.len(),
+            2,
+            "disposed dial histories remain observable"
+        );
+        assert_eq!((retained[1].processed, retained[1].errors), (2, 1));
     }
     #[test]
     fn disposal_cancels_native_event_consumer_without_host_wakeup() {

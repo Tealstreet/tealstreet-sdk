@@ -505,7 +505,7 @@ pub fn infer_stop_loss_type_from_reduce_only_limit(
     let reference_price = get_positive_price_candidate(&[
         ticker.map(|t| t.mark),
         ticker.map(|t| t.last),
-        ticker.map(|t| t.index),
+        ticker.and_then(|t| t.index),
     ])?;
     if order.side == OrderSide::Sell {
         (order.price.to_number() <= reference_price).then_some(OrderType::StopLoss)
@@ -541,7 +541,7 @@ pub fn resolve_market_order_reference_price(
         Some(side_price),
         Some(ticker.mark),
         Some(ticker.last),
-        Some(ticker.index),
+        ticker.index,
         midpoint,
         Some(opposite_price),
     ])

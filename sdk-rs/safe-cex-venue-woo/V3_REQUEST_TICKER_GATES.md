@@ -1,5 +1,9 @@
 # V3 request input and ticker scope
 
+The inactive account/private-order/write closure and request DTO were retired.
+See ACCOUNT_WRITE_REVIEW.md; historical counts below describe the pre-retirement
+audit, while the runners select only the remaining owners.
+
 The unused request preparer, authentication input and prepared-output descriptor
 are retired after caller review. Only WooV3RequestInput remains because the
 inert account/algo/regular/position-mode/websocket builders still consume it.

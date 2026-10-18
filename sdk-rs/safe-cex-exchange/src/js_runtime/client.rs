@@ -10,6 +10,7 @@ use safe_cex_transport::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+mod error_enhancer;
 pub mod factory;
 
 /// What a client needs from its host: the runtime owning launched requests and
@@ -715,8 +716,91 @@ impl RestAdapter for JsRestAdapter {
                     let message = thrown.message();
                     let capture = (|| -> Result<_, crate::runtime::ExchangeError> {
                         let mut fields = Vec::new();
-                        for field in ["name", "message", "code", "stack", "cause", "isAxiosError"] {
+                        for field in [
+                            "name",
+                            "message",
+                            "code",
+                            "stack",
+                            "cause",
+                            "isAxiosError",
+                            "enhancedMessage",
+                            "context",
+                            "originalError",
+                        ] {
                             let value = optional(&thrown.value, field)?;
+                            if field == "originalError"
+                                && matches!(&value, Js::Object(object) if object.class == "Error")
+                            {
+                                use super::value::owned::OwnedJsValue;
+                                let OwnedJsValue::Object(mut snapshot) =
+                                    OwnedJsValue::object(fields.clone())
+                                else {
+                                    unreachable!("error metadata object")
+                                };
+                                for (key, cell) in value.own_entries()? {
+                                    if key.as_ref()
+                                        == "originalError".encode_utf16().collect::<Vec<_>>()
+                                        || key.as_ref()
+                                            == "response".encode_utf16().collect::<Vec<_>>()
+                                        || snapshot
+                                            .iter()
+                                            .any(|(name, _)| name.as_slice() == key.as_ref())
+                                        || cell.is_callable()
+                                    {
+                                        continue;
+                                    }
+                                    let captured = if key.as_ref()
+                                        == "config".encode_utf16().collect::<Vec<_>>()
+                                        && cell.is_object()
+                                    {
+                                        let mut config = vec![];
+                                        for (name, cell) in cell.own_entries()? {
+                                            if cell.is_callable()
+                                                || cell.array_items().is_some_and(|items| {
+                                                    items
+                                                        .into_iter()
+                                                        .flatten()
+                                                        .any(|item| item.is_callable())
+                                                })
+                                            {
+                                                continue;
+                                            }
+                                            let captured = if ["paramsSerializer", "axios-retry"]
+                                                .iter()
+                                                .any(|key| {
+                                                    name.iter().copied().eq(key.encode_utf16())
+                                                })
+                                                && cell.is_object()
+                                            {
+                                                let mut options = vec![];
+                                                for (key, value) in cell.own_entries()? {
+                                                    if !value.is_callable() {
+                                                        options.push((
+                                                            key.to_vec(),
+                                                            OwnedJsValue::from_js(&value)?,
+                                                        ));
+                                                    }
+                                                }
+                                                OwnedJsValue::Object(options)
+                                            } else {
+                                                OwnedJsValue::from_js(&cell)?
+                                            };
+                                            config.push((name.to_vec(), captured));
+                                        }
+                                        OwnedJsValue::Object(config)
+                                    } else {
+                                        OwnedJsValue::from_js(&cell)?
+                                    };
+                                    snapshot.push((key.to_vec(), captured));
+                                }
+                                let snapshot = OwnedJsValue::Object(snapshot);
+                                fields.push((
+                                    "originalErrorIsError",
+                                    super::value::owned::OwnedJsValue::Bool(true),
+                                ));
+                                fields.push(("originalError", snapshot));
+                                continue;
+                            }
                             if !value.is_undefined() || thrown.value.has_own(field) {
                                 fields.push((
                                     field,
@@ -1160,11 +1244,18 @@ impl JsHttpHost for RestHttpHost {
                 Err(failure) => {
                     if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
                         failure.transport_error.as_deref()
-                        && let Some(cause) = origin
+                        && origin
                             .error()
-                            .downcast_ref::<super::value::owned::OwnedCallbackError>()
+                            .is::<super::value::owned::OwnedCallbackError>()
                     {
-                        return Err(Thrown::new(cause.value().to_js()));
+                        let config = if remote.is_some() {
+                            effective_config(&config, (*failure.request).clone())?
+                        } else {
+                            config
+                        };
+                        let error = Thrown::from(crate::runtime::ExchangeError::from(failure));
+                        error.value.define("config", config)?;
+                        return Err(error);
                     }
                     let config = if remote.is_some() {
                         effective_config(&config, *failure.request)?

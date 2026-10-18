@@ -19,7 +19,7 @@ use crate::{
 };
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_num::{JsJsonValue, TableHit};
-use safe_cex_types::Candle;
+use safe_cex_types::{Candle, retained_json::RetainedJsonInput};
 use std::{
     any::Any,
     cell::RefCell,
@@ -103,16 +103,16 @@ fn json_text(value: &JsJsonValue) -> Result<String, ExchangeError> {
         .ok_or_else(|| ExchangeError::new("Undefined WebSocket frame"))
 }
 
-fn topic(t: &[u16]) -> JsJsonValue {
-    JsJsonValue::String(lossy(t))
+fn topic(t: &[u16]) -> RetainedJsonInput {
+    RetainedJsonInput::Text(t.to_vec())
 }
 
-fn interval_json(interval: &TableHit<f64>) -> Option<JsJsonValue> {
+fn interval_json(interval: &TableHit<f64>) -> Option<RetainedJsonInput> {
     match interval {
-        TableHit::Mapped(n) => Some(JsJsonValue::Number(*n)),
+        TableHit::Mapped(n) => Some(RetainedJsonInput::Float(*n)),
         // A stock-prototype member is a function: JSON.stringify omits the field.
         TableHit::Inherited(_) => None,
-        TableHit::Missing => Some(JsJsonValue::Number(1.0)),
+        TableHit::Missing => Some(RetainedJsonInput::Float(1.0)),
     }
 }
 
@@ -244,12 +244,18 @@ impl PublicSubscriptionHost for SocketHost {
                 event,
                 feed,
                 product_ids,
-            } => JsJsonValue::Object(vec![
-                ("event".into(), JsJsonValue::String(event.into())),
-                ("feed".into(), JsJsonValue::String(feed.into())),
+            } => RetainedJsonInput::Object(vec![
                 (
-                    "product_ids".into(),
-                    JsJsonValue::Array(product_ids.iter().map(|t| topic(t)).collect()),
+                    "event".encode_utf16().collect(),
+                    RetainedJsonInput::Text(event.encode_utf16().collect()),
+                ),
+                (
+                    "feed".encode_utf16().collect(),
+                    RetainedJsonInput::Text(feed.encode_utf16().collect()),
+                ),
+                (
+                    "product_ids".encode_utf16().collect(),
+                    RetainedJsonInput::Array(product_ids.iter().map(|t| topic(t)).collect()),
                 ),
             ]),
             PublicSubscription::SpotTicker {
@@ -260,14 +266,17 @@ impl PublicSubscriptionHost for SocketHost {
             } => spot_frame(
                 method,
                 vec![
-                    ("channel".into(), JsJsonValue::String(channel.into())),
                     (
-                        "symbol".into(),
-                        JsJsonValue::Array(symbols.iter().map(|t| topic(t)).collect()),
+                        "channel".encode_utf16().collect(),
+                        RetainedJsonInput::Text(channel.encode_utf16().collect()),
                     ),
                     (
-                        "event_trigger".into(),
-                        JsJsonValue::String(event_trigger.into()),
+                        "symbol".encode_utf16().collect(),
+                        RetainedJsonInput::Array(symbols.iter().map(|t| topic(t)).collect()),
+                    ),
+                    (
+                        "event_trigger".encode_utf16().collect(),
+                        RetainedJsonInput::Text(event_trigger.encode_utf16().collect()),
                     ),
                 ],
             ),
@@ -279,12 +288,18 @@ impl PublicSubscriptionHost for SocketHost {
             } => spot_frame(
                 method,
                 vec![
-                    ("channel".into(), JsJsonValue::String(channel.into())),
                     (
-                        "symbol".into(),
-                        JsJsonValue::Array(symbols.iter().map(|t| topic(t)).collect()),
+                        "channel".encode_utf16().collect(),
+                        RetainedJsonInput::Text(channel.encode_utf16().collect()),
                     ),
-                    ("depth".into(), JsJsonValue::Number(depth)),
+                    (
+                        "symbol".encode_utf16().collect(),
+                        RetainedJsonInput::Array(symbols.iter().map(|t| topic(t)).collect()),
+                    ),
+                    (
+                        "depth".encode_utf16().collect(),
+                        RetainedJsonInput::Float(depth),
+                    ),
                 ],
             ),
             PublicSubscription::SpotOhlc {
@@ -294,19 +309,29 @@ impl PublicSubscriptionHost for SocketHost {
                 interval,
             } => {
                 let mut params = vec![
-                    ("channel".into(), JsJsonValue::String(channel.into())),
                     (
-                        "symbol".into(),
-                        JsJsonValue::Array(symbols.iter().map(|t| topic(t)).collect()),
+                        "channel".encode_utf16().collect(),
+                        RetainedJsonInput::Text(channel.encode_utf16().collect()),
+                    ),
+                    (
+                        "symbol".encode_utf16().collect(),
+                        RetainedJsonInput::Array(symbols.iter().map(|t| topic(t)).collect()),
                     ),
                 ];
                 if let Some(interval) = interval_json(&interval) {
-                    params.push(("interval".into(), interval));
+                    params.push(("interval".encode_utf16().collect(), interval));
                 }
                 spot_frame(method, params)
             }
         };
-        self.call("send", vec![Js::str(&json_text(&value)?)])?;
+        self.call(
+            "send",
+            vec![Js::str(
+                &safe_cex_num::js_retained_json_stringify(&value)
+                    .map_err(|e| ExchangeError::new(e.message))?
+                    .ok_or_else(|| ExchangeError::new("Undefined WebSocket frame"))?,
+            )],
+        )?;
         Ok(())
     }
     // ts: `console.error(message, symbol, e)`.
@@ -324,10 +349,16 @@ impl PublicSubscriptionHost for SocketHost {
     }
 }
 
-fn spot_frame(method: &str, params: Vec<(String, JsJsonValue)>) -> JsJsonValue {
-    JsJsonValue::Object(vec![
-        ("method".into(), JsJsonValue::String(method.into())),
-        ("params".into(), JsJsonValue::Object(params)),
+fn spot_frame(method: &str, params: Vec<(Vec<u16>, RetainedJsonInput)>) -> RetainedJsonInput {
+    RetainedJsonInput::Object(vec![
+        (
+            "method".encode_utf16().collect(),
+            RetainedJsonInput::Text(method.encode_utf16().collect()),
+        ),
+        (
+            "params".encode_utf16().collect(),
+            RetainedJsonInput::Object(params),
+        ),
     ])
 }
 
@@ -335,17 +366,19 @@ fn spot_frame(method: &str, params: Vec<(String, JsJsonValue)>) -> JsJsonValue {
 /// the tolerant Futures private reader yields null for an unparsable frame.
 fn parse_frame(data: &Js, tolerant: bool) -> Result<Js, ExchangeError> {
     let text = match data {
-        Js::String(s) => lossy(s),
-        Js::Undefined | Js::Null => String::new(),
-        other => lossy(&other.to_js_string().map_err(ex)?),
+        Js::String(s) => s.to_vec(),
+        Js::Undefined | Js::Null => Vec::new(),
+        other => other.to_js_string().map_err(ex)?.to_vec(),
     };
     let text = if text.is_empty() && !tolerant {
-        "{}".to_owned()
+        "{}".encode_utf16().collect()
     } else {
         text
     };
-    match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(v) => Ok(from_json(&v)),
+    match safe_cex_types::retained_json::RetainedJsonInput::parse_json(&text) {
+        Ok(value) => Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+            value,
+        )),
         Err(_) if tolerant => Ok(Js::Null),
         Err(e) => {
             let mut error = ExchangeError::new(e.to_string());
@@ -760,9 +793,9 @@ fn key_units(key: &Key<Js>) -> Result<Vec<u16>, ExchangeError> {
     }
 }
 
-fn frame_json(frame: &Frame<Js>) -> Result<JsJsonValue, ExchangeError> {
-    let symbols = |values: &Vec<Rc<Js>>| -> Result<JsJsonValue, ExchangeError> {
-        Ok(JsJsonValue::Array(
+fn frame_json(frame: &Frame<Js>) -> Result<RetainedJsonInput, ExchangeError> {
+    let symbols = |values: &Vec<Rc<Js>>| -> Result<RetainedJsonInput, ExchangeError> {
+        Ok(RetainedJsonInput::Array(
             values
                 .iter()
                 .map(|v| v.to_js_string().map(|s| topic(&s)).map_err(ex))
@@ -774,10 +807,16 @@ fn frame_json(frame: &Frame<Js>) -> Result<JsJsonValue, ExchangeError> {
             event,
             feed,
             products,
-        } => JsJsonValue::Object(vec![
-            ("event".into(), JsJsonValue::String((*event).into())),
-            ("feed".into(), JsJsonValue::String((*feed).into())),
-            ("product_ids".into(), symbols(products)?),
+        } => RetainedJsonInput::Object(vec![
+            (
+                "event".encode_utf16().collect(),
+                RetainedJsonInput::Text((*event).encode_utf16().collect()),
+            ),
+            (
+                "feed".encode_utf16().collect(),
+                RetainedJsonInput::Text((*feed).encode_utf16().collect()),
+            ),
+            ("product_ids".encode_utf16().collect(), symbols(products)?),
         ]),
         Frame::SpotBook {
             method,
@@ -787,9 +826,15 @@ fn frame_json(frame: &Frame<Js>) -> Result<JsJsonValue, ExchangeError> {
         } => spot_frame(
             method,
             vec![
-                ("channel".into(), JsJsonValue::String((*channel).into())),
-                ("symbol".into(), symbols(s)?),
-                ("depth".into(), JsJsonValue::Number(*depth)),
+                (
+                    "channel".encode_utf16().collect(),
+                    RetainedJsonInput::Text((*channel).encode_utf16().collect()),
+                ),
+                ("symbol".encode_utf16().collect(), symbols(s)?),
+                (
+                    "depth".encode_utf16().collect(),
+                    RetainedJsonInput::Float(*depth),
+                ),
             ],
         ),
         Frame::SpotOhlc {
@@ -799,11 +844,14 @@ fn frame_json(frame: &Frame<Js>) -> Result<JsJsonValue, ExchangeError> {
             interval,
         } => {
             let mut params = vec![
-                ("channel".into(), JsJsonValue::String((*channel).into())),
-                ("symbol".into(), symbols(s)?),
+                (
+                    "channel".encode_utf16().collect(),
+                    RetainedJsonInput::Text((*channel).encode_utf16().collect()),
+                ),
+                ("symbol".encode_utf16().collect(), symbols(s)?),
             ];
             if let Some(interval) = interval_json(interval) {
-                params.push(("interval".into(), interval));
+                params.push(("interval".encode_utf16().collect(), interval));
             }
             spot_frame(method, params)
         }
@@ -861,7 +909,9 @@ impl ListenerHost for SocketHost {
         Ok(self.this().get("isConnected").map_err(ex)?.truthy())
     }
     fn send(&self, frame: Rc<RefCell<Frame<Js>>>) -> Result<(), ExchangeError> {
-        let text = json_text(&frame_json(&frame.borrow())?)?;
+        let text = safe_cex_num::js_retained_json_stringify(&frame_json(&frame.borrow())?)
+            .map_err(|e| ExchangeError::new(e.message))?
+            .ok_or_else(|| ExchangeError::new("Undefined WebSocket frame"))?;
         self.call("send", vec![Js::str(&text)])?;
         Ok(())
     }

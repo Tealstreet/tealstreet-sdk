@@ -466,8 +466,9 @@ fn dispatch(mut h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown
             }
             "fetchIncomeHistoryRange" => {
                 let result = crate::income_reads::fetch_income_history_range(
-                    &h,
+                    Rc::new(h.clone()),
                     &super::reads::range_runtime(),
+                    h.0.exchange_runtime(),
                     first.to_number()?,
                     second.to_number()?,
                     arg(&args, 2),

@@ -1,6 +1,6 @@
 use safe_cex_transport::signing::*;
 use safe_cex_transport::{RestAdapter, RestBody, RestRequest, RestResponse, TransportFuture};
-use safe_cex_types::ExchangeName;
+use safe_cex_types::{ExchangeName, retained_json::RetainedJsonInput};
 use serde_json::{Value, json};
 use std::{
     future::Future,
@@ -16,6 +16,9 @@ fn run<T>(future: impl Future<Output = T>) -> T {
         Poll::Ready(v) => v,
         Poll::Pending => panic!("unexpected pending recorder"),
     }
+}
+fn native_json_fixture(value: Value) -> RetainedJsonInput {
+    RetainedJsonInput::parse_json(&value.to_string().encode_utf16().collect::<Vec<_>>()).unwrap()
 }
 struct Browser {
     expected: Value,
@@ -55,10 +58,7 @@ impl RemoteSigner for Browser {
                 expected
                     .get("data")
                     .cloned()
-                    .map(
-                        |value| safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
-                            .unwrap()
-                    )
+                    .map(native_json_fixture)
                     .as_ref(),
                 "native remote data identity"
             );
@@ -105,7 +105,13 @@ impl RemoteSigner for Browser {
             };
             let mut input = json!({"headers":client.headers});
             if let Some(body) = &client.body {
-                input["data"] = body.untransformed().unwrap().clone().into_value().unwrap();
+                let data = body
+                    .untransformed()
+                    .unwrap()
+                    .json_stringify()
+                    .unwrap()
+                    .unwrap();
+                input["data"] = serde_json::from_str(&data).unwrap();
             }
             assert_eq!(
                 input, self.expected["clientInput"],
@@ -175,11 +181,11 @@ fn remote_stage_matches_whole_source_adapter_and_real_axios() {
             method: "post".into(),
             url: "/data".into(),
             base_url: Some("https://example.test".into()),
-            body: row.get("data").cloned().map(|value| {
-                RestBody::Untransformed(
-                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
-                )
-            }),
+            body: row
+                .get("data")
+                .cloned()
+                .map(native_json_fixture)
+                .map(RestBody::Untransformed),
             ..Default::default()
         };
         request
@@ -203,10 +209,7 @@ fn remote_stage_matches_whole_source_adapter_and_real_axios() {
             row["wire"]
                 .get("data")
                 .cloned()
-                .map(
-                    |value| safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
-                        .unwrap()
-                )
+                .map(native_json_fixture)
                 .as_ref(),
             "remote inner adapter must retain echoed object versus string identity: {row}"
         );

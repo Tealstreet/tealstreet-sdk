@@ -171,7 +171,7 @@ fn legacy_history_matches_source_requests_and_rows() {
                 "LEGACY native row cardinality {index}"
             );
             assert_eq!(
-                observe(&Value::Array(rows)),
+                observe(&json!(rows)),
                 observe(&Value::Array(expected.clone())),
                 "LEGACY native rows {index}"
             );
@@ -264,7 +264,13 @@ fn legacy_response_phase_preserves_native_rows() {
         assert_eq!(result.len(), 3, "LEGACY response phase row count");
         assert_eq!(
             result,
-            data["rows"].as_array().unwrap().clone(),
+            data["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(safe_cex_types::retained_json::RetainedJsonInput::from)
+                .collect::<Vec<_>>(),
             "LEGACY response phase native members"
         );
         count += 1;

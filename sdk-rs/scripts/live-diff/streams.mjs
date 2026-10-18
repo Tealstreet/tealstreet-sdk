@@ -43,6 +43,7 @@ const report = {
   captureMs,
   startupOnly,
   nativeDrainVerified: false,
+  nativeDrainScope: 'exchange-runtime (parser, physical transport, canonical jobs, classified raw tasks)',
   comparisonsProvisional: true,
   limitations: [
     tradeCapability,
@@ -245,6 +246,7 @@ try {
     replaySessions.map(async (s) => {
       if (!startupOnly) await s.call('subscribe', [symbol, '1m', candleTo]);
       if (!(await s.relay.ready())) throw new Error(`${s.label}: captured sockets did not open`);
+      s.startupReceipt = await s.call('receipt');
       // Flush startup Store deliveries before observing parser-facing replay.
       await s.call('barrier');
     }),
@@ -389,6 +391,7 @@ try {
       sockets: s.sockets,
       diagnostics: s.diagnostics,
       progress: s.relay.progress,
+      startupReceipt: s.startupReceipt,
     });
     try {
       const value = await s.call('drain');

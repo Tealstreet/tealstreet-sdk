@@ -14,11 +14,6 @@ import { verifiedNumberOutputOrigin } from '../../safe-cex-parity/scripts/accept
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const names = [
-  "safe_cex_venue_woo::v3_account_writes::WooV3AccountPositionMode",
-  "safe_cex_venue_woo::v3_account_writes::WooV3FuturesMarginMode",
-  "safe_cex_venue_woo::v3_algo_writes::WooV3AlgoPlaceFamily",
-  "safe_cex_venue_woo::v3_algo_writes::WooV3AlgoPlaceType",
-  "safe_cex_venue_woo::v3_algo_writes::WooV3AlgoTriggerPriceType",
   "safe_cex_venue_woo::v3_contracts::WooV3AccountInfoPositionMode",
   "safe_cex_venue_woo::v3_contracts::WooV3Endpoint",
   "safe_cex_venue_woo::v3_contracts::WooV3HttpMethod",
@@ -31,20 +26,6 @@ const names = [
   "safe_cex_venue_woo::v3_contracts::WooV3PlaceOrderRequestSide",
   "safe_cex_venue_woo::v3_contracts::WooV3PlaceOrderRequestType",
   "safe_cex_venue_woo::v3_contracts::WooV3PositionPositionSide",
-  "safe_cex_venue_woo::v3_private::WooV3AccountPositionMode",
-  "safe_cex_venue_woo::v3_private::WooV3PositionSide",
-  "safe_cex_venue_woo::v3_private_orders::WooV3AlgoType",
-  "safe_cex_venue_woo::v3_private_orders::WooV3MarginMode",
-  "safe_cex_venue_woo::v3_private_orders::WooV3OrderSide",
-  "safe_cex_venue_woo::v3_private_orders::WooV3OrderStatus",
-  "safe_cex_venue_woo::v3_private_orders::WooV3RegularOrderType",
-  "safe_cex_venue_woo::v3_private_orders::WooV3TriggerPriceType",
-  "safe_cex_venue_woo::v3_private_orders::WooV3TriggerStatus",
-  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularCancelStatus",
-  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularMutationStatus",
-  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularPlaceKind",
-  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularPlaceType",
-  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularTimeInForce"
 ];
 const args = process.argv.slice(2);
 assert.ok(args.every(arg => arg === '--control' || /^--target=(native|wasm32-unknown-unknown)$/.test(arg) || arg.startsWith('--out=')), 'unknown focused literal argument');
@@ -69,7 +50,7 @@ const own = artifacts.filter(item => item.package_id === pkg.id && item.target.n
 assert.equal(own.length, 1, 'actual selected WOO compiler artifact');
 const found = inventory(doc, { defaultTraits: loadPolicy('default-traits'), receiverTraits: loadPolicy('receiver-traits'), readSource: file => fs.readFileSync(path.resolve(root, file)) });
 const owners = found.types.filter(owner => names.includes(owner.name));
-assert.equal(owners.length, 31, 'complete reviewed literal cohort');
+assert.equal(owners.length, 12, 'complete reviewed literal cohort');
 assert.ok(owners.every(owner => owner.deserialize && owner.kind === 'enum' && !owner.methods.length && !owner.conversions.length && !owner.traitMethods.length), 'no indexed API may be omitted');
 const scanner = buildScanner('1');
 const sysroot = command('rustc', ['--print', 'sysroot']).trim();
@@ -114,11 +95,11 @@ try {
   if (output) fs.writeFileSync(output, JSON.stringify(rows, null, 2) + '\n');
   const failed = rows.filter(row => row.failures.length);
   console.log(JSON.stringify({ target: targetName, owners: rows.length, failed: failed.map(row => ({ name: row.name, failures: row.failures })) }));
-  assert.equal(rows.length, 31);
+  assert.equal(rows.length, 12);
   if (control) {
     assert.equal(mutations, 1);
-    assert.equal(failed.length, 31, 'every independent concrete string guard removal must fail');
+    assert.equal(failed.length, 12, 'every independent concrete string guard removal must fail');
     assert.ok(failed.every(row => row.failures.some(message => message.startsWith('Deserialize output mismatch for {'))), 'each actual tagged-map admission must change native variant observations');
-    console.log('31 concrete owner string guard removals: compiled named native refusals');
+    console.log('12 concrete owner string guard removals: compiled named native refusals');
   } else assert.deepEqual(failed, [], 'reviewed actual WOO enum fields and string-only admission');
 } finally { for (const [file, bytes] of originals) assert.deepEqual(fs.readFileSync(path.join(root, file)), bytes, `${file}: real production source remains unchanged`); }

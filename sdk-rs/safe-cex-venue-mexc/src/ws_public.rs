@@ -818,7 +818,7 @@ pub fn handle_ticker_frame(
     patch.set_number("ask", next.ask);
     patch.set_number("last", next.last);
     patch.set_number("mark", next.mark);
-    patch.set_number("index", next.index);
+    patch.set_native("index", next.index);
     patch.set_number("percentage", next.percentage);
     patch.set_number("openInterest", next.open_interest);
     patch.set_number("fundingRate", next.funding_rate);

@@ -783,7 +783,16 @@ impl FactoryBindings for Factorizer<'_> {
             adapter: self.imports.adapter.clone(),
             host: self.imports.host.clone(),
             runtime: runtime.clone(),
-            store: None,
+            store: Some(
+                self.imports
+                    .owner
+                    .borrow()
+                    .upgrade()
+                    .ok_or_else(|| failure("HTTP factory exchange owner released"))?
+                    .base
+                    .store
+                    .clone(),
+            ),
             stats: None,
             logs: None,
             every: vec![],
@@ -1133,7 +1142,7 @@ impl ExchangeImports for NativeImports {
         let runtime = self.runtime.clone();
         Ok(Box::pin(async move {
             // ts: paginateIncomeRange — the shared pager over this venue's rethrowing page fetch.
-            let mut fetch_page =
+            let fetch_page =
                 move |page: IncomePageParams| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
                     let call = fetch(record([
                         ("startTime", number(page.start_time)),
@@ -1145,10 +1154,16 @@ impl ExchangeImports for NativeImports {
                         crate::exchange_classes::income_records(&rows).map_err(into_exchange)
                     })
                 };
-            let mut delay = move |ms: f64| runtime.sleep(ms.max(0.0) as u64);
-            let result = paginate_income_range(&mut fetch_page, options, &mut delay)
-                .await
-                .map_err(Rc::new)?;
+            let pager_runtime = runtime.clone();
+            let delay = move |ms: f64| runtime.sleep(ms.max(0.0) as u64);
+            let result = paginate_income_range(
+                pager_runtime,
+                Box::new(fetch_page),
+                options,
+                Box::new(delay),
+            )
+            .await
+            .map_err(Rc::new)?;
             Ok(record([
                 (
                     "records",
@@ -1252,23 +1267,27 @@ impl ExchangeImports for NativeImports {
         }
         let delay = interval.filter(|v| *v > 0.0).unwrap_or(5_000.0);
         let reporter = runtime.clone();
-        self.runtime.spawn_local(Box::pin(async move {
-            if runtime.sleep(delay as u64).await.is_err() {
-                return;
-            }
-            // setTimeout(fn, 0): the tick runs on its own scheduler turn.
-            let _ = runtime.sleep(0).await;
-            let result = match callback() {
-                Ok(future) => future.await.map(|_| ()),
-                Err(error) => Err(error),
-            };
-            if let Err(error) = result {
-                reporter.report_exception(
-                    &error,
-                    &serde_json::json!({"operation":"binance tick loop"}).into(),
-                );
-            }
-        }));
+        self.runtime.spawn_classified(
+            safe_cex_exchange::runtime::RuntimeTaskKind::Timer,
+            Box::pin(async move {
+                if runtime.sleep(delay as u64).await.is_err() {
+                    return;
+                }
+                runtime.task_work_started();
+                // setTimeout(fn, 0): the tick runs on its own scheduler turn.
+                let _ = runtime.sleep(0).await;
+                let result = match callback() {
+                    Ok(future) => future.await.map(|_| ()),
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = result {
+                    reporter.report_exception(
+                        &error,
+                        &serde_json::json!({"operation":"binance tick loop"}).into(),
+                    );
+                }
+            }),
+        );
         Ok(())
     }
 }
@@ -1301,20 +1320,23 @@ fn schedule_timer(
     let id = this.next.get() + 1.0;
     this.next.set(id);
     let (runtime, timers) = (this.runtime.clone(), Rc::downgrade(this));
-    let task = this.runtime.spawn_local(Box::pin(async move {
-        if runtime.sleep(delay.max(0.0) as u64).await.is_err() {
-            return;
-        }
-        if let Some(timers) = timers.upgrade() {
-            timers.live.borrow_mut().remove(&(id as u64));
-        }
-        if let Err(error) = action() {
-            runtime.report_exception(
-                &error,
-                &serde_json::json!({"operation":"binance timer"}).into(),
-            );
-        }
-    }));
+    let task = this.runtime.spawn_classified(
+        safe_cex_exchange::runtime::RuntimeTaskKind::Timer,
+        Box::pin(async move {
+            if runtime.sleep(delay.max(0.0) as u64).await.is_err() {
+                return;
+            }
+            if let Some(timers) = timers.upgrade() {
+                timers.live.borrow_mut().remove(&(id as u64));
+            }
+            if let Err(error) = action() {
+                runtime.report_exception(
+                    &error,
+                    &serde_json::json!({"operation":"binance timer"}).into(),
+                );
+            }
+        }),
+    );
     this.live.borrow_mut().insert(id as u64, task);
     number(id)
 }

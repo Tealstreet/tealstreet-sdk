@@ -5,13 +5,17 @@ use crate::binding::{
     client::JsRestAdapter,
     ops,
     rt::{Rt, Shared},
-    value::{Js, Thrown, arg, from_json, from_typed, to_json, to_typed},
+    value::{Js, Thrown, arg, from_json, from_typed, to_json},
 };
 use crate::{
     historical_fills, history_fetch, legacy_fills, legacy_fills::WooLegacyFillsQuery,
     legacy_lifecycle, order_pages, orders, response, transaction,
 };
-use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeError};
+use safe_cex_exchange::{
+    exchange::Exchange,
+    js_runtime::value::{from_retained_input, to_retained_input},
+    runtime::ExchangeError,
+};
 use serde_json::{Map, Value};
 use std::rc::{Rc, Weak};
 
@@ -77,8 +81,50 @@ fn history_query(opts: &Js) -> Result<WooLegacyFillsQuery, Thrown> {
     })
 }
 
+fn historical_options(rt: &Rt, opts: &Js) -> Result<safe_cex_types::ExecutionsOptions, Thrown> {
+    let symbol = opts.get("symbol")?;
+    let order = opts.get("orderId")?;
+    let from = opts.get("from")?;
+    let to = opts.get("to")?;
+    let limit = opts.get("limit")?;
+    let symbol = rt
+        .this
+        .call_method("normalizeRequestedSymbol", vec![symbol])?;
+    let symbol = text_option(&symbol)?;
+    let order_id = if order.truthy() {
+        text_option(&order)?
+    } else {
+        None
+    };
+    let bound = |value: Js| -> Result<Option<f64>, Thrown> {
+        if value.is_nullish() || value.strict_equals(&Js::str("")) {
+            Ok(None)
+        } else {
+            Ok(Some(value.to_number()?))
+        }
+    };
+    let from = bound(from)?;
+    let to = bound(to)?;
+    let limit = if limit.is_undefined() {
+        None
+    } else {
+        Some(limit.to_number()?)
+    };
+    Ok(safe_cex_types::ExecutionsOptions {
+        symbol,
+        order_id,
+        from,
+        to,
+        limit,
+    })
+}
+
 fn rows(values: Vec<Value>) -> Js {
     Js::array(values.iter().map(from_json).collect())
+}
+
+fn retained_rows(values: Vec<safe_cex_types::retained_json::RetainedJsonInput>) -> Js {
+    Js::array(values.into_iter().map(from_retained_input).collect())
 }
 
 fn parsed_transaction(row: transaction::ParsedWooTransaction) -> Result<Js, Thrown> {
@@ -102,8 +148,7 @@ fn parsed_transaction(row: transaction::ParsedWooTransaction) -> Result<Js, Thro
         (
             "commissionAsset",
             row.commission_asset
-                .as_ref()
-                .map_or(Js::Undefined, from_json),
+                .map_or(Js::Undefined, from_retained_input),
         ),
         ("realizedPnl", number_or_undefined(row.realized_pnl)),
         ("positionSide", from_typed(&row.position_side)?),
@@ -224,8 +269,10 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         // ts: WOOXExchange#parseTransactionHistoryRow
         "parseTransactionHistoryRow" => sync(
             name,
-            |_, a| match transaction::parse_transaction_history_row(&object(&arg(&a, 0))?)
-                .map_err(|e| Thrown::type_error(&e))?
+            |_, a| match transaction::parse_transaction_history_row(&to_retained_input(&arg(
+                &a, 0,
+            ))?)
+            .map_err(|e| Thrown::type_error(&e))?
             {
                 Some(row) => parsed_transaction(row),
                 None => Ok(Js::Null),
@@ -236,8 +283,8 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         "parseTransactionRowsFromResponse" => sync(
             name,
             |_, a| {
-                let data = to_json(&arg(&a, 0))?;
-                Ok(rows(
+                let data = to_retained_input(&arg(&a, 0))?;
+                Ok(retained_rows(
                     response::parse_transaction_rows_from_response(&data).to_vec(),
                 ))
             },
@@ -249,7 +296,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
                 let query = history_query(&arg(&a, 0))?;
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 match legacy_fills::fetch_legacy_transaction_history_rows(&adapter, &query).await {
-                    Ok(values) => Ok(rows(values)),
+                    Ok(values) => Ok(retained_rows(values)),
                     Err(failure) => Err(adapter.thrown(failure)),
                 }
             })
@@ -260,7 +307,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
                 let query = history_query(&arg(&a, 0))?;
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 match history_fetch::fetch_transaction_history_rows(&adapter, &query).await {
-                    Ok(values) => Ok(rows(values)),
+                    Ok(values) => Ok(retained_rows(values)),
                     Err(failure) => Err(adapter.thrown(failure)),
                 }
             })
@@ -270,11 +317,17 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
             Box::pin(async move {
                 let opts = arg(&a, 0);
                 // ts: `opts: ExecutionsOptions = {}`
-                let opts = to_typed(&if opts.is_undefined() {
-                    Js::object(vec![])
-                } else {
-                    opts
-                })?;
+                if rt.this.get("isPublicDataOnly")?.truthy() {
+                    return Ok(Js::array(vec![]));
+                }
+                let opts = historical_options(
+                    &rt,
+                    &if opts.is_undefined() {
+                        Js::object(vec![])
+                    } else {
+                        opts
+                    },
+                )?;
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 let venue = venue(&rt)?;
                 let fills =
@@ -287,7 +340,20 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         // ts: WOOXExchange#fetchHistoricalTradesInternal
         "fetchHistoricalTradesInternal" => asynchronous(name, rt, |rt, a| {
             Box::pin(async move {
-                let opts = to_typed(&arg(&a, 0))?;
+                let raw = arg(&a, 0);
+                if rt.this.get("isPublicDataOnly")?.truthy() || !raw.get("symbol")?.truthy() {
+                    return Ok(Js::array(vec![]));
+                }
+                let opts = historical_options(&rt, &raw)?;
+                let opts = safe_cex_types::HistoricalTradeOptions {
+                    symbol: opts.symbol.unwrap_or_default(),
+                    order_id: opts.order_id,
+                    from: opts.from,
+                    to: opts.to,
+                    limit: opts.limit,
+                    from_id: None,
+                    account_name: None,
+                };
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 let venue = venue(&rt)?;
                 let trades = historical_fills::fetch_historical_trades_internal(

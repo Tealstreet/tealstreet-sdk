@@ -87,7 +87,7 @@ pub const GRAFANA_ENDPOINTS_PERIODIC: &[&str] = &[
 ];
 
 // ts: ORDER_TYPE
-// ts-bug: ORDER_TYPE inherited Object.prototype members cannot be domain enum values.
+// Own entries; binding::globals adds the source Object.prototype at runtime.
 pub const ORDER_TYPE: &[(&str, OrderType)] = &[
     ("POST_ONLY", OrderType::Limit),
     ("LIMIT", OrderType::Limit),
@@ -100,11 +100,11 @@ pub const ORDER_TYPE: &[(&str, OrderType)] = &[
 ];
 
 // ts: ORDER_SIDE
-// ts-bug: ORDER_SIDE inherited Object.prototype members cannot be domain enum values.
+// Own entries; binding::globals adds the source Object.prototype at runtime.
 pub const ORDER_SIDE: &[(&str, OrderSide)] = &[("BUY", OrderSide::Buy), ("SELL", OrderSide::Sell)];
 
 // ts: ORDER_TRIGGER_TYPE
-// ts-bug: ORDER_TRIGGER_TYPE inherited Object.prototype members cannot be domain enum values.
+// Own entries; binding::globals adds the source Object.prototype at runtime.
 pub const ORDER_TRIGGER_TYPE: &[(&str, OrderStopTriggerType)] = &[
     ("MARK_PRICE", OrderStopTriggerType::MarkPrice),
     ("MARKET_PRICE", OrderStopTriggerType::LastPrice),

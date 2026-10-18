@@ -1222,6 +1222,7 @@ fn ticker_frame_keeps_valid_rows(
     target: &str,
     source_error: bool,
     inherited: bool,
+    subscriber_error: bool,
 ) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_store::{Store, StoreUpdate};
@@ -1284,6 +1285,29 @@ fn ticker_frame_keeps_valid_rows(
             .clone();
         rt.console.borrow_mut().clear();
         rt.errors.borrow_mut().clear();
+        let unsubscribe = subscriber_error.then(|| {
+            let target = target.to_owned();
+            let expected = from_json(&rows[1][source]);
+            store.subscribe_native(Box::new(move |state, _| {
+                let state = state.downcast_ref::<Js>().unwrap();
+                let tickers = state.get("tickers").unwrap().array_values().unwrap();
+                let eth = tickers
+                    .iter()
+                    .find(|row| {
+                        row.get("symbol")
+                            .unwrap()
+                            .strict_equals(&Js::str("ETHUSDC"))
+                    })
+                    .unwrap();
+                if eth.get(&target).unwrap().strict_equals(&expected) {
+                    Err(safe_cex_types::StoreSubscriberError::new(
+                        "Orderly fixture subscriber failure",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }))
+        });
         socket
             .events
             .borrow_mut()
@@ -1293,9 +1317,24 @@ fn ticker_frame_keeps_valid_rows(
         for _ in 0..16 {
             rt.pump();
         }
+        let raw = store.native_value("tickersBySymbol").unwrap();
+        for (symbol, before) in [("BTCUSDC", &unchanged_btc), ("LTCUSDC", &unchanged_ltc)] {
+            assert!(
+                raw.get(symbol)
+                    .unwrap()
+                    .get(target)
+                    .unwrap()
+                    .strict_equals(&from_json(&before[target])),
+                "ORDERLY-ADMISSION {name:?}/{topic}: refused {symbol} row must leave the raw Store unchanged"
+            );
+        }
         let tickers = store.tickers().unwrap();
         let projected = serde_json::to_value(&*tickers).unwrap();
-        let expected_ada = rows[3][source].as_f64().unwrap();
+        let expected_ada = if subscriber_error {
+            unchanged_btc[target].as_f64().unwrap()
+        } else {
+            rows[3][source].as_f64().unwrap()
+        };
         let expected_eth = rows[1][source].as_f64().unwrap();
         let btc = projected
             .as_array()
@@ -1323,7 +1362,7 @@ fn ticker_frame_keeps_valid_rows(
             .unwrap();
         assert_eq!(
             ada[target], expected_ada,
-            "{name:?}/{topic}: later valid ADA row survives"
+            "{name:?}/{topic}: later ADA row follows source error precedence"
         );
         assert_eq!(
             *btc, unchanged_btc,
@@ -1350,6 +1389,15 @@ fn ticker_frame_keeps_valid_rows(
                 reports.is_empty(),
                 "inherited targets remain source no-ops: {reports}"
             );
+        } else if subscriber_error {
+            assert!(
+                reports.contains("Orderly fixture subscriber failure"),
+                "{reports}"
+            );
+            assert!(
+                !reports.contains("typed field"),
+                "subscriber error takes precedence: {reports}"
+            );
         } else if source_error {
             assert!(
                 reports.contains("Cannot read properties of null (reading 'symbol')"),
@@ -1369,20 +1417,23 @@ fn ticker_frame_keeps_valid_rows(
                 "{name:?}/{topic}: {reports}"
             );
         }
+        if let Some(unsubscribe) = unsubscribe {
+            unsubscribe();
+        }
         venue.dispose().unwrap();
     }
 }
 #[test]
 fn ticker_rows_refuse_only_null_and_string_values() {
-    ticker_frame_keeps_valid_rows("tickers", "close", "last", false, false);
+    ticker_frame_keeps_valid_rows("tickers", "close", "last", false, false, false);
 }
 #[test]
 fn bbo_rows_refuse_only_null_and_string_values() {
-    ticker_frame_keeps_valid_rows("bbos", "bid", "bid", false, false);
+    ticker_frame_keeps_valid_rows("bbos", "bid", "bid", false, false, false);
 }
 #[test]
 fn mark_rows_refuse_only_null_and_string_values() {
-    ticker_frame_keeps_valid_rows("markprices", "price", "mark", false, false);
+    ticker_frame_keeps_valid_rows("markprices", "price", "mark", false, false, false);
 }
 
 #[test]
@@ -1392,7 +1443,7 @@ fn ticker_row_refusals_preserve_later_source_errors() {
         ("bbos", "bid", "bid"),
         ("markprices", "price", "mark"),
     ] {
-        ticker_frame_keeps_valid_rows(topic, source, target, true, false);
+        ticker_frame_keeps_valid_rows(topic, source, target, true, false, false);
     }
 }
 
@@ -1403,6 +1454,17 @@ fn ticker_row_admission_preserves_inherited_target_no_ops() {
         ("bbos", "bid", "bid"),
         ("markprices", "price", "mark"),
     ] {
-        ticker_frame_keeps_valid_rows(topic, source, target, false, true);
+        ticker_frame_keeps_valid_rows(topic, source, target, false, true, false);
+    }
+}
+
+#[test]
+fn ticker_row_admission_preserves_subscriber_errors_and_prior_writes() {
+    for (topic, source, target) in [
+        ("tickers", "close", "last"),
+        ("bbos", "bid", "bid"),
+        ("markprices", "price", "mark"),
+    ] {
+        ticker_frame_keeps_valid_rows(topic, source, target, false, false, true);
     }
 }
