@@ -200,7 +200,9 @@ fn position_pnl_native_bits() {
             .get("bits")
             .map(|_| expected_bits(&row["derived"]));
         assert_eq!(
-            calculate_position_upnl_from_last_price(&positions[0], &store).map(bits),
+            calculate_position_upnl_from_last_price(&positions[0], &store)
+                .unwrap()
+                .map(bits),
             expected,
             "POSITION PNL native bits {row}"
         );
@@ -214,10 +216,7 @@ fn total_pnl_native_bits() {
     for row in rows {
         let store = store(row["raw"].as_str().unwrap());
         assert_eq!(
-            bits(calculate_upnl_from_positions(
-                &store.positions().unwrap(),
-                &store
-            )),
+            bits(calculate_upnl_from_positions(&store.positions().unwrap(), &store).unwrap()),
             expected_bits(&row["total"]),
             "TOTAL PNL native bits {row}"
         );

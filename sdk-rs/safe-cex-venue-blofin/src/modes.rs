@@ -218,9 +218,13 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(Store::positions(&store).len(), 2, "independent_input_floor");
+        assert_eq!(
+            Store::positions(&store).unwrap().len(),
+            2,
+            "independent_input_floor"
+        );
         let prepared = prepare_confirmed_mode_update(&store, PositionMode::OneWay).unwrap();
-        let native = prepared.positions.unwrap();
+        let native = prepared.unwrap().positions.unwrap();
         assert_eq!(native.len(), 1, "native_prepared_update_first_id_dedupe");
         assert_eq!(native[0].id, "BTCUSDT");
         assert_eq!(native[0].position_mode, Some(PositionMode::OneWay));
@@ -232,7 +236,7 @@ mod tests {
         assert_eq!(native[0].leverage, 3.0);
         assert_eq!(native[0].contracts, 1.0);
         assert_eq!(
-            Store::positions(&store).len(),
+            Store::positions(&store).unwrap().len(),
             2,
             "prepare_does_not_write_store"
         );

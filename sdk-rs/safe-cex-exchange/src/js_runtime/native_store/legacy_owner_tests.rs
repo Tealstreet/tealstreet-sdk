@@ -6,7 +6,7 @@ use safe_cex_types::{
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
-#[path = "../../../safe-cex-store/src/test_support.rs"]
+#[path = "../../../../safe-cex-store/src/test_support.rs"]
 mod comparison;
 fn snapshot(store: &DefaultStore) -> Value {
     crate::js_runtime::value::to_json(&store.graph.serialize().unwrap()).unwrap()

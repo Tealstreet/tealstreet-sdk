@@ -91,7 +91,7 @@ fn inverse_position_arithmetic_matches_live_source() {
             );
             assert_eq!(c["result"].get("symbol"), c["row"].get("symbol"));
             assert_eq!(
-                result.unwrap_err(),
+                result.unwrap_err().to_string(),
                 "Bybit typed Position requires string symbol"
             );
             assert_eq!(json!(logs), c["logs"]);
@@ -119,7 +119,7 @@ fn inverse_position_arithmetic_matches_live_source() {
                 );
             }
             assert_eq!(
-                result.unwrap_err(),
+                result.unwrap_err().to_string(),
                 format!("Bybit typed Position cannot represent inherited side key {key}")
             );
             assert_eq!(json!(logs), c["logs"]);
@@ -139,7 +139,7 @@ fn inverse_position_arithmetic_matches_live_source() {
         );
         if let Some(error) = c.get("error") {
             assert_eq!(
-                result.unwrap_err(),
+                result.unwrap_err().to_string(),
                 error.as_str().unwrap(),
                 "error case{i}"
             );

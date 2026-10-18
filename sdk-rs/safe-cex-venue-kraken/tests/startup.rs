@@ -553,7 +553,7 @@ fn fetch_and_set_orders_live_source() {
         let mut future = Box::pin(startup::fetch_and_set_orders(
             fetch,
             add,
-            || loaded.borrow().clone(),
+            || Ok(loaded.borrow().clone()),
             update,
         ));
         let mut context = Context::from_waker(Waker::noop());

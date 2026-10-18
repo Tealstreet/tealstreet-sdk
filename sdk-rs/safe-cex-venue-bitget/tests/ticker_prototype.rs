@@ -1,8 +1,6 @@
 use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::js_number_string;
-use safe_cex_store::{
-    Store, StoreUpdate, model_patch::ModelPatch, ticker_lookup::TickerSymbolLookup,
-};
+use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{StoreSubscriberError, Ticker};
 use safe_cex_venue_bitget::ticker::{TickerHandlerError, handle_ticker_topic};
 use serde_json::{Value, json};
@@ -182,15 +180,15 @@ fn run(scene: &'static str) -> Observed {
                 .contains_key("__proto__"),
             "PROTO native chosen borrowed own-entry view"
         );
+        let lookup = Store::lookup_ticker_by_symbol(&store, "symbol").unwrap();
         assert!(
-            matches!(
-                Store::lookup_ticker_by_symbol(&store, "symbol"),
-                TickerSymbolLookup::PrototypeField {
-                    truthy: true,
-                    id: None
-                }
-            ),
+            lookup.is_truthy(),
             "PROTO native real shared prototype lookup entry"
+        );
+        assert_eq!(
+            lookup.update_id().unwrap(),
+            None,
+            "PROTO native inherited value has no id"
         );
     }
     let key = match scene {
@@ -205,9 +203,14 @@ fn run(scene: &'static str) -> Observed {
         "own-constructor" => "constructor",
         _ => "symbol",
     };
+    let trait_lookup = Store::lookup_ticker_by_symbol(&store, key).unwrap();
+    let direct_lookup = store.lookup_ticker_by_symbol(key).unwrap();
     assert_eq!(
-        Store::lookup_ticker_by_symbol(&store, key),
-        store.lookup_ticker_by_symbol(key),
+        (trait_lookup.is_truthy(), trait_lookup.update_id().unwrap()),
+        (
+            direct_lookup.is_truthy(),
+            direct_lookup.update_id().unwrap()
+        ),
         "PROTO native trait dispatch uses actual Store view"
     );
     let input = match scene {

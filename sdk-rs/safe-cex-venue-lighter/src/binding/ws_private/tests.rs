@@ -21,6 +21,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
+use safe_cex_store::Store;
 use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{TransportProvider, socket::SocketFrame, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
@@ -296,7 +297,7 @@ fn mapped_order(raw: &Js) -> Js {
 fn parent(world: &Rc<Runtime>, store_impl: &Rc<DefaultStore>, calls: &Calls, token: Js) -> Js {
     let runtime: Rc<dyn ExchangeRuntime> = world.clone();
     let settled = move |value: Js| Js::Promise(Promise::settled(&runtime, Ok(value)));
-    let store = store::facade(store_impl.clone());
+    let store = store::facade(store_impl.clone()).unwrap();
     store
         .define(
             "updatePositions",
@@ -876,7 +877,7 @@ fn production_private_position_loop_closes_only_after_a_body_throw() {
 fn production_private_position_close_spread_accepts_iterator_values() {
     let world = world();
     // Use the actual Store mutator rather than this fixture's dispatch recorder.
-    let native_store = store::facade(world.store.clone());
+    let native_store = store::facade(world.store.clone()).unwrap();
     world
         .socket
         .get("store")

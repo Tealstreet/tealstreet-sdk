@@ -83,7 +83,7 @@ fn private_pin_key_retains_native_value_and_request_rejection_after_suspension()
                 name,
                 serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
                     .unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 dependencies,
             )
             .unwrap();

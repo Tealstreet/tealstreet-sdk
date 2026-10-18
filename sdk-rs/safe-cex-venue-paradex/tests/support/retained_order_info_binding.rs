@@ -1,4 +1,5 @@
 //! Child-module witness accesses the actual constructed receiver, without a test API.
+use safe_cex_store::Store;
 #[allow(
     dead_code,
     reason = "primitive constructed fixture offers other workflow operations"

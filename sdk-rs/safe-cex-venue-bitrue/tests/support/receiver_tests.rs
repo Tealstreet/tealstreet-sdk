@@ -46,7 +46,7 @@ impl Fixture {
                 serde_json::json!({"key":"fixture-key","secret":"fixture-secret"}),
             )
             .unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             BitrueDependencies {
                 runtime: runtime.clone(),
                 http: Rc::new(NoHttp(runtime.clone())),

@@ -289,7 +289,7 @@ fn spot_positions_live_oracle() {
     for case in cardinality::cases("reads", "positions", oracle()) {
         let store = DefaultStore::new();
         install(&store, &case["markets"]);
-        let positions = reads::fetch_spot_positions(&store);
+        let positions = reads::fetch_spot_positions(&store).unwrap();
         cardinality::native_len(
             positions.len(),
             &case["result"],

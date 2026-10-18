@@ -347,9 +347,10 @@ fn futures_orders_live_source() {
                 }
                 if flag(case, "alias") {
                     aliases += 1;
+                    let stored = store.orders().unwrap();
                     assert_ne!(
                         values.as_ptr(),
-                        store.orders().unwrap().as_ptr(),
+                        stored.as_ptr(),
                         "ORDERS CHOSEN owned fallback"
                     );
                     assert_eq!(

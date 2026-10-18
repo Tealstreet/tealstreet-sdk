@@ -229,11 +229,12 @@ fn actual_typescript_rest_reads() {
         match row["method"].as_str().unwrap() {
             "fetchMarkets" => {
                 let native = resolve(fetch_markets(
-                    || vec![cached_market.clone()],
+                    || Ok(vec![cached_market.clone()]),
                     read,
                     |_: &ReadError| reports += 1,
                     |message| panic!("source corpus has no typed asset refusals: {message}"),
-                ));
+                ))
+                .unwrap();
                 assert_eq!(
                     native.len(),
                     expected_lengths[index],
@@ -261,11 +262,12 @@ fn actual_typescript_rest_reads() {
             }
             "fetchTickers" => {
                 let native = resolve(fetch_tickers(
-                    || vec![cached_ticker.clone()],
-                    |symbol| (symbol == cached_market.symbol).then_some(&cached_market),
+                    || Ok(vec![cached_ticker.clone()]),
+                    |symbol| Ok((symbol == cached_market.symbol).then_some(cached_market.clone())),
                     read,
                     |_: &ReadError| reports += 1,
-                ));
+                ))
+                .unwrap();
                 assert_eq!(
                     native.len(),
                     expected_lengths[index],
@@ -284,8 +286,8 @@ fn actual_typescript_rest_reads() {
             }
             "fetchBalance" => {
                 let (native, returned_positions) = resolve(fetch_balance(
-                    || cached_balance.clone(),
-                    || positions.as_slice(),
+                    || Ok(cached_balance.clone()),
+                    || Ok(positions.clone()),
                     &mut mode,
                     read,
                     |error: &ReadError| {
@@ -297,10 +299,11 @@ fn actual_typescript_rest_reads() {
                                 .unwrap_or_else(|| error.cause.message.into()),
                         );
                     },
-                ));
+                ))
+                .unwrap();
                 balance(&native, &row["result"]["fields"]["balance"]);
                 assert!(
-                    std::ptr::eq(returned_positions, positions.as_slice()),
+                    returned_positions == positions,
                     "REST native positions identity"
                 );
                 assert_eq!(

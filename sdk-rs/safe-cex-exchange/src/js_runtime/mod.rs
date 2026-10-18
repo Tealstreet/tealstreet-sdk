@@ -10,7 +10,6 @@ pub mod globals;
 pub mod iterator;
 pub(crate) mod jobs;
 pub mod library;
-#[path = "../native_store/mod.rs"]
 pub mod native_store;
 mod number_radix;
 pub mod ops;

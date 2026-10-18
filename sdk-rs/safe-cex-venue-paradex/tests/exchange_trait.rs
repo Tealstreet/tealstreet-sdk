@@ -2,6 +2,7 @@
 #[path = "support/exchange_runtime.rs"]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_store::Store;
 use serde_json::json;
 use support::drive;
 fn script(wire: &support::Wire) {

@@ -380,9 +380,9 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
             |symbol| {
                 calls.push(symbol.to_owned());
                 if symbol == "BTCUSD" {
-                    case["inverse"].as_bool()
+                    Ok(case["inverse"].as_bool())
                 } else {
-                    None
+                    Ok(None)
                 }
             },
             || {
@@ -549,7 +549,7 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         )]),
     ));
     let numeric_order =
-        map_inverse_order(Some(&numeric_input), "coin-futures", |_| None, || 1.0).unwrap();
+        map_inverse_order(Some(&numeric_input), "coin-futures", |_| Ok(None), || 1.0).unwrap();
     assert!(
         numeric_order[0]
             .info
@@ -609,7 +609,7 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         "inverse mapOrder attached info relabel propagates to gateway"
     );
     let mut input: Input = json!({"orderId":"x","status":"new","orderType":"limit","side":"buy","symbol":"BTCUSD","size":"3","price":"2","presetStopLossPrice":"2","presetStopSurplusPrice":"3","label":"before"}).into();
-    let mut orders = map_inverse_order(Some(&input), "coin-futures", |_| None, || 1.0).unwrap();
+    let mut orders = map_inverse_order(Some(&input), "coin-futures", |_| Ok(None), || 1.0).unwrap();
     *input.get_mut("label").unwrap() = json!("after-input").into();
     assert!(
         orders[0]

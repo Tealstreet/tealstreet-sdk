@@ -245,6 +245,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
                 .base
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|row| row.status == OrderStatus::Open)
         );
@@ -268,6 +269,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
                 .base
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|row| row.status == OrderStatus::Open)
         );
@@ -282,7 +284,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
             assert_eq!(response["status"], 500);
             assert_eq!(response["data"]["msg"], "algo refused");
         }
-        let rows = owner.base.store.orders();
+        let rows = owner.base.store.orders().unwrap();
         assert_eq!(rows.len(), 3);
         for row in rows.iter() {
             let expected =

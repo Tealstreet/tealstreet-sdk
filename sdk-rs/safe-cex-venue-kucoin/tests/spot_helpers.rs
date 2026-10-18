@@ -103,7 +103,7 @@ fn live_spot_position_and_leverage_helpers() {
         );
         let symbols: Option<Vec<String>> = serde_json::from_value(case["symbols"].clone()).unwrap();
         let symbol = case["symbol"].as_str().unwrap();
-        let positions = fetch_positions(&store, symbols.as_deref());
+        let positions = fetch_positions(&store, symbols.as_deref()).unwrap();
         let max = fetch_symbol_max_leverage(symbol);
         set_leverage(
             &store,

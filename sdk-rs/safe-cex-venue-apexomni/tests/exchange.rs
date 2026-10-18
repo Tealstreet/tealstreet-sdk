@@ -755,7 +755,7 @@ fn run(name: &str) {
             let zk = store
                 .zk_link_config()
                 .unwrap()
-                .as_deref()
+                .as_ref()
                 .cloned()
                 .map_or(J::Undefined, |v| native::retained(&v));
             native::check_fields(&zk, &row["zk"], &format!("{name} config state"));

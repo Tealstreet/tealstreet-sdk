@@ -1,4 +1,4 @@
-#[path = "../../../safe-cex-store/src/test_support.rs"]
+#[path = "../../../../safe-cex-store/src/test_support.rs"]
 mod comparison;
 use crate::native_store::DefaultStore;
 use safe_cex_store::{Store, request_stats::record_request_outcome};

@@ -543,6 +543,7 @@ fn bound_defaults_beyond_the_sixteen_reach_their_ported_bodies() {
     assert!(
         store2
             .positions()
+            .unwrap()
             .iter()
             .all(|p| p.leverage == 25.0
                 && p.margin_type == Some(safe_cex_types::MarginType::Isolated))

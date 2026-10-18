@@ -132,10 +132,11 @@ fn live_tickers_corpus() {
                 );
             }
             if case["fallbackAlias"] == true {
+                let stored = store.tickers().unwrap();
                 assert!(
                     result
                         .as_ref()
-                        .is_ok_and(|rows| rows.as_ptr() != store.tickers().unwrap().as_ptr()),
+                        .is_ok_and(|rows| rows.as_ptr() != stored.as_ptr()),
                     "ticker_owned_fallback_boundary"
                 );
             }

@@ -2663,7 +2663,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
     .unwrap_err();
     assert_eq!(error.message, "subscriber failed");
     assert_eq!(
-        throwing_store.markets_by_symbol()["BTCUSDT"]
+        throwing_store.markets_by_symbol().unwrap()["BTCUSDT"]
             .limits
             .leverage
             .max,
@@ -2671,7 +2671,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         "market update commits before its notification failure"
     );
     assert_eq!(
-        throwing_store.fetched_leverage()["BTCUSDT"].buy_leverage,
+        throwing_store.fetched_leverage().unwrap()["BTCUSDT"].buy_leverage,
         21.0,
         "caught market notification falls back to the configured leverage"
     );
@@ -2730,7 +2730,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         "public-only fallback buy leverage"
     );
     assert_eq!(
-        fallback_store.fetched_leverage()["BTCUSDT"].sell_leverage,
+        fallback_store.fetched_leverage().unwrap()["BTCUSDT"].sell_leverage,
         expected["publicFallback"]["store"]["BTCUSDT"]["sellLeverage"]
             .as_f64()
             .unwrap()
@@ -2804,7 +2804,7 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         "request failure fallback buy leverage"
     );
     assert_eq!(
-        failed_store.fetched_leverage()["BTCUSDT"].sell_leverage,
+        failed_store.fetched_leverage().unwrap()["BTCUSDT"].sell_leverage,
         expected["requestFailure"]["store"]["BTCUSDT"]["sellLeverage"]
             .as_f64()
             .unwrap()
