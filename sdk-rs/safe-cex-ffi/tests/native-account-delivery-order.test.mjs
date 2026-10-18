@@ -48,10 +48,12 @@ test('recorded Binance frames preserve combined Store/event order across eight f
       assert.equal(report.parity[channel].qualifiedStatus, 'PASS', channel);
       assert.ok(report.parity[channel].leftCount > 0, channel);
     }
+    const source = deserialize(readFileSync(report.runs.find((entry) => entry.implementation === 'ts').fixture));
     for (const result of report.runs.filter((entry) => entry.implementation === 'rust')) {
       assert.equal(result.receipt.delivered, 12);
       assert.equal(result.receipt.dropped, 0);
       const { outputs } = deserialize(readFileSync(result.fixture));
+      assert.deepEqual(outputs.map((entry) => entry.kind), source.outputs.map((entry) => entry.kind), 'combined channel order matches the maintained worker');
       expected ??= outputs;
       assert.deepEqual(outputs, expected, `fresh native account ${run}/${result.label} preserves the entire combined sequence`);
     }

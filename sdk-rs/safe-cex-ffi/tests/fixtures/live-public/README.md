@@ -31,7 +31,7 @@ the replay bundle and drives the real TS worker and production addon four times,
 with two fresh accounts per side each time. It requires parsed/transport frame
 receipts, zero canonical Promise jobs, exact ticker/book/candle values, and
 identical combined native output across all eight accounts, including every
-Store field. Binance's snapshot listener must start through `start_eager` so its
+Store field, with the combined channel order matching the maintained TS worker. Binance's snapshot listener must start through `start_eager` so its
 HTTP continuation belongs to that job system before the next clock advance.
 `binance-snapshot-ordering-evidence.json` records the compiled RED/GREEN and
 source enqueue/clock observations. General classification of raw runtime tasks

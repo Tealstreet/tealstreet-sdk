@@ -1,6 +1,6 @@
 {
   "kind": "recorded-binance-snapshot-ordering-proof",
-  "date": "2026-10-18",
+  "date": "2026-10-19",
   "input": {
     "sourceBundleSha256": "df9a504272da029f0c871cb9c44bb2777ff092c34ea966a68d3c126269218d5f",
     "checkedFixture": "binance-delivery-prefix.json.gz",
@@ -14,8 +14,8 @@
     "listenerJob": "runtime.spawn_local",
     "addonSha256": "bc6830ceeb41a349cedbff5c69e44b60de8e606b242b5b0808c990cba6b0301d",
     "testExit": 1,
-    "orderingDiff": "combined indices 1/2: store/orderbook swap",
-    "logSha256": "8c98abb24826bfd531f74f6de6a8070644d87bf2b37950a5a713c6f24b6c73b7"
+    "orderingDiff": "combined channel order differs from maintained TS: Store/Store/orderbook vs Store/orderbook/Store",
+    "logSha256": "1379af922ca52287f226cad6a1b527852613a506b85e92ee6a6c6ba1f3e33e6d"
   },
   "fifoControl": {
     "addonSha256": "939aad7496f150e53691bb01c051df378777bdbaf458e92606d291018c93991d",
@@ -26,7 +26,7 @@
     "ffi": "original two queues",
     "listenerJob": "eager::start_eager, existing error reporting retained",
     "nativeHostSourceSha256": "028142efe4843a84994110a2a17adc83e67b0d439c7581fa973b36db80f0849e",
-    "addonSha256": "2f34978a9d378ed0eb67a6847cad2c867d81b840476a4384d3df5ab6d0d9d8e9",
+    "addonSha256": "88306912e4598ed81f8d1bc5faf5028883598baac2990142dc83d4fdd459f49b",
     "testExit": 0,
     "nativeFreshAccounts": 8,
     "tsFreshAccounts": 8,
@@ -37,7 +37,9 @@
       "orderbook",
       "candles"
     ],
-    "logSha256": "e88aad403609843166ebedb89ff15dd76c76d7402e2d6d5913f62edc3ab3d3fd"
+    "logSha256": "a2b7247dca5402be58599b7f62787e31cbc76420b8e5fb211320c40fe02a8976",
+    "productionHead": "480f4a9063984baab10805506441e9d9e2840400",
+    "combinedChannelOrder": "identical to maintained TS across all eight accounts"
   },
   "sourceTrace": {
     "enqueueIdsEqualDeliveryIds": true,
@@ -82,5 +84,28 @@
     "allRawRuntimeTasksCertified": false,
     "fullStoreParityClaim": false,
     "rawTaskClassification": "follow-up"
+  },
+  "build": {
+    "profile": "dev, unoptimized; correctness proof only",
+    "command": "CARGO_INCREMENTAL=0 cargo build --locked --jobs 2 -p safe-cex-ffi --features node",
+    "performanceClaim": false
+  },
+  "fullCapture": {
+    "frames": 570,
+    "combinedOutputsPerAccount": 624,
+    "wholeCombinedWithinSideRepeat": "exact on both sides",
+    "combinedChannelOrder": "identical on both sides",
+    "exactSourceOutputs": {
+      "tickerStorePosts": 238,
+      "orderbook": 237,
+      "candles": 149
+    },
+    "reportSha256": "04d8cdeeb2d59735a7bdb7e1638bf1899021c678b3b61cc0d71e826c887d6dd5",
+    "addonSha256": "2f34978a9d378ed0eb67a6847cad2c867d81b840476a4384d3df5ab6d0d9d8e9",
+    "remainingMetadataDiffs": [
+      "requestStats",
+      "messageHandlerStats",
+      "socketHealth"
+    ]
   }
 }
