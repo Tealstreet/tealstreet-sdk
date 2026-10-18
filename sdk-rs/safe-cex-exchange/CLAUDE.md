@@ -1741,3 +1741,15 @@ private-slot mutation through freeze, inherited getter receivers and final relea
 Independent dropped-retention and leaked-retention faults must compile, fail named
 assertions, restore exact source and pass. This adds no native resource wire codec
 and does not switch a Hyperliquid consumer or change default prototype policy.
+
+Ordinary objects can retain one native WriteObserver, installed or cleared by
+set_write_observer. Successful assignments notify after the property operation,
+including inherited setters, using the original receiver, UTF-16 key and value.
+The callback runs outside storage borrows, can replace itself or reenter writes,
+and propagates its original failure without rolling back the completed assignment.
+Refused assignments and own data definitions do not notify; prototypes and spread
+do not transfer the native callback. tests/js_write_observers.rs compares immediate
+native account identity reads with the maintained TS constructor's shared options
+and checks reentry, exact references/bits, capture release and refusal behavior.
+Missing-publication and premature-publication production mutations must compile,
+fail the named source-visible assertions, restore exact bytes and pass.
