@@ -15,8 +15,11 @@ use std::{
     future::Future,
     pin::Pin,
     rc::Rc,
-    task::{Context, Poll, Waker},
+    sync::Arc,
+    task::{Context, Poll},
 };
+#[path = "../../test-support/virtual_time.rs"]
+mod virtual_time;
 
 type Job = Pin<Box<dyn Future<Output = ()>>>;
 #[derive(Default)]
@@ -24,6 +27,8 @@ struct Runtime {
     mono: Rc<Cell<u64>>,
     wall: Cell<f64>,
     jobs: RefCell<Vec<(Rc<Cell<bool>>, Job)>>,
+    sleepers: virtual_time::SleepWakers,
+    wake: Arc<virtual_time::WakeSignal>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -44,7 +49,7 @@ impl Runtime {
                 }
                 if job
                     .as_mut()
-                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .poll(&mut Context::from_waker(&self.wake.waker()))
                     .is_pending()
                 {
                     kept.push((cancelled, job));
@@ -55,7 +60,8 @@ impl Runtime {
             let spawned = !self.jobs.borrow().is_empty();
             kept.append(&mut self.jobs.borrow_mut());
             *self.jobs.borrow_mut() = kept;
-            if !completed && !spawned {
+            let awakened = self.wake.take();
+            if !completed && !spawned && !awakened {
                 return;
             }
         }
@@ -65,6 +71,7 @@ impl Runtime {
         while self.mono.get() < at {
             self.mono.set(self.mono.get() + 1);
             self.wall.set(self.wall.get() + 1.);
+            self.sleepers.wake_due(self.mono.get() as f64);
             self.drain();
         }
     }
@@ -79,8 +86,10 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let clock = self.mono.clone();
         let due = clock.get() + ms;
+        let wake = self.sleepers.register(due as f64);
         let mut first = true;
-        Box::pin(std::future::poll_fn(move |_| {
+        Box::pin(std::future::poll_fn(move |cx| {
+            *wake.borrow_mut() = Some(cx.waker().clone());
             if first {
                 first = false;
                 return Poll::Pending;
@@ -92,14 +101,9 @@ impl ExchangeRuntime for Runtime {
             }
         }))
     }
-    fn spawn_local(&self, mut f: Job) -> Box<dyn ExchangeTask> {
+    fn spawn_local(&self, f: Job) -> Box<dyn ExchangeTask> {
         let cancelled = Rc::new(Cell::new(false));
-        if f.as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-            .is_pending()
-        {
-            self.jobs.borrow_mut().push((cancelled.clone(), f));
-        }
+        self.jobs.borrow_mut().push((cancelled.clone(), f));
         Box::new(Task(cancelled))
     }
     fn console(&self, _: &str, _: &str) {}

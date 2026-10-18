@@ -15,6 +15,8 @@ use std::{
     rc::Rc,
     task::{Context, Poll, Waker},
 };
+#[path = "../../test-support/release.rs"]
+mod release;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 #[path = "support/retry_observer_native.rs"]
 mod retry_observer_native;
@@ -39,7 +41,7 @@ struct Capture {
 #[derive(Default)]
 struct Runtime {
     now: Rc<Cell<f64>>,
-    hold: Rc<Cell<bool>>,
+    timer_release: release::Release,
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     trace: Rc<RefCell<Vec<Trace>>>,
     sleep_error: Cell<bool>,
@@ -61,19 +63,21 @@ impl ExchangeRuntime for Runtime {
             ms: ms as f64,
             time: self.now.get(),
         });
-        let (now, hold, fail) = (self.now.clone(), self.hold.clone(), self.sleep_error.get());
-        Box::pin(std::future::poll_fn(move |_| {
-            if hold.get() {
-                return Poll::Pending;
-            }
+        let (now, released, fail) = (
+            self.now.clone(),
+            self.timer_release.wait(),
+            self.sleep_error.get(),
+        );
+        Box::pin(async move {
+            released.await;
             if fail {
                 let mut error = ExchangeError::new("scripted timer failure");
                 error.store_subscriber_ids = vec![47];
-                return Poll::Ready(Err(error));
+                return Err(error);
             }
             now.set(now.get() + ms as f64);
-            Poll::Ready(Ok(()))
-        }))
+            Ok(())
+        })
     }
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.jobs.borrow_mut().push(f);
@@ -157,6 +161,7 @@ fn settle(rt: &Runtime, value: Js) -> Result<Js, Thrown> {
 }
 fn setup(s: &Value) -> (Rc<Runtime>, Rc<Http>, Js, Js) {
     let rt = Rc::new(Runtime::default());
+    rt.timer_release.set(true);
     rt.now.set(1000.0);
     let http = Rc::new(Http {
         rt: rt.clone(),
@@ -330,20 +335,38 @@ fn dropping_retry_observer_keeps_owned_timer_and_replay_alive() {
     );
     let input = json!({"timeout":500,"reset":true,"failures":1,"stop":2,"delay":125,"seed":null,"asyncRefusal":false});
     let (rt, http, xhr, config) = setup(&input);
-    rt.hold.set(true);
+    rt.timer_release.set(false);
     let observer = xhr
         .call_method("get", vec![Js::str("/retry"), config])
         .unwrap();
     assert_eq!(
         http.attempts.get(),
-        1,
-        "first request eagerly reached pending delay"
+        source["immediate"].as_u64().unwrap() as usize,
+        "Axios starts the request after returning its observer"
     );
     assert_eq!(rt.jobs.borrow().len(), 1, "runtime owns retry continuation");
+    for _ in 0..8 {
+        jobs(&rt);
+        if rt
+            .trace
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, Trace::Sleep { .. }))
+        {
+            break;
+        }
+    }
+    assert!(
+        matches!(
+            rt.trace.borrow().last(),
+            Some(Trace::Sleep { ms, .. }) if *ms == 125.0
+        ),
+        "producer reached the pending retry timer"
+    );
     drop(observer);
     jobs(&rt);
     assert_eq!(http.attempts.get(), 1, "no retry before timer completes");
-    rt.hold.set(false);
+    rt.timer_release.set(true);
     for _ in 0..8 {
         jobs(&rt);
     }
