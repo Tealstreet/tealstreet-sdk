@@ -856,35 +856,39 @@ mod accepted_control_flow {
                 }
             });
             let (t, e) = (events.clone(), error.clone());
-            globals.define_accessor(
-                "parseFloat",
-                Some(Rc::new(move |_| {
-                    t.borrow_mut().push("global");
-                    if failure == Some("global") {
-                        Err(Thrown::new(e.clone()))
-                    } else {
-                        Ok(parser.clone())
-                    }
-                })),
-                None,
-            );
+            globals
+                .define_accessor(
+                    "parseFloat",
+                    Some(Rc::new(move |_| {
+                        t.borrow_mut().push("global");
+                        if failure == Some("global") {
+                            Err(Thrown::new(e.clone()))
+                        } else {
+                            Ok(parser.clone())
+                        }
+                    })),
+                    None,
+                )
+                .expect("fresh extensible accessor target");
             let (expected, t, e) = (owner.clone(), events.clone(), error.clone());
-            owner.define_accessor(
-                "quantity",
-                Some(Rc::new(move |this| {
-                    t.borrow_mut().push("field");
-                    assert!(
-                        this.same_reference(&expected),
-                        "parsed native field receiver"
-                    );
-                    if failure == Some("field") {
-                        Err(Thrown::new(e.clone()))
-                    } else {
-                        Ok(input.clone())
-                    }
-                })),
-                None,
-            );
+            owner
+                .define_accessor(
+                    "quantity",
+                    Some(Rc::new(move |this| {
+                        t.borrow_mut().push("field");
+                        assert!(
+                            this.same_reference(&expected),
+                            "parsed native field receiver"
+                        );
+                        if failure == Some("field") {
+                            Err(Thrown::new(e.clone()))
+                        } else {
+                            Ok(input.clone())
+                        }
+                    })),
+                    None,
+                )
+                .expect("fresh extensible accessor target");
             let mut ops = crate::accepted_test_support::binding(globals);
             let (t, e) = (events.clone(), error.clone());
             Rc::get_mut(&mut ops.value).unwrap().numeric = Rc::new(move |value| {

@@ -826,7 +826,8 @@ fn production_private_position_loop_closes_only_after_a_body_throw() {
                             mode,
                             Some(Rc::new(move |_| Err(Thrown::new(failure.clone())))),
                             None,
-                        );
+                        )
+                        .expect("fresh extensible accessor target");
                     }
                     Ok(step)
                 }),

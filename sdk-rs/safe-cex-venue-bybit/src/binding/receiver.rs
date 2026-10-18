@@ -12,24 +12,34 @@ use crate::{core_snapshot_readers as snapshot, exchange::BybitExchange};
 use safe_cex_exchange::{js_runtime::client, socket_lifecycle::SocketSlot};
 use std::{cell::Cell, rc::Rc};
 
-fn bool_cell(this: &Js, rt: &Rt, name: &str, cell: fn(&BybitExchange) -> &Cell<bool>) {
+fn bool_cell(
+    this: &Js,
+    rt: &Rt,
+    name: &str,
+    cell: fn(&BybitExchange) -> &Cell<bool>,
+) -> Result<(), Thrown> {
     let (get_rt, set_rt) = (rt.clone(), rt.clone());
     let get: Getter = Rc::new(move |_| Ok(Js::Bool(cell(&*venue(&get_rt)?).get())));
     let set: Setter = Rc::new(move |_, v| {
         cell(&*venue(&set_rt)?).set(v.truthy());
         Ok(())
     });
-    this.define_accessor(name, Some(get), Some(set));
+    this.define_accessor(name, Some(get), Some(set))
 }
 
-fn number_cell(this: &Js, rt: &Rt, name: &str, cell: fn(&BybitExchange) -> &Cell<f64>) {
+fn number_cell(
+    this: &Js,
+    rt: &Rt,
+    name: &str,
+    cell: fn(&BybitExchange) -> &Cell<f64>,
+) -> Result<(), Thrown> {
     let (get_rt, set_rt) = (rt.clone(), rt.clone());
     let get: Getter = Rc::new(move |_| Ok(Js::Number(cell(&*venue(&get_rt)?).get())));
     let set: Setter = Rc::new(move |_, v| {
         cell(&*venue(&set_rt)?).set(v.to_number()?);
         Ok(())
     });
-    this.define_accessor(name, Some(get), Some(set));
+    this.define_accessor(name, Some(get), Some(set))
 }
 
 fn method(this: &Js, rt: &Rt, name: &'static str, body: fn(&Rt, Vec<Js>) -> Result<Js, Thrown>) {
@@ -68,7 +78,7 @@ fn socket(rt: &Rt, slot: SocketSlot) -> Result<Js, Thrown> {
         "isConnected",
         Some(Rc::new(move |_| Ok(Js::Bool(typed.is_connected())))),
         None,
-    );
+    )?;
     Ok(facade)
 }
 
@@ -135,13 +145,13 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     )?;
 
     // Fields owned by the typed core; reads and writes go straight through.
-    bool_cell(&this, rt, "needsReinit", |v| &v.needs_reinit);
+    bool_cell(&this, rt, "needsReinit", |v| &v.needs_reinit)?;
     bool_cell(&this, rt, "forceUnifiedBalance", |v| {
         &v.force_unified_balance
-    });
-    number_cell(&this, rt, "lastReinitAt", |v| &v.last_reinit_at);
-    number_cell(&this, rt, "reinitRetryMs", |v| &v.reinit_retry_ms);
-    number_cell(&this, rt, "batchLimit", |v| &v.batch_limit);
+    })?;
+    number_cell(&this, rt, "lastReinitAt", |v| &v.last_reinit_at)?;
+    number_cell(&this, rt, "reinitRetryMs", |v| &v.reinit_retry_ms)?;
+    number_cell(&this, rt, "batchLimit", |v| &v.batch_limit)?;
     {
         let (g, s) = (rt.clone(), rt.clone());
         this.define_accessor(
@@ -157,7 +167,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                     (!v.is_undefined()).then(|| to_json(&v)).transpose()?;
                 Ok(())
             })),
-        );
+        )?;
     }
     {
         let (g, s) = (rt.clone(), rt.clone());
@@ -178,7 +188,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 venue(&s)?.last_websocket_positions_update.set(value);
                 Ok(())
             })),
-        );
+        )?;
     }
     {
         let (g, s) = (rt.clone(), rt.clone());
@@ -189,7 +199,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 venue(&s)?.margin_type.set(to_typed(&v)?);
                 Ok(())
             })),
-        );
+        )?;
     }
     {
         let (g, s) = (rt.clone(), rt.clone());
@@ -208,7 +218,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 venue(&s)?.position_mode.set(mode);
                 Ok(())
             })),
-        );
+        )?;
     }
     {
         let (g, s) = (rt.clone(), rt.clone());
@@ -223,7 +233,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                     (!v.is_nullish()).then(|| to_typed(&v)).transpose()?;
                 Ok(())
             })),
-        );
+        )?;
     }
     {
         let g = rt.clone();
@@ -231,7 +241,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             "accountType",
             Some(Rc::new(move |_| Ok(Js::str(venue(&g)?.account_type())))),
             None,
-        );
+        )?;
     }
     {
         let g = rt.clone();
@@ -241,7 +251,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 Ok(Js::Bool(venue(&g)?.uses_bybit_demo_environment()))
             })),
             None,
-        );
+        )?;
     }
 
     // ts: BybitExchange.getSettleCoinsForCategory
@@ -381,7 +391,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             crate::ledger_history::income_contexts(&contexts_rt, &contexts_rt.this)
         })),
         None,
-    );
+    )?;
     let context_rt = rt.clone();
     this.define_accessor(
         "incomeContext",
@@ -389,7 +399,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             crate::inverse_read_surface::income_context(&context_rt, &context_rt.this)
         })),
         None,
-    );
+    )?;
     method(&this, rt, "fetchIncomeHistory", |rt, a| {
         members::history::fetch_income_history(rt, arg(&a, 0))
     });
@@ -525,7 +535,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             Ok(members::lifecycle::recently_placed_orders(&recent_rt))
         })),
         None,
-    );
+    )?;
     method(
         &this,
         rt,

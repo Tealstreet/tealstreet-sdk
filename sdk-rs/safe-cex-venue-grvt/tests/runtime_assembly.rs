@@ -1110,8 +1110,9 @@ impl CompositionHost for Host {
         self.created.borrow_mut().push(base.clone());
         Ok(base)
     }
-    fn attach_fields(&self, instance: &N, fields: Fields<N>) {
+    fn attach_fields(&self, instance: &N, fields: Fields<N>) -> JsResult<N, ()> {
         self.banks.borrow_mut().push((instance.clone(), fields));
+        Ok(())
     }
     fn rule_value(&self, rule: Rc<ClientOrderIdRule>) -> N {
         N::obj(vec![

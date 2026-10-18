@@ -192,7 +192,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         "parent",
         Some(Rc::new(move |_| Ok(scope_of(&weak)?.this))),
         None,
-    );
+    )?;
     let weak = Rc::downgrade(&socket);
     let write = weak.clone();
     owner.define_accessor(
@@ -208,7 +208,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             }
             Ok(())
         })),
-    );
+    )?;
     let weak = Rc::downgrade(&socket);
     owner.define_accessor(
         "isDisposed",
@@ -218,7 +218,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             ))
         })),
         None,
-    );
+    )?;
     owner.define("ws", Js::Undefined)?;
     for (name, body) in [
         (
@@ -239,7 +239,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 body(&scope_of(&shared)?, &owner)
             })),
             None,
-        );
+        )?;
     }
     method(rt, &owner, "resetSession", |rt, owner, _| {
         session::reset_session(rt, owner)?;

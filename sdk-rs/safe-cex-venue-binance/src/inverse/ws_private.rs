@@ -180,7 +180,7 @@ pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
             Ok(Js::Bool(base.is_force_closed()))
         })),
         None,
-    );
+    )?;
     Ok((socket, base))
 }
 fn flag(rt: &Rt, key: &str) -> Result<bool, Thrown> {

@@ -225,11 +225,13 @@ mod accepted_helpers {
         let error = token();
         let e = error.clone();
         let value = token();
-        value.define_accessor(
-            "field",
-            Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
-            None,
-        );
+        value
+            .define_accessor(
+                "field",
+                Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         thrown(
             optional_get(&h, value, "field"),
             &error,
