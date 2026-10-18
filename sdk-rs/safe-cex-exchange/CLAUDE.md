@@ -2049,3 +2049,17 @@ hosts; it does not cover arbitrary external Tokio tasks or transport internals.
 The public probe requires the versioned raw receipt and refuses older addons.
 Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
 the private wake-race witness checks the pre-repoll fence.
+
+
+`js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+natural-run detection, minrun, binary insertion, stack collapse, directional merges
+and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
+retain source comparisons and the first failure. The 4096-case real Node
+differential checks native result identities, comparison counts, pair-trace hashes
+and random-comparator state, alongside the constructed Paradex ticker corpus.
+Do not replace this with Rust slice sorting or a differently scheduled merge.
+
+The differential rejects other Node versions: inconsistent comparator ordering is
+engine-dependent. Array sort compacts defined values before TimSort, then writes
+undefined values and deletes remaining holes; four native/Node profiles pin the
+comparator schedule as well as sparse output.
