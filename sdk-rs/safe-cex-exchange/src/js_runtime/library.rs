@@ -1356,6 +1356,7 @@ fn define_on(owner: &Js, key: &str, value: Js) {
 
 /// Install the shared utility modules next to `install_builtins`' globals.
 pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
+    super::ccxt::install(g).expect("fresh native import descriptors admit ccxt utilities");
     let def = |k: &str, v: Js| define_on(g, k, v);
     def("times", func("times", |args| lodash_times(&args)));
     let scoped = |name: &'static str, f: fn(&Scope<X>, Vec<Js>) -> Result<Js, Thrown>| -> Js {
