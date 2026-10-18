@@ -523,3 +523,10 @@ actual Scope host. `page-alias-contracts.mjs` measures their finite native types
 held completion, native error identity, wire parameters and native income fields.
 `page-alias-controls.py` requires named compiled faults and exact restored passes.
 These continuation contracts do not classify other Kraken aliases.
+
+`CONSTRUCTION_ALIAS_REVIEW.md` covers the two finite Factory/RateLimit callback
+profiles over the real Scope. `construction-alias-contracts.mjs` measures their
+actual compiler identities and decoder traits; `accepted_construction_aliases`
+observes signed client bases, native thrown values and source throttle timing.
+The two compiled constructor faults in `construction-alias-controls.py` must fail
+named witnesses and restore exact bytes before readiness.
