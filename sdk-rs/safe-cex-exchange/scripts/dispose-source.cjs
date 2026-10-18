@@ -79,7 +79,7 @@ class DisposeSources {
 
   validate(row) {
     if (row.kind === 'native-final-drop') {
-      assert.equal(row.file, 'safe-cex-exchange/src/native_final_drop.rs', 'native final drop classification belongs only to the canonical core entrypoint');
+      assert.equal(row.file, 'safe-cex-exchange/src/native_teardown.rs', 'native final drop classification belongs only to the canonical core entrypoint');
       assert.equal(row.finding, 'native_final_drop bypasses dynamic hook dispose through base', 'native final drop classification cannot excuse another function');
       assert.equal(row.dispose_source, undefined, 'native final drop is not a TypeScript dispose/super claim');
       return;

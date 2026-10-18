@@ -11,7 +11,10 @@ workspace = crate.parent
 logs = workspace / 'target/backpack-divergence-controls'
 logs.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ)
-env.setdefault('SAFE_CEX_TYPESCRIPT_PATH', '/Users/sam/cs/tealstreet-sdk/node_modules/typescript')
+common_git = Path(subprocess.check_output(
+    ['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+    cwd=workspace, text=True).strip())
+env.setdefault('SAFE_CEX_TYPESCRIPT_PATH', str(common_git.parent / 'node_modules/typescript'))
 
 def body(source, name):
     match = re.search(r'\bfn ' + re.escape(name) + r'\(', source)
@@ -52,7 +55,7 @@ controls = [
  ('market-owner-retained', 'adapter_runtime.rs', 'subscribe_to_all_markets', lambda _: '\n        source::subscribe_to_all_markets(Data::Markets(markets), self.frame())\n    ', 'real_pending_market_timer_does_not_retain_final_exchange'),
  ('loop-owner-retained', 'adapter_runtime.rs', 'schedule_loop', lambda _: '\n        self.timeout(cb, d)\n    ', 'real_pending_poll_loop_does_not_retain_final_exchange'),
  ('drop-incomplete', 'adapter.rs', 'drop', lambda _: '\n    ', 'real_final_drop_fully_tears_down_public_socket'),
- ('core-drop-incomplete', '../../safe-cex-exchange/src/native_final_drop.rs', 'native_final_drop', lambda _: '\n    let _ = (base, venue_cleanup);\n', 'native_final_drop_completes_after_both_venue_and_store_errors'),
+ ('core-drop-incomplete', '../../safe-cex-exchange/src/native_teardown.rs', 'native_final_drop', lambda _: '\n    let _ = (base, venue_cleanup);\n', 'native_final_drop_completes_after_both_venue_and_store_errors'),
  ('held-throttle', 'public_adapter.rs', 'call', lambda _: '\n        let _ = (data, self.window_ms());\n        Ok(())\n    ', 'real_public_receiver_stays_live_while_exchange_is_held'),
 ]
 selected = set(sys.argv[1:])

@@ -572,7 +572,7 @@
     ]
   },
   {
-    "file": "safe-cex-exchange/src/native_final_drop.rs",
+    "file": "safe-cex-exchange/src/native_teardown.rs",
     "function": "native_final_drop",
     "edges": [
       {

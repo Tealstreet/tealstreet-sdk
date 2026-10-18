@@ -921,12 +921,12 @@
       ]
     },
     {
-      "file": "safe-cex-exchange/src/native_final_drop.rs",
+      "file": "safe-cex-exchange/src/native_teardown.rs",
       "finding": "native_final_drop bypasses dynamic hook dispose through base",
       "kind": "native-final-drop",
       "evidence": [
         {
-          "file": "sdk-rs/safe-cex-exchange/src/native_final_drop.rs",
+          "file": "sdk-rs/safe-cex-exchange/src/native_teardown.rs",
           "contains": "pub fn native_final_drop("
         },
         {
