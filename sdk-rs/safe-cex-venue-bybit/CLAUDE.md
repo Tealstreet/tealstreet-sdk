@@ -798,6 +798,15 @@ primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
 order history. `history_capability_binding` exercises the actual capability calls
 and signed HTTP; direct trait coverage alone does not witness this dispatch path.
 
+The production `SpotExchangeHost::destructure` consumes the shared JS iterator
+protocol for candle tuples, interval splits and guarded balance arrays. It reads
+only the requested elements, skips value reads for elisions, pads exhausted
+iterators and closes bounded iteration. `native_host_bybit` proves string KLINE
+tuples through the real registry and HTTP reader for all four account variants;
+the maintained TS source check is imported by the Spot read oracle. Noniterable
+rows remain failures. The old array-only adapter compiled but failed this actual
+registry witness at `234567 is not iterable`.
+
 HyroTrader inherits all three option-read methods but its optionsEnabled override
 always returns false. Route those trait and dynamic calls through the inherited
 receiver so they preserve the source options-disabled Error before HTTP, including
@@ -862,3 +871,13 @@ production route and are deleted. Hyro socket disposal uses the existing concret
 PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
 generic dispose wrapper and its three synthetic-only cases are removed. Preserve
 the actual constructor/socket/Store witnesses and the remaining439 session cases.
+
+The constructed ticker census in `public_stream_binding` compares primary/demo
+linear and inverse categories, dedicated inverse and Spot with their maintained
+TS exchanges and DefaultStores. The configured Hyro constructor uses the same
+shared live helper from `hyro_binding`. Across616 cases and1848 real frames,
+all11 source numeric inputs vary independently beside distinct good rows, with
+finite Store resets and native binary64 assertions. Spot's ignored funding time
+and truthy rate-to-zero behavior remain source-equal. The shared control runner
+must fail all four family witnesses and the configured Hyro witness under live
+last/bid misrouting, then pass after exact source restoration.
