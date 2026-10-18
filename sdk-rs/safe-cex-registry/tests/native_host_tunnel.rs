@@ -239,6 +239,9 @@ async fn serve_tunnel(listener: TcpListener, handler: Handler, tunnel: Rc<Tunnel
                         let answer = handler(&request);
                         tunnel.seen.borrow_mut().push(request);
                         let (status, body) = match answer {
+                            Some(reply) if reply.get("__status").is_some() => {
+                                (reply["__status"].as_u64().unwrap(), reply["body"].clone())
+                            }
                             Some(body) => (200, body),
                             None => (404, json!({"code":-1,"msg":"no route"})),
                         };
@@ -563,6 +566,140 @@ fn okx_family_signed_rest_uses_the_authenticated_bigint_tunnel() {
                 "source bigInt transport uses raw responses"
             );
             drop(requests);
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn bybit_validation_keeps_the_api_hosts_settled_how_404() {
+    run_local(async {
+        use safe_cex_types::ExchangeName;
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            for tunneled in [true, false] {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let origin = format!("ws://{}", listener.local_addr().unwrap());
+                let tunnel = Rc::new(Tunnel::default());
+                tokio::task::spawn_local(serve_tunnel(listener, Rc::new(|_| None), tunnel.clone()));
+                let runtime = native_tealstreet_runtime_with(
+                    Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+                    Rc::new(LocalTunnel {
+                        inner: NativeTunnelHost,
+                        origin,
+                    }),
+                );
+                let h = venue_harness(
+                    name.clone(),
+                    Rc::new(|_| None),
+                    json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":tunneled}),
+                    None,
+                    runtime,
+                )
+                .await;
+                let errors = Rc::new(RefCell::new(Vec::new()));
+                let captured = errors.clone();
+                h.exchange.base().on_args(
+                    "error",
+                    Rc::new(move |_, args| {
+                        captured.borrow_mut().push(args[0].to_display());
+                        Ok(())
+                    }),
+                );
+                let result = h.exchange.validate_account().await.unwrap();
+                if tunneled {
+                    assert_eq!(
+                        result.error.as_value(),
+                        &json!("Cannot read properties of undefined (reading 'includes')"),
+                        "{name:?}: HOW 404 resolves through the API interceptor into validateAccount's TypeError catch"
+                    );
+                    assert_eq!(
+                        errors.borrow().len(),
+                        2,
+                        "undefined retMsg emission precedes the TypeError"
+                    );
+                    assert_eq!(tunnel.seen.borrow().len(), 1);
+                    assert!(
+                        h.seen.borrow().is_empty(),
+                        "HOW never dials the venue origin"
+                    );
+                } else {
+                    assert!(
+                        result
+                            .error
+                            .as_value()
+                            .as_str()
+                            .unwrap()
+                            .starts_with("no route GET /v5/account/info"),
+                        "{name:?}: direct rejection retains response.data.msg: {result:?}"
+                    );
+                    assert_eq!(errors.borrow().len(), 1);
+                    assert_eq!(h.seen.borrow().len(), 1);
+                    assert!(tunnel.seen.borrow().is_empty());
+                }
+                assert!(h.store.orders().is_empty());
+                h.exchange.dispose().unwrap();
+            }
+        }
+    });
+}
+
+#[test]
+fn kucoin_validation_keeps_the_api_hosts_settled_how_404() {
+    run_local(async {
+        use safe_cex_types::ExchangeName;
+        for (name, message, count) in [
+            (ExchangeName::Kucoin, "Failed to validate account", 1),
+            (
+                ExchangeName::Kucoinspot,
+                "Failed to validate KuCoin Spot account",
+                0,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = format!("ws://{}", listener.local_addr().unwrap());
+            let tunnel = Rc::new(Tunnel::default());
+            tokio::task::spawn_local(serve_tunnel(
+                listener,
+                Rc::new(|_| Some(json!({"__status":404,"body":{"code":"rejected"}}))),
+                tunnel.clone(),
+            ));
+            let runtime = native_tealstreet_runtime_with(
+                Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+                Rc::new(LocalTunnel {
+                    inner: NativeTunnelHost,
+                    origin,
+                }),
+            );
+            let h = venue_harness(name.clone(), Rc::new(|_| None),
+                json!({"key":"native-key","secret":SECRET,"passphrase":"native-passphrase","tealstreetTunnel":true}),
+                None, runtime).await;
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let captured = errors.clone();
+            h.exchange.base().on_args(
+                "error",
+                Rc::new(move |_, args| {
+                    captured.borrow_mut().push(args[0].to_display());
+                    Ok(())
+                }),
+            );
+            let result = h.exchange.validate_account().await.unwrap();
+            assert_eq!(
+                result.error.as_value(),
+                &json!(message),
+                "{name:?}: source resolved-error branch"
+            );
+            assert_eq!(
+                errors.borrow().len(),
+                count,
+                "{name:?}: source emission count"
+            );
+            assert_eq!(tunnel.seen.borrow().len(), 1);
+            assert!(h.seen.borrow().is_empty());
             h.exchange.dispose().unwrap();
         }
     });
