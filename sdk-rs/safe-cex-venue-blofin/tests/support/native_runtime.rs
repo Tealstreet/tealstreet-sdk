@@ -174,6 +174,7 @@ impl WsRuntime for Runtime {
 pub struct Wire {
     pub requests: RefCell<Vec<RestRequest>>,
     pub bodies: RefCell<BTreeMap<String, Value>>,
+    pub pages: RefCell<BTreeMap<String, std::collections::VecDeque<Value>>>,
     pub retained_bodies: RefCell<BTreeMap<String, RestResponseBody>>,
 }
 pub fn path(url: &str) -> &str {
@@ -185,7 +186,14 @@ impl RestAdapter for Wire {
         let retained = self.retained_bodies.borrow().get(path(&r.url)).cloned();
         // Active-order pagination completes on the page after a cursor.
         let paged = r.params.as_ref().is_some_and(|p| !p["after"].is_null());
-        let body = if paged {
+        let scripted = self
+            .pages
+            .borrow_mut()
+            .get_mut(path(&r.url))
+            .and_then(|pages| pages.pop_front());
+        let body = if let Some(body) = scripted {
+            body
+        } else if paged {
             json!({"code":"0","msg":"success","data":[]})
         } else {
             self.bodies
