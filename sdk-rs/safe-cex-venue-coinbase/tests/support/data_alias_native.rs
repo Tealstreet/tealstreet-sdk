@@ -1,11 +1,16 @@
 use crate::{
-    market_position_reads::{ReadItem, ReadItems, ReadMarket, ReadMarkets, ReadPosition, ReadPositions, ReadTicker, ReadTickers},
+    market_position_reads::{
+        ReadItem, ReadItems, ReadMarket, ReadMarkets, ReadPosition, ReadPositions, ReadTicker,
+        ReadTickers,
+    },
     order_sync::PrivateOrderMarkets,
     public_market_reads::{CatalogMarket, CatalogMarkets, CatalogSupportedTypes, PublicCandles},
     starbase_public_frames::CoinbaseStarbaseFrameValue as Frame,
 };
 use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
-use safe_cex_types::{Market, OrderSide, Position, Ticker, retained_json::RetainedJsonInput as Input};
+use safe_cex_types::{
+    Market, OrderSide, Position, Ticker, retained_json::RetainedJsonInput as Input,
+};
 use serde_json::json;
 use std::{cell::RefCell, rc::Rc};
 
@@ -265,4 +270,3 @@ fn candle_and_supported_type_aliases_decode_native_values_before_reporting() {
     types.borrow_mut().push("CFM".into());
     assert_eq!(&*captured.borrow(), &["SPOT", "INTX", "CFM"]);
 }
-
