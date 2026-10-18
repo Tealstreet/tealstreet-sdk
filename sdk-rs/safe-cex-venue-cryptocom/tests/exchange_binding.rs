@@ -913,7 +913,13 @@ fn dispose_sets_source_flag_without_removing_inherited_listeners() {
         h.venue().base().is_disposed(),
         "source assignment reaches shared state"
     );
-    h.venue().base().emit("update", json!({})).unwrap();
+    h.venue()
+        .base()
+        .emit(
+            "update",
+            safe_cex_exchange::js_runtime::value::from_json(&json!({})),
+        )
+        .unwrap();
     assert_eq!(
         observed.get(),
         1,
@@ -1389,10 +1395,10 @@ fn order_book_rows_require_iterable_pairs_through_real_socket() {
             case["side"]
         );
         assert!(
-            errors
-                .borrow()
-                .iter()
-                .any(|e| e.to_string().contains("TypeError")),
+            errors.borrow().iter().any(|e| {
+                e.as_str()
+                    .is_some_and(|text| String::from_utf16_lossy(text).contains("TypeError"))
+            }),
             "pair refusal must retain a visible TypeError cause: {:?}",
             errors.borrow()
         );

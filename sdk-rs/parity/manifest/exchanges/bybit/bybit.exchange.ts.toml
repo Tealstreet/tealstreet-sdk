@@ -411,8 +411,8 @@ status = "ported"
 note = "safe-cex-venue-bybit/src/private_snapshot_refresh.rs::schedule_set_trading_stop_snapshot_refresh selects and invokes the actual receiver field with no arguments, then returns undefined; debounce completion is not awaited. Its source initializer and native scheduling calls are exercised together. Full class/constructor binding remains pending."
 
 [[symbol]]
-ts = "BybitExchange#shouldUseLocalRestOrderLifecycleFallback"
-kind = "field-fn"
+ts = "BybitExchange.shouldUseLocalRestOrderLifecycleFallback"
+kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/primary_order_lifecycle.rs::should_use_local_rest_order_lifecycle_fallback"
 status = "ported"

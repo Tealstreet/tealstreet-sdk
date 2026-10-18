@@ -1,7 +1,10 @@
 //! Constructed production Orderly family over scripted HTTP and shared sockets.
 #[path = "support/exchange_runtime.rs"]
 mod support;
-use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::{
+    exchange::Exchange,
+    js_runtime::value::{Js, from_json},
+};
 use serde_json::json;
 use support::drive;
 
@@ -686,7 +689,7 @@ fn disposal_updates_the_shared_flag_and_preserves_source_listeners() {
     );
     venue
         .base()
-        .emit("fill", json!({"source":"disposal witness"}))
+        .emit("fill", from_json(&json!({"source":"disposal witness"})))
         .unwrap();
     assert_eq!(calls.get(), 1, "source disposal retains emitter listeners");
 }
@@ -752,7 +755,7 @@ fn trait_cancel_symbol_attempts_algo_after_a_normal_cancel_failure() {
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0]
-            .to_string()
+            .to_display()
             .contains("normal cancellation denied")
     );
 }
@@ -866,10 +869,18 @@ fn private_partial_execution_updates_store_and_emits_fill_for_name(
     assert_eq!(actual.filled, 0.5);
     assert_eq!(actual.remaining, 1.5);
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"].as_f64(), Some(778.0));
-    assert_eq!(fills.borrow()[0]["symbol"], "BTCUSDC");
-    assert_eq!(fills.borrow()[0]["price"].as_f64(), Some(101.5));
-    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(0.5));
+    assert_eq!(fills.borrow()[0].get("id").unwrap().as_f64(), Some(778.0));
+    assert!(
+        fills.borrow()[0]
+            .get("symbol")
+            .unwrap()
+            .strict_equals(&Js::str("BTCUSDC"))
+    );
+    assert_eq!(
+        fills.borrow()[0].get("price").unwrap().as_f64(),
+        Some(101.5)
+    );
+    assert_eq!(fills.borrow()[0].get("amount").unwrap().as_f64(), Some(0.5));
     drop(orders);
     venue.dispose().unwrap();
 }
@@ -1019,7 +1030,7 @@ fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0]
-            .to_string()
+            .to_display()
             .contains("account leverage denied")
     );
     wire.responses

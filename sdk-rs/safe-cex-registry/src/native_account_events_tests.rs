@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_exchange::js_runtime::value::from_json;
 
 fn with_account(test: impl FnOnce(&Rc<NativeAccount>)) {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -48,7 +49,11 @@ fn native_worker_log_arguments_keep_arity_and_single_array_identity() {
                 vec![json!(["array-valued argument"])],
                 vec![json!("message"), json!({"severity":"info"})],
             ] {
-                account.exchange.base().emit_args(event, &args).unwrap();
+                account
+                    .exchange
+                    .base()
+                    .emit_args(event, &args.iter().map(from_json).collect::<Vec<_>>())
+                    .unwrap();
                 let (name, actual) = events.borrow_mut().pop().unwrap();
                 assert_eq!(name, event);
                 assert_eq!(
@@ -59,7 +64,11 @@ fn native_worker_log_arguments_keep_arity_and_single_array_identity() {
             }
         }
         let fill = json!({"symbol":"BTCUSDT","price":10.0});
-        account.exchange.base().emit("fill", fill.clone()).unwrap();
+        account
+            .exchange
+            .base()
+            .emit("fill", from_json(&fill))
+            .unwrap();
         assert_eq!(
             events.borrow_mut().pop().unwrap(),
             ("fill".into(), NativeValue::from(fill))
@@ -84,7 +93,7 @@ fn native_worker_forwards_both_private_websocket_diagnostic_events() {
             account
                 .exchange
                 .base()
-                .emit(event, json!("redacted frame"))
+                .emit(event, Js::str("redacted frame"))
                 .unwrap();
         }
         assert_eq!(events.borrow().len(), 2);

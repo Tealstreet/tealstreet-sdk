@@ -593,7 +593,9 @@ impl MexcExchange {
                             }
                         });
                     self.base.emit_and_log_error(
-                        ExchangeErrorInput::Raw(message.clone()),
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
                         None,
                         None,
                     )?;
@@ -1085,8 +1087,13 @@ impl MexcExchange {
             match result {
                 Ok(positions) => Ok(positions),
                 Err(message) => {
-                    self.base
-                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
+                    self.base.emit_and_log_error(
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
+                        None,
+                        None,
+                    )?;
                     let positions = self.base.store.positions();
                     Ok(match symbols {
                         Some(symbols) => positions
@@ -1204,8 +1211,13 @@ impl MexcExchange {
             match result {
                 Ok(tickers) => Ok(tickers),
                 Err(message) => {
-                    self.base
-                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
+                    self.base.emit_and_log_error(
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
+                        None,
+                        None,
+                    )?;
                     Ok(self.base.store.tickers().to_vec())
                 }
             }
@@ -1330,8 +1342,13 @@ impl MexcExchange {
             match result {
                 Ok(markets) => Ok(markets),
                 Err(message) => {
-                    self.base
-                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
+                    self.base.emit_and_log_error(
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
+                        None,
+                        None,
+                    )?;
                     Ok(self.base.store.markets().to_vec())
                 }
             }

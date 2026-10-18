@@ -179,6 +179,7 @@ fn fixture(input: Value) -> (BingxDataReads, Rc<DefaultStore>, Rc<Transport>, Rc
     base.on(
         "error",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             events.borrow_mut().push(value.as_str().unwrap().into());
             Ok(())
         }),

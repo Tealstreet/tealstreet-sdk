@@ -1,6 +1,7 @@
 //! E2E calls the production PhemexExchange through the typed Exchange contract.
 #[path = "support/binding_harness.rs"]
 mod support;
+use safe_cex_exchange::js_runtime::value::{Js, from_json};
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -751,7 +752,10 @@ fn dispose_runs_source_super_cleanup() {
         h.venue().base().is_disposed(),
         "source super call sets shared state"
     );
-    h.venue().base().emit("update", json!({})).unwrap();
+    h.venue()
+        .base()
+        .emit("update", from_json(&json!({})))
+        .unwrap();
     assert_eq!(
         observed.get(),
         0,
@@ -934,5 +938,107 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         "{:?}",
         h.runtime.reports.borrow()
     );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = chart_venue();
+    // Reject terminal I/O with the real harness Error; all socket, HTTP-client,
+    // snapshot and logging behavior stays in the constructed production venue.
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/md/v2/fullbook");
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let received = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let seen = received.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            Rc::new(move |book| seen.borrow_mut().push(book)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    let frame =
+        json!({"symbol":SYMBOL,"orderbook_p":{"sequence":101,"bids":[["100","4"]],"asks":[]}});
+    let warning = "[Phemex] Orderbook snapshot request failed for BTCUSDT; waiting for next delta to retry: unscripted request GET /md/v2/fullbook";
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/snapshot-warning-source.cjs"
+        ))
+        .output()
+        .expect("maintained TS source oracle");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source["error"],
+        json!([[warning, "warning"], [warning, "warning"]])
+    );
+    for attempt in 0..3 {
+        if attempt == 1 {
+            // Markets/tickers plus the first snapshot consumed the real
+            // three-per-second read budget. Advance its clock, not its policy.
+            h.runtime.advance(1_000.);
+        }
+        if attempt == 2 {
+            h.runtime.advance(30_000.);
+        }
+        public_frame(&h, frame.clone());
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        assert_eq!(
+            h.http.calls("/md/v2/fullbook").len(),
+            attempt + 1,
+            "failed snapshot must retry on the next delta"
+        );
+        let logs: Vec<_> = h
+            .runtime
+            .console
+            .borrow()
+            .iter()
+            .filter(|(_, msg)| msg.contains("Orderbook snapshot request failed"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            logs.len(),
+            if attempt == 2 { 2 } else { 1 },
+            "PHEMEX-SNAPSHOT-WARNING must reach parent.log and throttle/reopen; reports: {:?}",
+            h.runtime.reports.borrow()
+        );
+        for (severity, message) in logs {
+            assert_eq!(severity, "warning");
+            assert_eq!(
+                message, warning,
+                "PHEMEX-SNAPSHOT-WARNING must use Error.message, matching maintained TS"
+            );
+        }
+        assert!(received.borrow().is_empty());
+    }
+    h.http.ok("GET", "/md/v2/fullbook", json!({"result":{"sequence":100,"orderbook_p":{"bids":[["100","2"]],"asks":[["102","3"]]}}}));
+    public_frame(&h, frame);
+    for _ in 0..8 {
+        h.runtime.pump();
+    }
+    assert_eq!(
+        received.borrow().len(),
+        1,
+        "a later valid snapshot must recover"
+    );
+    assert_eq!(received.borrow()[0].bids[0].amount, 4.);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "snapshot failure must be handled by its warning path"
+    );
+    cleanup().unwrap();
     h.venue().dispose().unwrap();
 }
