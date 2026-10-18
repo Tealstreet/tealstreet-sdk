@@ -1,3 +1,6 @@
+#[cfg(feature = "native")]
+#[path = "support/api_factory_binding.rs"]
+mod api_factory_binding;
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
 #[cfg(feature = "native")]

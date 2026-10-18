@@ -15171,6 +15171,561 @@
     "evidence": "Source-role review: safe-cex-venue-binance/src/lifecycle.rs::TickTimer; actual consumers are exchange_classes.rs/native_host.rs. Native compiler Deserialize and conversion detectors execute on the exact authenticated production alias. Independently, tests/private_classes.rs::lifecycle_aliases::native_lifecycle_aliases_publish_store_then_resolve_tick_again_at_timer_fire uses native_dependencies, actual owner/HTTP or socket/signing bindings and native field/effect assertions; scripts/lifecycle-alias-controls.py disconnects the reachable production dataflow with a named compiled refusal then exact restoration. This finite scope does not grant arbitrary callback implementations or a feature-matrix exemption.",
     "reason": "Scheduled zero-input continuation resolving and invoking the current tick after the source interval. The real native timer dispatches a second account request while independently respecting the risk interval; this is a capability, not timer-data parsing."
   },
+  "safe_cex_venue_binance::api_factory::QuerySerializer": {
+    "shape": "observed",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "serialize",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "params",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Native outbound repeat-array query encoding over this finite JSON corpus, with returned string observed directly."
+      }
+    ],
+    "call": "serde_json::Value::String($type::Repeat.serialize($value))",
+    "cases": [
+      {
+        "input": {},
+        "output": ""
+      },
+      {
+        "input": {
+          "symbol": "BTC USDT",
+          "ids": [
+            1,
+            2
+          ]
+        },
+        "output": "symbol=BTC%20USDT&ids=1&ids=2"
+      },
+      {
+        "input": {
+          "value": "é&=",
+          "missing": null
+        },
+        "output": "value=%C3%A9%26%3D&missing="
+      },
+      {
+        "input": {
+          "nested": {
+            "a": "x"
+          },
+          "flag": false
+        },
+        "output": "nested%5Ba%5D=x&flag=false"
+      }
+    ]
+  },
+  "safe_cex_venue_binance::api_factory::RetryRead": {
+    "shape": "observed",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "matches_read",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "method",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Native predicate over finite method/URL profiles and both concrete policies; the Boolean is observed directly."
+      }
+    ],
+    "call": "{ let policy=if $value[\"policy\"]==\"path\" { $type::ReadsAndPath(\"/listen\") } else { $type::Reads }; serde_json::Value::Bool(policy.matches_read($value[\"method\"].as_str(),$value[\"url\"].as_str())) }",
+    "cases": [
+      {
+        "input": {
+          "policy": "reads",
+          "method": "GET",
+          "url": "/private"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "reads",
+          "method": "HeAd",
+          "url": null
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "reads",
+          "method": "POST",
+          "url": "/listen"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": "POST",
+          "url": "/listen?x=1"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": "DELETE",
+          "url": "/listen"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": null,
+          "url": null
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": "post",
+          "url": "/listen/extra"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "policy": "reads",
+          "method": null,
+          "url": "/listen"
+        },
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_binance::api_factory::optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/api-factory-observers.rs\")); } witness::optional($value, |value,key| $type(value,key)) }",
+    "cases": [
+      {
+        "input": {
+          "profile": "undefined",
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": false,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": false,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "selected": false
+          },
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "bool": false
+          },
+          "own": true,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "selected": null
+          },
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "null"
+          },
+          "own": true,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "profile": "own-undefined",
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": true,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": false,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "profile": "identity",
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "object"
+          },
+          "own": true,
+          "retained": true
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "selected": "literal"
+          },
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "units": [
+              108,
+              105,
+              116,
+              101,
+              114,
+              97,
+              108
+            ]
+          },
+          "own": true,
+          "retained": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::api_factory::endpoint": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "table",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Selects a generated static path from a typed slice using internal literal keys; it parses no response or typed wire record.",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile."
+  },
+  "safe_cex_venue_binance::api_factory::utf8_hmac_sha256_hex": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "utf8_hmac_sha256_hex",
+      "signature": {
+        "inputs": [
+          [
+            "secret",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outbound authentication codec over a UTF8 secret and already assembled signing payload. It computes the HMAC-SHA256 hex string for transmission; no wire response or model is decoded. Buffer/key-object coercions remain outside this boundary.",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile."
+  },
   "safe_cex_venue_binance::api_factory::ApiFuture": {
     "category": "non-decoder",
     "target": {
