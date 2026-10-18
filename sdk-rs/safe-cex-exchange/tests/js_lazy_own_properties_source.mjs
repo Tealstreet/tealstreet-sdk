@@ -30,7 +30,7 @@ function load(filename) {
 const {DefaultStore} = load(path.join(root,'packages/safe-cex/src/store/store.base.ts'));
 
 // Execute actual maintained Store mutations. Table values remain live; individual
-// native DTO results are snapshots in the planned shared view capability.
+// references observe granular mutation; full replacement uses a new generation.
 const market={id:'m',symbol:'BTCUSD',base:'BTC',quote:'USD',active:true,
  precision:{amount:1,price:0.5},limits:{amount:{min:1,max:1000},leverage:{min:1,max:100}}};
 const ticker={id:'t',symbol:'BTCUSD',bid:1,ask:2,last:1,mark:1,index:1,
@@ -85,5 +85,5 @@ const descriptorError={failure:'descriptor'};
 const failingDescriptor=new Proxy({}, {getOwnPropertyDescriptor(){throw descriptorError}});
 try{Object.hasOwn(failingDescriptor,'x')}catch(e){failures.push(e===descriptorError)}
 assert.deepEqual(failures,[true,true,true,true,true]);
-process.stdout.write(JSON.stringify({market,ticker,storeCases,proxy:{presentUndefined,absent,inherited,keysBefore,ownNames,
- spreadKeys:Object.keys(spread),json,receiverSeen,failures,keysCalls}}));
+process.stdout.write(JSON.stringify({market,ticker,storeCases,proxy:{presentUndefined,absent,inherited,keysBefore:keysBefore.map(k=>Array.from(k,c=>c.charCodeAt(0))),ownNames:ownNames.map(k=>Array.from(k,c=>c.charCodeAt(0))),
+ spreadKeys:Object.keys(spread).map(k=>Array.from(k,c=>c.charCodeAt(0))),json,receiverSeen,failures,keysCalls}}));
