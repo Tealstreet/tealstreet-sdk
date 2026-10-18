@@ -809,6 +809,7 @@
     {
       "owner": "src/exchange.rs::BaseExchange::start_watchdog",
       "boundaries": [
+        "owned-or-host-spawn",
         "async-block",
         "await"
       ],
@@ -1383,6 +1384,7 @@
     {
       "owner": "src/health.rs::ExchangeHealthMonitor::schedule_recovery",
       "boundaries": [
+        "owned-or-host-spawn",
         "async-block",
         "await"
       ],
@@ -2382,7 +2384,8 @@
     {
       "owner": "src/owned_tasks.rs::OwnedTasks::start_classified",
       "boundaries": [
-        "future-signature"
+        "future-signature",
+        "owned-or-host-spawn"
       ],
       "producer_sha256": "fbd95d8d6be433e1cc71b1a304668a52b5f4d5a2b55f234e30ecb91f63be97a8",
       "classification": "delegated",
@@ -2811,6 +2814,7 @@
     {
       "owner": "src/throttle.rs::ThrottleManager < T >::call",
       "boundaries": [
+        "owned-or-host-spawn",
         "async-block",
         "await"
       ],
