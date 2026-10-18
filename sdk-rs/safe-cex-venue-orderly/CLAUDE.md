@@ -247,3 +247,9 @@ behavior, requiring a compiled native failure and exact restored pass.
 Ticker row admission runs after the real Store lookup. Inherited dictionary targets
 without a matching ticker remain source no-ops. Only numeric typed patch errors
 from the native Store are deferred; source and subscriber errors still propagate.
+
+The three `ws_controls` structural aliases use exact production Host profiles in
+the reviewed generic-alias policy. `STRUCTURAL_ALIAS_REVIEW.md` separates their
+native trait classifications from actual six-family host/socket execution and
+compiled production controls. The same crate-internal Host re-export is used by
+live assembly; do not introduce a second host or an identity fallback.
