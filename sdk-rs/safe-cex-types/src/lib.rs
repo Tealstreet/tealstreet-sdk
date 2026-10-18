@@ -233,12 +233,32 @@ pub struct MarketPrecision {
     pub quote: Option<f64>,
 }
 
+/// A numeric runtime property whose source mapper may retain numeric text.
+/// Arithmetic consumers explicitly apply JavaScript Number conversion in num.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NumericValue {
+    Number(f64),
+    Text(String),
+}
+impl From<f64> for NumericValue {
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
+}
+impl From<String> for NumericValue {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct MarketLimitsAmount {
     pub min: f64,
-    pub max: f64,
+    #[ts(type = "number")]
+    pub max: NumericValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -3433,7 +3453,7 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireMarketLimitsAmount {
         min: f64,
-        max: f64,
+        max: super::NumericValue,
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketLimitsAmount {
