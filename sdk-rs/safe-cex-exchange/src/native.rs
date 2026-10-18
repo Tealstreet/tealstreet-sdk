@@ -88,6 +88,15 @@ impl Future for HostTask {
 
 /// `ExchangeRuntime` + `WsRuntime` on the current tokio `LocalSet`.
 pub struct NativeRuntime {
+    pub replay_clock: Option<Rc<crate::replay_clock::ReplayClock>>,
+    frame_counts: Rc<
+        RefCell<
+            Vec<(
+                String,
+                Rc<RefCell<safe_cex_transport::native::NativeFrameCounts>>,
+            )>,
+        >,
+    >,
     origin: Instant,
     owner: Weak<NativeRuntime>,
     transport: Arc<dyn TransportProvider>,
@@ -100,7 +109,30 @@ pub fn native_runtime() -> Rc<NativeRuntime> {
     native_runtime_with_transport(Arc::new(DirectTransport))
 }
 pub fn native_runtime_with_transport(transport: Arc<dyn TransportProvider>) -> Rc<NativeRuntime> {
-    runtime_over(transport, Rc::new(NativeTunnelHost))
+    runtime_over(transport, Rc::new(NativeTunnelHost), None)
+}
+/// Isolated diagnostic host: fixed startup timestamps, manually driven replay timers.
+pub fn native_replay_runtime(epoch: f64) -> Rc<NativeRuntime> {
+    safe_cex_store::virtual_clock::set_thread_host_time(Some(epoch));
+    runtime_over(
+        Arc::new(DirectTransport),
+        Rc::new(NativeTunnelHost),
+        Some(crate::replay_clock::new(epoch)),
+    )
+}
+pub fn replay_checkpoint(runtime: &Rc<NativeRuntime>) {
+    crate::js_runtime::jobs::checkpoint(runtime.clone());
+}
+pub fn replay_pending_jobs(runtime: &Rc<NativeRuntime>) -> usize {
+    crate::js_runtime::jobs::pending_non_timer(runtime.clone())
+}
+pub fn native_frame_receipts(runtime: &NativeRuntime) -> Vec<Value> {
+    runtime
+        .frame_counts
+        .borrow()
+        .iter()
+        .map(|(url, counts)| serde_json::json!({"url": url, "counts": counts.borrow().clone()}))
+        .collect()
 }
 /// The account's proxy token (ts: the accessToken facade; exchange-server's per-account provider).
 pub type ProxyTokenSource = Rc<dyn Fn() -> TransportFuture<'static, String>>;
@@ -115,7 +147,7 @@ pub fn native_tealstreet_runtime_with(
     dials: Rc<dyn TunnelHost>,
 ) -> Rc<NativeRuntime> {
     let tunnel: Rc<dyn TunnelHost> = Rc::new(TokenTunnel { dials, token });
-    runtime_over(tealstreet_transport(tunnel.clone()), tunnel)
+    runtime_over(tealstreet_transport(tunnel.clone()), tunnel, None)
 }
 // TealstreetTransport takes an Arc host; this one is local like every native future.
 #[allow(clippy::arc_with_non_send_sync)]
@@ -127,9 +159,12 @@ fn tealstreet_transport(tunnel: Rc<dyn TunnelHost>) -> Arc<dyn TransportProvider
 fn runtime_over(
     transport: Arc<dyn TransportProvider>,
     tunnel: Rc<dyn TunnelHost>,
+    replay_clock: Option<Rc<crate::replay_clock::ReplayClock>>,
 ) -> Rc<NativeRuntime> {
     let random = random_unit();
     Rc::new_cyclic(|owner| NativeRuntime {
+        replay_clock,
+        frame_counts: Rc::default(),
         origin: Instant::now(),
         owner: owner.clone(),
         transport,
@@ -242,14 +277,25 @@ fn random_unit() -> f64 {
 }
 impl ExchangeRuntime for NativeRuntime {
     fn monotonic_now_ms(&self) -> f64 {
-        self.origin.elapsed().as_secs_f64() * 1000.0
+        self.replay_clock.as_ref().map_or_else(
+            || self.origin.elapsed().as_secs_f64() * 1000.0,
+            |clock| crate::replay_clock::elapsed(clock),
+        )
     }
     fn now_ms(&self) -> f64 {
         // JavaScript wall-clock timestamps (Date.now) have integer milliseconds.
         // Keep sub-millisecond precision on monotonic_now_ms for pacing/metrics.
-        wall_clock_ms().floor()
+        self.replay_clock.as_ref().map_or_else(
+            || wall_clock_ms().floor(),
+            |clock| crate::replay_clock::now(clock),
+        )
     }
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()> {
+        if let Some(clock) = &self.replay_clock {
+            if delay_ms > 0 {
+                return crate::replay_clock::sleep(clock, delay_ms);
+            }
+        }
         Box::pin(async move {
             if delay_ms == 0 {
                 tokio::task::yield_now().await;
@@ -316,6 +362,9 @@ impl ExchangeRuntime for NativeRuntime {
     }
 }
 impl WsRuntime for NativeRuntime {
+    fn frame_receipts_enabled(&self) -> bool {
+        self.replay_clock.is_some()
+    }
     fn transport(&self) -> Arc<dyn TransportProvider> {
         self.transport.clone()
     }
@@ -329,6 +378,8 @@ impl WsRuntime for NativeRuntime {
         options: WebSocketConnectionOptions,
         reconnecting: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+        let frame_counts = self.frame_counts.clone();
+        let replay = self.replay_clock.is_some();
         Box::pin(async move {
             // Header-capable source sockets select the wrapper branch even
             // when the native core owns reconnects. Dial that authenticated
@@ -344,9 +395,22 @@ impl WsRuntime for NativeRuntime {
                 Some(UpgradeHeaders::Static(map)) => map.clone().into_iter().collect(),
                 Some(UpgradeHeaders::Fresh(provider)) => provider().into_iter().collect(),
             };
-            let socket = connect_websocket(&url, &protocols, &headers)
-                .await
-                .map_err(|e| ExchangeError::new(e.to_string()))?;
+            let socket = match connect_websocket(&url, &protocols, &headers).await {
+                Ok(socket) => {
+                    if replay {
+                        frame_counts
+                            .borrow_mut()
+                            .push((url, socket.frame_counts.clone()));
+                    }
+                    Ok(socket)
+                }
+                Err(error @ safe_cex_transport::TransportError::Network(_)) => Err(error),
+                Err(cause) => {
+                    let mut error = ExchangeError::new(cause.to_string());
+                    error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(cause));
+                    return Err(error);
+                }
+            };
             Ok(Rc::new(native_ws_socket(socket)) as Rc<dyn WsSocket>)
         })
     }
@@ -370,29 +434,51 @@ impl WsRuntime for NativeRuntime {
     }
 }
 
-/// A plain (non-reconnecting) socket. Open is delivered first; after Close or
-/// terminate the stream stays pending, as a listener-less socket would.
+/// A plain socket delivers Open or the failed attempt's Error/Close pair.
+/// After Close or termination, event delivery stays pending.
 struct NativeWsSocket {
-    inner: Rc<NativeSocket>,
+    inner: Result<Rc<NativeSocket>, String>,
     opened: Rc<Cell<bool>>,
     ended: Rc<Cell<bool>>,
 }
-fn native_ws_socket(inner: NativeSocket) -> NativeWsSocket {
+fn native_ws_socket(
+    inner: Result<NativeSocket, safe_cex_transport::TransportError>,
+) -> NativeWsSocket {
     NativeWsSocket {
-        inner: Rc::new(inner),
+        inner: inner.map(Rc::new).map_err(|error| error.to_string()),
         opened: Rc::new(Cell::new(false)),
         ended: Rc::new(Cell::new(false)),
     }
 }
 impl WsSocket for NativeWsSocket {
     fn ready_state(&self) -> u8 {
-        self.inner.ready_state() as u8
+        self.inner
+            .as_ref()
+            .map_or(3, |inner| inner.ready_state() as u8)
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+        let inner = match &self.inner {
+            Ok(inner) => inner.clone(),
+            Err(message) => {
+                if self.ended.get() {
+                    return Box::pin(std::future::pending());
+                }
+                let event = if !self.opened.replace(true) {
+                    WsEvent::Error(message.clone())
+                } else {
+                    self.ended.set(true);
+                    WsEvent::Close {
+                        code: Some(1006),
+                        reason: String::new(),
+                    }
+                };
+                return Box::pin(std::future::ready(Ok(event)));
+            }
+        };
         if !self.opened.replace(true) {
             return Box::pin(async { Ok(WsEvent::Open) });
         }
-        let (inner, ended) = (self.inner.clone(), self.ended.clone());
+        let ended = self.ended.clone();
         Box::pin(async move {
             if ended.get() {
                 return std::future::pending().await;
@@ -416,15 +502,19 @@ impl WsSocket for NativeWsSocket {
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
         self.inner
+            .as_ref()
+            .map_err(|message| ExchangeError::new(message.clone()))?
             .send(SocketFrame::Text(message.to_owned()))
             .map_err(|e| ExchangeError::new(e.to_string()))
     }
     fn close(&self) {
-        let _ = self.inner.close(Some(1000), "");
+        if let Ok(inner) = &self.inner {
+            let _ = inner.close(Some(1000), "");
+        }
     }
     fn terminate(&self) {
         self.ended.set(true);
-        let _ = self.inner.close(Some(1000), "");
+        self.close();
     }
     fn reconnect(&self) {
         // The core reconnects only host-managed wrappers; a plain socket just closes.

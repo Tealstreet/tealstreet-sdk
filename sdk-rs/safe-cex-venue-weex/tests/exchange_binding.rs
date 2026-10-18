@@ -514,7 +514,7 @@ fn change_position_mode_e2e() {
     let calls = h.http.calls(endpoint("SET_MARGIN_TYPE"));
     assert_eq!(calls.len(), 1);
     assert_eq!(body(&calls[0])["separatedType"], "SEPARATED");
-    assert!(h.store.options().is_hedged);
+    assert!(h.store.options().unwrap().is_hedged);
 }
 #[test]
 fn rejected_order_leg_keeps_successful_orders_without_error_event() {
@@ -599,7 +599,7 @@ fn accepted_post_only_placement_updates_the_real_store() {
         assert_eq!(body(&calls[0])["timeInForce"], "POST_ONLY");
         let ids = outcome.expect("accepted PostOnly placement must resolve after Store update");
         assert_eq!(ids, ["1008"]);
-        let stored = h.store.orders();
+        let stored = h.store.orders().unwrap();
         assert_eq!(stored.len(), usize::from(has_stored_order));
         if has_stored_order {
             assert_eq!(
@@ -656,7 +656,7 @@ fn accepted_post_only_batch_updates_only_the_matching_store_row() {
         outcome.expect("accepted PostOnly batch must resolve after Store update"),
         ["1008", "1009"]
     );
-    let stored = h.store.orders();
+    let stored = h.store.orders().unwrap();
     assert_eq!(stored.len(), 2);
     assert_eq!(
         stored
@@ -703,7 +703,7 @@ fn accepted_tpsl_amendment_updates_the_real_store_price() {
             outcome.expect("accepted TP/SL amendment must resolve after Store update"),
             ["native-9"]
         );
-        let stored = h.store.orders();
+        let stored = h.store.orders().unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].price, ModelField::Value(103.5));
         assert_eq!(stored[0].amount, 2.0);
@@ -725,7 +725,7 @@ fn cancel_orders_e2e() {
     let calls = h.http.calls(endpoint("BATCH_ORDERS"));
     assert_eq!(calls.len(), 1);
     assert_eq!(body(&calls[0])["orderIdList"], json!(["native-9"]));
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
 }
 #[test]
 fn update_order_e2e() {
@@ -765,10 +765,10 @@ fn schedule_cancel_e2e() {
 fn start_e2e() {
     let h = setup();
     expect_ok(h.drive(h.venue().start()));
-    assert!(h.store.loaded().markets);
-    assert!(h.store.loaded().tickers);
-    assert!(h.store.loaded().orders);
-    assert!(h.store.loaded().balance);
+    assert!(h.store.loaded().unwrap().markets);
+    assert!(h.store.loaded().unwrap().tickers);
+    assert!(h.store.loaded().unwrap().orders);
+    assert!(h.store.loaded().unwrap().balance);
     assert!(!h.runtime.dials.borrow().is_empty());
     h.venue().dispose().unwrap();
 }
@@ -829,7 +829,7 @@ fn incapable_private_transport_never_dials_and_rest_start_stays_available() {
             .iter()
             .all(|(_, options)| !options.headers_required)
     );
-    assert!(h.store.loaded().balance);
+    assert!(h.store.loaded().unwrap().balance);
     h.venue().dispose().unwrap();
 }
 #[test]
@@ -1017,7 +1017,7 @@ fn trait_fetch_leverage_uses_cross_config_instead_of_market_maximum() {
         "user leverage comes from the symbol config"
     );
     assert_eq!(actual.sell_leverage, 20.0);
-    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert_eq!(h.store.fetched_leverage().unwrap()["BTCUSDT"], actual);
     assert_eq!(h.http.calls(endpoint("SYMBOL_CONFIG")).len(), 1);
     assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
 }
@@ -1039,7 +1039,7 @@ fn trait_fetch_leverage_retains_distinct_isolated_sides() {
         .unwrap();
     assert_eq!(actual.buy_leverage, 11.0);
     assert_eq!(actual.sell_leverage, 13.0);
-    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert_eq!(h.store.fetched_leverage().unwrap()["BTCUSDT"], actual);
     assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
 }
 
@@ -1089,7 +1089,11 @@ fn generated_minted_order_id_strips_nanoid_separators() {
     let h = setup();
     *h.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
     assert_eq!(
-        h.venue().base().mint_client_order_id(place()).as_deref(),
+        h.venue()
+            .base()
+            .mint_client_order_id(place())
+            .unwrap()
+            .as_deref(),
         Some("tsAbcDefGhiJklM")
     );
 }
@@ -1107,7 +1111,7 @@ fn private_order_frame_commits_the_normalized_order() {
             json!({"e":"orders","d":[row]}).to_string(),
         ))
         .unwrap();
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let order = orders.iter().find(|o| o.id == "native-9").unwrap();
     assert_eq!(order.price, 107.5);
     assert_eq!(order.filled, 0.75);
@@ -1120,7 +1124,7 @@ fn private_position_frame_commits_the_normalized_position() {
     h.runtime.pump();
     h.venue().base().get_private_sockets()[0]
         .on_message(&safe_cex_transport::socket::SocketFrame::Text(json!({"e":"positions","d":[{"symbol":"BTCUSDT","positionSide":"LONG","size":"7","openValue":"714","leverage":"14","marginType":"CROSS","updatedTime":1700000000000.0}]}).to_string())).unwrap();
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let position = positions
         .iter()
         .find(|p| p.symbol == "BTCUSDT" && p.side == PositionSide::Long)
@@ -1150,9 +1154,9 @@ fn private_account_frame_refreshes_balance_from_rest() {
     h.runtime.advance(250.0);
     h.runtime.pump();
     assert_eq!(h.http.calls(endpoint("BALANCE")).len(), before + 1);
-    assert_eq!(h.store.balance().total, 150.0);
-    assert_eq!(h.store.balance().free, 120.0);
-    assert_eq!(h.store.balance().upnl, 3.0);
+    assert_eq!(h.store.balance().unwrap().total, 150.0);
+    assert_eq!(h.store.balance().unwrap().free, 120.0);
+    assert_eq!(h.store.balance().unwrap().upnl, 3.0);
 }
 
 #[test]
@@ -1165,7 +1169,7 @@ fn trait_nuke_positions_closes_unseen_positions_and_replaces_snapshot() {
     seed(&h);
     // Consume the initial position page, leaving an empty close-confirmation page.
     h.drive(h.venue().fetch_positions(None)).unwrap();
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.positions().unwrap().is_empty());
     expect_ok(h.drive(h.venue().nuke_positions(0)));
     let calls = h.http.calls(endpoint("CLOSE_POSITIONS"));
     assert_eq!(
@@ -1175,8 +1179,14 @@ fn trait_nuke_positions_closes_unseen_positions_and_replaces_snapshot() {
     );
     assert_eq!(body(&calls[0]), json!({}));
     assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 2);
-    assert!(!h.store.positions().is_empty());
-    assert!(h.store.positions().iter().all(|p| p.contracts == 0.0));
+    assert!(!h.store.positions().unwrap().is_empty());
+    assert!(
+        h.store
+            .positions()
+            .unwrap()
+            .iter()
+            .all(|p| p.contracts == 0.0)
+    );
     assert!(h.http.calls(endpoint("ORDER")).is_empty());
 }
 
@@ -1231,7 +1241,7 @@ fn private_orders_frame_updates_the_real_store() {
             json!({"e":"orders","d":[row]}).to_string(),
         ))
         .unwrap();
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let actual = orders.iter().find(|o| o.id == "socket-order-42").unwrap();
     assert_eq!(actual.price, 123.5);
     assert_eq!(actual.amount, 2.0);
@@ -1249,7 +1259,7 @@ fn private_positions_frame_updates_the_real_store() {
     socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(
         json!({"e":"positions","d":[{"symbol":"BTCUSDT","positionSide":"LONG","size":"3","openValue":"330","leverage":"20","marginType":"CROSS","updatedTime":1700000000001.0}]}).to_string(),
     )).unwrap();
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let actual = positions.iter().find(|p| p.contracts == 3.0).unwrap();
     assert_eq!(actual.symbol, "BTCUSDT");
     assert_eq!(actual.entry_price, 110.0);
@@ -1262,7 +1272,7 @@ fn private_account_frame_refreshes_balance_in_the_real_store() {
     let h = setup();
     expect_ok(h.drive(h.venue().start()));
     h.runtime.pump();
-    assert_eq!(h.store.balance().total, 150.0);
+    assert_eq!(h.store.balance().unwrap().total, 150.0);
     h.http.replace(
         "GET",
         endpoint("BALANCE"),
@@ -1276,9 +1286,9 @@ fn private_account_frame_refreshes_balance_in_the_real_store() {
         .unwrap();
     h.runtime.pump();
     h.runtime.advance(251.0);
-    assert_eq!(h.store.balance().total, 285.0);
-    assert_eq!(h.store.balance().free, 240.0);
-    assert_eq!(h.store.balance().upnl, 5.0);
+    assert_eq!(h.store.balance().unwrap().total, 285.0);
+    assert_eq!(h.store.balance().unwrap().free, 240.0);
+    assert_eq!(h.store.balance().unwrap().upnl, 5.0);
     h.venue().dispose().unwrap();
 }
 
@@ -1303,7 +1313,7 @@ fn private_balance_refresh_rejection_is_silent() {
     let before = h.http.calls(endpoint("BALANCE")).len();
     assert_eq!(before, 2);
     assert!(h.runtime.reports.borrow().is_empty());
-    assert_eq!(h.store.balance().total, 150.0);
+    assert_eq!(h.store.balance().unwrap().total, 150.0);
     h.venue().base().get_private_sockets()[0]
         .on_message(&safe_cex_transport::socket::SocketFrame::Text(
             json!({"e":"account","d":[{"equity":"999"}]}).to_string(),
@@ -1314,7 +1324,7 @@ fn private_balance_refresh_rejection_is_silent() {
     h.runtime.pump();
     assert_eq!(h.http.calls(endpoint("BALANCE")).len(), before + 1);
     assert_eq!(
-        h.store.balance().total,
+        h.store.balance().unwrap().total,
         150.0,
         "rejected refresh retains balance"
     );
@@ -1401,7 +1411,7 @@ fn private_fill_frame_emits_and_reconciles_the_real_order_store() {
     let h = setup();
     expect_ok(h.drive(h.venue().start()));
     h.runtime.pump();
-    let before = h.store.orders().to_vec();
+    let before = h.store.orders().unwrap().to_vec();
     assert_eq!(
         before
             .iter()
@@ -1453,7 +1463,7 @@ fn private_fill_frame_emits_and_reconciles_the_real_order_store() {
         "queued frame must reach the production fill emitter"
     );
     assert_eq!(
-        h.store.orders().to_vec(),
+        h.store.orders().unwrap().to_vec(),
         before,
         "source waits for REST order reconciliation"
     );
@@ -1461,7 +1471,7 @@ fn private_fill_frame_emits_and_reconciles_the_real_order_store() {
     assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), reads);
     h.runtime.advance(1.0);
     assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), reads + 1);
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let actual = orders.iter().find(|order| order.id == "native-9").unwrap();
     assert_eq!(actual.filled, 0.75);
     assert_eq!(actual.remaining, 1.25);
@@ -1579,7 +1589,7 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
             assert_eq!(result.unwrap(), expected, "accepted source ID {id:?}");
             assert!(errors.borrow().is_empty());
             assert_eq!(
-                h.store.orders()[0].time_in_force,
+                h.store.orders().unwrap()[0].time_in_force,
                 ModelField::Value(OrderTimeInForce::PostOnly)
             );
         } else {
@@ -1600,7 +1610,7 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
                 "native emitter preserves the exact source refusal string"
             );
             assert_eq!(
-                h.store.orders()[0].time_in_force,
+                h.store.orders().unwrap()[0].time_in_force,
                 ModelField::Value(OrderTimeInForce::GoodTillCancel),
                 "no PostOnly patch before full source validation"
             );
@@ -1662,7 +1672,7 @@ fn market_closed_rows_keep_good_markets_and_report_field_values() {
                 "bad {field}={bad:?} must not discard good markets or return the cached BTC snapshot"
             );
             assert_eq!(
-                h.store.markets()[0].symbol,
+                h.store.markets().unwrap()[0].symbol,
                 "BTCUSDT",
                 "fetch returns the snapshot; caller commits it"
             );
@@ -1804,7 +1814,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),
@@ -1869,4 +1879,383 @@ fn ticker_info_keeps_source_own_undefined_and_opaque_native_rows() {
         (-0.0f64).to_bits()
     );
     assert!(matches!(raw.get("undefined"), Some(Input::Undefined)));
+}
+
+// The audit enters through public SDK methods and the installed HTTP transform,
+// rather than treating the standalone utility decoder as the production ingress.
+fn audit_deep_response(candles: bool, tuple: bool) {
+    let deep = format!("{}0{}", "[".repeat(150), "]".repeat(150));
+    let h = harness(options(), |http| {
+        let (name, payload) = if candles {
+            (
+                "KLINES",
+                format!(
+                    r#"[{{"timestamp":1700000000000,"open":"11","high":"13","low":"7","close":"12","volume":"5","ignored":{deep}}}]"#
+                ),
+            )
+        } else if tuple {
+            (
+                "DEPTH",
+                format!(r#"{{"bids":[["1","2",{deep}]],"asks":[["3","4",{deep}]]}}"#),
+            )
+        } else {
+            (
+                "DEPTH",
+                format!(r#"{{"bids":[["1","2"]],"asks":[["3","4"]],"ignored":{deep}}}"#),
+            )
+        };
+        http.route_body(
+            "GET",
+            endpoint(name),
+            200,
+            safe_cex_transport::RestResponseBody::Encoded(payload.into_bytes()),
+        );
+        script(http);
+    });
+    seed(&h);
+    if candles {
+        let rows = h
+            .drive(h.venue().fetch_ohlcv(
+                serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(),
+            ))
+            .expect("WEEX-AUDIT unread candle property must not lose response");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].open.to_bits(), 11.0_f64.to_bits());
+    } else {
+        let book = h
+            .drive(h.exchange.fetch_order_book("BTCUSDT".into(), None))
+            .expect("WEEX-AUDIT unread book property must not lose response");
+        assert_eq!(book.bids.len(), 1);
+        assert_eq!(book.asks.len(), 1);
+        assert_eq!(book.bids[0].amount.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(book.asks[0].amount.to_bits(), 4.0_f64.to_bits());
+    }
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn fix_audit_unread_deep_candle_property() {
+    audit_deep_response(true, false);
+}
+#[test]
+fn fix_audit_unread_deep_book_property() {
+    audit_deep_response(false, false);
+}
+#[test]
+fn fix_audit_unread_deep_tuple_tail() {
+    audit_deep_response(false, true);
+}
+
+#[test]
+fn fix_audit_utilities_run_through_whole_source_and_constructed_native_methods() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fix-audit-source.cjs"),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        cases
+            .iter()
+            .map(|c| c["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "candle-aliases",
+            "candle-defaults",
+            "book-levels",
+            "ticker-percent",
+            "ticker-fallback",
+            "order-enums",
+            "order-defaults",
+            "position-enums",
+            "config-enums",
+            "fills-typed",
+            "candle-unread-deep",
+            "book-unread-deep",
+            "book-unread-tuple"
+        ]
+    );
+    for case in cases {
+        let h = harness(options(), |http| {
+            for (path, data) in case["routeBodies"].as_object().unwrap() {
+                http.route_body(
+                    "GET",
+                    path,
+                    200,
+                    safe_cex_transport::RestResponseBody::Encoded(
+                        data.as_str().unwrap().as_bytes().to_vec(),
+                    ),
+                );
+            }
+            script(http);
+        });
+        seed(&h);
+        let (actual, keys): (Value, &[&str]) = match case["method"].as_str().unwrap() {
+            "candles" => {
+                let values = h
+                    .drive(
+                        h.venue().fetch_ohlcv(
+                            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"}))
+                                .unwrap(),
+                        ),
+                    )
+                    .unwrap();
+                assert_eq!(values.len(), 1);
+                let expected = &case["result"][0];
+                for (name, value) in [
+                    ("timestamp", values[0].timestamp),
+                    ("open", values[0].open),
+                    ("high", values[0].high),
+                    ("low", values[0].low),
+                    ("close", values[0].close),
+                    ("volume", values[0].volume),
+                ] {
+                    assert_eq!(
+                        value.to_bits(),
+                        expected[name].as_f64().unwrap().to_bits(),
+                        "{}:{name} native bits",
+                        case["id"]
+                    );
+                }
+                (
+                    serde_json::to_value(values).unwrap(),
+                    &["timestamp", "open", "high", "low", "close", "volume"],
+                )
+            }
+            "book" => {
+                let value = h
+                    .drive(h.exchange.fetch_order_book("BTCUSDT".into(), None))
+                    .unwrap();
+                assert_eq!(value.bids.len(), 2);
+                assert_eq!(value.asks.len(), 1);
+                assert_eq!(value.bids[0].price.to_bits(), 1.0_f64.to_bits());
+                (serde_json::to_value(value).unwrap(), &["bids", "asks"])
+            }
+            "tickers" => {
+                let values = h.drive(h.venue().fetch_tickers()).unwrap();
+                assert_eq!(values.len(), 1);
+                assert_eq!(
+                    values[0].percentage.to_bits(),
+                    case["result"][0]["percentage"].as_f64().unwrap().to_bits()
+                );
+                (
+                    serde_json::to_value(values).unwrap(),
+                    &["symbol", "last", "percentage", "volume"],
+                )
+            }
+            "orders" => (
+                serde_json::to_value(h.drive(h.venue().fetch_orders(None)).unwrap()).unwrap(),
+                &[
+                    "id",
+                    "side",
+                    "type",
+                    "status",
+                    "lastUpdate",
+                    "tpTriggerType",
+                    "slTriggerType",
+                ],
+            ),
+            "positions" => (
+                serde_json::to_value(
+                    h.drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()])))
+                        .unwrap(),
+                )
+                .unwrap(),
+                &["symbol", "side", "contracts", "entryPrice", "marginType"],
+            ),
+            "leverage" => (
+                serde_json::to_value(
+                    h.drive(h.venue().fetch_leverage_for_symbol("BTCUSDT".into()))
+                        .unwrap(),
+                )
+                .unwrap(),
+                &["buyLeverage", "sellLeverage"],
+            ),
+            "fills" => (
+                serde_json::to_value(
+                    h.drive(h.venue().fetch_historical_fills(
+                        serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+                    ))
+                    .unwrap(),
+                )
+                .unwrap(),
+                &[
+                    "id",
+                    "orderId",
+                    "side",
+                    "price",
+                    "qty",
+                    "timestamp",
+                    "maker",
+                    "commissionAsset",
+                ],
+            ),
+            other => panic!("unexpected source case {other}"),
+        };
+        fn project(value: &Value, keys: &[&str]) -> Value {
+            if let Some(values) = value.as_array() {
+                return Value::Array(values.iter().map(|v| project(v, keys)).collect());
+            }
+            Value::Object(
+                keys.iter()
+                    .filter_map(|key| value.get(*key).map(|v| ((*key).into(), v.clone())))
+                    .collect(),
+            )
+        }
+        fn finite_numbers(value: &Value) -> Value {
+            match value {
+                Value::Number(n) => json!(n.as_f64().unwrap()),
+                Value::Array(a) => Value::Array(a.iter().map(finite_numbers).collect()),
+                Value::Object(o) => Value::Object(
+                    o.iter()
+                        .map(|(k, v)| (k.clone(), finite_numbers(v)))
+                        .collect(),
+                ),
+                v => v.clone(),
+            }
+        }
+        assert_eq!(
+            finite_numbers(&project(&actual, keys)),
+            finite_numbers(&case["result"]),
+            "WEEX-AUDIT actual SDK {}",
+            case["id"]
+        );
+        let sent = h.http.sent.lock().unwrap();
+        assert_eq!(sent.len(), case["requests"].as_array().unwrap().len());
+        if matches!(
+            case["method"].as_str().unwrap(),
+            "orders" | "positions" | "leverage" | "fills" | "configpositions"
+        ) {
+            assert!(
+                sent.iter().all(|r| r.headers.contains_key("ACCESS-SIGN")),
+                "{} actual signed HTTP",
+                case["id"]
+            );
+        }
+        drop(sent);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn fix_audit_real_private_refreshes_debounce_await_and_skip_disposed_store() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fix-audit-refresh-source.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 6);
+    use safe_cex_transport::socket::SocketFrame;
+    for kind in ["orders", "positions", "account"] {
+        for disposed in [false, true] {
+            let h = setup();
+            h.drive(h.venue().start()).unwrap();
+            h.runtime.pump();
+            match kind {
+                "orders" => {let mut row=raw_order();row["price"]=json!(999);h.http.replace("GET",endpoint("OPEN_ORDERS"),json!([row]));},
+                "positions" => h.http.replace("GET",endpoint("POSITIONS"),json!([{"symbol":"BTCUSDT","positionSide":"LONG","size":"7","openValue":"714","leverage":"14","marginType":"CROSS","updatedTime":1700000000000.0}])),
+                "account" => h.http.replace("GET",endpoint("BALANCE"),json!([{"asset":"USDT","balance":"285","availableBalance":"240","unrealizePnl":"5"}])),
+                _=>unreachable!(),
+            }
+            let state = || -> Option<f64> {
+                match kind {
+                    "orders" => h
+                        .store
+                        .orders()
+                        .unwrap()
+                        .iter()
+                        .find(|v| v.id == "native-9")
+                        .map(|v| v.price.to_number()),
+                    "positions" => h
+                        .store
+                        .positions()
+                        .unwrap()
+                        .iter()
+                        .find(|v| v.contracts > 0.0)
+                        .map(|v| v.contracts),
+                    _ => Some(h.store.balance().unwrap().total),
+                }
+            };
+            let before = state();
+            let held = h.http.hold_responses();
+            let sent = h.http.sent.lock().unwrap().len();
+            let socket = h.venue().base().get_private_sockets()[0].clone();
+            let frame = SocketFrame::Text(json!({"e":kind,"d":[]}).to_string());
+            socket.on_message(&frame).unwrap();
+            h.runtime.advance(100.0);
+            socket.on_message(&frame).unwrap();
+            h.runtime.advance(249.0);
+            assert_eq!(
+                h.http.sent.lock().unwrap().len(),
+                sent,
+                "{kind}: reset debounce deadline"
+            );
+            h.runtime.advance(1.0);
+            assert_eq!(
+                h.http.sent.lock().unwrap().len() - sent,
+                if kind == "orders" { 2 } else { 1 },
+                "{kind}: real fetch starts at timer deadline"
+            );
+            assert_eq!(
+                state().map(f64::to_bits),
+                before.map(f64::to_bits),
+                "{kind}: held HTTP cannot update Store"
+            );
+            if disposed {
+                h.venue().dispose().unwrap();
+            }
+            held.release();
+            h.runtime.pump();
+            let expected = if disposed {
+                if kind == "account" { Some(0.0) } else { None }
+            } else {
+                Some(match kind {
+                    "orders" => 999.0,
+                    "positions" => 7.0,
+                    _ => 285.0,
+                })
+            };
+            let observed = source
+                .iter()
+                .find(|v| v["kind"] == kind && v["disposed"] == disposed)
+                .unwrap();
+            assert_eq!(
+                state(),
+                observed["after"].as_f64(),
+                "actual source Store {kind} disposed={disposed}"
+            );
+            assert_eq!(
+                state().map(f64::to_bits),
+                expected.map(f64::to_bits),
+                "{kind}: disposed={disposed}, real Store settlement"
+            );
+            assert!(
+                h.runtime.reports.borrow().is_empty(),
+                "{:?}",
+                h.runtime.reports.borrow()
+            );
+            h.venue().dispose().unwrap();
+        }
+    }
 }

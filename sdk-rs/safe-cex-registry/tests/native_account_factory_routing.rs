@@ -48,7 +48,7 @@ async fn check_factory(name: ExchangeName, mut options: Value) {
         );
     }
     assert_eq!(
-        h.store.request_stats().unwrap().auth,
+        h.store.request_stats().unwrap().unwrap().auth,
         denied.get() as f64,
         "{name:?} records each actual HTTP auth failure on its owning Store"
     );

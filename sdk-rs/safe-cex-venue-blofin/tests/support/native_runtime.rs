@@ -4,12 +4,12 @@ mod virtual_time {
         "/../test-support/virtual_time.rs"
     ));
 }
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody, TransportProvider,
     socket::TunnelHost,
@@ -24,7 +24,7 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
 };
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 pub struct Runtime {
@@ -174,7 +174,10 @@ impl WsRuntime for Runtime {
 pub struct Wire {
     pub requests: RefCell<Vec<RestRequest>>,
     pub bodies: RefCell<BTreeMap<String, Value>>,
+    pub pages: RefCell<BTreeMap<String, std::collections::VecDeque<Value>>>,
     pub retained_bodies: RefCell<BTreeMap<String, RestResponseBody>>,
+    pub paused_cursor: Rc<RefCell<Option<String>>>,
+    pub paused_waker: Rc<RefCell<Option<Waker>>>,
 }
 pub fn path(url: &str) -> &str {
     url.split('?').next().unwrap_or(url)
@@ -185,7 +188,14 @@ impl RestAdapter for Wire {
         let retained = self.retained_bodies.borrow().get(path(&r.url)).cloned();
         // Active-order pagination completes on the page after a cursor.
         let paged = r.params.as_ref().is_some_and(|p| !p["after"].is_null());
-        let body = if paged {
+        let scripted = self
+            .pages
+            .borrow_mut()
+            .get_mut(path(&r.url))
+            .and_then(|pages| pages.pop_front());
+        let body = if let Some(body) = scripted {
+            body
+        } else if paged {
             json!({"code":"0","msg":"success","data":[]})
         } else {
             self.bodies
@@ -194,7 +204,24 @@ impl RestAdapter for Wire {
                 .cloned()
                 .unwrap_or(json!({"code":"0","msg":"success","data":[]}))
         };
+        let paused_cursor = self.paused_cursor.clone();
+        let paused_waker = self.paused_waker.clone();
+        let cursor = r
+            .params
+            .as_ref()
+            .and_then(|p| p.get("after"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         Box::pin(async move {
+            std::future::poll_fn(|cx| {
+                if cursor.is_some() && *paused_cursor.borrow() == cursor {
+                    *paused_waker.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
             Ok(RestResponse {
                 status: 200,
                 reason: None,

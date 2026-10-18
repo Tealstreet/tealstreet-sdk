@@ -91,7 +91,7 @@ impl GrvtExchange {
             &host,
             from_typed(&name).map_err(err)?,
             from_typed(&options).map_err(err)?,
-            store::facade(store),
+            store::facade(store)?,
         ))?
         .base;
         *shared.exchange.borrow_mut() = receiver.clone();
@@ -431,3 +431,8 @@ mod interval_binding_tests {
 #[cfg(test)]
 #[path = "signing_admission_tests.rs"]
 mod signing_admission_tests;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "update_diagnostic_tests.rs"]
+mod update_diagnostic_tests;

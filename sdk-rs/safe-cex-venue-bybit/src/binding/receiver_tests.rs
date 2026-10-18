@@ -3,6 +3,7 @@ use crate::{
     core_snapshot_readers::SnapshotHost, exchange::BybitExchange,
     hyro_private_session::SessionHost, variant_account_refresh::AccountRefreshHost,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     js_runtime::{
         promise::await_js,
@@ -10,7 +11,7 @@ use safe_cex_exchange::{
     },
     native::{NativeHttpHost, native_runtime},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, TransportFuture, rate_limit::RateLimitClock,
 };
@@ -408,5 +409,68 @@ fn native_receiver_intrinsics_and_callback_effects() {
                 .unwrap()
                 .same_reference(&rows)
         );
+    });
+}
+
+#[test]
+fn native_protective_side_errors_match_actual_source() {
+    use safe_cex_exchange::exchange::Exchange;
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/protective-side-fixtures.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 242);
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+            let venue = venue(name);
+            let rt = venue.js.get().unwrap();
+            let mut compared = 0;
+            for (index, case) in cases.iter().enumerate() {
+                if case["error"].is_null() {
+                    continue;
+                }
+                let thrown = rt
+                    .this
+                    .get("inferProtectiveOrderSide")
+                    .unwrap()
+                    .call(
+                        rt.this.clone(),
+                        vec![safe_cex_exchange::js_runtime::value::from_json(
+                            &case["order"],
+                        )],
+                    )
+                    .unwrap_err();
+                assert_eq!(
+                    safe_cex_exchange::js_runtime::value::to_json(
+                        &thrown.value.get("name").unwrap()
+                    )
+                    .unwrap(),
+                    case["error"],
+                    "PROTECTIVE native receiver class case {index}"
+                );
+                assert_eq!(
+                    safe_cex_exchange::js_runtime::value::to_json(
+                        &thrown.value.get("message").unwrap()
+                    )
+                    .unwrap(),
+                    case["message"],
+                    "PROTECTIVE native receiver message case {index}"
+                );
+                compared += 1;
+            }
+            assert_eq!(compared, 44, "PROTECTIVE native receiver error coverage");
+            venue.dispose().unwrap();
+        }
     });
 }

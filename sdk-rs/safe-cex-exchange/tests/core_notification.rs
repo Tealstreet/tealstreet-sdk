@@ -1,8 +1,9 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::*,
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{
@@ -130,7 +131,7 @@ fn real_store_commit_preserves_listener_failure_and_stops_both_fanouts() {
     );
     let error = store.set_setting("isHedged", true).unwrap_err();
     assert!(
-        store.options().is_hedged,
+        store.options().unwrap().is_hedged,
         "mutation must remain committed after listener failure"
     );
     assert_eq!(
@@ -209,7 +210,7 @@ fn non_exchange_subscriber_response_survives_overlay_recovery() {
     );
     let error = ExchangeError::from(store.set_setting("isHedged", true).unwrap_err());
     assert_eq!(
-        error.response,
+        error.response_json_view(),
         Some(expected),
         "canonical subscriber response must survive non-ExchangeError projection"
     );
@@ -498,7 +499,7 @@ fn store_notification_conversion_retains_subscriber_identity_on_both_paths() {
         "projected subscriber error retains subscriber identity"
     );
     assert_eq!(
-        projected.response,
+        projected.response_json_view(),
         Some(response),
         "subscriber identity preserves response"
     );
@@ -507,4 +508,247 @@ fn store_notification_conversion_retains_subscriber_identity_on_both_paths() {
         ordinary.store_subscriber_ids.is_empty(),
         "non-notification errors invent no subscriber identity"
     );
+}
+
+#[test]
+fn internal_update_delivery_retains_graph_without_reading_unrelated_getters() {
+    use safe_cex_exchange::js_runtime::{store, value::Js};
+    let (base, native) = fixture();
+    let facade = store::facade(native.clone()).unwrap();
+    let balance = facade.get("balance").unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    balance
+        .define_accessor(
+            "used",
+            Some(Rc::new(move |_| {
+                count.set(count.get() + 1);
+                Err(safe_cex_exchange::js_runtime::value::Thrown::type_error(
+                    "unrelated row read",
+                ))
+            })),
+            None,
+        )
+        .unwrap();
+    let deliveries = Rc::new(RefCell::new(Vec::new()));
+    let seen = deliveries.clone();
+    let expected = balance.clone();
+    base.on(
+        "update",
+        Rc::new(move |_, data| {
+            assert!(
+                data.get("balance").unwrap().strict_equals(&expected),
+                "deliver the canonical graph referent"
+            );
+            seen.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    native
+        .set_setting("isHedged", true)
+        .expect("internal emitter must not project unrelated fields");
+    native.set_setting("isHedged", false).unwrap();
+    assert_eq!(reads.get(), 0);
+    assert_eq!(deliveries.borrow().len(), 2);
+    assert!(
+        deliveries.borrow()[0]
+            .get("options")
+            .unwrap()
+            .get("isHedged")
+            .unwrap()
+            .strict_equals(&Js::Bool(false)),
+        "retained event observes later granular writes"
+    );
+}
+
+#[test]
+fn native_update_listener_throw_stops_typed_projection_and_retains_original_cause() {
+    use safe_cex_exchange::js_runtime::{
+        store,
+        value::{Js, Thrown},
+    };
+    let (base, native) = fixture();
+    let facade = store::facade(native.clone()).unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    facade
+        .get("balance")
+        .unwrap()
+        .define_accessor(
+            "used",
+            Some(Rc::new(move |_| {
+                count.set(count.get() + 1);
+                Err(Thrown::type_error("must not project before listener"))
+            })),
+            None,
+        )
+        .unwrap();
+    let marker = Js::object(vec![("sentinel", Js::Bool(true))]);
+    let mut original = failure("native update listener sentinel");
+    original.code = Some(marker.clone());
+    base.on("update", Rc::new(move |_, _| Err(original.clone())));
+    let later = Rc::new(Cell::new(false));
+    let reached = later.clone();
+    let _unsubscribe = Store::subscribe(
+        native.as_ref(),
+        Box::new(move |_, _| {
+            reached.set(true);
+            Ok(())
+        }),
+    );
+    let error = ExchangeError::from(native.set_setting("isHedged", true).unwrap_err());
+    assert!(error.code.as_ref().unwrap().strict_equals(&marker));
+    assert_eq!(error.message, "native update listener sentinel");
+    assert_eq!(reads.get(), 0);
+    assert!(!later.get());
+    assert!(native.options().unwrap().is_hedged);
+}
+
+#[test]
+#[ignore = "mandatory core include-ignored CI installs frozen TinyEmitter and TypeScript"]
+fn native_graph_emitter_matches_maintained_store_subscription() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/native_store_emitter_source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "maintained Store/emitter source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn real_nested_store_boundaries_keep_every_id_and_the_original_cause() {
+    use safe_cex_types::StoreSubscriberError;
+    for native in [false, true] {
+        let original: Rc<dyn Error> = Rc::new(failure("three Store boundaries"));
+        let mut cause = StoreSubscriberError::new("first wrapper").with_cause(original.clone());
+        let mut expected_ids = vec![];
+        for local_id in [0, 1, 0] {
+            let store = DefaultStore::new();
+            let _earlier =
+                (local_id == 1).then(|| Store::subscribe(&store, Box::new(|_, _| Ok(()))));
+            let callback_cause = cause.clone();
+            let _subscription = if native {
+                Store::subscribe_native(&store, Box::new(move |_, _| Err(callback_cause.clone())))
+            } else {
+                Store::subscribe(&store, Box::new(move |_, _| Err(callback_cause.clone())))
+            };
+            let error = ExchangeError::from(store.set_setting("isHedged", true).unwrap_err());
+            expected_ids.push(local_id);
+            assert_eq!(error.store_subscriber_ids, expected_ids);
+            assert!(std::ptr::eq(error.source().unwrap(), original.as_ref()));
+            let mut expected = original.downcast_ref::<ExchangeError>().unwrap().clone();
+            expected.store_subscriber_ids = expected_ids.clone();
+            expected.store_subscriber_cause = error.store_subscriber_cause.clone();
+            assert_eq!(error, expected, "only boundary metadata changes");
+            cause = error.into();
+        }
+    }
+}
+
+#[test]
+fn notification_roundtrip_keeps_arbitrary_throw_without_reading_its_properties() {
+    use safe_cex_exchange::js_runtime::{
+        store,
+        value::{Js, Thrown},
+    };
+    use safe_cex_types::{StoreReadError, StoreReadPhase};
+    for native in [false, true] {
+        let store = Rc::new(DefaultStore::new());
+        let value = Js::object(vec![]);
+        let reads = Rc::new(Cell::new(0));
+        for field in ["name", "message", "code"] {
+            let reads = reads.clone();
+            value
+                .define_accessor(
+                    field,
+                    Some(Rc::new(move |_| {
+                        reads.set(reads.get() + 1);
+                        Err(Thrown::type_error("original throw must not be inspected"))
+                    })),
+                    None,
+                )
+                .unwrap();
+        }
+        let raw = Rc::new(Thrown::new(value.clone()));
+        let read = StoreReadError::new(StoreReadPhase::Property, raw.clone());
+        let original = ExchangeError::from(read.clone());
+        let cause: safe_cex_types::StoreSubscriberError = original.into();
+        let _subscription = if native {
+            Store::subscribe_native(store.as_ref(), Box::new(move |_, _| Err(cause.clone())))
+        } else {
+            Store::subscribe(store.as_ref(), Box::new(move |_, _| Err(cause.clone())))
+        };
+        let facade = store::facade(store.clone()).unwrap();
+        let thrown = facade
+            .get("setSetting")
+            .unwrap()
+            .call(facade.clone(), vec![Js::str("isHedged"), Js::Bool(true)])
+            .unwrap_err();
+        assert!(thrown.value.same_reference(&value));
+        let native_error = thrown.native.as_ref().unwrap();
+        assert_eq!(native_error.store_subscriber_ids, [0]);
+        let notification = native_error
+            .origin
+            .as_ref()
+            .unwrap()
+            .error()
+            .downcast_ref::<safe_cex_store::StoreMutationError>()
+            .unwrap();
+        let safe_cex_store::StoreMutationError::Notification(notification) = notification else {
+            panic!("notification origin");
+        };
+        let source = notification
+            .cause()
+            .source()
+            .unwrap()
+            .downcast_ref::<ExchangeError>()
+            .unwrap();
+        assert_eq!(
+            source
+                .origin
+                .as_ref()
+                .unwrap()
+                .error()
+                .downcast_ref::<StoreReadError>(),
+            Some(&read)
+        );
+        let typed = store.set_setting("isHedged", false).unwrap_err();
+        let safe_cex_store::StoreMutationError::Notification(notification) = typed else {
+            panic!("typed notification origin");
+        };
+        assert_eq!(notification.subscriber_id(), 0);
+        let source = notification
+            .cause()
+            .source()
+            .unwrap()
+            .downcast_ref::<ExchangeError>()
+            .unwrap();
+        let recovered = source
+            .origin
+            .as_ref()
+            .unwrap()
+            .error()
+            .downcast_ref::<StoreReadError>()
+            .unwrap();
+        assert!(Rc::ptr_eq(recovered.native_cause(), read.native_cause()));
+        assert!(
+            recovered
+                .native_cause()
+                .downcast_ref::<Thrown>()
+                .unwrap()
+                .value
+                .same_reference(&value)
+        );
+        assert_eq!(
+            reads.get(),
+            0,
+            "notification transport must not replay getters"
+        );
+    }
 }

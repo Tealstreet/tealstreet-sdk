@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{runtime::*, websocket::*};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{
     TransportProvider,
     socket::{SocketFrame, TunnelHost},
@@ -207,7 +208,7 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
         original_error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
             "HANDLER_ORIGIN"
         )));
-        original_error.response = Some(json!({"sentinel": 42}));
+        original_error = original_error.with_retained_response((json!({"sentinel": 42})).into());
         let a: MessageHandler = {
             let (trace, b, c) = (trace.clone(), b.clone(), c.clone());
             let (protocol, socket) = (Rc::downgrade(&protocol), Rc::downgrade(&socket));

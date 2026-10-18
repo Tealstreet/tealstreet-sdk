@@ -317,7 +317,7 @@ impl safe_cex_exchange::journal::JournalFolder for NativeJournal {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        resolve_settle_currency: Box<dyn Fn(&str) -> String + 'a>,
+        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
     ) -> ExchangeFuture<'a, Vec<serde_json::Value>> {
         Box::pin(async move {
             use safe_cex_exchange::build_records::{
@@ -366,3 +366,8 @@ mod sdk_quantum_probe;
 #[cfg(test)]
 #[path = "../tests/support/retained_order_info_binding.rs"]
 mod retained_order_info_binding;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../tests/support/payload_signer_binding.rs"]
+mod payload_signer_binding;

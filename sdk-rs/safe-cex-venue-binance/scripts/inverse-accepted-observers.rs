@@ -133,14 +133,14 @@ pub fn new_parts(
 ) -> (
     Rc<host::Runtime>,
     std::sync::Arc<host::Http>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     safe_cex_types::ExchangeOptions,
 ) {
     let runtime = Rc::new(host::Runtime::default());
     runtime.now.set(1700000000000.0);
     runtime.headers_capable.set(true);
     let http = std::sync::Arc::new(host::Http::default());
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let mut options = host::options();
     options.testnet = input["testnet"].as_bool();
     (runtime, http, store, options)

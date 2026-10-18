@@ -6,13 +6,14 @@ mod virtual_time {
 }
 // Virtual-clock runtime and scripted REST transport for the concrete Bitunix venue.
 // Kept include-compatible for native accepted-set probes of concrete host adapters.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     http::{HttpClientOptions, HttpFuture, HttpHost, safe_cex_axios_create_no_proxy},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider, socket::TunnelHost,
@@ -216,9 +217,24 @@ impl WsRuntime for Runtime {
     }
 }
 #[derive(Default)]
+pub struct HeldResponse {
+    open: std::sync::atomic::AtomicBool,
+    waker: Mutex<Option<std::task::Waker>>,
+}
+impl HeldResponse {
+    #[allow(dead_code)]
+    pub fn release(&self) {
+        self.open.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(waker) = self.waker.lock().unwrap().take() {
+            waker.wake();
+        }
+    }
+}
+#[derive(Default)]
 pub struct Wire {
     pub requests: Mutex<Vec<RestRequest>>,
     pub bodies: Mutex<BTreeMap<String, Value>>,
+    pub held_responses: Mutex<BTreeMap<String, Arc<HeldResponse>>>,
 }
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -230,7 +246,18 @@ impl RestAdapter for Wire {
             .get(&r.url)
             .cloned()
             .unwrap_or(json!({"code": 0, "msg": "Success", "data": {}}));
+        let gate = self.held_responses.lock().unwrap().get(&r.url).cloned();
         Box::pin(async move {
+            std::future::poll_fn(move |cx| {
+                if let Some(gate) = &gate {
+                    *gate.waker.lock().unwrap() = Some(cx.waker().clone());
+                    if !gate.open.load(std::sync::atomic::Ordering::SeqCst) {
+                        return Poll::Pending;
+                    }
+                }
+                Poll::Ready(())
+            })
+            .await;
             Ok(RestResponse {
                 status: 200,
                 reason: None,

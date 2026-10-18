@@ -1,6 +1,7 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Ticker;
 use safe_cex_venue_okx::public_socket::{
     handle_funding_rate_events, handle_index_ticker_events, handle_mark_price_events,
@@ -196,7 +197,7 @@ fn maintained_typescript_first_ticker_update_numeric_bits() {
         );
         if case["error"].is_null() {
             result.unwrap();
-            let tickers = store.tickers();
+            let tickers = store.tickers().unwrap();
             assert_eq!(tickers.len(), 2, "TICKER-CARDINALITY native stored records");
             let fields: &[&str] = match case["method"].as_str().unwrap() {
                 "handleTickerEvents" => {
@@ -246,7 +247,7 @@ fn maintained_typescript_first_ticker_update_numeric_bits() {
                         "fundingRate" => ticker.funding_rate,
                         "fundingTime" => ticker.funding_time,
                         "mark" => ticker.mark,
-                        "index" => ticker.index,
+                        "index" => ticker.index.unwrap(),
                         "bid" => ticker.bid,
                         "ask" => ticker.ask,
                         "last" => ticker.last,
@@ -315,7 +316,7 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
         let mut expected = safe_cex_exchange::runtime::ExchangeError::new("listener rejection");
         expected.name = "TypeError".into();
         expected.store_subscriber_ids = vec![901];
-        expected.response = Some(json!({"subscriber":"original cause"}));
+        expected = expected.with_retained_response(json!({"subscriber":"original cause"}).into());
         let original = expected.clone();
         let unsubscribe =
             Store::subscribe(&store, Box::new(move |_, _| Err(original.clone().into())));
@@ -370,6 +371,7 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
             "notification later subscriber stop {method}"
         );
         let ticker = Store::tickers(&store)
+            .unwrap()
             .iter()
             .find(|ticker| ticker.id == "BTC")
             .unwrap()
@@ -379,7 +381,7 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
             "interest" => ticker.open_interest,
             "funding" => ticker.funding_rate,
             "mark" => ticker.mark,
-            "index" => ticker.index,
+            "index" => ticker.index.unwrap(),
             _ => unreachable!(),
         };
         assert_eq!(value, 9.0, "notification commit before rejection {method}");

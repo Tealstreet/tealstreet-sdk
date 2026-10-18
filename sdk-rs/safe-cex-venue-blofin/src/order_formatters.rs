@@ -62,7 +62,7 @@ fn side(side: safe_cex_types::ModelField<OrderSide>) -> Option<&'static str> {
 }
 fn market<E>(opts: &PreparedOrderOpts, store: &dyn Store) -> Result<Market, ServiceError<E>> {
     store
-        .markets_by_symbol()
+        .markets_by_symbol()?
         .get(&opts.symbol)
         .cloned()
         .ok_or_else(|| ServiceError::Input(format!("Market {} not found on Blofin", opts.symbol)))
@@ -326,7 +326,7 @@ pub async fn format_algo_order<E>(
             OrderType::StopLoss
         };
         let orders: Vec<_> = store
-            .orders()
+            .orders()?
             .iter()
             .filter(|o| {
                 o.symbol == opts.symbol
@@ -364,7 +364,7 @@ pub async fn format_normal_order<E>(
     host: &FormatHost<'_, E>,
 ) -> Result<Vec<OrderPayload>, ServiceError<E>> {
     let market = market(opts, store)?;
-    let max_size = market.limits.amount.max;
+    let max_size = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
     let lot = js_retained_parse_float(lot_value(&market)?).map_err(ServiceError::Coercion)?;
     let amount = adjust(opts.amount, lot);
     let price = optional_truthy(opts.price).map(|price| adjust(price, market.precision.price));

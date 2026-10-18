@@ -6,12 +6,13 @@ mod error_post_support;
 mod runtime;
 use indexmap::IndexMap;
 use runtime::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ListenerCleanup},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::object_map::JsObjectMap;
 use safe_cex_types::*;
 use safe_cex_webworker::{order_book_post::*, payload::*, subscriptions::*};
@@ -140,7 +141,7 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
             venue.clone(),
             trace_post(Rc::new(move |payload| {
                 assert_eq!(
-                    observed_store.tickers()[0].bid,
+                    observed_store.tickers().unwrap()[0].bid,
                     100.0,
                     "BBO-IDENTITY post precedes mutation"
                 );
@@ -165,7 +166,6 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
             is_axios_error: true,
             request: Some(json!({"request":"bbo-request"})),
             stack: Some("bbo-stack".into()),
-            response: Some(json!({"response":"bbo-response"})),
             context: Some(json!({"origin":"subscriber"})),
             config: Some(json!({"config":"bbo-config"})),
             enhanced_message: Some("bbo-enhanced".into()),
@@ -174,6 +174,7 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
             original_error: Some(json!({"original":"bbo-original"})),
             code: Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197))),
         });
+        original = original.with_retained_response(json!({"response":"bbo-response"}).into());
         let original_cause: safe_cex_types::StoreSubscriberError = original.clone().into();
         let thrown = original_cause.clone();
         let calls = Rc::new(Cell::new(0));
@@ -297,7 +298,7 @@ fn subscriptions_match_live_source_dedup_fanout_flush_and_first_envelope() {
         let snapshot = store.clone();
         let post: Rc<dyn Fn(StoreWorkerPayload)> =
             Rc::new(move |p| {
-                let ticker = Store::tickers(snapshot.as_ref());
+                let ticker = Store::tickers(snapshot.as_ref()).unwrap();
                 sink.borrow_mut().push(json!([
                     "post",
                     clock.get(),
@@ -507,7 +508,7 @@ fn bbo_native_patch_preserves_existing_and_new_nonfinite_prices() {
         .unwrap();
     let callback = venue.books.borrow()["BTC"].clone();
     callback(serde_json::from_value(json!({"bids":[{"price":101,"amount":1,"total":1}],"asks":[{"price":103,"amount":1,"total":1}]})).unwrap());
-    let tickers = Store::tickers(store.as_ref());
+    let tickers = Store::tickers(store.as_ref()).unwrap();
     assert!(tickers[0].last.is_nan());
     assert_eq!(tickers[0].bid, 101.0);
     assert_eq!(tickers[0].ask, 103.0);
@@ -569,7 +570,7 @@ fn bbo_native_patch_preserves_existing_and_new_nonfinite_prices() {
             total: 1.0,
         }],
     });
-    let tickers = Store::tickers(store.as_ref());
+    let tickers = Store::tickers(store.as_ref()).unwrap();
     assert_eq!(
         tickers[0].bid,
         f64::INFINITY,
@@ -708,7 +709,7 @@ fn bbo_leaf_posts_native_clone_and_observes_reentrant_book_changes() {
         let post = OrderBookPost::new(Rc::new(move |mut post| {
             counted.set(counted.get() + 1);
             assert_eq!(
-                observed.tickers()[0].bid,
+                observed.tickers().unwrap()[0].bid,
                 99.0,
                 "BBO native post precedes BBO"
             );
@@ -776,7 +777,7 @@ fn bbo_leaf_posts_native_clone_and_observes_reentrant_book_changes() {
             "BBO native leaf does not flatten errors into reports"
         );
         assert_book_numbers(&received.borrow().as_ref().unwrap().data.book().unwrap());
-        let ticker = venue.base.store.tickers()[0].clone();
+        let ticker = venue.base.store.tickers().unwrap()[0].clone();
         let (bid, ask) = if scenario == "post-error" {
             (99.0, 101.0)
         } else if scenario == "book-mutation" {
@@ -1018,7 +1019,7 @@ fn listener_setup_failure_propagates_but_cleanup_failure_keeps_source_catch_orde
     for book in [true, false] {
         let (venue, runtime) = leaf_venue();
         runtime.advance(10_000);
-        let mut loaded = venue.base.store.loaded().clone();
+        let mut loaded = venue.base.store.loaded().unwrap().clone();
         loaded.markets = true;
         venue.base.store.update(StoreUpdate { markets:Some(vec![serde_json::from_value(json!({"id":"m","symbol":"BTC","base":"BTC","quote":"USD","active":true,"precision":{"amount":1,"price":0.1},"limits":{"amount":{"min":1,"max":100},"leverage":{"min":1,"max":20}}})).unwrap()]), loaded:Some(loaded), ..Default::default() }, false).unwrap();
         let posts = Rc::new(Cell::new(0));

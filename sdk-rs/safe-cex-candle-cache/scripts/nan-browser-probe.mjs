@@ -51,7 +51,23 @@ try {
         transaction.onerror=()=>reject(transaction.error);transaction.oncomplete=()=>{db.close();resolve();};
       };
     });
-    return module.nan_codec_probe(storage);
+    const codec = await module.nan_codec_probe(storage);
+    const negative = [];
+    negative[-1] = {timestamp:-60000,open:11,high:17,low:7,close:13,volume:19};
+    const sourceNegative = new IndexedDBCandleCacheBackend({dbName:'port-txflow-source-negative'});
+    await sourceNegative.persistChunks('negative',new Map([[-1,negative]]));
+    const open = indexedDB.open('port-txflow-source-negative',1);
+    const sourceRecord = await new Promise((resolve,reject)=>{
+      open.onerror=()=>reject(open.error);open.onsuccess=()=>{
+        const db=open.result,tx=db.transaction('chunks','readonly'),get=tx.objectStore('chunks').get('negative::-1');
+        get.onerror=()=>reject(get.error);get.onsuccess=()=>{resolve(get.result);db.close();};
+      };
+    });
+    if(sourceRecord!==undefined)throw Error('source filter must drop negative array properties');
+    const audit = await module.fix_audit_probe();
+    if(!audit.includes('cancelled waiter ownership passed'))throw Error('native audit receipt absent');
+    const cancellation = await module.cancellation_probe();
+    return codec+'; '+audit+'; '+cancellation;
   }),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error("NaN browser probe timed out")),20000);})]);
   assert.match(result,/26 real profiles/);assert.deepEqual(errors,[]);console.log(result);
 }finally{clearTimeout(timeout);await browser?.close();server.close();}

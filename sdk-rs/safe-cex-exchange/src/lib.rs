@@ -4,6 +4,7 @@ pub mod build_records;
 pub mod capabilities;
 pub mod client_order_id;
 pub mod delivery_timers;
+pub mod eager;
 pub mod error_reporting;
 pub mod exchange;
 pub mod external;
@@ -14,6 +15,7 @@ pub mod http;
 pub mod income_paging;
 pub mod journal;
 pub mod js_runtime;
+pub use js_runtime::native_store;
 pub mod lifecycle;
 pub mod message_stats;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
@@ -61,3 +63,9 @@ pub mod cross_trade;
 
 pub mod fill_event_units;
 pub mod how_facade;
+
+mod native_teardown;
+pub use native_teardown::native_final_drop;
+
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod replay_clock;

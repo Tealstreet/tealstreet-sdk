@@ -1,7 +1,10 @@
 //! Native request preflight and multi-order placement from BackpackExchange.
 use crate::{
     order_utils::{is_ordinary_limit_order, map_time_in_force},
-    types::*,
+    types::{
+        BackpackOrderRequest, BackpackOrderRequestOrderType, BackpackOrderRequestSide,
+        BackpackOrderRequestTimeInForce,
+    },
 };
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_types::{OrderSide, OrderTimeInForce, PlaceOrderOpts};

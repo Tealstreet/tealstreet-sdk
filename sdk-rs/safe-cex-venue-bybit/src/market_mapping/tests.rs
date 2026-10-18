@@ -104,7 +104,7 @@ fn market_mapping_matches_each_live_family_source() {
             market.precision.amount,
             market.precision.price,
             market.limits.amount.min,
-            market.limits.amount.max,
+            safe_cex_num::numeric_value_to_number(&market.limits.amount.max),
             market.limits.leverage.min,
             market.limits.leverage.max,
         ];

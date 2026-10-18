@@ -83,11 +83,11 @@ fn precision(value: Option<&Value>) -> Result<f64, JsCoercionError> {
 }
 
 pub async fn fetch_markets<E, F>(
-    cached: impl FnOnce() -> Vec<Market>,
+    cached: impl FnOnce() -> Result<Vec<Market>, E>,
     read: impl FnOnce(&'static str, Value) -> F,
     mut trace: impl FnMut(&E),
     mut refuse: impl FnMut(&str),
-) -> Vec<Market>
+) -> Result<Vec<Market>, E>
 where
     E: From<JsCoercionError>,
     F: Future<Output = Result<Option<Value>, E>>,
@@ -122,12 +122,16 @@ where
                 refusals.push(format!("Refused Bitunix market row {index}: symbol={value}: expected string"));
                 continue;
             };
-            let max_amount = match js_number(key(row, "maxLimitOrderVolume")) {
-                Ok(value) => value,
-                Err(cause) => {
-                    let value = key(row, "maxLimitOrderVolume").map_or_else(|| "undefined".into(), Value::to_string);
-                    refusals.push(format!("Refused Bitunix market row {index} symbol={symbol:?}: limits.amount.max={value}: {}", cause.message));
-                    continue;
+            let max_amount = if let Some(Value::String(value)) = key(row, "maxLimitOrderVolume") {
+                safe_cex_types::NumericValue::Text(value.clone())
+            } else {
+                match js_number(key(row, "maxLimitOrderVolume")) {
+                    Ok(value) => safe_cex_types::NumericValue::Number(value),
+                    Err(cause) => {
+                        let value = key(row, "maxLimitOrderVolume").map_or_else(|| "undefined".into(), Value::to_string);
+                        refusals.push(format!("Refused Bitunix market row {index} symbol={symbol:?}: limits.amount.max={value}: {}", cause.message));
+                        continue;
+                    }
                 }
             };
             markets.push(Market {
@@ -176,7 +180,7 @@ where
             for message in refusals {
                 refuse(&message);
             }
-            markets
+            Ok(markets)
         }
         Err(error) => {
             trace(&error);
@@ -185,12 +189,12 @@ where
     }
 }
 
-pub async fn fetch_tickers<'a, E, F>(
-    cached: impl FnOnce() -> Vec<Ticker>,
-    mut market_by_symbol: impl FnMut(&str) -> Option<&'a Market>,
+pub async fn fetch_tickers<E, F>(
+    cached: impl FnOnce() -> Result<Vec<Ticker>, E>,
+    mut market_by_symbol: impl FnMut(&str) -> Result<Option<Market>, E>,
     read: impl FnOnce(&'static str, Value) -> F,
     mut trace: impl FnMut(&E),
-) -> Vec<Ticker>
+) -> Result<Vec<Ticker>, E>
 where
     E: From<JsCoercionError>,
     F: Future<Output = Result<Option<Value>, E>>,
@@ -208,7 +212,7 @@ where
                 return Err(error("Ticker row must not be null").into());
             }
             let symbol = js_string(row.get("symbol"))?;
-            let Some(market) = market_by_symbol(&symbol) else {
+            let Some(market) = market_by_symbol(&symbol)? else {
                 continue;
             };
             let last = parse_float(&js_string(key(row, "last"))?);
@@ -221,7 +225,7 @@ where
                 ask: last,
                 last,
                 mark,
-                index: mark,
+                index: Some(mark),
                 percentage: if open == 0.0 {
                     0.0
                 } else {
@@ -241,7 +245,7 @@ where
     }
     .await;
     match result {
-        Ok(tickers) => tickers,
+        Ok(tickers) => Ok(tickers),
         Err(error) => {
             trace(&error);
             cached()
@@ -249,13 +253,13 @@ where
     }
 }
 
-pub async fn fetch_balance<'a, E, F>(
-    cached: impl FnOnce() -> Balance,
-    positions: impl FnOnce() -> &'a [Position],
+pub async fn fetch_balance<E, F>(
+    cached: impl FnOnce() -> Result<Balance, E>,
+    positions: impl FnOnce() -> Result<Vec<Position>, E>,
     account_position_mode: &mut PositionMode,
     read: impl FnOnce(&'static str, Value) -> F,
     mut report: impl FnMut(&E),
-) -> (Balance, &'a [Position])
+) -> Result<(Balance, Vec<Position>), E>
 where
     E: From<JsCoercionError>,
     F: Future<Output = Result<Option<Value>, E>>,
@@ -299,10 +303,10 @@ where
         Ok(balance) => balance,
         Err(error) => {
             report(&error);
-            cached()
+            cached()?
         }
     };
-    (balance, positions())
+    Ok((balance, positions()?))
 }
 
 pub async fn fetch_position_mode<E, F>(

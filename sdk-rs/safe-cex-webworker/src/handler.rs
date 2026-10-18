@@ -97,10 +97,13 @@ impl BaseHandler {
     pub fn handle(&self, payload: StoreWorkerPayload) {
         (self.replay)(payload);
     }
-    pub fn buffer_until_markets_loaded(self: &Rc<Self>, payload: StoreWorkerPayload) -> bool {
-        if !self.exchange.base().store.markets().is_empty() {
+    pub fn buffer_until_markets_loaded(
+        self: &Rc<Self>,
+        payload: StoreWorkerPayload,
+    ) -> Result<bool, ExchangeError> {
+        if !self.exchange.base().store.markets()?.is_empty() {
             self.reset_pending_timeout_report_episode();
-            return false;
+            return Ok(false);
         }
         if self.first_pending_at.get().is_none() {
             self.first_pending_at
@@ -111,7 +114,7 @@ impl BaseHandler {
         if !self.timeout.armed.get() {
             self.arm(false, 30_000);
         }
-        true
+        Ok(true)
     }
     fn arm(self: &Rc<Self>, is_check: bool, delay: u64) {
         let timer = if is_check { &self.check } else { &self.timeout };
@@ -154,7 +157,17 @@ impl BaseHandler {
                         if handler.pending.borrow().is_empty() {
                             return;
                         }
-                        if !handler.exchange.base().store.markets().is_empty() {
+                        let markets = match handler.exchange.base().store.markets() {
+                            Ok(markets) => markets,
+                            Err(error) => {
+                                handler.exchange.base().runtime.report_exception(
+                                    &error.into(),
+                                    &json!({"method":"bufferUntilMarketsLoaded"}).into(),
+                                );
+                                return;
+                            }
+                        };
+                        if !markets.is_empty() {
                             handler.flush_pending();
                         } else {
                             handler.schedule_pending_markets_check();
@@ -210,7 +223,7 @@ impl BaseHandler {
                     .console("error", &format!("[{}] {message}", self.name));
                 let error = self.error_post.create("MarketsNotLoadedError", &message)?;
                 let tags = json!({"exchange":self.exchange.base().name,"module":"BaseHandler","worker_handler":self.name,"worker_error_family":"markets_not_loaded"});
-                let mut extra = self.get_pending_telemetry();
+                let mut extra = self.get_pending_telemetry()?;
                 extra["suppressedPendingTimeoutReports"] = json!(self.suppressed.get());
                 self.error_post.send(WorkerErrorReport {
                     message,
@@ -228,7 +241,7 @@ impl BaseHandler {
         self.clear_pending_timers();
         Ok(())
     }
-    fn get_pending_telemetry(&self) -> Value {
+    fn get_pending_telemetry(&self) -> Result<Value, ExchangeError> {
         let mut counts = Map::new();
         for payload in self.pending.borrow().iter() {
             let key = serde_json::to_value(payload.op)
@@ -248,7 +261,7 @@ impl BaseHandler {
             options.insert("publicDataOnly".into(), json!(value));
         }
         let mut health = Map::new();
-        if let Some(source) = base.store.socket_health() {
+        if let Some(source) = base.store.socket_health()? {
             for key in [
                 "publicInitialized",
                 "privateInitialized",
@@ -266,9 +279,11 @@ impl BaseHandler {
                 }
             }
         }
-        json!({"marketCount":base.store.markets().len(),"loadedMarkets":base.store.loaded().markets,
+        Ok(
+            json!({"marketCount":base.store.markets()?.len(),"loadedMarkets":base.store.loaded()?.markets,
             "pendingCount":self.pending.borrow().len(),"pendingAgeMs":self.first_pending_at.get().map_or(0.0,|first|base.runtime.now_ms()-first),
-            "pendingOpCounts":counts,"exchangeOptions":options,"socketHealth":health})
+            "pendingOpCounts":counts,"exchangeOptions":options,"socketHealth":health}),
+        )
     }
     fn reset_pending_timeout_report_episode(&self) {
         self.last_report_at.set(None);

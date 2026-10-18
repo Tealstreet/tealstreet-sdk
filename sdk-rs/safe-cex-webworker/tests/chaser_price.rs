@@ -1,11 +1,12 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use runtime::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Market, Ticker};
 use safe_cex_webworker::{
     chaser::ChaserOrderInstance, chaser_manager::find_best_price, task_types::ChaserOrderOptions,
@@ -48,7 +49,7 @@ fn run(row: &Value) -> Value {
     ticker.ask = number(&row["prices"][1]);
     ticker.last = number(&row["prices"][2]);
     ticker.mark = ticker.last;
-    ticker.index = ticker.last;
+    ticker.index = Some(ticker.last);
     let availability = row["availability"].as_str().unwrap();
     let store = Rc::new(DefaultStore::new());
     let mut markets = if availability == "ticker" || availability == "none" {
@@ -68,7 +69,7 @@ fn run(row: &Value) -> Value {
         ticker.ask = 85.0;
         ticker.last = 82.0;
         ticker.mark = 82.0;
-        ticker.index = 82.0;
+        ticker.index = Some(82.0);
         tickers.push(ticker);
     }
     let runtime = Rc::new(Runtime::default());
@@ -126,7 +127,7 @@ fn run(row: &Value) -> Value {
             }),
         );
     }
-    let instance = ChaserOrderInstance::new(venue, options);
+    let instance = ChaserOrderInstance::new(venue, options).unwrap();
     instance.set_min_tick_distance(number(&row["distance"]));
     let result = match find_best_price(&instance) {
         Ok(v) => json!({"price":bits(v)}),

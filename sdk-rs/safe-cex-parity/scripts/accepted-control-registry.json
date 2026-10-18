@@ -1,5 +1,13 @@
 {
   "tests": {
+    "accepted-string-key-observer-native.test.mjs": [
+      "generated JsJsonValue observer compiles and observes native String object keys"
+    ],
+    "accepted-glob-exports.test.mjs": [
+      "dependency glob providers require the active binding compiler artifact and feature set",
+      "dependency glob names include public reexports and macros and refuse incomplete inventories",
+      "Bitrue dependency glob executes a real exported macro and refuses its hidden origin"
+    ],
     "accepted-aliases.test.mjs": [
       "public alias claims require exact mapped declarations or explicit exemptions",
       "native tooling alias exceptions cannot replace SDK mappings",
@@ -203,6 +211,9 @@
       "real Node probe execution is restricted to the production FFI addon profile",
       "Node probe execution refuses failed builds and foreign or ambiguous Cargo artifacts"
     ],
+    "accepted-number-output-exports-native.test.mjs": [
+      "numeric dependency exports authenticate the real compiler origin and reject compiling grammar changes"
+    ],
     "accepted-number-output-native.test.mjs": [
       "numeric production compiler binding catches a compiling recipe mutation"
     ],
@@ -268,11 +279,16 @@
       "native feature compiler provenance follows real reexports without passing foreign feature names to dependencies"
     ],
     "accepted-woo-alias.test.mjs": [
-      "exact WOO book array refuses slot root and caller redirects",
-      "WOO five structural aliases execute actual native traits and decoded values"
+      "retired WOO book array has no special alias permission",
+      "WOO four structural aliases execute actual native traits and decoded values"
     ]
   },
   "mutations": [
+    "native String-key observer corruption",
+    "numeric dependency export missing origin",
+    "numeric dependency export opaque operand",
+    "workspace dependency glob macro shadow",
+    "workspace dependency glob hidden provider expansion",
     "doc-hidden production enum",
     "doc-hidden production module",
     "doc-dependent attribute",
@@ -461,7 +477,6 @@
     "authored JSON native key ordering",
     "required feature actual native output",
     "required feature native dispatch removal",
-    "WOO array expanded slots",
     "Binance exact-method scope",
     "Binance native observer pin",
     "Binance source oracle pin"

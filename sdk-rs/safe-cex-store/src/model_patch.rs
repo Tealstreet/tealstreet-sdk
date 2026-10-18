@@ -9,18 +9,11 @@ pub struct StorePatchError {
     source_type_error: bool,
 }
 impl StorePatchError {
-    pub(crate) fn source_type_error(field: &str, message: String) -> Self {
-        Self {
-            field: field.into(),
-            message,
-            source_type_error: true,
-        }
-    }
     pub fn is_type_error(&self) -> bool {
         self.source_type_error
     }
 
-    pub(crate) fn invalid_index() -> Self {
+    pub fn invalid_index() -> Self {
         error("$index", "ticker delta index must address a row")
     }
     pub fn field(&self) -> &str {
@@ -215,11 +208,11 @@ fn model_info(
         retained_info(field, value).map(safe_cex_types::ModelField::Value)
     }
 }
-pub(crate) trait PatchModel {
+pub trait PatchModel {
     fn patch_field(&mut self, field: &str, value: PatchValueRef<'_>)
     -> Result<(), StorePatchError>;
 }
-pub(crate) fn apply<T: PatchModel + Clone>(
+pub fn apply<T: PatchModel + Clone>(
     target: &mut T,
     changes: &dyn PatchSource,
 ) -> Result<(), StorePatchError> {
@@ -333,40 +326,6 @@ impl PatchModel for safe_cex_types::Position {
     }
 }
 
-pub(crate) fn merge_position(
-    target: &mut safe_cex_types::Position,
-    incoming: safe_cex_types::Position,
-) {
-    let old = std::mem::replace(target, incoming);
-    if target.side.is_absent() {
-        target.side = old.side;
-    }
-    if target.margin_type.is_absent() {
-        target.margin_type = old.margin_type;
-    }
-    if target.position_mode.is_absent() {
-        target.position_mode = old.position_mode;
-    }
-    if target.realized_pnl.is_absent() {
-        target.realized_pnl = old.realized_pnl;
-    }
-    if target.margin_size.is_absent() {
-        target.margin_size = old.margin_size;
-    }
-    if target.info.is_absent() {
-        target.info = old.info;
-    }
-    if target.extra.is_absent() {
-        target.extra = old.extra;
-    }
-    if target.last_update.is_absent() {
-        target.last_update = old.last_update;
-    }
-    if target.option.is_absent() {
-        target.option = old.option;
-    }
-}
-
 impl PatchModel for safe_cex_types::Market {
     fn patch_field(
         &mut self,
@@ -401,20 +360,6 @@ impl PatchModel for safe_cex_types::Market {
     }
 }
 
-pub(crate) fn merge_market(target: &mut safe_cex_types::Market, incoming: safe_cex_types::Market) {
-    let old = std::mem::replace(target, incoming);
-    target.pretty_symbol = target.pretty_symbol.take().or(old.pretty_symbol);
-    target.contract_size = target.contract_size.take().or(old.contract_size);
-    target.is_expiring = target.is_expiring.take().or(old.is_expiring);
-    target.is_inverse = target.is_inverse.take().or(old.is_inverse);
-    target.is_spot = target.is_spot.take().or(old.is_spot);
-    target.is_read_only = target.is_read_only.take().or(old.is_read_only);
-    target.info = target.info.take().or(old.info);
-    target.taker_fee = target.taker_fee.take().or(old.taker_fee);
-    target.maker_fee = target.maker_fee.take().or(old.maker_fee);
-    target.option = target.option.take().or(old.option);
-}
-
 impl PatchModel for safe_cex_types::Ticker {
     fn patch_field(
         &mut self,
@@ -447,7 +392,15 @@ impl PatchModel for safe_cex_types::Ticker {
             "ask" => self.ask = number(field, value)?,
             "last" => self.last = number(field, value)?,
             "mark" => self.mark = number(field, value)?,
-            "index" => self.index = number(field, value)?,
+            "index" => {
+                self.index = match value {
+                    PatchValueRef::Json(Value::Null) => None,
+                    PatchValueRef::Native(v) if v.is::<Option<f64>>() => {
+                        *v.downcast_ref::<Option<f64>>().unwrap()
+                    }
+                    value => Some(number(field, value)?),
+                }
+            }
             "midPrice" => self.mid_price = Some(number(field, value)?),
             "percentage" => self.percentage = number(field, value)?,
             "openInterest" => self.open_interest = number(field, value)?,

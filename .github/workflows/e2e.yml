@@ -1,0 +1,280 @@
+# Nightly Cypress e2e against a deployed lane. Source of truth lives in the
+# monorepo at mirrors/tealstreet-sdk/.github/workflows/. It runs here rather
+# than in the monorepo because this repo is public, so its runners are free.
+name: E2E Tests
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Daily at 6am UTC
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target environment'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - v3
+          - dev
+      exchanges:
+        description: 'Exchanges to test: all, one exchange, or comma-separated exchanges'
+        required: true
+        default: 'all'
+        type: string
+      tests:
+        description: 'Tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - load-balance
+          - place-market-orders
+          - place-limit-orders
+          - position-mode
+          - reduce-orders
+          - hedge-mode
+          - bracket-orders
+          - margin-slider
+          - stop-orders
+          - bad-api-key
+          - add-api-key
+      slack_dm_user:
+        description: 'Send results as DM to this Slack user ID (optional, default: channel)'
+        required: false
+        type: string
+      allow_foreign_flatten:
+        description: 'DESTRUCTIVE one-off maintenance: let the suite close positions outside the test symbol. Never enable for a routine run.'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  HUSKY: 0
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  # Resolve target URL + expand the exchange input into a JSON array used as
+  # the matrix below. Running on a tiny VM keeps the per-exchange jobs from
+  # all paying the URL/case-statement cost.
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    outputs:
+      target_url: ${{ steps.url.outputs.target_url }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Resolve target URL
+        id: url
+        run: |
+          TARGET="${{ inputs.target || 'preview' }}"
+          case "$TARGET" in
+            v3)  URL="https://v3.tealstreet.io" ;;
+            dev) URL="https://dev.tealstreet.io" ;;
+            *)   URL="https://preview.tealstreet.io" ;;
+          esac
+          echo "target_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Target: $TARGET → $URL"
+
+      - name: Build exchange matrix
+        id: matrix
+        run: |
+          EXCHANGES="${{ inputs.exchanges || 'all' }}"
+          if [ "$EXCHANGES" = "all" ]; then
+            # Derived from apps/web/cypress/config/exchanges.js so CI's "all"
+            # can never drift from the local runners.
+            MATRIX=$(node apps/web/cypress/scripts/list-exchanges.js)
+          elif [[ "$EXCHANGES" == *","* ]]; then
+            MATRIX=$(echo "$EXCHANGES" | jq -Rsc 'split(",") | map(gsub("^\\s+|\\s+$";""))')
+          else
+            MATRIX="[\"$EXCHANGES\"]"
+          fi
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "Matrix: $MATRIX"
+
+  # One job per exchange runs its full test list sequentially via run-e2e.js.
+  e2e:
+    name: E2E ${{ matrix.exchange }}
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        exchange: ${{ fromJSON(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Restore the Cypress binary cache BEFORE the install step — Cypress's
+      # postinstall hook downloads the ~200 MB binary into ~/.cache/Cypress.
+      # Pinned to the in-repo Cypress version so the cache key is stable.
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-15.18.0
+
+      - name: Install Cypress + esbuild + typescript
+        # Isolated install instead of the full workspace yarn install. typescript
+        # MUST stay ^6: Cypress's bundled ts-loader resolves its compiler through
+        # NODE_PATH, and 7.x exports no `ts.sys`, so every spec fails to compile.
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-deps" && cd "$RUNNER_TEMP/ci-deps" && npm init -y && npm install cypress@15.18.0 esbuild 'typescript@^6'
+
+      - name: Bundle vendor dependencies
+        run: NODE_PATH="$RUNNER_TEMP/ci-deps/node_modules" node apps/web/cypress/scripts/bundle-vendor.js
+
+      - name: Create cypress.env.json
+        env:
+          CYPRESS_ENV_JSON: ${{ secrets.CYPRESS_ENV_JSON }}
+        run: printenv CYPRESS_ENV_JSON > apps/web/cypress.env.json
+
+      - name: Run Cypress tests
+        id: tests
+        working-directory: apps/web
+        env:
+          NODE_PATH: ${{ runner.temp }}/ci-deps/node_modules
+          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
+          CYPRESS_PROJECT_ID: ${{ secrets.CYPRESS_PROJECT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Opt the in-browser app into hosted-exchange-server mode for CI runs.
+          # See `apps/web/src/utils/environment/isCypressUseExchangeServer.ts`.
+          # Cypress strips `CYPRESS_` and exposes the rest as `Cypress.env(...)`
+          # with the original case preserved, so this surfaces as
+          # `Cypress.env('useExchangeServer')` (string `"true"`).
+          CYPRESS_useExchangeServer: 'true'
+          # Deliberate one-off account maintenance only — see cypress/CLAUDE.md.
+          # `schedule` renders inputs.* as '', so the nightly always keeps the
+          # hard guard; the spec compares against the literal string 'true'.
+          CYPRESS_allowForeignFlatten: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_foreign_flatten || false }}
+        run: |
+          export PATH="$RUNNER_TEMP/ci-deps/node_modules/.bin:$PATH"
+          TESTS="${{ inputs.tests || 'all' }}"
+          URL="${{ needs.setup.outputs.target_url }}"
+          RECORD_FLAG=""
+          if [ -n "$CYPRESS_RECORD_KEY" ]; then
+            RECORD_FLAG="--record"
+          fi
+          # Cypress's Chrome driver needs an X server; xvfb-run supplies one
+          # regardless of the runner's desktop configuration.
+          xvfb-run -a node cypress/scripts/run-e2e.js \
+            --exchange "${{ matrix.exchange }}" \
+            --tests "$TESTS" \
+            --url "$URL" \
+            --browser chrome \
+            $RECORD_FLAG
+
+      # This repo is public, so artifacts are downloadable by anyone. The API
+      # logs carry account API keys and passphrases verbatim, and GitHub only
+      # masks the whole secret blob, so replace every credential value first.
+      - name: Redact credentials from logs and results
+        if: always()
+        working-directory: apps/web
+        run: |
+          node -e '
+            const fs = require("fs"), path = require("path");
+            const values = new Set();
+            const labels = new Set(["name", "color", "exchange"]);
+            const walk = (o, key) => {
+              if (typeof o === "string") { if (o.length >= 8 && !labels.has(key)) values.add(o); }
+              else if (Array.isArray(o)) o.forEach((v) => walk(v, key));
+              else if (o && typeof o === "object") for (const [k, v] of Object.entries(o)) walk(v, k);
+            };
+            walk(JSON.parse(fs.readFileSync("cypress.env.json", "utf8")));
+            for (const dir of ["cypress/logs", "cypress/results"]) {
+              if (!fs.existsSync(dir)) continue;
+              for (const name of fs.readdirSync(dir)) {
+                const file = path.join(dir, name);
+                let text = fs.readFileSync(file, "utf8");
+                for (const v of values) text = text.split(v).join("[redacted]");
+                fs.writeFileSync(file, text);
+              }
+            }
+          '
+
+      - name: Collect results
+        if: always()
+        run: |
+          mkdir -p results
+          if [ -d "apps/web/cypress/results" ]; then
+            cp apps/web/cypress/results/*.json results/ 2>/dev/null || true
+            cp apps/web/cypress/results/*.txt results/ 2>/dev/null || true
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-results-${{ matrix.exchange }}
+          path: results/
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Upload API logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-api-logs-${{ matrix.exchange }}
+          path: apps/web/cypress/logs/*-api.log
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # Aggregate per-exchange artifacts and post to Slack. Unchanged reporter;
+  # the only difference is artifact names now have a `-${exchange}` suffix
+  # so the download step glob-matches and merge-multiples them into one dir.
+  report:
+    name: Report Results
+    needs: [setup, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Download per-exchange results
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: e2e-results-*
+          path: all-results
+          merge-multiple: true
+
+      - name: Send Slack report
+        env:
+          SLACK_E2E_BOT_TOKEN: ${{ secrets.SLACK_E2E_BOT_TOKEN }}
+          SLACK_E2E_CHANNEL_ID: ${{ secrets.SLACK_E2E_CHANNEL_ID }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          E2E_TARGET_URL: ${{ needs.setup.outputs.target_url }}
+          CYPRESS_PROJECT_ID: ${{ secrets.CYPRESS_PROJECT_ID }}
+          SLACK_E2E_DM_USER_ID: ${{ inputs.slack_dm_user }}
+        run: node apps/web/cypress/scripts/slack-e2e-report.js all-results

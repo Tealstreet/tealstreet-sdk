@@ -142,7 +142,7 @@ impl BingxAmendment {
         self.reads
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&order.symbol)
             .cloned()
             .ok_or_else(|| ExchangeError::new(format!("Market {} not found", order.symbol)))
@@ -177,8 +177,8 @@ impl BingxAmendment {
     }
     fn caught<T>(&self, result: Result<T, ExchangeError>) -> Result<T, ExchangeError> {
         if let Err(error) = &result {
-            let wire = error
-                .response
+            let response_view = error.response_json_view();
+            let wire = response_view
                 .as_ref()
                 .and_then(|r| r.get("data"))
                 .and_then(|d| d.get("msg"));
@@ -315,7 +315,9 @@ impl BingxAmendment {
         if !qty.is_finite() || qty <= 0.0 {
             return self.reject("BingX amended order quantity must be greater than zero");
         }
-        if qty < market.limits.amount.min || qty > market.limits.amount.max {
+        if qty < market.limits.amount.min
+            || qty > safe_cex_num::numeric_value_to_number(&market.limits.amount.max)
+        {
             return self
                 .reject("BingX amended order quantity is outside the reconciled market limits");
         }
@@ -439,7 +441,12 @@ impl BingxAmendment {
                 "BingX replacement trigger price must change after market-precision normalization",
             );
         }
-        if let Some(ticker) = self.reads.base.store.tickers_by_symbol().get(&order.symbol)
+        if let Some(ticker) = self
+            .reads
+            .base
+            .store
+            .tickers_by_symbol()?
+            .get(&order.symbol)
             && ticker.mark.is_finite()
             && ticker.mark > 0.0
         {
@@ -700,7 +707,7 @@ impl BingxAmendment {
             let raw = Input::Object(fields);
             let replacement = map_order(
                 &raw,
-                &self.reads.base.store.orders(),
+                &self.reads.base.store.orders()?,
                 safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )?;
             self.reads

@@ -186,7 +186,7 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         visitor: V,
     ) -> Result<V::Value, Error> {
         if name == safe_cex_types::retained_json::RETAINED_NATIVE {
-            return JsNumberDeserializer(self.0.into_native_payload()).deserialize_seq(visitor);
+            return self.0.into_native_payload().deserialize_seq(visitor);
         }
         if name == safe_cex_types::model_field::MODEL_FIELD && matches!(self.0, Node::Undefined) {
             visitor.visit_unit()

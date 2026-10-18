@@ -806,7 +806,7 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
         };
         let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
         assert_eq!(
-            venue.get_ticker_symbols_for_category(category),
+            venue.get_ticker_symbols_for_category(category).unwrap(),
             expected,
             "quote filter and active fallback case {index}"
         );
@@ -900,13 +900,13 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
         venue.dispose().unwrap();
     }
     assert_eq!(fixture["boundary"]["outputUnits"], json!([0xd800]));
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<safe_cex_types::Market>(
-            fixture["boundary"]["wire"].as_str().unwrap()
-        )
-        .is_err(),
-        "UTF-8 Market ingress refuses source-observable lone surrogate"
+    let raw = fixture["boundary"]["wire"].as_str().unwrap();
+    let market: safe_cex_types::Market = safe_cex_num::numeric_ingress::js_from_str(raw).unwrap();
+    assert_eq!(
+        market.symbol, "\u{fffd}",
+        "typed Market symbol projects the lone unit"
     );
+    typed_utf16::assert_projection(raw, &market);
 }
 
 #[test]
@@ -1062,15 +1062,17 @@ fn protective_side_matches_source_coercion_and_exact_one_position() {
                 "PROTECTIVE native side case {index}"
             );
         } else {
-            let primitive =
-                !case["order"].is_null() && !case["order"].is_object() && !case["order"].is_array();
             assert_eq!(
-                record_return(venue.infer_protective_order_side(&case["order"])).unwrap_err(),
-                if primitive {
-                    "TypeError: Bybit field lookup requires an object"
-                } else {
-                    case["message"].as_str().unwrap()
+                {
+                    let error = record_return(venue.infer_protective_order_side(&case["order"]))
+                        .unwrap_err();
+                    format!("{}: {}", error.name, error.message)
                 },
+                format!(
+                    "{}: {}",
+                    source_error.as_str().unwrap(),
+                    case["message"].as_str().unwrap()
+                ),
                 "PROTECTIVE coercion error case {index}"
             );
         }
@@ -1544,11 +1546,15 @@ fn opposite_position_matches_source_signed_contracts() {
             safe_cex_types::OrderSide::Sell
         };
         assert_eq!(
-            json!(venue.has_full_sized_position_opposite_side(
-                "BTCUSD",
-                side,
-                case["amount"].as_f64().unwrap()
-            )),
+            json!(
+                venue
+                    .has_full_sized_position_opposite_side(
+                        "BTCUSD",
+                        side,
+                        case["amount"].as_f64().unwrap()
+                    )
+                    .unwrap()
+            ),
             case["expected"],
             "OPPOSITE inverse native size case {index}: {case}"
         );
@@ -1625,7 +1631,8 @@ fn opposite_position_matches_source_signed_contracts() {
                 symbol,
                 side,
                 amount.parse().unwrap()
-            )),
+            ))
+            .unwrap(),
             expected,
             "OPPOSITE native boolean {index}"
         );
@@ -1683,3 +1690,6 @@ fn observed_error_code(
         safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
     })
 }
+
+#[path = "../../../../test-support/typed_utf16.rs"]
+mod typed_utf16;

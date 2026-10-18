@@ -6,13 +6,13 @@ mod virtual_time {
         "/../test-support/virtual_time.rs"
     ));
 }
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     external::ExternalPublicData,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider, socket::TunnelHost,
@@ -215,8 +215,18 @@ impl WsRuntime for Runtime {
 /// Requests in send order as (METHOD, path, JSON body); responses by path.
 #[derive(Default)]
 pub struct Wire {
+    pub hold_responses: Rc<Cell<bool>>,
+    response_wakers: Rc<RefCell<Vec<std::task::Waker>>>,
     pub requests: RefCell<Vec<(String, String, Value)>>,
     pub bodies: RefCell<BTreeMap<String, safe_cex_types::retained_json::RetainedJsonInput>>,
+}
+impl Wire {
+    pub fn release_responses(&self) {
+        self.hold_responses.set(false);
+        for waker in self.response_wakers.borrow_mut().drain(..) {
+            waker.wake();
+        }
+    }
 }
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -239,7 +249,21 @@ impl RestAdapter for Wire {
             .get(&r.url)
             .cloned()
             .unwrap_or_else(|| json!({"success":true,"code":0,"data":[]}).into());
+        let held = self.hold_responses.clone();
+        let wakers = self.response_wakers.clone();
         Box::pin(async move {
+            std::future::poll_fn(move |cx| {
+                if held.get() {
+                    let mut pending = wakers.borrow_mut();
+                    if !pending.iter().any(|w| w.will_wake(cx.waker())) {
+                        pending.push(cx.waker().clone());
+                    }
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
             Ok(RestResponse {
                 status: 200,
                 reason: None,
@@ -322,5 +346,5 @@ pub fn fixture_with_settings_and_local_time(
         },
         external,
     );
-    (venue, runtime, store, wire)
+    (venue.unwrap(), runtime, store, wire)
 }

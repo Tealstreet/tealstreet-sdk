@@ -326,7 +326,7 @@ fn run(privacy: &str, name: &str) {
         let runtime = Rc::new(Host::default());
         let store = fixture(&runtime);
         if ["positions", "accounts"].contains(&name) {
-            let mut p = store.positions()[0].clone();
+            let mut p = store.positions().unwrap()[0].clone();
             p.id = "BTC-USDC:short".into();
             p.side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
@@ -367,7 +367,7 @@ fn run(privacy: &str, name: &str) {
         let host = SocketHost::new(runtime.clone(), private, variant, name);
         runtime.operations.borrow_mut().clear();
         let input = native::input(&row["input"]);
-        let initial_positions = store.positions().to_vec();
+        let initial_positions = store.positions().unwrap().to_vec();
         let mut result = J::Undefined;
         if private {
             let socket = ApexOmniPrivateWebsocket::new(parent.clone(), host.clone()).unwrap();
@@ -575,15 +575,15 @@ fn run(privacy: &str, name: &str) {
         let state = obj(vec![
             (
                 "tickers",
-                J::Array(store.tickers().iter().map(ticker_value).collect()),
+                J::Array(store.tickers().unwrap().iter().map(ticker_value).collect()),
             ),
             (
                 "positions",
-                J::Array(store.positions().iter().map(position).collect()),
+                J::Array(store.positions().unwrap().iter().map(position).collect()),
             ),
             (
                 "orders",
-                J::Array(store.orders().iter().map(order_value).collect()),
+                J::Array(store.orders().unwrap().iter().map(order_value).collect()),
             ),
             (
                 "executions",
@@ -602,7 +602,7 @@ fn run(privacy: &str, name: &str) {
             // Retain the live source observation of late publication; compare
             // every other state axis, and assert the chosen native axis directly.
             assert_eq!(
-                store.positions().to_vec(),
+                store.positions().unwrap().to_vec(),
                 initial_positions,
                 "disposed timer retains the prior positions"
             );
@@ -652,7 +652,7 @@ fn ticker_value(t: &Ticker) -> J {
         ("ask", n(t.ask)),
         ("last", n(t.last)),
         ("mark", n(t.mark)),
-        ("index", n(t.index)),
+        ("index", t.index.map(n).unwrap_or(J::Null)),
         ("percentage", n(t.percentage)),
         ("volume", n(t.volume)),
         ("quoteVolume", n(t.quote_volume)),
@@ -909,12 +909,12 @@ fn canceled_prefix_effects_precede_later_order_faults() {
         );
         assert_eq!(row["timers"], timers, "{marker} source pending timers");
         assert_eq!(
-            store.orders().len(),
+            store.orders().unwrap().len(),
             order_count,
             "{marker} native Store order floor"
         );
         native::check_fields(
-            &J::Array(store.orders().iter().map(super::order).collect()),
+            &J::Array(store.orders().unwrap().iter().map(super::order).collect()),
             &row["orders"],
             &format!("{marker} native Store orders"),
         );
@@ -1073,10 +1073,14 @@ fn socket_frame_units_are_observed_before_wire() {
         if !private {
             let ticker = js_from_str::<Ticker>(row["rawTicker"].as_str().unwrap());
             if record_refused {
-                assert!(
-                    ticker.is_err(),
-                    "{marker} whole source Ticker cannot enter shared String id"
+                let ticker = ticker.unwrap();
+                assert_eq!(
+                    ticker.id,
+                    String::from_utf16_lossy(units),
+                    "{marker} typed ticker id"
                 );
+                assert_eq!(ticker.last.to_bits(), 103f64.to_bits());
+                typed_utf16::assert_projection(row["rawTicker"].as_str().unwrap(), &ticker);
             } else {
                 let ticker = ticker.unwrap();
                 assert_eq!(
@@ -1174,7 +1178,7 @@ fn socket_frame_units_are_observed_before_wire() {
                 "{marker} source peer argument units"
             );
             assert_eq!(
-                store.tickers()[0].last.to_bits(),
+                store.tickers().unwrap()[0].last.to_bits(),
                 103f64.to_bits(),
                 "{marker} native private Store untouched"
             );
@@ -1185,7 +1189,7 @@ fn socket_frame_units_are_observed_before_wire() {
             ));
         } else {
             assert_eq!(
-                store.tickers()[0].last.to_bits(),
+                store.tickers().unwrap()[0].last.to_bits(),
                 if refused {
                     103f64.to_bits()
                 } else {
@@ -1205,7 +1209,10 @@ fn socket_frame_units_are_observed_before_wire() {
             );
             if !record_refused {
                 assert_eq!(
-                    store.tickers()[0].id.encode_utf16().collect::<Vec<_>>(),
+                    store.tickers().unwrap()[0]
+                        .id
+                        .encode_utf16()
+                        .collect::<Vec<_>>(),
                     units,
                     "{marker} native returned ticker id units"
                 );
@@ -1236,3 +1243,6 @@ fn socket_frame_units_are_observed_before_wire() {
         assert_eq!(sent, vec![source], "{marker} native exact positive wire");
     }
 }
+
+#[path = "../../../test-support/typed_utf16.rs"]
+mod typed_utf16;

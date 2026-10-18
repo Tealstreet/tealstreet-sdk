@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref};
-use safe_cex_store::{StoreUpdate, store::DefaultStore};
+use safe_cex_store::StoreUpdate;
 use safe_cex_types::{Balance, Order, Position};
 use safe_cex_venue_breakoutprop::portfolio_reads::*;
 use serde_json::{Value, json};
@@ -428,21 +429,50 @@ fn inherited_and_utf8_read_boundaries() {
                 );
                 assert!(balance.used > 0.0);
             }
-            "fetchOpenPositions" => assert!(
-                run(fetch_open_positions(
+            "fetchOpenPositions" => {
+                let rows = run(fetch_open_positions(
                     fetch,
                     &store,
                     &|ms| ms,
                     &report,
-                    |e| e.message
+                    |e| e.message,
                 ))
-                .is_err(),
-                "closed Position symbol refusal"
-            ),
-            "fetchOrders" => assert!(
-                run(fetch_orders(fetch, &store, &|ms| ms, &report, |e| e.message)).is_err(),
-                "closed Order symbol refusal"
-            ),
+                .unwrap()
+                .unwrap();
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].symbol, "\u{fffd}");
+                assert_eq!(rows[1].symbol, "ETHUSD");
+                assert_eq!(
+                    rows[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("symbol")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+            }
+            "fetchOrders" => {
+                let rows = run(fetch_orders(fetch, &store, &|ms| ms, &report, |e| {
+                    e.message
+                }))
+                .unwrap()
+                .unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].id, "id-A");
+                assert_eq!(rows[0].symbol, "\u{fffd}");
+                assert_eq!(
+                    rows[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("instrument")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+            }
             "fetchPositions" => {
                 assert!(
                     serde_json::from_str::<Vec<String>>(r#"["\ud800"]"#).is_err(),
@@ -567,7 +597,7 @@ fn owned_read_info_and_fallbacks() {
             assert_eq!(fallback.free, 881.0);
             assert_eq!(alias["fallbackObserved"], 881);
             assert_eq!(
-                safe_cex_store::Store::balance(&store).free,
+                safe_cex_store::Store::balance(&store).unwrap().free,
                 893.0,
                 "owned_read_fallback_balance"
             );
@@ -581,7 +611,7 @@ fn owned_read_info_and_fallbacks() {
             assert!(fallback.is_empty());
             assert_eq!(alias["fallbackObserved"], 2);
             assert_eq!(
-                safe_cex_store::Store::orders(&store).len(),
+                safe_cex_store::Store::orders(&store).unwrap().len(),
                 1,
                 "owned_read_fallback_orders"
             );
@@ -625,7 +655,7 @@ fn owned_read_info_and_fallbacks() {
             assert_eq!(fallback.len(), 1);
             assert_eq!(alias["fallbackObserved"], 1);
             assert!(
-                safe_cex_store::Store::positions(&store).is_empty(),
+                safe_cex_store::Store::positions(&store).unwrap().is_empty(),
                 "owned_read_fallback_{method}"
             );
         }

@@ -12,14 +12,30 @@ use std::sync::{
 struct HeldDepth {
     released: AtomicBool,
     requests: Mutex<Vec<String>>,
+    waiters: Mutex<Vec<Waker>>,
+}
+impl HeldDepth {
+    fn release(&self) {
+        self.released.store(true, Ordering::SeqCst);
+        // The Promise driver waits for readiness instead of repolling held I/O.
+        let waiters = std::mem::take(&mut *self.waiters.lock().unwrap());
+        for waiter in waiters {
+            waiter.wake();
+        }
+    }
 }
 impl RestAdapter for HeldDepth {
     fn execute(&self, request: RestRequest) -> safe_cex_transport::RestFuture<'_, RestResponse> {
         self.requests.lock().unwrap().push(request.url);
-        Box::pin(std::future::poll_fn(move |_| {
+        Box::pin(std::future::poll_fn(move |cx| {
+            let mut waiters = self.waiters.lock().unwrap();
             if !self.released.load(Ordering::SeqCst) {
+                if !waiters.iter().any(|waiter| waiter.will_wake(cx.waker())) {
+                    waiters.push(cx.waker().clone());
+                }
                 return Poll::Pending;
             }
+            drop(waiters);
             Poll::Ready(Ok(RestResponse {
                 status: 200,
                 reason: None,
@@ -75,6 +91,7 @@ fn production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe()
         let http = Arc::new(HeldDepth {
             released: AtomicBool::new(false),
             requests: Mutex::default(),
+            waiters: Mutex::default(),
         });
         let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
             runtime.clone(),
@@ -92,7 +109,7 @@ fn production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe()
             venue,
             serde_json::from_value(json!(name)).unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();
@@ -163,7 +180,7 @@ fn production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe()
             query, "symbol=BTCUSDT&limit=1000",
             "flat Axios query fields, without a second params wrapper {venue:?}"
         );
-        http.released.store(true, Ordering::SeqCst);
+        http.release();
         for _ in 0..16 {
             runtime.pump();
         }
@@ -244,6 +261,7 @@ fn native_depth_overflow_case(venue: Venue, buffered: bool, previous: Option<&st
     let http = Arc::new(HeldDepth {
         released: AtomicBool::new(!buffered),
         requests: Mutex::default(),
+        waiters: Mutex::default(),
     });
     let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
         runtime.clone(),
@@ -261,7 +279,7 @@ fn native_depth_overflow_case(venue: Venue, buffered: bool, previous: Option<&st
         venue,
         serde_json::from_value(json!(name)).unwrap(),
         serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -303,7 +321,7 @@ fn native_depth_overflow_case(venue: Venue, buffered: bool, previous: Option<&st
         push(r#"{"e":"depthUpdate","s":"BTCUSDT","U":102,"u":102,"pu":OVERFLOW,"b":[["99.25","6"]],"a":[]}"#.replace("OVERFLOW", previous));
         if buffered {
             assert!(seen.borrow().is_empty());
-            http.released.store(true, Ordering::SeqCst);
+            http.release();
             for _ in 0..16 {
                 runtime.pump();
             }
@@ -382,6 +400,7 @@ fn production_native_public_listener_functions_preserve_two_subscriptions() {
         let http = Arc::new(HeldDepth {
             released: AtomicBool::new(false),
             requests: Mutex::default(),
+            waiters: Mutex::default(),
         });
         let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
             runtime.clone(),
@@ -399,7 +418,7 @@ fn production_native_public_listener_functions_preserve_two_subscriptions() {
             venue,
             serde_json::from_value(json!(name)).unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();
@@ -495,7 +514,7 @@ fn production_native_public_listener_functions_preserve_two_subscriptions() {
             2,
             "separate listener jobs {venue:?}"
         );
-        http.released.store(true, Ordering::SeqCst);
+        http.release();
         for _ in 0..16 {
             runtime.pump();
         }

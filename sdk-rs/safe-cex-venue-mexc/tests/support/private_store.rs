@@ -1,14 +1,14 @@
 // Native test observation delegates every Store operation to actual DefaultStore.
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::{
     PackedTickerDelta, Store, StoreMutationError, StoreUpdate,
     model_patch::{ModelPatch, PatchSource},
-    store::DefaultStore,
 };
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::*;
 use serde_json::{Map, Value};
-use std::cell::{Cell, Ref, RefCell};
+use std::cell::{Cell, RefCell};
 type Subscriber = StoreSubscriber;
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteCall {
@@ -41,6 +41,12 @@ impl Store for ObservedStore {
     }
     fn reset(&self) -> Result<(), StoreMutationError> {
         Store::reset(&self.inner)
+    }
+    fn subscribe_native(
+        &self,
+        callback: safe_cex_store::contract::NativeStoreSubscriber,
+    ) -> Box<dyn Fn()> {
+        safe_cex_store::Store::subscribe_native(&self.inner, callback)
     }
     fn subscribe(&self, callback: Subscriber) -> Box<dyn Fn()> {
         Store::subscribe(&self.inner, callback)
@@ -149,73 +155,73 @@ impl Store for ObservedStore {
     fn update_user_data(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
         Store::update_user_data(&self.inner, data)
     }
-    fn latency(&self) -> f64 {
+    fn latency(&self) -> Result<f64, StoreReadError> {
         Store::latency(&self.inner)
     }
-    fn balance(&self) -> Ref<'_, Balance> {
+    fn balance(&self) -> Result<Balance, StoreReadError> {
         Store::balance(&self.inner)
     }
-    fn balance_handle(&self) -> std::sync::Arc<Balance> {
+    fn balance_handle(&self) -> Result<safe_cex_store::BalanceHandle, StoreReadError> {
         Store::balance_handle(&self.inner)
     }
-    fn markets(&self) -> Ref<'_, [Market]> {
+    fn markets(&self) -> Result<Vec<Market>, StoreReadError> {
         Store::markets(&self.inner)
     }
-    fn tickers(&self) -> Ref<'_, [Ticker]> {
+    fn tickers(&self) -> Result<Vec<Ticker>, StoreReadError> {
         Store::tickers(&self.inner)
     }
-    fn orders(&self) -> Ref<'_, [Order]> {
+    fn orders(&self) -> Result<Vec<Order>, StoreReadError> {
         Store::orders(&self.inner)
     }
-    fn orders_risk(&self) -> Ref<'_, IndexMap<String, Vec<OrderRiskProfile>>> {
+    fn orders_risk(&self) -> Result<IndexMap<String, Vec<OrderRiskProfile>>, StoreReadError> {
         Store::orders_risk(&self.inner)
     }
-    fn positions(&self) -> Ref<'_, [Position]> {
+    fn positions(&self) -> Result<Vec<Position>, StoreReadError> {
         Store::positions(&self.inner)
     }
-    fn displayed_positions(&self) -> Ref<'_, [DisplayedPosition]> {
+    fn displayed_positions(&self) -> Result<Vec<DisplayedPosition>, StoreReadError> {
         Store::displayed_positions(&self.inner)
     }
-    fn displayed_margin(&self) -> Option<Ref<'_, DisplayedMargin>> {
+    fn displayed_margin(&self) -> Result<Option<DisplayedMargin>, StoreReadError> {
         Store::displayed_margin(&self.inner)
     }
-    fn active_chasers(&self) -> Ref<'_, [ActiveChaser]> {
+    fn active_chasers(&self) -> Result<Vec<ActiveChaser>, StoreReadError> {
         Store::active_chasers(&self.inner)
     }
-    fn active_twaps(&self) -> Ref<'_, [ActiveTWAP]> {
+    fn active_twaps(&self) -> Result<Vec<ActiveTWAP>, StoreReadError> {
         Store::active_twaps(&self.inner)
     }
-    fn loaded(&self) -> Ref<'_, StoreDataLoaded> {
+    fn loaded(&self) -> Result<StoreDataLoaded, StoreReadError> {
         Store::loaded(&self.inner)
     }
-    fn update_ids(&self) -> Ref<'_, StoreUpdateIds> {
+    fn update_ids(&self) -> Result<StoreUpdateIds, StoreReadError> {
         Store::update_ids(&self.inner)
     }
-    fn options(&self) -> Ref<'_, StoreOptions> {
+    fn options(&self) -> Result<StoreOptions, StoreReadError> {
         Store::options(&self.inner)
     }
-    fn message_handler_stats(&self) -> Option<Ref<'_, Value>> {
+    fn message_handler_stats(&self) -> Result<Option<Value>, StoreReadError> {
         Store::message_handler_stats(&self.inner)
     }
-    fn stark_config(&self) -> Option<Ref<'_, Value>> {
+    fn stark_config(&self) -> Result<Option<Value>, StoreReadError> {
         Store::stark_config(&self.inner)
     }
-    fn zk_link_config(&self) -> Option<Ref<'_, Input>> {
+    fn zk_link_config(&self) -> Result<Option<Input>, StoreReadError> {
         Store::zk_link_config(&self.inner)
     }
-    fn user_data(&self) -> Option<Ref<'_, Value>> {
+    fn user_data(&self) -> Result<Option<Value>, StoreReadError> {
         Store::user_data(&self.inner)
     }
-    fn tickers_by_id(&self) -> Ref<'_, IndexMap<String, Ticker>> {
+    fn tickers_by_id(&self) -> Result<IndexMap<String, Ticker>, StoreReadError> {
         Store::tickers_by_id(&self.inner)
     }
-    fn markets_by_id(&self) -> Ref<'_, IndexMap<String, Market>> {
+    fn markets_by_id(&self) -> Result<IndexMap<String, Market>, StoreReadError> {
         Store::markets_by_id(&self.inner)
     }
-    fn tickers_by_symbol(&self) -> Ref<'_, IndexMap<String, Ticker>> {
+    fn tickers_by_symbol(&self) -> Result<IndexMap<String, Ticker>, StoreReadError> {
         Store::tickers_by_symbol(&self.inner)
     }
-    fn markets_by_symbol(&self) -> Ref<'_, IndexMap<String, Market>> {
+    fn markets_by_symbol(&self) -> Result<IndexMap<String, Market>, StoreReadError> {
         self.market_reads.set(self.market_reads.get() + 1);
         Store::markets_by_symbol(&self.inner)
     }
@@ -225,22 +231,31 @@ impl Store for ObservedStore {
     fn get_tickers_version(&self) -> f64 {
         Store::get_tickers_version(&self.inner)
     }
-    fn fetched_leverage(&self) -> Ref<'_, IndexMap<String, FetchedLeverage>> {
+    fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
         Store::fetched_leverage(&self.inner)
     }
-    fn socket_health(&self) -> Option<Ref<'_, Value>> {
+    fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
         Store::socket_health(&self.inner)
     }
     fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError> {
         Store::update_socket_health(&self.inner, data)
     }
-    fn request_stats(&self) -> Option<Ref<'_, RequestOutcomeCounts>> {
+    fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError> {
         Store::request_stats(&self.inner)
     }
-    fn record_request_outcome(&self, outcome: RequestOutcome) {
+    fn record_request_outcome(&self, outcome: RequestOutcome) -> Result<(), StoreMutationError> {
         Store::record_request_outcome(&self.inner, outcome)
     }
-    fn serialize(&self) -> StoreData {
+    fn serialize(&self) -> Result<StoreData, StoreReadError> {
         Store::serialize(&self.inner)
+    }
+    fn native_owner(&self) -> std::rc::Rc<dyn std::any::Any> {
+        Store::native_owner(&self.inner)
+    }
+    fn lookup_ticker_by_symbol(
+        &self,
+        symbol: &str,
+    ) -> Result<std::rc::Rc<dyn safe_cex_store::ticker_lookup::TickerLookup>, StoreReadError> {
+        Store::lookup_ticker_by_symbol(&self.inner, symbol)
     }
 }

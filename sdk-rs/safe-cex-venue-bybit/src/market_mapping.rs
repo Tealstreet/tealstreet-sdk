@@ -82,7 +82,7 @@ pub(crate) fn map_market(
         cost: None,
         amount: MarketLimitsAmount {
             min: nested("lotSizeFilter", "minOrderQty")?,
-            max: nested("lotSizeFilter", "maxOrderQty")?,
+            max: (nested("lotSizeFilter", "maxOrderQty")?).into(),
         },
         leverage: MarketLimitsLeverage {
             min: if spot {

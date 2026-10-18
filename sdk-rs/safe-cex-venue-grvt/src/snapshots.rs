@@ -47,15 +47,21 @@ pub async fn get_position_mode() -> PositionMode {
 pub fn calculate_position_upnl_from_last_price(
     position: &Position,
     store: &dyn Store,
-) -> Option<f64> {
-    let last = store.tickers_by_symbol().get(&position.symbol)?.last;
+) -> Result<Option<f64>, ExchangeError> {
+    let Some(last) = store
+        .tickers_by_symbol()?
+        .get(&position.symbol)
+        .map(|ticker| ticker.last)
+    else {
+        return Ok(None);
+    };
     if !truthy_number(last)
         || last <= 0.0
         || !truthy_number(position.entry_price)
         || position.entry_price <= 0.0
         || !truthy_number(position.contracts)
     {
-        return None;
+        return Ok(None);
     }
     let direction = if position.side == PositionSide::Long {
         1.0
@@ -63,7 +69,7 @@ pub fn calculate_position_upnl_from_last_price(
         -1.0
     };
     let derived = direction * (last - position.entry_price) * position.contracts.abs();
-    derived.is_finite().then_some(derived)
+    Ok(derived.is_finite().then_some(derived))
 }
 
 fn truthy_number(value: f64) -> bool {
@@ -71,19 +77,22 @@ fn truthy_number(value: f64) -> bool {
 }
 
 /// ts: GrvtExchange#calculateUpnlFromPositions. Addition order is source array order.
-pub fn calculate_upnl_from_positions(positions: &[Position], store: &dyn Store) -> f64 {
+pub fn calculate_upnl_from_positions(
+    positions: &[Position],
+    store: &dyn Store,
+) -> Result<f64, ExchangeError> {
     let mut total = 0.0;
     for position in positions {
         if !truthy_number(position.contracts) {
             continue;
         }
-        if let Some(derived) = calculate_position_upnl_from_last_price(position, store) {
+        if let Some(derived) = calculate_position_upnl_from_last_price(position, store)? {
             total += derived;
         } else if position.unrealized_pnl.is_finite() {
             total += position.unrealized_pnl;
         }
     }
-    total
+    Ok(total)
 }
 
 /// ts: GrvtExchange.syncBalanceUpnlFromPositions. Position notification precedes balance read.
@@ -95,7 +104,7 @@ pub fn sync_balance_upnl_from_positions(
     let positions = match positions {
         Some(positions) => positions,
         None => {
-            defaults = store.positions().to_vec();
+            defaults = store.positions()?.to_vec();
             &defaults
         }
     };
@@ -105,7 +114,7 @@ pub fn sync_balance_upnl_from_positions(
         if !truthy_number(position.contracts) {
             continue;
         }
-        if let Some(derived) = calculate_position_upnl_from_last_price(position, store) {
+        if let Some(derived) = calculate_position_upnl_from_last_price(position, store)? {
             total += derived;
             let old = if truthy_number(position.unrealized_pnl) {
                 position.unrealized_pnl
@@ -128,7 +137,7 @@ pub fn sync_balance_upnl_from_positions(
         store.update_positions(&updates)?;
     }
     // Release the Ref before notifying. Subscribers may synchronously mutate balance.
-    let mut balance = store.balance().clone();
+    let mut balance = store.balance()?.clone();
     let old = if truthy_number(balance.upnl) {
         balance.upnl
     } else {
@@ -152,11 +161,11 @@ pub fn get_fake_positions(
     store: &dyn Store,
     default_leverage: f64,
 ) -> Result<Vec<Position>, ExchangeError> {
-    let positions = store.positions();
+    let positions = store.positions()?;
     let existing: IndexMap<_, _> = positions.iter().map(|p| (&p.symbol, p.side)).collect();
-    let leverage = store.fetched_leverage();
+    let leverage = store.fetched_leverage()?;
     store
-        .markets()
+        .markets()?
         .iter()
         .map(|market| {
             if !leverage.contains_key(&market.symbol)
@@ -205,8 +214,19 @@ pub fn fetch_tickers(
     store: &dyn Store,
     mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError>,
 ) -> std::future::Ready<Result<Vec<Ticker>, ExchangeError>> {
-    let tickers: Vec<_> = store
-        .markets()
+    let markets = match store.markets() {
+        Ok(markets) => markets,
+        Err(error) => {
+            let error = ExchangeError::from(error);
+            let result = log(
+                &format!("Error fetching tickers: {}", error.js_error_string()),
+                LogSeverity::Error,
+            )
+            .and(Err(error));
+            return std::future::ready(result);
+        }
+    };
+    let tickers: Vec<_> = markets
         .iter()
         .map(|market| Ticker {
             id: market.id.clone(),
@@ -215,7 +235,7 @@ pub fn fetch_tickers(
             ask: 0.0,
             last: 0.0,
             mark: 0.0,
-            index: 0.0,
+            index: Some(0.0),
             mid_price: None,
             timestamp: None,
             percentage: 0.0,

@@ -1,7 +1,13 @@
 //! Concrete AsterDEX exchange assembled from the ported bodies and shared runtime.
 #[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "fix_audit_tests.rs"]
+mod fix_audit_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "native_emitter_tests.rs"]
 mod native_emitter_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "native_error_tests.rs"]
+mod native_error_tests;
 use crate::binding::{self, Rt};
 use safe_cex_exchange::{
     capabilities::{
@@ -101,17 +107,18 @@ impl AsterDEXExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let this = self.rt.this.clone();
+        let runtime = self.rt.exchange_runtime();
+        let result = self.rt.this.call_method(member, args);
         Box::pin(async move {
-            let result =
-                await_js(&self.rt.exchange_runtime(), this.call_method(member, args)?).await?;
+            let result = await_js(&runtime, result?).await?;
             Ok(to_typed(&result)?)
         })
     }
     fn unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let this = self.rt.this.clone();
+        let runtime = self.rt.exchange_runtime();
+        let result = self.rt.this.call_method(member, args);
         Box::pin(async move {
-            await_js(&self.rt.exchange_runtime(), this.call_method(member, args)?).await?;
+            await_js(&runtime, result?).await?;
             Ok(())
         })
     }

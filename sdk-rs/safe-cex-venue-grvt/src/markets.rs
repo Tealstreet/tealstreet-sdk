@@ -103,7 +103,10 @@ fn project_instrument(inst: &Input) -> Result<Result<Market, ExchangeError>, Exc
         },
         limits: MarketLimits {
             cost: None,
-            amount: MarketLimitsAmount { min: min_size, max },
+            amount: MarketLimitsAmount {
+                min: min_size,
+                max: max.into(),
+            },
             leverage: MarketLimitsLeverage {
                 min: 1.0,
                 max: 100.0,
@@ -200,13 +203,15 @@ pub fn refresh_markets<'a, F: Future<Output = Result<Vec<Market>, ExchangeError>
     mut emit: impl FnMut(&str, &MarketChanges) -> Result<(), ExchangeError> + 'a,
     mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError> + 'a,
 ) -> impl Future<Output = Result<MarketChanges, ExchangeError>> + 'a {
-    let old: IndexMap<_, _> = store
-        .markets()
-        .iter()
-        .map(|market| (market.id.clone(), market.clone()))
-        .collect();
-    let request = fetch();
+    let pending = store.markets().map(|markets| {
+        let old: IndexMap<_, _> = markets
+            .into_iter()
+            .map(|market| (market.id.clone(), market))
+            .collect();
+        (old, fetch())
+    });
     async move {
+        let (old, request) = pending?;
         let new = request.await?;
         let changes = MarketChanges {
             added: new

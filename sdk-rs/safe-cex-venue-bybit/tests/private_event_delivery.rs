@@ -22,7 +22,7 @@ fn setup(
         "limits":{"amount":{"min":0.001,"max":100},"leverage":{"min":1,"max":100}}
     }))
     .unwrap();
-    let mut balance = h.store.balance().clone();
+    let mut balance = h.store.balance().unwrap().clone();
     balance.total = 1000.;
     balance.free = 1000.;
     balance.upnl = 0.;
@@ -87,11 +87,11 @@ fn production_private_frames_publish_orders_incremental_fills_and_terminal_statu
             json!({"topic":"order","data":[order("o1","BTCUSDT","New")]}),
         );
         assert_eq!(
-            h.store.orders().len(),
+            h.store.orders().unwrap().len(),
             2,
             "private event creates parent and virtual stop"
         );
-        assert_eq!(h.store.orders()[0].id, "o1");
+        assert_eq!(h.store.orders().unwrap()[0].id, "o1");
         let mut partial = order("o1", "BTCUSDT", "PartiallyFilled");
         partial["cumExecQty"] = json!("0.004");
         partial["cumExecValue"] = json!("100");
@@ -122,6 +122,7 @@ fn production_private_frames_publish_orders_incremental_fills_and_terminal_statu
         assert!(
             h.store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|o| o.status == OrderStatus::Closed)
         );
@@ -137,6 +138,7 @@ fn production_private_frames_publish_orders_incremental_fills_and_terminal_statu
             let rows: Vec<_> = h
                 .store
                 .orders()
+                .unwrap()
                 .iter()
                 .filter(|o| o.id.starts_with(&format!("terminal-{i}")))
                 .cloned()
@@ -171,14 +173,14 @@ fn production_position_frames_update_positions_balance_and_filter_untraded_categ
         json!({"topic":"position","data":[position("BTCUSDT","12.5","0.5"), position("BTCUSD","99","200"), position("BTC-30DEC26-100000-C","88","2")]}),
     );
     assert_eq!(
-        h.store.positions().len(),
+        h.store.positions().unwrap().len(),
         1,
         "default linear-only connection filters inverse/options"
     );
-    assert_eq!(h.store.positions()[0].contracts, 0.5);
-    assert_eq!(h.store.positions()[0].unrealized_pnl, 12.5);
+    assert_eq!(h.store.positions().unwrap()[0].contracts, 0.5);
+    assert_eq!(h.store.positions().unwrap()[0].unrealized_pnl, 12.5);
     assert_eq!(
-        h.store.balance().upnl,
+        h.store.balance().unwrap().upnl,
         12.5,
         "private position synchronizes balance upnl"
     );
@@ -192,9 +194,9 @@ fn production_position_frames_update_positions_balance_and_filter_untraded_categ
         &h,
         json!({"topic":"position","data":[position("BTCUSDT","0","0")]}),
     );
-    assert_eq!(h.store.positions()[0].contracts, 0.);
-    assert_eq!(h.store.balance().upnl, 0.);
-    let before = serde_json::to_value(h.store.balance().clone()).unwrap();
+    assert_eq!(h.store.positions().unwrap()[0].contracts, 0.);
+    assert_eq!(h.store.balance().unwrap().upnl, 0.);
+    let before = serde_json::to_value(h.store.balance().unwrap().clone()).unwrap();
     feed(
         &h,
         json!({"topic":"wallet","data":[{"totalEquity":"999999"}]}),
@@ -204,12 +206,12 @@ fn production_position_frames_update_positions_balance_and_filter_untraded_categ
         json!({"topic":"execution","data":[{"orderId":"not-an-order","execQty":"999","execPrice":"1"}]}),
     );
     assert_eq!(
-        serde_json::to_value(h.store.balance().clone()).unwrap(),
+        serde_json::to_value(h.store.balance().unwrap().clone()).unwrap(),
         before,
         "source ignores wallet topic"
     );
     assert!(
-        h.store.orders().is_empty(),
+        h.store.orders().unwrap().is_empty(),
         "source ignores execution topic"
     );
     feed(&h, json!({"op":"pong"}));
@@ -221,7 +223,7 @@ fn production_position_frames_update_positions_balance_and_filter_untraded_categ
         ))
         .unwrap();
     assert!(
-        h.store.orders().is_empty(),
+        h.store.orders().unwrap().is_empty(),
         "disposed delivery has no effects"
     );
 }
@@ -236,14 +238,14 @@ fn enabled_inverse_private_orders_retain_native_units_and_false_partial_is_ignor
     inverse["leavesQty"] = json!("200");
     inverse["cumExecQty"] = json!("50");
     feed(&h, json!({"topic":"order","data":[inverse]}));
-    assert_eq!(h.store.orders()[0].remaining, 0.008);
-    let count = h.store.orders().len();
+    assert_eq!(h.store.orders().unwrap()[0].remaining, 0.008);
+    let count = h.store.orders().unwrap().len();
     let mut false_partial = order("false-positive", "BTCUSDT", "PartiallyFilled");
     false_partial["price"] = json!("0");
     false_partial["qty"] = json!("0");
     feed(&h, json!({"topic":"order","data":[false_partial]}));
     assert_eq!(
-        h.store.orders().len(),
+        h.store.orders().unwrap().len(),
         count,
         "replacement false partial creates no order"
     );
@@ -266,9 +268,9 @@ fn pick(value: Value, keys: &[&str]) -> Value {
     )
 }
 fn snapshot(h: &support::Harness, fills: &RefCell<Vec<Value>>) -> Value {
-    json!({"orders":h.store.orders().iter().map(|row|pick(serde_json::to_value(row).unwrap(), &["id","status","symbol","type","side","filled","remaining","amount"])).collect::<Vec<_>>(),
-        "positions":h.store.positions().iter().map(|row|pick(serde_json::to_value(row).unwrap(), &["id","symbol","contracts","notional","unrealizedPnl","realizedPnl","leverage","marginSize","marginType","positionMode","option"])).collect::<Vec<_>>(),
-        "upnl":h.store.balance().upnl,"fills":fills.borrow().clone()})
+    json!({"orders":h.store.orders().unwrap().iter().map(|row|pick(serde_json::to_value(row).unwrap(), &["id","status","symbol","type","side","filled","remaining","amount"])).collect::<Vec<_>>(),
+        "positions":h.store.positions().unwrap().iter().map(|row|pick(serde_json::to_value(row).unwrap(), &["id","symbol","contracts","notional","unrealizedPnl","realizedPnl","leverage","marginSize","marginType","positionMode","option"])).collect::<Vec<_>>(),
+        "upnl":h.store.balance().unwrap().upnl,"fills":fills.borrow().clone()})
 }
 
 #[test]
@@ -349,7 +351,7 @@ fn private_delivery_matches_actual_source_handler_mapper_fill_and_store_bodies()
                 }),
             );
             cases
-                .push(json!({"variant":if spot {"spot"} else {"primary"},"options":opts,"markets":h.store.markets().to_vec(),"frames":frames}));
+                .push(json!({"variant":if spot {"spot"} else {"primary"},"options":opts,"markets":h.store.markets().unwrap().to_vec(),"frames":frames}));
             let mut snapshots = vec![];
             for frame in frames {
                 if let Some(raw) = frame.as_str() {
@@ -430,7 +432,7 @@ fn private_auth_rejections_retry_four_times_without_inventing_wallet_or_executio
         4,
         "source authRetries <= 3 allows four starts"
     );
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     h.venue().dispose().unwrap();
 }
 

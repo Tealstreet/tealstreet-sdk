@@ -55,6 +55,7 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
             contract: Some(m.contract),
             linear: Some(m.linear),
             inverse: Some(m.inverse),
+            fees: None,
         },
         id: text(&m.id)?,
         symbol: text(&m.symbol)?,
@@ -80,7 +81,7 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
             }),
             amount: MarketLimitsAmount {
                 min: m.limits[0][0],
-                max: m.limits[0][1],
+                max: (m.limits[0][1]).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: m.limits[3][0],
@@ -134,7 +135,7 @@ pub fn ticker(t: reads::Ticker<Value>) -> Result<Ticker, ExchangeError> {
         ask: t.ask,
         last: t.last,
         mark: t.mark,
-        index: t.index,
+        index: Some(t.index),
         mid_price: None,
         percentage: t.percentage,
         open_interest: t.open_interest,

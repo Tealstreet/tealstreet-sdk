@@ -54,11 +54,11 @@ impl PublicDataParent for Parent {
     fn now_ms(&self) -> f64 {
         self.now.get()
     }
-    fn loaded(&self) -> StoreDataLoaded {
-        self.data.borrow().loaded.borrow().clone()
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError> {
+        Ok(self.data.borrow().loaded.borrow().clone())
     }
-    fn tickers(&self) -> TickerBatch {
-        self.data.borrow().tickers.clone()
+    fn tickers(&self) -> Result<Rc<RefCell<Vec<safe_cex_types::Ticker>>>, ExchangeError> {
+        Ok(self.data.borrow().tickers.clone())
     }
     fn adapt_markets(&self, markets: MarketBatch) -> Result<MarketBatch, ExchangeError> {
         let mut output = markets.borrow().clone();
@@ -246,7 +246,7 @@ fn in_process_native_alias_filter_health_delegation_and_disposal() {
     assert!(provider.is_initialized());
     assert!(provider.is_healthy());
     assert!(
-        Rc::ptr_eq(&parent.tickers(), &source.data.borrow().tickers),
+        Rc::ptr_eq(&parent.tickers().unwrap(), &source.data.borrow().tickers),
         "PUBLIC native seed array identity"
     );
     let market = parent.data.borrow().markets.borrow()[0].clone();
@@ -267,7 +267,7 @@ fn in_process_native_alias_filter_health_delegation_and_disposal() {
         "PUBLIC native in-place delta filtered"
     );
     assert_eq!(
-        parent.tickers().borrow()[0].bid,
+        parent.tickers().unwrap().borrow()[0].bid,
         151.0,
         "PUBLIC native alias delta visible without update"
     );
@@ -288,7 +288,7 @@ fn in_process_native_alias_filter_health_delegation_and_disposal() {
         "PUBLIC native same-array length mutation filtered"
     );
     assert_eq!(
-        parent.tickers().borrow().len(),
+        parent.tickers().unwrap().borrow().len(),
         2,
         "PUBLIC native aliased length visible"
     );
@@ -577,7 +577,7 @@ fn gateway_native_decode_subscriptions_heartbeat_reconnect_and_late_events() {
     single["ask"] = 167.into();
     incoming(&socket, "ticker", None, single);
     {
-        let batch = parent.tickers();
+        let batch = parent.tickers().unwrap();
         let rows = batch.borrow();
         let ticker = &rows[0];
         assert_eq!(
@@ -588,7 +588,7 @@ fn gateway_native_decode_subscriptions_heartbeat_reconnect_and_late_events() {
                 ticker.mark,
                 ticker.index
             ),
-            (163.0, 167.0, 107.0, 109.0, 113.0),
+            (163.0, 167.0, 107.0, 109.0, Some(113.0)),
             "PUBLIC native decoded ticker prices"
         );
         assert_eq!(
@@ -608,7 +608,7 @@ fn gateway_native_decode_subscriptions_heartbeat_reconnect_and_late_events() {
     extra["symbol"] = "ETH".into();
     incoming(&socket, "ticker", None, extra);
     assert_eq!(
-        parent.tickers().borrow().len(),
+        parent.tickers().unwrap().borrow().len(),
         2,
         "PUBLIC native single ticker append"
     );
@@ -627,8 +627,8 @@ fn gateway_native_decode_subscriptions_heartbeat_reconnect_and_late_events() {
         parent.data.borrow().markets.borrow()[0].symbol,
         "ADAPT:BTC:PERP"
     );
-    assert!(parent.loaded().tickers);
-    assert!(parent.loaded().markets);
+    assert!(parent.loaded().unwrap().tickers);
+    assert!(parent.loaded().unwrap().markets);
     incoming(&socket, "orderbook", Some("BTC:PERP"), payload("orderbook"));
     incoming(&socket, "candle", Some("BTC:PERP"), payload("candle"));
     assert_eq!(*seen.borrow(), ["book", "candle"]);

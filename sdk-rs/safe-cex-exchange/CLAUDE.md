@@ -1,8 +1,44 @@
 # Exchange core contract
 
+The native Axios factory enhances rejections before venue interceptors, using
+the maintained helper's field order and live message getter. Its originalError
+Error snapshot excludes the self-reference under decision 2; existing owned
+metadata preserves diagnostics, extra/config data and nearest-response authority.
+Executable config capabilities retain the owned-data boundary. Constructed Aster
+and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
+
+## Canonical Store owner
+
+`native_store::DefaultStore` owns one material `Js` graph. State arrays, rows and
+all four dictionaries expose their actual referents through the native facade;
+granular writes mutate existing rows, while full replacement and reset publish
+new generations. Retained values have no back-reference to the Store owner.
+Native mutations use the shared property/iterator algorithms and notify the live
+ordered listener registry. Typed subscribers project only at their reached slot.
+Notification transport retains the complete typed boundary in the existing opaque
+error origin before recovery, preserving nested subscriber IDs and the original
+cause without rebuilding the thrown value or replaying getters.
+Graph-backed typed reads return `StoreReadError` with property/projection phase
+and the opaque original cause; conversion recovers that cause before diagnostics.
+The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
+
+Native snapshots retain their own undefined properties; JSON serialization is a
+separate boundary. Retained config reads keep absence distinct from an own
+undefined or null value. Source `for` loops recheck live input lengths, while
+`forEach`, `map`, `filter` and `findIndex` keep their captured iteration lengths.
+Object literal spreads finish before evaluating the following explicit fields.
+Position audits read each reached row after earlier id getters and evaluate
+diagnostic arguments before the terminal sink, preserving prethrow writes and
+skipping later revision/notification statements on failure.
+`Object.seal` and `Object.freeze` share the canonical descriptor integrity
+operation; sealing preserves existing writable bits and both retain accessors.
+Strict writes to string primitives distinguish existing read-only length/index
+slots from missing properties. The actual Bitget dictionary facade witness pins
+both errors against the maintained Store and preserves the typed projection refusal.
 
 ## Abstract venue hooks
 
@@ -1047,12 +1083,13 @@ The js_runtime typed-value bridge uses the shared native serialization capture a
 
 JS socket properties are the source of truth for typed lifecycle grouping. BaseExchange installs weak, lazy lookups for the eight source fields; these create socket cores after venue assembly and observe property replacement/removal on each lookup. The JS runtime regression checks source order, public/private grouping and disposal.
 
-The js_runtime socket terminal preserves Binary as the host binary object: native
-Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
-Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
+The js_runtime socket terminal preserves Binary as Blob on native and wasm,
+matching both the source WebSocket default and the reconnecting wrapper’s explicit
+`binaryType = "blob"`, including its Node ws transport. Exact bytes remain behind
+ArrayBuffer; Blob.text performs UTF-8 replacement only when requested;
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
-checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+checks non-UTF-8 bytes, size, explicit conversion and unchanged text frames.
 
 Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
 JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
@@ -1856,8 +1893,106 @@ then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
 Serialization errors stay visible; `native_console_default` checks both paths
 against Node and verifies that reporting leaves the retained input unchanged.
 
+The production REST host can carry the native PayloadSigner alongside its hosted
+RemoteSigner. `rest_http_host_with_signers` retains executable callbacks outside
+serialized options; shared BaseExchange assembly binds the same payload provider
+to its core and JS options before venue initialization. One PayloadScheme union
+covers HMAC hex/base64 and Stark felt-pair requests, using the existing runtime-owned
+Promise machinery for completion and errors. The Paradex native binding witness
+uses real NativeRuntime/reqwest and a loopback config/auth origin; maintained Node
+SDK code independently builds and signs Order, ModifyOrder and JWT preimages.
+
 Array.join retains UTF16 units through both separator and element coercion;
 UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 `native_array_join_preserves_utf16_elements_separators_and_coercions` compares
 eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
+
+`js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
+and the Vec<Market> info boundary. Its optional recorded-payload probe measures
+parse and typed decode separately; `tests/large_payload_source.mjs` captures
+maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Native observation files encode UTF-16, own undefined and f64 bits explicitly so
+before/after byte comparisons do not hide lossy JSON projections.
+
+## Retained error responses
+
+Local `Thrown` conversions retain the original JS value in the existing opaque
+`ExchangeError.origin`. The retained Thrown's native slot holds the diagnostic
+projection before attaching that origin, avoiding a reference cycle. Recovery
+preserves original identity and numeric/string bits without replaying getters
+while the typed metadata is unchanged. Explicit diagnostic edits and retained
+response authority continue through the existing error materialization path.
+The constructed Backpack trigger-repair witness compares real TS rejection
+identity and stringify with native object, signed-zero, NaN and UTF16 values.
+
+ExchangeError has no cached JSON response field. retained_response_input reads the
+nearest response origin in its cause chain: the original RestFailure for transport
+failures, or the existing RetainedJsonInput inside the API-error origin wrapper.
+with_retained_response is construction glue for API-created errors, not a transport
+response update API. Prior opaque causes stay on the same source chain.
+
+Native error policies and callbacks read retained data before coercion or reporting.
+response_json_view computes the explicitly lossy decision-5 model/report view on
+demand; it never replaces the retained response or becomes a second authority.
+The real Binance cancel-symbol witness compares both signed DELETE calls, original
+failure propagation and emitted UTF-16/argument lists with the maintained class.
+error_response_origins separately pins nearest-origin selection across a chain.
+
+`eager::start_eager` is the typed async SDK call boundary. It starts the body
+through the existing canonical Promise driver at call time, retains native `T`
+without Clone/Serde/JSON, and returns a waiter. Dropping that waiter leaves the
+runtime-owned continuation alive. Native errors retain their original metadata
+and origin. `tests/eager_start.rs` executes the real native scheduler and checks
+prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
+boundary for an already-ready result. It does not insert suspension points into
+arbitrary ready Rust leaf futures. Venue probes must still check their actual
+ready and pending I/O phases.
+
+Store payload ticker baselines retain nullable index prices. The maintained worker
+advances its baseline for number-to-null transitions but omits non-number deltas;
+null-to-number emits the new number. Preserve this source behavior. The live
+store_payload oracle pins both transitions and unchanged-null packed arrays.
+
+Internal update listeners subscribe to the canonical Store's native state referent.
+They do not project StoreData or visit unrelated getters before emitter fanout.
+Typed subscribers remain explicit projection boundaries at their reached slots;
+native and typed slots share live order, unsubscription and first-error behavior.
+StoreUpdateThrottle accepts a retained argument type while its existing StoreFrame
+constructor remains available. Native account delivery retains the Js argument
+through bursts and projects only when leading/trailing delivery actually runs.
+See [the delivery review](NATIVE_STORE_DELIVERY_REVIEW.md) for compiled controls,
+receipt-qualified replay results, and the separate Bybit options decode timeout.
+
+`native_final_drop(base, venue_cleanup)` is the single native final-handle teardown
+entrypoint. It marks disposed before venue cleanup and always performs shared
+cleanup afterward, silencing Result errors at destruction. The callback must
+finish cancelling venue-owned tasks/state even if an earlier cleanup returns an
+error. Stored timer callbacks must use weak venue ownership so they cannot keep
+the final external handle alive; held venues must still service them normally.
+This accepted lifetime policy has one core override classification and no source
+super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
+`tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
+cleanup, while Backpack/BingX binding probes cover actual sockets/timers.
+
+`REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
+`JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
+materialization follows that source chain and the canonical retained response.
+Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
+signed requests before JSON. Original JS object identity remains an owned-tree residual.
+
+
+
+The mapped closed-position resolver requires a runtime and retained static fetch
+callbacks. It starts its selected fetch during invocation with `start_eager`;
+the runtime owns continuation after the waiter/source drop. Fetch and resolver
+Promise boundaries share the canonical driver. `closed_position_timing` checks
+six maintained-source profiles with NativeRuntime; the separate typed result
+surrogate/alias boundary remains in CLOSED_POSITIONS_AUDIT.md.
+
+The mapped loop utility requires its owning runtime on LoopHost and starts via
+start_eager. Its sleep Promise preserves the source await fence even for ready
+leaves, and waiter drop leaves the continuation alive. Positive infinity disables
+all loop host effects; remaining_utils compares invocation, continuation and
+callback scheduling with the maintained TypeScript function in Node.
+

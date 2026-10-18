@@ -1,14 +1,14 @@
 //! Test-only implementation of the actual shared Store contract.
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::{
     PackedTickerDelta, Store, StoreMutationError, StoreNotificationError, StoreUpdate,
     model_patch::{ModelPatch, PatchSource},
-    store::DefaultStore,
 };
 use safe_cex_types::*;
 use serde_json::{Map, Value, json};
 use std::{
-    cell::{Cell, Ref, RefCell},
+    cell::{Cell, RefCell},
     rc::Rc,
 };
 type Subscriber = Rc<dyn Fn(&StoreData, bool) -> Result<(), StoreSubscriberError>>;
@@ -16,11 +16,10 @@ pub struct TestStore {
     pub data: RefCell<StoreData>,
     subscribers: Rc<RefCell<Vec<(u64, Subscriber)>>>,
     next_subscriber_id: Cell<u64>,
-    markets_by_symbol_cache: RefCell<IndexMap<String, Market>>,
 }
 impl Default for TestStore {
     fn default() -> Self {
-        Self {data:RefCell::new(serde_json::from_value(json!({"latency":0,"balance":{"used":0,"free":0,"total":0,"upnl":0},"markets":[],"tickers":[],"orders":[],"positions":[],"displayedPositions":[],"ordersRisk":{},"activeChasers":[],"activeTWAPs":[],"loaded":{"markets":false,"tickers":false,"positions":false,"orders":false,"balance":false},"options":{"isHedged":false},"updateIds":{"orders":0,"positions":0},"fetchedLeverage":{},"requestStats":{"ok":0,"rateLimit":0,"auth":0,"network":0,"other":0}})).unwrap()),subscribers:Rc::default(),next_subscriber_id:Cell::new(0),markets_by_symbol_cache:RefCell::default()}
+        Self {data:RefCell::new(serde_json::from_value(json!({"latency":0,"balance":{"used":0,"free":0,"total":0,"upnl":0},"markets":[],"tickers":[],"orders":[],"positions":[],"displayedPositions":[],"ordersRisk":{},"activeChasers":[],"activeTWAPs":[],"loaded":{"markets":false,"tickers":false,"positions":false,"orders":false,"balance":false},"options":{"isHedged":false},"updateIds":{"orders":0,"positions":0},"fetchedLeverage":{},"requestStats":{"ok":0,"rateLimit":0,"auth":0,"network":0,"other":0}})).unwrap()),subscribers:Rc::default(),next_subscriber_id:Cell::new(0)}
     }
 }
 impl TestStore {
@@ -28,7 +27,7 @@ impl TestStore {
         Self::default()
     }
     fn notify(&self, from_worker: bool) -> Result<(), StoreMutationError> {
-        let data = self.serialize();
+        let data = self.serialize()?;
         let callbacks = self.subscribers.borrow().clone();
         for (id, callback) in callbacks {
             callback(&data, from_worker)
@@ -43,13 +42,13 @@ impl TestStore {
         let mut engine = DefaultStore::new();
         engine.add_or_update_orders_full(self.data.borrow().orders.clone())?;
         change(&mut engine)?;
-        self.data.borrow_mut().orders = engine.orders().to_vec();
+        self.data.borrow_mut().orders = engine.orders()?;
         self.notify(false)
     }
 }
 impl Store for TestStore {
     fn update(&self, changes: StoreUpdate, from_worker: bool) -> Result<(), StoreMutationError> {
-        let mut snapshot = serde_json::to_value(self.serialize()).unwrap();
+        let mut snapshot = serde_json::to_value(self.serialize()?).unwrap();
         let changes = serde_json::to_value(changes).unwrap();
         for (key, value) in changes.as_object().unwrap() {
             snapshot
@@ -63,6 +62,16 @@ impl Store for TestStore {
     fn reset(&self) -> Result<(), StoreMutationError> {
         *self.data.borrow_mut() = Self::default().data.into_inner();
         self.notify(false)
+    }
+    fn subscribe_native(
+        &self,
+        callback: safe_cex_store::contract::NativeStoreSubscriber,
+    ) -> Box<dyn Fn()> {
+        self.subscribe(Box::new(move |data, from_worker| {
+            let value = safe_cex_exchange::js_runtime::value::from_typed(data)
+                .map_err(|cause| StoreSubscriberError::new(cause.message()))?;
+            callback(&value, from_worker)
+        }))
     }
     fn subscribe(&self, callback: StoreSubscriber) -> Box<dyn Fn()> {
         let callback: Subscriber = Rc::from(callback);
@@ -200,98 +209,127 @@ impl Store for TestStore {
     fn update_user_data(&self, _data: Option<Value>) -> Result<(), StoreMutationError> {
         panic!("TestStore::update_user_data is not exercised by this fixture")
     }
-    fn latency(&self) -> f64 {
-        self.data.borrow().latency
+    fn native_owner(&self) -> Rc<dyn std::any::Any> {
+        // This controlled typed fixture deliberately has no native graph.
+        // The real native facade must refuse it, rather than copying its data.
+        Rc::new(())
     }
-    fn balance(&self) -> Ref<'_, Balance> {
-        Ref::map(self.data.borrow(), |data| &data.balance)
-    }
-    fn balance_handle(&self) -> std::sync::Arc<Balance> {
+    fn balance_handle(&self) -> Result<safe_cex_store::BalanceHandle, StoreReadError> {
         panic!("TestStore::balance_handle is not exercised by this fixture")
     }
-    fn markets(&self) -> Ref<'_, [Market]> {
-        Ref::map(self.data.borrow(), |data| data.markets.as_slice())
+    fn lookup_ticker_by_symbol(
+        &self,
+        _: &str,
+    ) -> Result<Rc<dyn safe_cex_store::ticker_lookup::TickerLookup>, StoreReadError> {
+        panic!("TestStore::lookup_ticker_by_symbol is not exercised by this fixture")
     }
-    fn tickers(&self) -> Ref<'_, [Ticker]> {
-        Ref::map(self.data.borrow(), |data| data.tickers.as_slice())
+    fn latency(&self) -> Result<f64, StoreReadError> {
+        Ok(self.data.borrow().latency)
     }
-    fn orders(&self) -> Ref<'_, [Order]> {
-        Ref::map(self.data.borrow(), |data| data.orders.as_slice())
+    fn balance(&self) -> Result<Balance, StoreReadError> {
+        Ok(self.data.borrow().balance.clone())
     }
-    fn orders_risk(&self) -> Ref<'_, IndexMap<String, Vec<OrderRiskProfile>>> {
-        Ref::map(self.data.borrow(), |data| &data.orders_risk)
+    fn markets(&self) -> Result<Vec<Market>, StoreReadError> {
+        Ok(self.data.borrow().markets.clone())
     }
-    fn positions(&self) -> Ref<'_, [Position]> {
-        Ref::map(self.data.borrow(), |data| data.positions.as_slice())
+    fn tickers(&self) -> Result<Vec<Ticker>, StoreReadError> {
+        Ok(self.data.borrow().tickers.clone())
     }
-    fn displayed_positions(&self) -> Ref<'_, [DisplayedPosition]> {
-        Ref::map(self.data.borrow(), |data| {
-            data.displayed_positions.as_slice()
-        })
+    fn orders(&self) -> Result<Vec<Order>, StoreReadError> {
+        Ok(self.data.borrow().orders.clone())
     }
-    fn displayed_margin(&self) -> Option<Ref<'_, DisplayedMargin>> {
-        Ref::filter_map(self.data.borrow(), |data| data.displayed_margin.as_ref()).ok()
+    fn orders_risk(&self) -> Result<IndexMap<String, Vec<OrderRiskProfile>>, StoreReadError> {
+        Ok(self.data.borrow().orders_risk.clone())
     }
-    fn active_chasers(&self) -> Ref<'_, [ActiveChaser]> {
-        Ref::map(self.data.borrow(), |data| data.active_chasers.as_slice())
+    fn positions(&self) -> Result<Vec<Position>, StoreReadError> {
+        Ok(self.data.borrow().positions.clone())
     }
-    fn active_twaps(&self) -> Ref<'_, [ActiveTWAP]> {
-        Ref::map(self.data.borrow(), |data| data.active_twaps.as_slice())
+    fn displayed_positions(&self) -> Result<Vec<DisplayedPosition>, StoreReadError> {
+        Ok(self.data.borrow().displayed_positions.clone())
     }
-    fn loaded(&self) -> Ref<'_, StoreDataLoaded> {
-        Ref::map(self.data.borrow(), |data| &data.loaded)
+    fn displayed_margin(&self) -> Result<Option<DisplayedMargin>, StoreReadError> {
+        Ok(self.data.borrow().displayed_margin.clone())
     }
-    fn update_ids(&self) -> Ref<'_, StoreUpdateIds> {
-        Ref::map(self.data.borrow(), |data| &data.update_ids)
+    fn active_chasers(&self) -> Result<Vec<ActiveChaser>, StoreReadError> {
+        Ok(self.data.borrow().active_chasers.clone())
     }
-    fn options(&self) -> Ref<'_, StoreOptions> {
-        Ref::map(self.data.borrow(), |data| &data.options)
+    fn active_twaps(&self) -> Result<Vec<ActiveTWAP>, StoreReadError> {
+        Ok(self.data.borrow().active_twaps.clone())
     }
-    fn message_handler_stats(&self) -> Option<Ref<'_, Value>> {
-        Ref::filter_map(self.data.borrow(), |data| {
-            data.message_handler_stats.as_ref()
-        })
-        .ok()
+    fn loaded(&self) -> Result<StoreDataLoaded, StoreReadError> {
+        Ok(self.data.borrow().loaded.clone())
     }
-    fn stark_config(&self) -> Option<Ref<'_, Value>> {
-        Ref::filter_map(self.data.borrow(), |data| data.stark_config.as_ref()).ok()
+    fn update_ids(&self) -> Result<StoreUpdateIds, StoreReadError> {
+        Ok(self.data.borrow().update_ids.clone())
     }
-    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
-        Ref::filter_map(self.data.borrow(), |data| data.zk_link_config.as_ref()).ok()
+    fn options(&self) -> Result<StoreOptions, StoreReadError> {
+        Ok(self.data.borrow().options.clone())
     }
-    fn user_data(&self) -> Option<Ref<'_, Value>> {
-        Ref::filter_map(self.data.borrow(), |data| data.user_data.as_ref()).ok()
+    fn message_handler_stats(&self) -> Result<Option<Value>, StoreReadError> {
+        Ok(self.data.borrow().message_handler_stats.clone())
     }
-    fn tickers_by_id(&self) -> Ref<'_, IndexMap<String, Ticker>> {
-        panic!("TestStore::tickers_by_id is not exercised by this fixture")
+    fn stark_config(&self) -> Result<Option<Value>, StoreReadError> {
+        Ok(self.data.borrow().stark_config.clone())
     }
-    fn markets_by_id(&self) -> Ref<'_, IndexMap<String, Market>> {
-        panic!("TestStore::markets_by_id is not exercised by this fixture")
+    fn zk_link_config(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError> {
+        Ok(self.data.borrow().zk_link_config.clone())
     }
-    fn tickers_by_symbol(&self) -> Ref<'_, IndexMap<String, Ticker>> {
-        panic!("TestStore::tickers_by_symbol is not exercised by this fixture")
+    fn user_data(&self) -> Result<Option<Value>, StoreReadError> {
+        Ok(self.data.borrow().user_data.clone())
     }
-    fn markets_by_symbol(&self) -> Ref<'_, IndexMap<String, Market>> {
-        let markets = self.data.borrow().markets.clone();
-        let mut cache = self.markets_by_symbol_cache.borrow_mut();
-        cache.clear();
-        for market in markets {
-            cache.insert(market.symbol.clone(), market);
-        }
-        drop(cache);
-        self.markets_by_symbol_cache.borrow()
+    fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
+        Ok(self.data.borrow().fetched_leverage.clone())
+    }
+    fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
+        Ok(self.data.borrow().socket_health.clone())
+    }
+    fn tickers_by_id(&self) -> Result<IndexMap<String, Ticker>, StoreReadError> {
+        Ok(self
+            .data
+            .borrow()
+            .tickers
+            .iter()
+            .cloned()
+            .map(|row| (row.id.clone(), row))
+            .collect())
+    }
+    fn tickers_by_symbol(&self) -> Result<IndexMap<String, Ticker>, StoreReadError> {
+        Ok(self
+            .data
+            .borrow()
+            .tickers
+            .iter()
+            .cloned()
+            .map(|row| (row.symbol.clone(), row))
+            .collect())
+    }
+    fn markets_by_id(&self) -> Result<IndexMap<String, Market>, StoreReadError> {
+        Ok(self
+            .data
+            .borrow()
+            .markets
+            .iter()
+            .cloned()
+            .map(|row| (row.id.clone(), row))
+            .collect())
+    }
+    fn markets_by_symbol(&self) -> Result<IndexMap<String, Market>, StoreReadError> {
+        Ok(self
+            .data
+            .borrow()
+            .markets
+            .iter()
+            .cloned()
+            .map(|row| (row.symbol.clone(), row))
+            .collect())
     }
     fn get_markets_version(&self) -> f64 {
-        0.
+        0.0
     }
     fn get_tickers_version(&self) -> f64 {
-        0.
-    }
-    fn fetched_leverage(&self) -> Ref<'_, IndexMap<String, FetchedLeverage>> {
-        Ref::map(self.data.borrow(), |data| &data.fetched_leverage)
-    }
-    fn socket_health(&self) -> Option<Ref<'_, Value>> {
-        Ref::filter_map(self.data.borrow(), |data| data.socket_health.as_ref()).ok()
+        0.0
     }
     fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError> {
         let mut state = self.data.borrow_mut();
@@ -300,10 +338,10 @@ impl Store for TestStore {
         drop(state);
         self.notify(false)
     }
-    fn request_stats(&self) -> Option<Ref<'_, RequestOutcomeCounts>> {
-        Ref::filter_map(self.data.borrow(), |data| data.request_stats.as_ref()).ok()
+    fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError> {
+        Ok(self.data.borrow().request_stats.clone())
     }
-    fn record_request_outcome(&self, outcome: RequestOutcome) {
+    fn record_request_outcome(&self, outcome: RequestOutcome) -> Result<(), StoreMutationError> {
         if let Some(stats) = &mut self.data.borrow_mut().request_stats {
             *match outcome {
                 RequestOutcome::Ok => &mut stats.ok,
@@ -313,8 +351,9 @@ impl Store for TestStore {
                 RequestOutcome::Other => &mut stats.other,
             } += 1.;
         }
+        Ok(())
     }
-    fn serialize(&self) -> StoreData {
-        self.data.borrow().clone()
+    fn serialize(&self) -> Result<StoreData, StoreReadError> {
+        Ok(self.data.borrow().clone())
     }
 }

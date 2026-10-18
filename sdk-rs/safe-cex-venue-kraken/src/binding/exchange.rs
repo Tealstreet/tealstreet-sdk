@@ -3,14 +3,44 @@
 #[path = "../../tests/support/accepted_additional_receivers.rs"]
 mod accepted_additional_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_api_receivers.rs"]
+mod accepted_api_receivers;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_client_id_alias.rs"]
+mod accepted_client_id_alias;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_construction_aliases.rs"]
+mod accepted_construction_aliases;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_diagnostic_receivers.rs"]
 mod accepted_diagnostic_receivers;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_handle_alias.rs"]
+mod accepted_handle_alias;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_loop_socket_aliases.rs"]
+mod accepted_loop_socket_aliases;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_member_aliases.rs"]
+mod accepted_member_aliases;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_page_aliases.rs"]
+mod accepted_page_aliases;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_polling_aliases.rs"]
+mod accepted_polling_aliases;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_read_receivers.rs"]
 mod accepted_read_receivers;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_runtime_receivers.rs"]
 mod accepted_runtime_receivers;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_stream_tail.rs"]
+mod accepted_stream_tail;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_topic_alias.rs"]
+mod accepted_topic_alias;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_trading_error_receivers.rs"]
 mod accepted_trading_error_receivers;
@@ -173,7 +203,7 @@ impl KrakenExchange {
         };
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         let h = |v| Rc::new(v);
         let receiver = match venue {
             Venue::Futures => {
@@ -204,14 +234,12 @@ impl KrakenExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let this = self.rt.this.clone();
+        // The assembled member already creates the canonical eager Promise.
+        // Start it now; this Rust future only waits and projects its result.
+        let value = self.rt.this.call_method(member, args);
+        let runtime = self.rt.exchange_runtime();
         Box::pin(async move {
-            let value = await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            let value = await_js(&runtime, value.map_err(err)?).await.map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
@@ -247,14 +275,10 @@ impl KrakenExchange {
         }))
     }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let this = self.rt.this.clone();
+        let value = self.rt.this.call_method(member, args);
+        let runtime = self.rt.exchange_runtime();
         Box::pin(async move {
-            await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            await_js(&runtime, value.map_err(err)?).await.map_err(err)?;
             Ok(())
         })
     }

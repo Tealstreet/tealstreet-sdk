@@ -12,38 +12,38 @@
   },
   "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:each": {
     "category": "non-decoder",
-    "reason": "Inside array builtin installation: executes the live-array callback loop with property-presence checks and forwards each callback result to the selected visitor. This is VM iteration/control flow over native values, not typed wire admission.",
-    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+    "reason": "Inside array builtin installation: executes the live-array callback loop with property-presence checks and forwards each callback result to the selected visitor. This is VM iteration/control flow over native values, not typed wire admission. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "9b41458ed6120a77bc66531dd3f6d94f3012ac00e1102590cbd618ad9a2ea545"
   },
   "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:find": {
     "category": "non-decoder",
-    "reason": "Inside array builtin installation: implements find/findIndex callback evaluation, including holes, and returns the matched native value/index. It does not parse input or construct a domain schema.",
-    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+    "reason": "Inside array builtin installation: implements find/findIndex callback evaluation, including holes, and returns the matched native value/index. It does not parse input or construct a domain schema. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "9b41458ed6120a77bc66531dd3f6d94f3012ac00e1102590cbd618ad9a2ea545"
   },
   "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:flatten": {
     "category": "non-decoder",
-    "reason": "Inside the flat builtin: recursively flattens existing VM arrays to the requested depth into runtime Values. It is an array operation with no typed record or raw response admission.",
-    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+    "reason": "Inside the flat builtin: recursively flattens existing VM arrays to the requested depth into runtime Values. It is an array operation with no typed record or raw response admission. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "9b41458ed6120a77bc66531dd3f6d94f3012ac00e1102590cbd618ad9a2ea545"
   },
   "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:unary": {
     "category": "non-decoder",
-    "reason": "Inside numeric builtin installation: applies the selected f64 operation after the realm ToNumber coercion and returns a VM Number. Arithmetic coercion is not a typed domain decoder.",
-    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+    "reason": "Inside numeric builtin installation: applies the selected f64 operation after the realm ToNumber coercion and returns a VM Number. Arithmetic coercion is not a typed domain decoder. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "9b41458ed6120a77bc66531dd3f6d94f3012ac00e1102590cbd618ad9a2ea545"
   },
   "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:error_construct": {
     "category": "non-decoder",
-    "reason": "Inside install_errors: selects the already implemented native Error constructor callback for the requested intrinsic class. It returns a function pointer and admits no raw/model data.",
-    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+    "reason": "Inside install_errors: selects the already implemented native Error constructor callback for the requested intrinsic class. It returns a function pointer and admits no raw/model data. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "9b41458ed6120a77bc66531dd3f6d94f3012ac00e1102590cbd618ad9a2ea545"
   },
   "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:make_error": {
     "category": "non-decoder",
-    "reason": "Inside install_errors: constructs an intrinsic VM Error with the selected prototype and hidden message/cause fields from native constructor arguments. This implements JavaScript object construction, not a wire Error deserializer or typed response admission.",
-    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+    "reason": "Inside install_errors: constructs an intrinsic VM Error with the selected prototype and hidden message/cause fields from native constructor arguments. This implements JavaScript object construction, not a wire Error deserializer or typed response admission. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "9b41458ed6120a77bc66531dd3f6d94f3012ac00e1102590cbd618ad9a2ea545"
   },
   "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:time": {
     "category": "non-decoder",
-    "reason": "Inside Date builtin installation: reads the numeric internal slot of an existing VM Date and throws for an incompatible receiver. It is intrinsic receiver validation, not wire/domain decoding.",
-    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+    "reason": "Inside Date builtin installation: reads the numeric internal slot of an existing VM Date and throws for an incompatible receiver. It is intrinsic receiver validation, not wire/domain decoding. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "9b41458ed6120a77bc66531dd3f6d94f3012ac00e1102590cbd618ad9a2ea545"
   },
   "safe-cex-venue-hyperliquid/src/realm/host_market.rs::LOCAL_FUNCTION:parts": {
     "category": "non-decoder",

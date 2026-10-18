@@ -596,9 +596,9 @@ fn check_record<T: DeserializeOwned + Serialize + JsNumberOutput + Observe>(reco
         compared[1] += 3;
     }
     for raw in record["surrogate"].as_array().unwrap() {
-        assert!(
-            js_from_str::<T>(raw.as_str().unwrap()).is_err(),
-            "surrogate_representation_refusal {name}"
+        typed_utf16::assert_projection(
+            raw.as_str().unwrap(),
+            &(js_from_str::<T>(raw.as_str().unwrap())).expect("typed surrogate record is retained"),
         );
         compared[2] += 1;
     }
@@ -672,9 +672,9 @@ fn actual_typescript_constants_and_predicates() {
         json!({"trigger":false,"market":false}),
         "predicate_surrogate_source_acceptance"
     );
-    assert!(
-        js_from_str::<String>(r#""\ud800""#).is_err(),
-        "predicate_surrogate_representation_refusal"
+    typed_utf16::assert_projection(
+        r#""\ud800""#,
+        &(js_from_str::<String>(r#""\ud800""#)).expect("typed surrogate record is retained"),
     );
     assert_eq!(
         json!({"type":"number","bits":format!("{:016x}",RECV_WINDOW.to_bits())}),
@@ -795,3 +795,6 @@ fn native_collection_lengths_across_all_response_owners() {
         "consuming_native_collection_cardinality {failures:?}"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

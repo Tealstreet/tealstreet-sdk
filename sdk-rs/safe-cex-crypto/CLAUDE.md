@@ -223,3 +223,9 @@ Unrelated erased declarations can change; missing pins/declarations and changed
 enum values fail named controls. Fresh captures still verify their recorded full
 source digest before historical provenance normalization. Original generators,
 92-case fixtures, preimages and 24-case field-identity expectations stay pinned.
+
+PayloadScheme represents both source PayloadSignerRequest branches: HMAC-SHA256
+with hex/base64 encoding, and Stark with fixed felt-pair encoding. Venue callers
+own Stark typed-data hashing; the shared provider bridge forwards that exact hash
+to the same native PayloadSigner trait used for HMAC. Neither scheme selection nor
+provider installation serializes executable capabilities into account options.

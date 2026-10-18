@@ -131,7 +131,7 @@ No fetch wiring is claimed.
 
 **Response selection helpers:** `response_helpers` walks the seven source envelope edges in preorder through depth four without entering arrays. `row_extraction` selects the first qualifying array, preserves first-value precedence (including false/zero), and uses shared `TableHit` for inherited stock Object members. Inputs are retained JSON; account fallback is `None` for the source empty object.
 
-**REST reads:** `rest_reads` supplies async market, ticker, balance and position-mode reads through a caller-owned GET closure returning `xhr.response.data`. Fallback and position callbacks read caller-owned store snapshots after the await boundary; lookup/report callbacks own host integration. The balance mode update happens before numeric parsing and survives a later fallback. Position-mode reads propagate failures. Shared `Market.limits.amount.max` is numeric even when the source passes through a string; this is declared in the manifest and source oracle. Report callbacks must perform the source trace and, for balance, emit/log the chosen transport/coercion cause.
+**REST reads:** `rest_reads` supplies async market, ticker, balance and position-mode reads through a caller-owned GET closure returning `xhr.response.data`. Fallback and position callbacks read caller-owned store snapshots after the await boundary; lookup/report callbacks own host integration. The balance mode update happens before numeric parsing and survives a later fallback. Position-mode reads propagate failures. Shared `Market.limits.amount.max` retains numeric text in the canonical NumericValue carrier. The mapper preserves strings unchanged; numeric consumers apply shared Number coercion explicitly. The recorded 697-market addon regression compares exact TS/native field types as well as values. Report callbacks must perform the source trace and, for balance, emit/log the chosen transport/coercion cause.
 
 **TP/SL helpers:** `tpsl_helpers` preserves nullish raw-ID precedence, position-disambiguated leg IDs, explicit raw trigger precedence and cached false reduce-only values. `TpslLeg` represents the inline TS tp/sl union and is mapped alongside the ID helper. Inputs use shared retained numeric JSON; arbitrary host objects and lone-surrogate strings remain declared boundaries. Recovery gates are recorded in tracked `GATE_EVIDENCE.md`.
 
@@ -209,3 +209,9 @@ Private socket controls retain opaque metadata through position and order patche
 including a UTF-16 client-key cache miss. Malformed websocket JSON still maps to
 null, matching the maintained jsonParse helper, and does not reconnect the socket.
 Each repair has a compiling pre-fix failure and a restored passing native control.
+
+Native typed SDK wrappers use the owning runtime's shared `eager::start_eager`.
+The common native HTTP request adds the Axios Promise await boundary even for
+ready terminal responses; private login captures clock/nonce and starts sync
+before its waiter is queued. `ASYNC_WRAPPER_REVIEW.md` records actual dropped,
+ready and held-response binding probes and three compiled boundary controls.

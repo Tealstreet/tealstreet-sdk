@@ -90,7 +90,7 @@ pub fn market(base: &str) -> safe_cex_types::Market {
             cost: None,
             amount: MarketLimitsAmount {
                 min: 0.001,
-                max: 50.0,
+                max: (50.0).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: 1.0,
@@ -147,7 +147,7 @@ pub fn ticker() -> safe_cex_types::Ticker {
         ask: 2.0,
         last: 1.5,
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         percentage: 0.0,
         open_interest: 0.0,

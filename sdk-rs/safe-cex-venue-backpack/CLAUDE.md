@@ -432,3 +432,23 @@ aliases, preserve arguments/results and shared effects, poll each pending future
 and execute production native HTTP factory/install and Date.parse callbacks.
 The finite instantiations do not claim every generic argument or JavaScript
 scheduler behavior.
+
+The five-row divergence audit in [DIVERGENCE_FIX_AUDIT.md](DIVERGENCE_FIX_AUDIT.md)
+supersedes the earlier production Future/caught-error exclusions for getAccount,
+fetchBalance and private order/balance reconciliation. All 23 owned async Task
+entrypoints use the shared eager boundary; the caller receives a waiter, and
+losing it preserves source continuations. Production private catches are silent;
+configured generic helper Results remain diagnostic inputs. Final native Drop
+silently tears down source and shared resources under the coordinator lifetime
+ruling. Existing alias, input/corpus and identity guards remain independent.
+
+`RoutedClient::clone` shares the configured primary and reader client owners. The
+construction policy records only Clone; it adds no decoder or receiver exemption.
+The native adapter witness checks both Rc counts, shared retry state, primary
+identity and real GET/write routing after the original handle is dropped. A
+compiled swapped-owner Clone control must fail that witness before exact restore.
+
+Production derived types in `batch_orders` and `adapter_runtime` use explicit
+imports so the accepted-set scanner can authenticate their attribute scope.
+Keep the scanner guard active; source-oracle batch tests and constructed native
+exchange tests continue to exercise the unchanged request and runtime bodies.

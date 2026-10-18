@@ -371,7 +371,7 @@ fn interval_reports_callback_error_and_retains_next_tick() {
 #[test]
 fn exchange_owned_sibling_survives_outer_handle_and_disposal_releases_it() {
     use crate::exchange::{BaseExchange, ExchangeSettings};
-    use safe_cex_store::store::DefaultStore;
+    use crate::native_store::DefaultStore;
     use safe_cex_types::ExchangeName;
     let runtime = Rc::new(Runtime::default());
     let base = BaseExchange::new(
@@ -428,7 +428,7 @@ fn exchange_owned_sibling_survives_outer_handle_and_disposal_releases_it() {
 #[test]
 fn exchange_dispose_error_still_cancels_every_owned_task_and_rejects_new_work() {
     use crate::exchange::{BaseExchange, ExchangeSettings};
-    use safe_cex_store::store::DefaultStore;
+    use crate::native_store::DefaultStore;
     use safe_cex_types::ExchangeName;
     use std::sync::Arc;
     for poll_before_dispose in [false, true] {
@@ -470,7 +470,7 @@ fn exchange_dispose_error_still_cancels_every_owned_task_and_rejects_new_work() 
             "DISPOSE-ERROR reset failure reaches caller"
         );
         assert_eq!(
-            error.response,
+            error.response_json_view(),
             Some(serde_json::json!({"code": "reset-failure"})),
             "DISPOSE-ERROR failure metadata reaches caller"
         );
@@ -515,7 +515,7 @@ fn exchange_dispose_error_still_cancels_every_owned_task_and_rejects_new_work() 
 #[test]
 fn exchange_listener_error_rearms_interval_and_releases_timeout() {
     use crate::exchange::{BaseExchange, ExchangeSettings};
-    use safe_cex_store::store::DefaultStore;
+    use crate::native_store::DefaultStore;
     use safe_cex_types::ExchangeName;
     for repeat in [false, true] {
         let runtime = Rc::new(Runtime::default());
@@ -1335,4 +1335,109 @@ fn cancelling_detached_timeout_releases_its_sleep_and_callback() {
     runtime.mono.set(250.);
     runtime.pump();
     assert!(!called.get(), "detached_timer_native_cancel_no_callback");
+}
+
+#[test]
+fn eager_registry_starts_now_and_cancel_releases_pending_body_before_pump() {
+    let owner = Rc::new(OwnedTasks::default());
+    let runtime = Rc::new(Runtime::default());
+    let host: Rc<dyn ExchangeRuntime> = runtime.clone();
+    let prefix = Rc::new(Cell::new(false));
+    let captured = Rc::new(());
+    let weak = Rc::downgrade(&captured);
+    let seen = prefix.clone();
+    let cleanup = Rc::new(Cell::new(0));
+    let cleaned = cleanup.clone();
+    let operation = owner.start_eager(
+        &host,
+        move |operation| {
+            Box::pin(async move {
+                assert!(
+                    operation.is_active(),
+                    "eager body is registered before prefix"
+                );
+                seen.set(true);
+                std::future::pending::<()>().await;
+                drop(captured);
+            })
+        },
+        move |cancelled| {
+            assert!(cancelled);
+            cleaned.set(cleaned.get() + 1);
+        },
+    );
+    assert!(prefix.get(), "eager registry prefix before runtime polling");
+    assert!(weak.upgrade().is_some());
+    assert_eq!(owner.len(), 1);
+    operation.cancel();
+    assert!(
+        weak.upgrade().is_none(),
+        "eager cancellation synchronously drops pending body"
+    );
+    assert_eq!(cleanup.get(), 1);
+    assert_eq!(owner.len(), 0);
+    runtime.pump();
+    assert_eq!(cleanup.get(), 1);
+    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    assert_eq!(
+        crate::js_runtime::jobs::pending_non_timer(host),
+        0,
+        "eager cancelled driver is reaped after wake"
+    );
+}
+
+#[test]
+fn eager_registry_inline_close_and_ready_completion_leave_no_stale_slot() {
+    for inline in [false, true] {
+        let owner = Rc::new(OwnedTasks::default());
+        let runtime = Rc::new(Runtime::default());
+        runtime.inline.set(inline);
+        let host: Rc<dyn ExchangeRuntime> = runtime.clone();
+        let operation = owner.start_eager(&host, |_| Box::pin(async {}), |_| {});
+        assert!(!operation.is_active());
+        assert_eq!(owner.len(), 0);
+        let weak_owner = Rc::downgrade(&owner);
+        let captured = Rc::new(());
+        let weak = Rc::downgrade(&captured);
+        let operation = owner.start_eager(
+            &host,
+            move |_| {
+                Box::pin(async move {
+                    weak_owner.upgrade().unwrap().close();
+                    std::future::pending::<()>().await;
+                    drop(captured);
+                })
+            },
+            |_| {},
+        );
+        assert!(!operation.is_active());
+        assert!(
+            weak.upgrade().is_none(),
+            "reentrant close drops running eager body"
+        );
+        assert_eq!(owner.len(), 0);
+        runtime.pump();
+    }
+}
+
+#[test]
+fn eager_registry_host_discard_releases_registration_and_pending_capture() {
+    let owner = Rc::new(OwnedTasks::default());
+    let runtime = Rc::new(Runtime::default());
+    let host: Rc<dyn ExchangeRuntime> = runtime.clone();
+    let captured = Rc::new(());
+    let weak = Rc::downgrade(&captured);
+    let operation = owner.start_eager(&host, |_| pending_capture(captured), |_| {});
+    assert!(operation.is_active());
+    let jobs = std::mem::take(&mut *runtime.jobs.borrow_mut());
+    for job in jobs {
+        let future = job.borrow_mut().take();
+        drop(future);
+    }
+    assert!(
+        !operation.is_active(),
+        "discard of shared producer driver releases slot"
+    );
+    assert!(weak.upgrade().is_none());
+    assert_eq!(owner.len(), 0);
 }

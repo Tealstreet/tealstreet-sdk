@@ -87,8 +87,9 @@ impl NetworkFailure {
         })
     }
 }
-// Installed is-retry-allowed deny list, checked against the live axios-retry predicate.
-const NETWORK_DENIED_CODES: &[&str] = &[
+/// Installed is-retry-allowed deny list, shared by typed transport and native
+/// Axios error predicates without coercing their original code cells.
+pub const NETWORK_DENIED_CODES: &[&str] = &[
     "ENOTFOUND",
     "ENETUNREACH",
     "UNABLE_TO_GET_ISSUER_CERT",

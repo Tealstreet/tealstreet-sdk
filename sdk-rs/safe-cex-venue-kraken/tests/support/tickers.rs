@@ -20,7 +20,7 @@ fn fields(t: &Ticker) -> [f64; 11] {
         t.ask,
         t.last,
         t.mark,
-        t.index,
+        t.index.unwrap(),
         t.percentage,
         t.open_interest,
         t.funding_rate,
@@ -48,7 +48,7 @@ fn fallback(tag: &str, n: f64) -> Ticker {
         ask: n + 2.0,
         last: n + 3.0,
         mark: n + 4.0,
-        index: n + 5.0,
+        index: Some(n + 5.0),
         percentage: n + 6.0,
         open_interest: n + 7.0,
         funding_rate: n + 8.0,
@@ -202,7 +202,12 @@ fn futures_tickers_live_oracle() {
             "TICKER native trace arguments"
         );
         assert_eq!(
-            store.tickers().iter().map(snapshot).collect::<Vec<_>>(),
+            store
+                .tickers()
+                .unwrap()
+                .iter()
+                .map(snapshot)
+                .collect::<Vec<_>>(),
             case["storeAfter"].as_array().unwrap().clone(),
             "TICKER post-trace Store state"
         );
@@ -221,9 +226,10 @@ fn futures_tickers_live_oracle() {
             );
             if !traces.borrow().is_empty() {
                 assert_eq!(case["sameFallback"], true, "TICKER source fallback alias");
+                let stored = store.tickers().unwrap();
                 assert_ne!(
                     tickers.as_ptr(),
-                    store.tickers().as_ptr(),
+                    stored.as_ptr(),
                     "TICKER CHOSEN owned fallback snapshot"
                 );
             }

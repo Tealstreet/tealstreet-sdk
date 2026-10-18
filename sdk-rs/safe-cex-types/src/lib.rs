@@ -8,8 +8,10 @@ mod info_record;
 pub use info_record::STORE_RECORD;
 pub mod query_value;
 pub mod retained_json;
+pub mod store_access;
 pub mod telemetry;
 pub use query_value::QueryValue;
+pub use store_access::{StoreReadError, StoreReadPhase};
 pub mod validation_error;
 pub use validation_error::AccountValidationError;
 
@@ -233,12 +235,32 @@ pub struct MarketPrecision {
     pub quote: Option<f64>,
 }
 
+/// A numeric runtime property whose source mapper may retain numeric text.
+/// Arithmetic consumers explicitly apply JavaScript Number conversion in num.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NumericValue {
+    Number(f64),
+    Text(String),
+}
+impl From<f64> for NumericValue {
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
+}
+impl From<String> for NumericValue {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct MarketLimitsAmount {
     pub min: f64,
-    pub max: f64,
+    #[ts(type = "number")]
+    pub max: NumericValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -285,6 +307,13 @@ pub struct MarketLimits {
     )]
     #[ts(skip)]
     pub cost: Option<MarketLimitsLeverage>,
+}
+
+/// Runtime fee object constructed by venue market mappers.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MarketFees {
+    pub maker: f64,
+    pub taker: f64,
 }
 
 /// Extra properties constructed by venue TypeScript at runtime, beyond Market's declaration.
@@ -340,6 +369,12 @@ pub struct MarketRuntime {
         skip_serializing_if = "Option::is_none"
     )]
     pub inverse: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fees: Option<MarketFees>,
 }
 
 #[derive(Debug, Clone, PartialEq, TS)]
@@ -615,7 +650,9 @@ pub struct Ticker {
     pub ask: f64,
     pub last: f64,
     pub mark: f64,
-    pub index: f64,
+    // WOO publishes null for a real market with no index price.
+    #[ts(as = "f64")]
+    pub index: Option<f64>,
 
     pub mid_price: Option<f64>,
     pub percentage: f64,
@@ -3343,6 +3380,18 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::MarketFees")]
+    struct WireMarketFees {
+        maker: f64,
+        taker: f64,
+    }
+    impl<'de> serde::Deserialize<'de> for super::MarketFees {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireMarketFees::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::MarketRuntime")]
     #[serde(rename_all = "camelCase")]
     struct WireMarketRuntime {
@@ -3395,6 +3444,12 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         inverse: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        fees: Option<super::MarketFees>,
     }
     impl<'de> serde::Deserialize<'de> for super::MarketRuntime {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -3433,7 +3488,7 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireMarketLimitsAmount {
         min: f64,
-        max: f64,
+        max: super::NumericValue,
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketLimitsAmount {
@@ -4027,7 +4082,8 @@ mod strict_codecs {
         ask: f64,
         last: f64,
         mark: f64,
-        index: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        index: Option<f64>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",

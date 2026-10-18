@@ -27,13 +27,17 @@ runtime dependency only under the native feature.
 four exact owner filters for `public_dispatch::{Handlers,dispatch_binance_message}`
 and `ticker_capture::{Capture,lookup}`. The three raw-key/frame operations have
 direct native observations; `Capture::new` is a typed Store capability factory.
-Its classification does not claim decoder execution. Keep retained metadata,
+Its classification does not claim decoder execution. Capture stores the canonical
+Store facade and reads the current native dictionary; rows and retained maps are
+the actual graph referents, without a typed row cache or refresh subscriber.
+Keep retained metadata,
 callback identity/order and inherited lookup observations before JSON projection.
 
 The constructed NativeImports socket witness compares twelve prototype/capture
 cases against the maintained TypeScript exchange classes. Capture assertions
-must inspect retained cells before rereading the dictionary, so a lazy refresh
-cannot conceal a broken Store subscription. `scripts/public-dispatch-controls.py`
+must inspect retained rows before rereading the dictionary and distinguish
+granular writes from full map replacement; unrelated poisoned rows must not be
+read during capture or selected-row lookup. `scripts/public-dispatch-controls.py`
 requires four independently compiled production faults to fail their named
 constructed socket tests, then restores each source file byte for byte.
 
@@ -52,6 +56,14 @@ installation. The committed workflow audit rejects removal, masking and conditio
 Default cargo tests remain hermetic.
 
 ## Integration boundaries
+
+The native API factory attaches the constructed exchange's canonical Store to
+every shared HTTP client, including the public no-proxy client. The shared
+factory observer owns outcome classification and silent counter increments;
+venue response interceptors must not count the same request again.
+`native-binance-request-stats.test.mjs` replays recorded public responses through
+the real TS worker and napi account, verifies five/six successful outcomes, and
+requires HTTP alone to produce no Store posts before a market commit ships them.
 
 Binance uses shared `PlaceOrderOpts`; concrete venues declare it explicitly as
 `Exchange::PlaceOpts`. Placement receives private venue-typed validated tokens.

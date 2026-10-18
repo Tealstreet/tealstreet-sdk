@@ -156,7 +156,7 @@ fn shared_factory_records_native_request_outcomes() {
             assert_eq!(result.is_ok(), status == 200, "HTTP {status}: {result:?}");
             let requests = h.seen.borrow().len();
             assert!(requests > 0, "real HTTP requests reached the fixture");
-            let counts = serde_json::to_value(&*h.store.request_stats().unwrap()).unwrap();
+            let counts = serde_json::to_value(h.store.request_stats().unwrap().unwrap()).unwrap();
             assert_eq!(counts[outcome], requests as f64, "HTTP {status}: {counts}");
             h.exchange.dispose().unwrap();
         }

@@ -6,7 +6,10 @@ use crate::{
     transaction::{ParsedWooTransaction, parse_transaction_history_row},
 };
 use safe_cex_exchange::{
-    error_reporting::ExchangeErrorInput, exchange::Exchange, runtime::ExchangeError,
+    error_reporting::ExchangeErrorInput,
+    exchange::Exchange,
+    js_runtime::value::{Thrown, from_retained_input},
+    runtime::ExchangeError,
 };
 use safe_cex_transport::{RestAdapter, RestFailure};
 use safe_cex_types::{Execution, ExecutionsOptions, HistoricalTrade, HistoricalTradeOptions};
@@ -23,42 +26,31 @@ fn bounds(value: Option<f64>, milliseconds: bool) -> Result<Option<f64>, Exchang
     result.map_err(|error| ExchangeError::new(error.message))
 }
 fn rest_error(failure: RestFailure) -> ExchangeError {
-    let context_view = failure
-        .context
-        .as_deref()
-        .and_then(|value| value.get("response"))
-        .cloned();
-    // Shared conversion owns the explicit JSON error view and retained origin.
-    let mut error: ExchangeError = failure.into();
-    if let Some(view) = context_view {
-        error.response = Some(view);
-    }
-    error
+    failure.into()
 }
 
 fn report(venue: &dyn Exchange, error: ExchangeError) -> Result<(), ExchangeError> {
-    let response_message = error
-        .response
+    let response = error.retained_response_input();
+    let response_message = response
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("message"));
-    let input = match response_message.filter(|v| safe_cex_num::js_truthy(Some(v))) {
-        Some(Value::String(message)) => ExchangeErrorInput::Message(message.clone()),
-        Some(_) => {
-            return Err(ExchangeError::new(
-                "history error reporter cannot retain a non-string response message",
-            ));
-        }
-        None => ExchangeErrorInput::Message(error.message),
+    let message = match response_message.filter(|v| safe_cex_num::js_retained_truthy(v)) {
+        Some(value) => from_retained_input(value.clone()),
+        None => Thrown::from(error).value.get("message")?,
     };
-    venue.base().emit_and_log_error(input, None, None)
+    venue
+        .base()
+        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)
 }
 fn parse_rows(rows: Vec<Value>) -> Result<Vec<ParsedWooTransaction>, ExchangeError> {
     let mut parsed = Vec::new();
     for row in rows {
-        let row = row
-            .as_object()
-            .ok_or_else(|| ExchangeError::new("history parser requires an object row"))?;
+        let Some(row) = row.as_object() else {
+            safe_cex_num::get_key::v_unknown(Some(&row), "symbol")
+                .map_err(|error| ExchangeError::new(error.message))?;
+            continue;
+        };
         if let Some(row) = parse_transaction_history_row(row).map_err(ExchangeError::new)? {
             parsed.push(row);
         }

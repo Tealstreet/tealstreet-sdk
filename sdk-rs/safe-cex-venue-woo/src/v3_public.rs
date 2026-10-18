@@ -484,7 +484,7 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                     cost: None,
                     amount: MarketLimitsAmount {
                         min: amount_min,
-                        max: amount_max,
+                        max: (amount_max).into(),
                     },
                     leverage: MarketLimitsLeverage {
                         min: 1.0,
@@ -544,72 +544,6 @@ pub fn map_woo_v3_order_book(
     safe_cex_store::orderbook::calc_order_book_total(&mut book);
     Ok(WooV3MappedOrderBookSnapshot { timestamp, book })
 }
-// ts: mapWooV3Candles
-pub fn map_woo_v3_candles(rows: &[WooV3KlineRow]) -> Result<Vec<safe_cex_types::Candle>, String> {
-    let mut result = rows
-        .iter()
-        .enumerate()
-        .map(|(i, row)| {
-            let path = format!("WOO V3 kline[{i}]");
-            Ok(safe_cex_types::Candle {
-                timestamp: row.start_timestamp / 1000.0,
-                open: require_finite_number(
-                    Some(&Value::String(row.open.clone())),
-                    &format!("{path}.open"),
-                    0.0,
-                )?,
-                high: require_finite_number(
-                    Some(&Value::String(row.high.clone())),
-                    &format!("{path}.high"),
-                    0.0,
-                )?,
-                low: require_finite_number(
-                    Some(&Value::String(row.low.clone())),
-                    &format!("{path}.low"),
-                    0.0,
-                )?,
-                close: require_finite_number(
-                    Some(&Value::String(row.close.clone())),
-                    &format!("{path}.close"),
-                    0.0,
-                )?,
-                volume: require_finite_number(
-                    Some(&Value::String(row.volume.clone())),
-                    &format!("{path}.volume"),
-                    0.0,
-                )?,
-
-                last_side: None,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    // ts-bug: NaN timestamps make the source comparator nontransitive.
-    // Deterministic stable merge avoids Rust sort's total-order precondition.
-    fn sorted(rows: &mut [safe_cex_types::Candle]) {
-        if rows.len() < 2 {
-            return;
-        }
-        let mid = rows.len() / 2;
-        let (left, right) = rows.split_at_mut(mid);
-        sorted(left);
-        sorted(right);
-        let (left, right) = (left.to_vec(), right.to_vec());
-        let (mut l, mut r) = (0, 0);
-        for row in rows {
-            if r < right.len() && (l == left.len() || right[r].timestamp - left[l].timestamp < 0.0)
-            {
-                *row = right[r].clone();
-                r += 1;
-            } else {
-                *row = left[l].clone();
-                l += 1;
-            }
-        }
-    }
-    sorted(&mut result);
-    Ok(result)
-}
-
 // Map-only record boundaries. Remote companions are private.
 
 #[derive(Serialize, Deserialize)]

@@ -1,9 +1,10 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::{JsJsonValue as J, numeric_ingress::js_from_value};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_apexomni::exchange::*;
 use serde_json::{Value, json};
@@ -209,7 +210,12 @@ fn market(value: &Market) -> J {
                     "amount",
                     obj(vec![
                         ("min", n(value.limits.amount.min)),
-                        ("max", n(value.limits.amount.max)),
+                        (
+                            "max",
+                            n(safe_cex_num::numeric_value_to_number(
+                                &value.limits.amount.max,
+                            )),
+                        ),
                     ]),
                 ),
                 (
@@ -767,7 +773,8 @@ fn run(name: &str) {
         if name != "dispose" {
             let zk = store
                 .zk_link_config()
-                .as_deref()
+                .unwrap()
+                .as_ref()
                 .cloned()
                 .map_or(J::Undefined, |v| native::retained(&v));
             native::check_fields(&zk, &row["zk"], &format!("{name} config state"));

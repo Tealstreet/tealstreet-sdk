@@ -758,7 +758,10 @@ fn book_obs(book: &OrderBook) -> Value {
 impl OrderBookHost<()> for BookHost {
     type Parser = usize;
     type Timer = usize;
-    fn precision(&mut self, symbol: &str) -> Result<Option<Value>, String> {
+    fn precision(
+        &mut self,
+        symbol: &str,
+    ) -> Result<Option<Value>, safe_cex_exchange::runtime::ExchangeError> {
         Ok(
             if self.host.row["fixture"]["market"].is_null()
                 && self.host.row["fixture"].get("market").is_some()
@@ -778,28 +781,39 @@ impl OrderBookHost<()> for BookHost {
     fn allocate_parser(&mut self) -> usize {
         1
     }
-    fn connected(&mut self) -> Result<bool, String> {
+    fn connected(&mut self) -> Result<bool, safe_cex_exchange::runtime::ExchangeError> {
         Ok(self.connected)
     }
-    fn handlers(&mut self, key: &str) -> Result<Vec<usize>, String> {
+    fn handlers(
+        &mut self,
+        key: &str,
+    ) -> Result<Vec<usize>, safe_cex_exchange::runtime::ExchangeError> {
         Ok(self.handlers.get(key).cloned().unwrap_or_default())
     }
-    fn set_handlers(&mut self, key: &str, handlers: Vec<usize>) -> Result<(), String> {
+    fn set_handlers(
+        &mut self,
+        key: &str,
+        handlers: Vec<usize>,
+    ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         self.handlers.insert(key.into(), handlers);
         Ok(())
     }
-    fn topic_count(&mut self, key: &str) -> Result<f64, String> {
+    fn topic_count(&mut self, key: &str) -> Result<f64, safe_cex_exchange::runtime::ExchangeError> {
         Ok(self.topics.get(key).copied().unwrap_or(f64::NAN))
     }
-    fn set_topic_count(&mut self, key: &str, count: f64) -> Result<(), String> {
+    fn set_topic_count(
+        &mut self,
+        key: &str,
+        count: f64,
+    ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         self.topics.insert(key.into(), count);
         Ok(())
     }
-    fn send(&mut self, frame: &J) -> Result<(), String> {
+    fn send(&mut self, frame: &J) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         self.host.note("send", vec![obs(frame)]);
         Ok(())
     }
-    fn wait(&mut self, delay: f64) -> Result<usize, String> {
+    fn wait(&mut self, delay: f64) -> Result<usize, safe_cex_exchange::runtime::ExchangeError> {
         self.host.note("wait", vec![bits(delay)]);
         self.timer += 1;
         Ok(self.timer)
@@ -807,15 +821,22 @@ impl OrderBookHost<()> for BookHost {
     fn timer_truthy(&mut self, timer: &usize) -> bool {
         *timer != 0
     }
-    fn clear(&mut self, timer: usize) -> Result<(), String> {
+    fn clear(&mut self, timer: usize) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         self.host.note("clear", vec![bits(timer as f64)]);
         Ok(())
     }
-    fn cleanup_stats(&mut self, key: &str) -> Result<(), String> {
+    fn cleanup_stats(
+        &mut self,
+        key: &str,
+    ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         self.host.note("cleanup", vec![text(key)]);
         Ok(())
     }
-    fn call(&mut self, _: &(), book: Rc<RefCell<OrderBook>>) -> Result<(), String> {
+    fn call(
+        &mut self,
+        _: &(),
+        book: Rc<RefCell<OrderBook>>,
+    ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         if let Some(previous) = &self.book {
             assert!(Rc::ptr_eq(previous, &book), "BOOK native callback identity")
         }

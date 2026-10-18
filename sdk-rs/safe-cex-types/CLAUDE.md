@@ -97,6 +97,9 @@ its internal payload never appears in serialized JSON. The single retained JSON
 writer lives here below Num and applies JSON.stringify projection only on output.
 `safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
 against actual typed bridges and the production Store facade before wire checks.
+StoreData and StoreUpdate use the same native Store record profile: undefined
+optional JSON-view properties are omitted rather than turned into null, while
+retained zk config and nested model/info presence keep their native markers.
 
 Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
 float directly. Capture accepts that event using the same Float path as the
@@ -235,6 +238,12 @@ JSON boundary, never an intermediate model conversion. The native Serde marker
 and InfoRecord codecs preserve own undefined without exposing marker objects in
 wire JSON. The single retained JSON writer lives below Num in this crate.
 
+NumericValue retains Number versus Text for numeric runtime fields whose source
+mapper passes strings unchanged. Market.limits.amount.max uses this carrier.
+The static TS projection remains number, following its maintained declaration;
+output preserves the runtime variant. Numeric consumers explicitly call num's
+numeric_value_to_number, which uses the existing Number(string) parser.
+
 Market.runtime is the shared carrier for runtime type/spot/swap/future/contract/
 linear/inverse properties constructed outside the maintained TS Market declaration.
 Its serializer writes these optional fields on the Market object; its private
@@ -244,3 +253,17 @@ The static TS declaration projection omits them; native output and numeric ingre
 retain them. Other venue constructors explicitly leave these fields absent.
 The recorded public-market addon regression executes the actual Backpack and
 Crypto.com TS constructors and compiled native binding against identical HTTP bytes.
+
+Ticker.index is a required nullable number at runtime. WOO returns index_price:null for a real listed market; Option<f64> preserves that null in native and wire models while the generated index:number follows the maintained static declaration. Missing index, undefined and non-number/non-null values remain invalid. Null is not a zero price or a refused ticker.
+
+MarketRuntime.fees retains the undeclared Paradex market literal's maker/taker
+number object through the same flattened Market boundary. MarketFees requires an
+object with both numeric fields; absence remains absent for other venues. The
+static generated TS Market declaration is unchanged. The recorded public-market
+addon regression compares all 66 Paradex markets against actual maintained TS.
+
+Native retained payloads stream through the single `into_native_payload` Serde
+adapter. UTF-16 units decode into validated u16 storage without an intermediate
+Float-node tree or f64 vector. The tagged payload schema and malformed-unit
+refusals are unchanged. JSON string parsing copies unescaped spans together;
+escape/control validation and duplicate-property order keep their existing rules.

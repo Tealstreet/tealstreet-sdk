@@ -1,9 +1,10 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, MarginType, Position, PositionMode};
 use safe_cex_venue_kucoin::position_metadata::{
     get_or_fetch_margin_type, get_or_fetch_position_mode,
@@ -325,7 +326,7 @@ fn actual_core_fetch_is_awaited_and_dependency_errors_are_retained() {
     let mut failure = ExchangeError::new("position dependency failure");
     failure.name = "TypeError".into();
     failure.code = Some(safe_cex_exchange::js_runtime::value::Js::str("DEPENDENCY"));
-    failure.response = Some(json!({"data":{"msg":"distinct response"}}));
+    failure = failure.with_retained_response(json!({"data":{"msg":"distinct response"}}).into());
     let (venue, runtime) = setup(vec![], true, Err(failure.clone()));
     let mut future = Box::pin(get_or_fetch_margin_type(venue.clone(), "BTC/USDT"));
     assert!(

@@ -256,10 +256,10 @@ Value-returning parse adapter retains its whole-return representation cost.
 <a id="signing-adapter-contract"></a>
 
 Raw private keys and Result signatures use the shared native crypto primitives;
-no ethers Wallet/Promise/Error object identity or versioned diagnostic metadata
-is retained. Keeping that ownership outside the venue avoids a second wallet
-runtime. Generic array actions now sign with their indexed/length/prototype
-semantics and a request-local metadata overlay. Caller Value::Array does not
+ethers Wallet/Promise/Error heap identity stays outside the venue. Invalid vault
+BytesLike failures retain the installed ethers diagnostic fields in the canonical
+owned callback cause, including TypeError classification and original value.
+Generic array actions now sign with their indexed/length/prototype semantics and a request-local metadata overlay. Caller Value::Array does not
 expose signatureChainId/hyperliquidChain after the call; a richer named-property
 array ABI could retain them, but the request adapters keep their existing JSON
 carrier. Object arguments retain the writes before wallet/projection failures.
@@ -429,9 +429,37 @@ Malformed input sits between distinct good rows, with finite Store resets.
 The shared control runner misroutes midPrice independently in both live socket
 bodies and requires compiled native failures followed by exact-restored passes.
 
+
+## Legacy Realm Store hook failures
+
+Exotic lookup and key hooks return Result; property reads, presence checks,
+enumeration, spread, for-in and JSON propagate the original thrown value.
+Callbacks run outside property borrows. Existing Realm objects may retain one
+opaque canonical ExchangeError origin; native escape recovers it before reading
+message/code/response, and property reflection or serialization never copies it.
+The successful legacy DTO snapshot profile remains until the atomic family
+Realm consolidation. Store table enumeration must read canonical map keys without
+projecting unrelated rows; selected lookup projects only its captured row.
+The native Store-backed poison-row witness checks zero getter reads during keys
+and unrelated lookup, then one reached getter and its exact Projection cause.
+The table_hook_tests target compares 13 real Node operations, checks native cause
+identity/release and reentry, and scripts/realm-table-hook-controls.py proves both
+lookup/key swallowing mutations fail before exact restoration passes.
+
 The public Cloid, FundingHistory, UserOpenOrders and perpetual/Spot
 CancelOrderRequests aliases execute their actual native decoder traits through
 `scripts/wire-alias-contracts.mjs`. Authenticated compiler claims and root types
 remain guarded. Observations read every member and list position directly,
 including signed-zero bits; all five String conversion routes retain direct
 unit/byte witnesses. This is wire-alias evidence, not a Realm/HTTP behavior claim.
+
+
+The BytesLike signing regression runs the actual bound `signL1Action` on a
+NativeRuntime/Realm and the native ApiClient preparation path. It compares five
+valid vault byte/hash/signature profiles and three rejected vault envelopes with
+the maintained TS and installed ethers. Both hex prefix cases and empty bytes
+are accepted; short vault right-padding keeps the source behavior. The native
+transport retains the same canonical cause through RestFailure and the Realm
+REST rejection.
+`tests/byteslike-signing-controls.py` requires compiled native failures for prefix
+admission and dropped error metadata, then exact restoration and passing tests.

@@ -5,7 +5,7 @@ mod host;
 mod host_more;
 mod host_typed;
 mod members;
-mod rt;
+pub(crate) mod rt;
 mod sockets;
 pub use rt::{ExternalPublicDataFactory, SpotIds};
 pub(crate) use safe_cex_exchange::js_runtime::sockets as sockets_js;

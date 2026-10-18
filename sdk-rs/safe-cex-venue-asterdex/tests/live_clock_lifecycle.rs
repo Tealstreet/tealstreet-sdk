@@ -1,8 +1,8 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_asterdex::{
     types::AsterDEXAPIVersion,
@@ -151,26 +151,40 @@ impl ExchangeRuntime for Runtime {
         panic!("unexpected worker")
     }
 }
-type Response = Rc<RefCell<Option<Result<Value, ExchangeError>>>>;
+#[derive(Default)]
+struct Response {
+    value: RefCell<Option<Result<Value, ExchangeError>>>,
+    waker: RefCell<Option<Waker>>,
+}
+impl Response {
+    fn finish(&self, result: Result<Value, ExchangeError>) {
+        *self.value.borrow_mut() = Some(result);
+        if let Some(waker) = self.waker.borrow_mut().take() {
+            waker.wake();
+        }
+    }
+}
 #[derive(Default)]
 struct Http {
     requests: RefCell<Vec<(String, u64)>>,
-    pending: RefCell<VecDeque<Response>>,
+    pending: RefCell<VecDeque<Rc<Response>>>,
 }
-struct Waiting(Response);
+struct Waiting(Rc<Response>);
 impl Future for Waiting {
     type Output = Result<Value, ExchangeError>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        self.0
-            .borrow_mut()
-            .take()
-            .map_or(Poll::Pending, Poll::Ready)
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if let Some(value) = self.0.value.borrow_mut().take() {
+            Poll::Ready(value)
+        } else {
+            *self.0.waker.borrow_mut() = Some(cx.waker().clone());
+            Poll::Pending
+        }
     }
 }
 impl ClockHttp for Http {
     fn get(&self, url: String, timeout: u64) -> ExchangeFuture<'static, Value> {
         self.requests.borrow_mut().push((url, timeout));
-        let response = Rc::new(RefCell::new(None));
+        let response = Rc::new(Response::default());
         self.pending.borrow_mut().push_back(response.clone());
         Box::pin(Waiting(response))
     }
@@ -245,7 +259,7 @@ fn run(scenario: &Value) -> Trace {
                     .borrow_mut()
                     .pop_front()
                     .expect("pending HTTP response");
-                *response.borrow_mut() = Some(if step["error"].as_bool().unwrap_or(false) {
+                response.finish(if step["error"].as_bool().unwrap_or(false) {
                     Err(ExchangeError::new("offline"))
                 } else {
                     Ok(step["data"].clone())
@@ -424,8 +438,11 @@ fn clock_realm_shares_one_clock_and_isolates_other_realms() {
     let other = AsterDEXClockRealm::new(base.clone(), http.clone());
     assert!(!Rc::ptr_eq(&first, &aster_dex_virtual_clock(&other)));
     drop(first.force_sync_and_get_offset(false, None));
-    *http.pending.borrow_mut().pop_front().unwrap().borrow_mut() =
-        Some(Ok(json!({"serverTime":1100})));
+    http.pending
+        .borrow_mut()
+        .pop_front()
+        .unwrap()
+        .finish(Ok(json!({"serverTime":1100})));
     runtime.pump();
     assert_eq!(again.get_time_offset(), 100.0);
     assert_eq!(aster_dex_virtual_clock(&other).get_time_offset(), 0.0);
@@ -438,8 +455,11 @@ fn clock_stop_releases_timer_slot_before_reentrant_host_cancellation() {
     let (runtime, http, base, realm) = fixture();
     let clock = aster_dex_virtual_clock(&realm);
     drop(clock.start(false, AsterDEXAPIVersion::V1));
-    *http.pending.borrow_mut().pop_front().unwrap().borrow_mut() =
-        Some(Ok(json!({"serverTime":1100})));
+    http.pending
+        .borrow_mut()
+        .pop_front()
+        .unwrap()
+        .finish(Ok(json!({"serverTime":1100})));
     runtime.pump();
     assert_eq!(runtime.timers(), 1);
     let weak = Rc::downgrade(&clock);
@@ -452,20 +472,24 @@ fn clock_stop_releases_timer_slot_before_reentrant_host_cancellation() {
 }
 
 #[test]
-fn clock_owner_disposal_cancels_work_without_settling_completion() {
+fn clock_owner_disposal_still_settles_existing_completion() {
     let (runtime, http, base, realm) = fixture();
     let clock = aster_dex_virtual_clock(&realm);
     let mut operation = clock.force_sync_and_get_offset(false, None);
     assert!(clock.is_syncing());
+    clock.stop();
     base.dispose().unwrap();
-    *http.pending.borrow_mut().pop_front().unwrap().borrow_mut() =
-        Some(Ok(json!({"serverTime":1100})));
+    http.pending
+        .borrow_mut()
+        .pop_front()
+        .unwrap()
+        .finish(Ok(json!({"serverTime":1100})));
     runtime.pump();
     assert!(
-        poll(Pin::new(&mut operation)).is_pending(),
-        "documented native owner cancellation boundary"
+        matches!(poll(Pin::new(&mut operation)), Poll::Ready(Ok(0.0))),
+        "stopped native realm must settle its existing clock waiter"
     );
-    assert!(clock.is_syncing());
+    assert!(!clock.is_syncing());
     assert_eq!(clock.get_time_offset(), 0.0);
     assert_eq!(runtime.timers(), 0);
 }

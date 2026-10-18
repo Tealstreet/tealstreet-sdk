@@ -497,6 +497,101 @@ method lookup and the original values/errors through shared IteratorRecord.
 named failures and exact restored passes. Keep limited/unlimited client selection
 observable through the real signed HTTP pipeline.
 
+### API retry receiver coverage
+
+`API_RETRY_RECEIVER_REVIEW.md` records the native read/signature retry predicates.
+Preserve source short-circuit/property access order and strict native code checks;
+reuse the shared transport deny-list data without a second String conversion.
+`accepted_api_receivers` reaches actual constructed Scope callbacks; the source
+script executes the live utility and exact Spot retry arrow. The three serial
+`api-receiver-controls.py` faults must fail named compiled witnesses and restore
+exactly. Array.join UTF16 behavior is shared-owned and repaired separately in #1037.
+
+### Public async wrapper timing
+
+The shared `invoke`/`invoke_unit` helpers must invoke the assembled member before
+returning a Rust waiter. That member already starts a canonical eager Promise;
+keep its existing runtime-owned continuation and do not wrap it in another spawn.
+`EAGER_WRAPPER_REVIEW.md` describes the real HTTP/drop/rejection regressions and
+live-source witness. Pumping physical Axios interceptor jobs is separate from
+polling the returned SDK waiter.
+
+
+The three `rest_account` aliases have finite profiles at the actual constructed
+`binding::rt::Rt` host (and explicit `bool` payload for ReadResult), with native
+Serde/conversion detectors and independent invariant expected types. Run
+`RUSTC_BOOTSTRAP=1 node safe-cex-venue-kraken/scripts/handle-alias-contracts.mjs`
+from `sdk-rs`; discovery stays in its separate accepted-inventory target. The
+constructed-Scope tests and three compiled consumer controls are described in
+[READ_ALIAS_REVIEW.md](READ_ALIAS_REVIEW.md). These contracts do not classify
+other hosts, payloads, following aliases, or runtime method behavior by default.
+
+`PAGE_ALIAS_REVIEW.md` covers the following two income-page aliases at the same
+actual Scope host. `page-alias-contracts.mjs` measures their finite native types;
+`accepted_page_aliases` drives the real signed account-log client and pager with
+held completion, native error identity, wire parameters and native income fields.
+`page-alias-controls.py` requires named compiled faults and exact restored passes.
+These continuation contracts do not classify other Kraken aliases.
+
+`CONSTRUCTION_ALIAS_REVIEW.md` covers the two finite Factory/RateLimit callback
+profiles over the real Scope. `construction-alias-contracts.mjs` measures their
+actual compiler identities and decoder traits; `accepted_construction_aliases`
+observes signed client bases, native thrown values and source throttle timing.
+The two compiled constructor faults in `construction-alias-controls.py` must fail
+named witnesses and restore exact bytes before readiness.
+
+`POLLING_ALIAS_REVIEW.md` covers the four finite OHLCV continuation capabilities.
+The `polling-alias-contracts.mjs` native probes authenticate actual compiler
+identities; `accepted_polling_aliases` uses the constructed Scope, real chart
+client and timers. `polling-alias-controls.py` requires four independently named
+compiled runtime failures and exact-source restored passes.
+
+`MEMBER_ALIAS_REVIEW.md` covers three finite class dispatch/continuation aliases.
+`member-alias-contracts.mjs` authenticates their compiler identities; the native
+`accepted_member_aliases` witnesses use constructed receivers, real chart HTTP
+and the initialized arrow. `member-alias-controls.py` must fail three named
+compiled runtime assertions and restore exact source bytes before readiness.
+
+`binding::rt::SpotIds` is the module-owned mutable generator capability, not a
+wire decoder. `CLIENT_ID_ALIAS_REVIEW.md` records its source lifetime and exact
+native proof. `--lib accepted_client_id_alias` uses the real generator shared
+by two constructed Spot clients, signed AddOrder requests and entropy refusal;
+`scripts/client-id-alias-controls.py` requires named compiled semantic failures
+and exact restored passes. `scripts/client-id-alias-contracts.mjs` uses fresh
+compiler-authenticated identity/Serde/conversion probes for this one alias.
+
+`LOOP_SOCKET_ALIAS_REVIEW.md` covers the concrete socket event and periodic tick
+callback capabilities. `loop-socket-alias-contracts.mjs` runs authenticated native
+alias probes; `accepted_loop_socket_aliases` drives the actual socket/Store and
+signed timer/HTTP paths. Three named compiled consumer faults and exact restored
+passes are required by `loop-socket-alias-controls.py`.
+
+
+Historical fill pages in the constructed ReadHost map directly over the canonical
+Js graph, using the shared map/filter and iterator operations. Only fields read
+by kraken.fills.ts are reached; never serialize or capture the whole row to
+produce a utility DTO first. Unrelated surrogates, nonfinite numbers and deep
+properties must not erase a page. Native IDs retain their exact units until the
+existing final Execution projection. tests/fill-ingress-source.cjs executes the
+maintained mapper for twelve wire cases; exchange_binding checks both surviving
+fills, every numeric bit and signed unwindowed/cursor requests. The constructed
+Scope test also checks exact native units and an unread throwing property.
+The standalone fills utility's separately documented profile is not broadened
+by this production binding fix.
+
+`TOPIC_ALIAS_REVIEW.md` records the UTF-16 collection decoder and physical public
+subscription boundary. Keep `Topic` units in canonical retained JSON until wire
+escaping; do not reintroduce a lossy String conversion. The `accepted_topic_alias`
+native witnesses, live-source script and compiled lossy-consumer control cover
+both Futures and Spot. `topic-alias-contracts.mjs` probes only this concrete alias.
+
+`STREAM_ADAPTER_RETIREMENT.md` records why the duplicate typed stream adapters and
+three callback aliases were removed. Their old class target strings are native
+dispatch identifiers, not Rust calls. Stream manifest rows map to the live member
+dispatcher. Preserve constructed book/candle tests and the actual Futures socket
+no-op witness; `scripts/stream-binding-controls.py` requires four compiled named
+failures and exact-source restored passes.
+
 All four production socket message hosts share `binding/sockets.rs::parse_frame`.
 It sends original UTF-16 units through the canonical RetainedJsonInput parser
 and constructs native Js directly; a serde Value intermediate would reject

@@ -86,8 +86,8 @@ where
         match result {
             Ok(data) => Ok(Some(data)),
             Err(error) => {
-                let message = error
-                    .response
+                let response_view = error.response_json_view();
+                let message = response_view
                     .as_ref()
                     .and_then(|r| r.get("data"))
                     .and_then(|d| d.get("msg"));

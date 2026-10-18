@@ -269,3 +269,11 @@ real Chrome IndexedDB with 26 profiles (NaN writes, preexisting null numerics,
 structural misses, both read modes). Its separate runner executes the maintained
 TS backends too; browser availability for this probe does not imply the older
 fault/rollback probes were rerun. See GATE_EVIDENCE.md for commands and RED/GREEN.
+
+The eight-row non-UTF-8 FIX audit is recorded in
+`../parity/CANDLE_CACHE_FIX_AUDIT.md`. The real cache/KV source/native replay
+covers all 27 intervals under both read modes, and the browser probe includes
+cancelled persistence ownership. Pre-epoch Euclidean persistence is accepted
+because exchanges have no pre-1970 candles; this is not a general source-bug
+correction policy. Extreme key rounding and namespace violations remain explicit
+and do not arise from real candle dates or prefix-respecting storage.

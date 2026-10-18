@@ -121,22 +121,37 @@ impl Client {
                         .clone();
                     handler(response).await
                 }
-                Err(error) => {
-                    let mut e = ExchangeError::new(error.message);
+                Err(mut error) => {
+                    if let Some(response) = error.response.as_mut() {
+                        let body = std::mem::replace(
+                            &mut response.body,
+                            RestResponseBody::Transformed(Input::Undefined),
+                        );
+                        let data = match body {
+                            RestResponseBody::Encoded(_) => body
+                                .transform_axios_response()
+                                .map_err(|cause| {
+                                    ExchangeError::from(
+                                        safe_cex_transport::RestFailure::from_transport(
+                                            cause,
+                                            req.clone(),
+                                        ),
+                                    )
+                                })?
+                                .into_data(),
+                            body => body.into_data(),
+                        };
+                        let data = match data {
+                            Input::Text(units) => {
+                                Input::parse_json(&units).unwrap_or(Input::Text(units))
+                            }
+                            data => data,
+                        };
+                        response.body = RestResponseBody::Transformed(data);
+                    }
+                    let mut e = ExchangeError::from(error);
                     e.metadata.is_axios_error = true;
                     e.metadata.config = Some(json!({"url":req.url,"method":req.method}));
-                    e.metadata.code = error
-                        .code
-                        .map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
-                    if let Some(response) = error.response {
-                        let data = safe_cex_exchange::runtime::response_json_view(&response.body);
-                        let data = if let Value::String(s) = &data {
-                            serde_json::from_str(s).unwrap_or(data.clone())
-                        } else {
-                            data
-                        };
-                        e.metadata.response = Some(json!({"data":data,"status":response.status}));
-                    }
                     let handler = client
                         .failure
                         .borrow()
@@ -342,11 +357,15 @@ impl api::Host for Factory {
         Ok(Input::Text(e.message.encode_utf16().collect()))
     }
     fn response(&mut self, e: &ExchangeError) -> Result<Option<Rc<api::Response>>, ExchangeError> {
-        Ok(e.metadata.response.as_ref().map(|v| {
+        Ok(e.retained_response_input().as_ref().map(|v| {
             Rc::new(api::Response {
-                data: v.get("data").cloned().unwrap_or(Value::Null).into(),
+                data: v.get("data").cloned().unwrap_or(Input::Null),
                 config: None,
-                status: v.get("status").and_then(Value::as_f64),
+                status: v
+                    .get("status")
+                    .cloned()
+                    .map(safe_cex_exchange::js_runtime::value::from_retained_input)
+                    .and_then(|value| value.as_f64()),
             })
         }))
     }

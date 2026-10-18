@@ -164,17 +164,26 @@ impl Thrown {
         error
     }
     pub fn to_exchange_error(&self) -> ExchangeError {
+        let mut original = self.clone();
         let mut error = self.error_fields();
-        if !self.value.is_object() {
-            return error;
+        if self.value.is_object() {
+            let code = self
+                .value
+                .get("code")
+                .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
+            match code {
+                Ok(code) => error.code = code,
+                Err(cause) => {
+                    error = cause.error_fields();
+                    original = cause;
+                }
+            }
         }
-        let code = self
-            .value
-            .get("code")
-            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
-        match code {
-            Ok(code) => error.code = code,
-            Err(cause) => return cause.error_fields(),
+        if original.native.is_none() {
+            // The existing native slot records the diagnostic projection before
+            // adding its local origin. This is acyclic and needs no user reads.
+            original.native = Some(Rc::new(error.clone()));
+            error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(original));
         }
         error
     }
@@ -186,31 +195,151 @@ impl fmt::Debug for Thrown {
     }
 }
 
+impl fmt::Display for Thrown {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            self.native
+                .as_ref()
+                .map_or("native JavaScript throw", |error| error.message.as_str()),
+        )
+    }
+}
+
+impl std::error::Error for Thrown {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.native
+            .as_deref()
+            .map(|error| error as &(dyn std::error::Error + 'static))
+    }
+}
+
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
-        let value = error_object(&error.name, &error.message);
-        if let Some(cause) = error.origin.as_ref().and_then(|origin| {
-            let original = origin.error();
-            if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
-                return Some(cause);
+        // Store read failures carry arbitrary native throws below this layer.
+        // Recover before creating diagnostics or reading any cause properties.
+        if let Some(origin) = &error.origin {
+            let read = origin
+                .error()
+                .downcast_ref::<safe_cex_types::StoreReadError>()
+                .or_else(|| {
+                    match origin
+                        .error()
+                        .downcast_ref::<safe_cex_store::StoreMutationError>()
+                    {
+                        Some(safe_cex_store::StoreMutationError::Access(error)) => Some(error),
+                        _ => None,
+                    }
+                });
+            if let Some(cause) = read.and_then(|read| read.native_cause().downcast_ref::<Thrown>())
+            {
+                return cause.clone();
             }
-            let failure = original.downcast_ref::<safe_cex_transport::RestFailure>()?;
-            let safe_cex_transport::TransportError::Rejected(origin) =
-                failure.transport_error.as_deref()?
-            else {
-                return None;
-            };
-            origin.error().downcast_ref::<owned::OwnedCallbackError>()
-        }) {
-            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
-                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
-                    && String::from_utf16(units).is_err()
-                    && String::from_utf16_lossy(units) == *projected
+        }
+        let mut source = std::error::Error::source(&error);
+        while let Some(cause) = source {
+            if let Some(original) = cause.downcast_ref::<Thrown>()
+                && let Some(snapshot) = &original.native
+                && error.retained_response_input().is_none()
+            {
+                let mut projection = error.clone();
+                projection.origin = snapshot.origin.clone();
+                if projection == **snapshot {
+                    return Self {
+                        value: original.value.clone(),
+                        native: Some(Rc::new(error)),
+                    };
+                }
+            }
+            source = cause.source();
+        }
+        let value = error_object(&error.name, &error.message);
+        let mut source = std::error::Error::source(&error);
+        while let Some(original) = source {
+            if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
+                for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                    if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                        && String::from_utf16(units).is_err()
+                        && String::from_utf16_lossy(units) == *projected
+                    {
+                        value
+                            .set(field, Js::utf16(units))
+                            .expect("fresh error metadata property");
+                    }
+                }
+                for field in [
+                    "stack",
+                    "cause",
+                    "isAxiosError",
+                    "enhancedMessage",
+                    "context",
+                    "originalError",
+                ] {
+                    if let Some(cell) = cause.value().get(field) {
+                        value
+                            .define(field, cell.to_js())
+                            .expect("fresh retained error property");
+                    }
+                }
+                if matches!(
+                    cause.value().get("originalErrorIsError"),
+                    Some(OwnedJsValue::Bool(true))
+                ) {
+                    let snapshot = value.get("originalError").expect("captured original error");
+                    let original = error_object(
+                        &snapshot.get("name").expect("name").to_display(),
+                        &snapshot.get("message").expect("message").to_display(),
+                    );
+                    for (key, cell) in snapshot.own_entries().expect("captured error fields") {
+                        if key.as_ref() == "name".encode_utf16().collect::<Vec<_>>()
+                            && cell.strict_equals(&original.get("name").expect("name"))
+                        {
+                            continue;
+                        }
+                        if !value.own_keys().contains(&key) {
+                            value
+                                .define_key(&key, cell.clone())
+                                .expect("fresh error snapshot data");
+                        }
+                        original
+                            .define_key(&key, cell)
+                            .expect("fresh original error snapshot");
+                    }
+                    value
+                        .define("originalError", original)
+                        .expect("fresh original error snapshot");
+                }
+                if cause.value().get("enhancedMessage").is_some()
+                    && matches!(cause.value().get("message"), Some(OwnedJsValue::String(units)) if String::from_utf16_lossy(units) == error.message)
                 {
                     value
-                        .set(field, Js::String(units.clone().into()))
-                        .expect("fresh error metadata property");
+                        .define_accessor(
+                            "message",
+                            Some(Rc::new(|this| {
+                                let message = this.get("enhancedMessage")?;
+                                if message.truthy() {
+                                    Ok(message)
+                                } else {
+                                    this.get("originalError")?.get("message")
+                                }
+                            })),
+                            None,
+                        )
+                        .expect("fresh enhanced error accessor");
                 }
+                break;
+            }
+            source = original.source();
+        }
+        if let Some(response) = error.retained_response_input() {
+            let response = from_retained_input(response);
+            value
+                .define("response", response.clone())
+                .expect("fresh retained response property");
+            let original = value.get("originalError").expect("fresh error field");
+            if matches!(&original, Js::Object(object) if object.class == "Error") {
+                original
+                    .define("response", response)
+                    .expect("fresh original response property");
             }
         }
         if let Some(code) = &error.code {
@@ -1132,6 +1261,16 @@ impl Js {
                     String::from_utf16_lossy(key)
                 )));
             }
+            if let Js::String(units) = self
+                && (key == utf16("length").as_ref()
+                    || array_index(key).is_some_and(|index| index < units.len()))
+            {
+                return Err(Thrown::type_error(&format!(
+                    "Cannot assign to read only property '{}' of string '{}'",
+                    String::from_utf16_lossy(key),
+                    self.to_display()
+                )));
+            }
             // Strict-mode [[Set]] on a primitive throws; Map/Set/Promise expandos are unsupported.
             return Err(Thrown::type_error(&format!(
                 "Cannot create property '{}' on {} '{}'",
@@ -1280,6 +1419,12 @@ impl Js {
         Ok(self.clone())
     }
     pub(super) fn freeze(&self) -> Result<Js, Thrown> {
+        self.set_integrity(true)
+    }
+    pub(super) fn seal(&self) -> Result<Js, Thrown> {
+        self.set_integrity(false)
+    }
+    fn set_integrity(&self, frozen: bool) -> Result<Js, Thrown> {
         self.prevent_extensions()?;
         if let Some(props) = self.own_props() {
             for property in props.borrow_mut().values_mut() {
@@ -1287,7 +1432,7 @@ impl Js {
                     Prop::Data(value) => {
                         *property = Prop::DataDescriptor {
                             value: value.clone(),
-                            writable: false,
+                            writable: !frozen,
                             enumerable: true,
                             configurable: false,
                         }
@@ -1297,7 +1442,9 @@ impl Js {
                         configurable,
                         ..
                     } => {
-                        *writable = false;
+                        if frozen {
+                            *writable = false;
+                        }
                         *configurable = false;
                     }
                     Prop::Accessor { configurable, .. } => *configurable = false,

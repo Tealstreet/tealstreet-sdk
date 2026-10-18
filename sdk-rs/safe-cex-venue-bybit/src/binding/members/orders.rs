@@ -84,7 +84,7 @@ fn market(rt: &Rt, symbol: &str) -> Result<Option<safe_cex_types::Market>, Throw
     Ok(venue
         .base
         .store
-        .markets()
+        .markets()?
         .iter()
         .find(|m| m.symbol == symbol)
         .cloned())
@@ -646,7 +646,7 @@ pub(crate) async fn place_trailing_stop_loss(rt: &Rt, opts: &Js) -> Result<Js, T
     let ticker = venue
         .base
         .store
-        .tickers()
+        .tickers()?
         .iter()
         .find(|t| t.symbol == base.symbol)
         .cloned();
@@ -700,7 +700,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             |message| emit(&rt, message).map_err(|e| Rc::new(e.to_exchange_error())),
         )
         .map_err(|e| Thrown::from((*e).clone()))?;
-        if venue.has_full_sized_position_opposite_side(&base.symbol, base.side, base.amount)
+        if venue.has_full_sized_position_opposite_side(&base.symbol, base.side, base.amount)?
             && matches!(base.r#type, OrderType::StopLoss | OrderType::TakeProfit)
         {
             return place_stop_loss_or_take_profit(&rt, &opts).await;
@@ -720,7 +720,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         }
         let position_idx = get_order_position_idx(&rt, position_opts).await?;
 
-        let max_size = market.limits.amount.max;
+        let max_size = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         let (p_price, p_amount) = (market.precision.price, market.precision.amount);
         let amount = adjust(base.amount, p_amount);
         let truthy = |v: Option<f64>| v.filter(|n| *n != 0. && !n.is_nan());
@@ -733,7 +733,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                 let ticker = venue
                     .base
                     .store
-                    .tickers()
+                    .tickers()?
                     .iter()
                     .find(|t| t.symbol == base.symbol)
                     .cloned()

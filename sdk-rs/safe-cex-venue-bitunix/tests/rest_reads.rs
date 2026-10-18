@@ -77,13 +77,21 @@ fn market(native: &Market, source: &Value, numeric_max: &Value) {
         "price precision",
     );
     let limits = &f["limits"]["fields"];
+    if let safe_cex_types::NumericValue::Text(value) = &native.limits.amount.max {
+        string(
+            value,
+            &limits["amount"]["fields"]["max"],
+            "raw amount maximum",
+        );
+    }
+
     number(
         native.limits.amount.min,
         &limits["amount"]["fields"]["min"],
         "amount min",
     );
     number(
-        native.limits.amount.max,
+        safe_cex_num::numeric_value_to_number(&native.limits.amount.max),
         numeric_max,
         "amount max at shared numeric model boundary",
     );
@@ -111,7 +119,7 @@ fn ticker(native: &Ticker, source: &Value) {
         ("ask", native.ask),
         ("last", native.last),
         ("mark", native.mark),
-        ("index", native.index),
+        ("index", native.index.unwrap()),
         ("percentage", native.percentage),
         ("fundingRate", native.funding_rate),
         ("fundingTime", native.funding_time),
@@ -229,11 +237,12 @@ fn actual_typescript_rest_reads() {
         match row["method"].as_str().unwrap() {
             "fetchMarkets" => {
                 let native = resolve(fetch_markets(
-                    || vec![cached_market.clone()],
+                    || Ok(vec![cached_market.clone()]),
                     read,
                     |_: &ReadError| reports += 1,
                     |message| panic!("source corpus has no typed asset refusals: {message}"),
-                ));
+                ))
+                .unwrap();
                 assert_eq!(
                     native.len(),
                     expected_lengths[index],
@@ -261,11 +270,12 @@ fn actual_typescript_rest_reads() {
             }
             "fetchTickers" => {
                 let native = resolve(fetch_tickers(
-                    || vec![cached_ticker.clone()],
-                    |symbol| (symbol == cached_market.symbol).then_some(&cached_market),
+                    || Ok(vec![cached_ticker.clone()]),
+                    |symbol| Ok((symbol == cached_market.symbol).then_some(cached_market.clone())),
                     read,
                     |_: &ReadError| reports += 1,
-                ));
+                ))
+                .unwrap();
                 assert_eq!(
                     native.len(),
                     expected_lengths[index],
@@ -284,8 +294,8 @@ fn actual_typescript_rest_reads() {
             }
             "fetchBalance" => {
                 let (native, returned_positions) = resolve(fetch_balance(
-                    || cached_balance.clone(),
-                    || positions.as_slice(),
+                    || Ok(cached_balance.clone()),
+                    || Ok(positions.clone()),
                     &mut mode,
                     read,
                     |error: &ReadError| {
@@ -297,10 +307,11 @@ fn actual_typescript_rest_reads() {
                                 .unwrap_or_else(|| error.cause.message.into()),
                         );
                     },
-                ));
+                ))
+                .unwrap();
                 balance(&native, &row["result"]["fields"]["balance"]);
                 assert!(
-                    std::ptr::eq(returned_positions, positions.as_slice()),
+                    returned_positions == positions,
                     "REST native positions identity"
                 );
                 assert_eq!(

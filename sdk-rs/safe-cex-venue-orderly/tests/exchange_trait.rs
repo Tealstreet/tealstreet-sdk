@@ -62,7 +62,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                     rt.pump();
                 }
             }
-            ticker_coercion::assert_native(&store.tickers(), case);
+            ticker_coercion::assert_native(&store.tickers().unwrap(), case);
             let reports = rt
                 .errors
                 .borrow()
@@ -285,16 +285,16 @@ fn constructed_exchange_starts_and_signs_a_real_account_read() {
     script(&wire);
     drive(&rt, venue.start()).unwrap();
     assert!(
-        store.loaded().markets
-            && store.loaded().tickers
-            && store.loaded().positions
-            && store.loaded().orders
+        store.loaded().unwrap().markets
+            && store.loaded().unwrap().tickers
+            && store.loaded().unwrap().positions
+            && store.loaded().unwrap().orders
     );
     assert_eq!(
         drive(&rt, venue.get_account()).unwrap().user_id,
         "orderly-account"
     );
-    assert_eq!(store.markets()[0].symbol, "BTCUSDC");
+    assert_eq!(store.markets().unwrap()[0].symbol, "BTCUSDC");
     assert!(!rt.urls.borrow().is_empty());
     let requests = wire.requests.borrow();
     let read = requests
@@ -337,10 +337,10 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
     // 1 source startup, Store initialization, real HTTP signing and socket assembly.
     drive(&rt, venue.start()).expect("start binding");
     assert!(
-        store.loaded().markets
-            && store.loaded().tickers
-            && store.loaded().orders
-            && store.loaded().positions
+        store.loaded().unwrap().markets
+            && store.loaded().unwrap().tickers
+            && store.loaded().unwrap().orders
+            && store.loaded().unwrap().positions
     );
     take(&wire);
     // 2 account.
@@ -367,8 +367,8 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
     let positions = drive(&rt, venue.fetch_positions(None)).expect("fetch_positions binding");
     assert_eq!(positions.len(), 1);
     assert!(positions.iter().all(|p| p.symbol == "BTCUSDC"));
-    assert_eq!(store.balance().free.to_bits(), 81f64.to_bits());
-    assert_eq!(store.balance().used.to_bits(), 42f64.to_bits());
+    assert_eq!(store.balance().unwrap().free.to_bits(), 81f64.to_bits());
+    assert_eq!(store.balance().unwrap().used.to_bits(), 42f64.to_bits());
     assert!(sent(&wire, "GET", "/v1/positions"));
     take(&wire);
     // 5 limit + algo order reads, including snake-case get-key conversion.
@@ -792,7 +792,7 @@ fn trait_cancel_all_reaches_both_endpoints_with_an_empty_store() {
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
     drive(&rt, venue.cancel_all_orders()).unwrap();
     assert!(
         sent(&wire, "DELETE", "/v1/orders"),
@@ -915,7 +915,7 @@ fn private_execution_report_updates_orders_in_the_real_store_for_name(
         &rt,
         json!({"topic":"executionreport","data":{"orderId":777,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":97.5,"quantity":2,"totalExecutedQuantity":0,"reduceOnly":false}}),
     );
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let actual = orders.iter().find(|o| o.id == "777").unwrap();
     assert_eq!(actual.symbol, "BTCUSDC");
     assert_eq!(actual.price, 97.5);
@@ -956,7 +956,7 @@ fn private_partial_execution_updates_store_and_emits_fill_for_name(
         &rt,
         json!({"topic":"executionreport","data":{"orderId":778,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":101.5,"quantity":2,"totalExecutedQuantity":0.5,"executedPrice":101.5,"executedQuantity":0.5,"reduceOnly":false}}),
     );
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let actual = orders.iter().find(|o| o.id == "778").unwrap();
     assert_eq!(actual.filled, 0.5);
     assert_eq!(actual.remaining, 1.5);
@@ -994,20 +994,20 @@ fn private_position_report_updates_store_and_keeps_rest_account_balance_for_name
     script(&wire);
     drive(&rt, venue.start()).unwrap();
     acknowledge_private(&venue, &rt);
-    assert_eq!(store.balance().total, 100.0);
+    assert_eq!(store.balance().unwrap().total, 100.0);
     private_frame(
         &venue,
         &rt,
         json!({"topic":"position","data":{"positions":[{"symbol":"PERP_BTC_USDC","position_qty":"3","average_open_price":"100","mark_price":"102","margin_mode":"CROSS","leverage":"20","est_liq_price":"50"}]}}),
     );
-    let positions = store.positions();
+    let positions = store.positions().unwrap();
     let actual = positions.iter().find(|p| p.contracts == 3.0).unwrap();
     assert_eq!(actual.symbol, "BTCUSDC");
     assert_eq!(actual.entry_price, 100.0);
     assert_eq!(actual.unrealized_pnl, 6.0);
     // Orderly has no private balance topic: fetchPositions owns its REST balance write.
-    assert_eq!(store.balance().total, 100.0);
-    assert_eq!(store.balance().free, 70.0);
+    assert_eq!(store.balance().unwrap().total, 100.0);
+    assert_eq!(store.balance().unwrap().free, 70.0);
     drop(positions);
     venue.dispose().unwrap();
 }
@@ -1034,7 +1034,7 @@ fn private_algo_execution_report_updates_the_real_store_for_name(
         &rt,
         json!({"topic":"algoexecutionreportv2","data":{"algoOrderId":779,"rootAlgoOrderId":779,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","quantity":2,"triggerPrice":108.5,"totalExecutedQuantity":0,"reduceOnly":true}}),
     );
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let actual = orders.iter().find(|o| o.id == "779").unwrap();
     assert_eq!(actual.symbol, "BTCUSDC");
     assert_eq!(actual.price, 108.5);
@@ -1060,7 +1060,7 @@ fn trait_set_all_leverage_updates_account_once_and_clamps_without_positions() {
     wire.responses
         .borrow_mut()
         .insert("/v1/client/leverages".into(), json!({"success":true}));
-    assert!(store.positions().is_empty());
+    assert!(store.positions().unwrap().is_empty());
     drive(&rt, venue.set_all_leverage(20.0)).unwrap();
     assert!(
         sent(&wire, "POST", "/v1/client/leverages"),
@@ -1186,9 +1186,9 @@ fn private_balance_topic_preserves_rest_owned_account_for_each_subclass() {
         script(&wire);
         drive(&rt, venue.start()).unwrap();
         acknowledge_private(&venue, &rt);
-        let before = store.balance().clone();
-        let orders = store.orders().to_vec();
-        let positions = store.positions().to_vec();
+        let before = store.balance().unwrap().clone();
+        let orders = store.orders().unwrap().to_vec();
+        let positions = store.positions().unwrap().to_vec();
         let fills = std::rc::Rc::new(std::cell::Cell::new(0usize));
         let observed = fills.clone();
         venue.base().on(
@@ -1205,12 +1205,12 @@ fn private_balance_topic_preserves_rest_owned_account_for_each_subclass() {
             "total_collateral_value":"999999","free_collateral":"888888"}}),
         );
         assert_eq!(
-            *store.balance(),
+            store.balance().unwrap(),
             before,
             "source has no private balance handler"
         );
-        assert_eq!(store.orders().to_vec(), orders);
-        assert_eq!(store.positions().to_vec(), positions);
+        assert_eq!(store.orders().unwrap().to_vec(), orders);
+        assert_eq!(store.positions().unwrap().to_vec(), positions);
         assert_eq!(fills.get(), 0);
         venue.dispose().unwrap();
     }
@@ -1222,6 +1222,7 @@ fn ticker_frame_keeps_valid_rows(
     target: &str,
     source_error: bool,
     inherited: bool,
+    subscriber_error: bool,
 ) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_store::{Store, StoreUpdate};
@@ -1235,7 +1236,7 @@ fn ticker_frame_keeps_valid_rows(
         );
         script(&wire);
         drive(&rt, venue.start()).unwrap();
-        let btc = store.tickers()[0].clone();
+        let btc = store.tickers().unwrap()[0].clone();
         let mut eth = btc.clone();
         eth.id = "PERP_ETH_USDC".into();
         eth.symbol = "ETHUSDC".into();
@@ -1284,6 +1285,29 @@ fn ticker_frame_keeps_valid_rows(
             .clone();
         rt.console.borrow_mut().clear();
         rt.errors.borrow_mut().clear();
+        let unsubscribe = subscriber_error.then(|| {
+            let target = target.to_owned();
+            let expected = from_json(&rows[1][source]);
+            store.subscribe_native(Box::new(move |state, _| {
+                let state = state.downcast_ref::<Js>().unwrap();
+                let tickers = state.get("tickers").unwrap().array_values().unwrap();
+                let eth = tickers
+                    .iter()
+                    .find(|row| {
+                        row.get("symbol")
+                            .unwrap()
+                            .strict_equals(&Js::str("ETHUSDC"))
+                    })
+                    .unwrap();
+                if eth.get(&target).unwrap().strict_equals(&expected) {
+                    Err(safe_cex_types::StoreSubscriberError::new(
+                        "Orderly fixture subscriber failure",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }))
+        });
         socket
             .events
             .borrow_mut()
@@ -1293,9 +1317,24 @@ fn ticker_frame_keeps_valid_rows(
         for _ in 0..16 {
             rt.pump();
         }
-        let tickers = store.tickers();
+        let raw = store.native_value("tickersBySymbol").unwrap();
+        for (symbol, before) in [("BTCUSDC", &unchanged_btc), ("LTCUSDC", &unchanged_ltc)] {
+            assert!(
+                raw.get(symbol)
+                    .unwrap()
+                    .get(target)
+                    .unwrap()
+                    .strict_equals(&from_json(&before[target])),
+                "ORDERLY-ADMISSION {name:?}/{topic}: refused {symbol} row must leave the raw Store unchanged"
+            );
+        }
+        let tickers = store.tickers().unwrap();
         let projected = serde_json::to_value(&*tickers).unwrap();
-        let expected_ada = rows[3][source].as_f64().unwrap();
+        let expected_ada = if subscriber_error {
+            unchanged_btc[target].as_f64().unwrap()
+        } else {
+            rows[3][source].as_f64().unwrap()
+        };
         let expected_eth = rows[1][source].as_f64().unwrap();
         let btc = projected
             .as_array()
@@ -1323,7 +1362,7 @@ fn ticker_frame_keeps_valid_rows(
             .unwrap();
         assert_eq!(
             ada[target], expected_ada,
-            "{name:?}/{topic}: later valid ADA row survives"
+            "{name:?}/{topic}: later ADA row follows source error precedence"
         );
         assert_eq!(
             *btc, unchanged_btc,
@@ -1350,6 +1389,15 @@ fn ticker_frame_keeps_valid_rows(
                 reports.is_empty(),
                 "inherited targets remain source no-ops: {reports}"
             );
+        } else if subscriber_error {
+            assert!(
+                reports.contains("Orderly fixture subscriber failure"),
+                "{reports}"
+            );
+            assert!(
+                !reports.contains("typed field"),
+                "subscriber error takes precedence: {reports}"
+            );
         } else if source_error {
             assert!(
                 reports.contains("Cannot read properties of null (reading 'symbol')"),
@@ -1369,20 +1417,23 @@ fn ticker_frame_keeps_valid_rows(
                 "{name:?}/{topic}: {reports}"
             );
         }
+        if let Some(unsubscribe) = unsubscribe {
+            unsubscribe();
+        }
         venue.dispose().unwrap();
     }
 }
 #[test]
 fn ticker_rows_refuse_only_null_and_string_values() {
-    ticker_frame_keeps_valid_rows("tickers", "close", "last", false, false);
+    ticker_frame_keeps_valid_rows("tickers", "close", "last", false, false, false);
 }
 #[test]
 fn bbo_rows_refuse_only_null_and_string_values() {
-    ticker_frame_keeps_valid_rows("bbos", "bid", "bid", false, false);
+    ticker_frame_keeps_valid_rows("bbos", "bid", "bid", false, false, false);
 }
 #[test]
 fn mark_rows_refuse_only_null_and_string_values() {
-    ticker_frame_keeps_valid_rows("markprices", "price", "mark", false, false);
+    ticker_frame_keeps_valid_rows("markprices", "price", "mark", false, false, false);
 }
 
 #[test]
@@ -1392,7 +1443,7 @@ fn ticker_row_refusals_preserve_later_source_errors() {
         ("bbos", "bid", "bid"),
         ("markprices", "price", "mark"),
     ] {
-        ticker_frame_keeps_valid_rows(topic, source, target, true, false);
+        ticker_frame_keeps_valid_rows(topic, source, target, true, false, false);
     }
 }
 
@@ -1403,6 +1454,17 @@ fn ticker_row_admission_preserves_inherited_target_no_ops() {
         ("bbos", "bid", "bid"),
         ("markprices", "price", "mark"),
     ] {
-        ticker_frame_keeps_valid_rows(topic, source, target, false, true);
+        ticker_frame_keeps_valid_rows(topic, source, target, false, true, false);
+    }
+}
+
+#[test]
+fn ticker_row_admission_preserves_subscriber_errors_and_prior_writes() {
+    for (topic, source, target) in [
+        ("tickers", "close", "last"),
+        ("bbos", "bid", "bid"),
+        ("markprices", "price", "mark"),
+    ] {
+        ticker_frame_keeps_valid_rows(topic, source, target, false, false, true);
     }
 }

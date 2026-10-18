@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::js_number_string;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{StoreSubscriberError, Ticker};
 use safe_cex_venue_bitget::ticker::{TickerHandlerError, handle_ticker_topic};
 use serde_json::{Value, json};
@@ -35,7 +36,7 @@ fn decode(value: &Value) -> Option<Value> {
 fn snapshot(rows: &[Ticker]) -> Value {
     Value::Array(rows.iter().map(|t| {
         let mut value=json!({"id":t.id,"symbol":t.symbol});
-        for (key,n) in [("bid",t.bid),("ask",t.ask),("last",t.last),("mark",t.mark),("index",t.index),("percentage",t.percentage),("openInterest",t.open_interest),("fundingRate",t.funding_rate),("fundingTime",t.funding_time),("volume",t.volume),("quoteVolume",t.quote_volume)] {
+        for (key,n) in [("bid",t.bid),("ask",t.ask),("last",t.last),("mark",t.mark),("index",t.index.unwrap()),("percentage",t.percentage),("openInterest",t.open_interest),("fundingRate",t.funding_rate),("fundingTime",t.funding_time),("volume",t.volume),("quoteVolume",t.quote_volume)] {
             value[key]=json!({"$number":if n==0.0&&n.is_sign_negative(){"-0".into()}else{js_number_string(n)},"bits":format!("{:016x}",n.to_bits())});
         }
         value
@@ -127,7 +128,7 @@ fn check(oracle: &Value) {
                 );
             }
             if case["mode"] == "prototype-write" {
-                let rows = Store::tickers(&store);
+                let rows = Store::tickers(&store).unwrap();
                 assert_eq!(rows.len(), 2, "TICKER native prototype witness row floor");
                 assert_eq!(
                     rows[0].last.to_bits(),
@@ -147,7 +148,7 @@ fn check(oracle: &Value) {
                     json!({"name":e.name(),"message":e.to_string()})
                 }
             };
-            let actual = snapshot(&store.tickers());
+            let actual = snapshot(&store.tickers().unwrap());
             let expected_notifications: Vec<_> = case["events"]
                 .as_array()
                 .unwrap()
@@ -334,7 +335,7 @@ fn ticker_notification_preserves_second_subscriber_identity() {
                 ask: 0.0,
                 last: 0.0,
                 mark: 0.0,
-                index: 0.0,
+                index: Some(0.0),
                 mid_price: None,
                 timestamp: None,
                 percentage: 0.0,
@@ -406,7 +407,7 @@ fn ticker_notification_preserves_second_subscriber_identity() {
         "ticker shared projection retains subscriber identity"
     );
     assert_eq!(
-        projected.response,
+        projected.response_json_view(),
         cause.response().cloned(),
         "ticker shared projection retains response"
     );
@@ -416,7 +417,7 @@ fn ticker_notification_preserves_second_subscriber_identity() {
         "ticker second subscriber stops fanout and batch"
     );
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         7.0_f64.to_bits(),
         "ticker second subscriber sees committed first row"
     );

@@ -69,7 +69,7 @@ fn decoded_balance_and_ticker_numeric_fields_have_native_identity() {
         ("ask", ticker.ask, 23.0),
         ("last", ticker.last, 37.0),
         ("mark", ticker.mark, 41.0),
-        ("index", ticker.index, 53.0),
+        ("index", ticker.index.unwrap(), 53.0),
         ("percentage", ticker.percentage, 67.0),
         ("openInterest", ticker.open_interest, 79.0),
         ("fundingRate", ticker.funding_rate, 83.0),
@@ -184,7 +184,7 @@ fn decoded_nested_and_history_models_pin_native_field_identity() {
     );
     assert_eq!(
         (market.limits.amount.min, market.limits.amount.max),
-        (37.0, 41.0),
+        (37.0, safe_cex_types::NumericValue::Number(41.0)),
         "FIELD-IDENTITY nested amount limits"
     );
     assert_eq!(

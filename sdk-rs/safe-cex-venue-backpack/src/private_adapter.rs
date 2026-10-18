@@ -198,10 +198,13 @@ impl BackpackPrivateWebSocket {
         events::throttled_fetch_balance(self.state.balance.clone(), self.frame())
     }
     pub fn fetch_orders_throttled(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
-        Box::pin(events::fetch_throttled_orders(
-            &self.state.orders_timeout,
-            self.frame(),
-        ))
+        let future = events::fetch_throttled_orders(&self.state.orders_timeout, self.frame());
+        let runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = self.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            // The source reconciliation catch is silent; the next event retries.
+            let _ = future.await;
+            Ok(())
+        })
     }
     pub fn throttled_fetch_orders(self: &Rc<Self>) -> Result<(), ExchangeError> {
         let cb = self.clone();
@@ -233,10 +236,13 @@ impl BackpackPrivateWebSocket {
         ))
     }
     pub fn execute_balance_fetch(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
-        Box::pin(events::execute_balance_fetch(
-            &self.state.balance,
-            self.frame(),
-        ))
+        let future = events::execute_balance_fetch(&self.state.balance, self.frame());
+        let runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = self.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            // The source reconciliation catch is silent; the next event retries.
+            let _ = future.await;
+            Ok(())
+        })
     }
     pub fn unsubscribe(&self, streams: control::Streams) -> Result<(), ExchangeError> {
         crate::private_control::unsubscribe(&self.state.subscriptions, &streams, |m| {
@@ -273,7 +279,7 @@ impl BackpackPrivateWebSocket {
             .parent()?
             .base
             .store
-            .tickers()
+            .tickers()?
             .iter()
             .map(|t| (units(&t.symbol), Some(t.last), Some(t.mark)))
             .collect::<Vec<_>>();
@@ -474,7 +480,7 @@ impl events::UpdateHost<Value> for PrivateFrame {
             .parent()?
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.id == s)
             .cloned())
@@ -538,7 +544,7 @@ impl events::PositionHost<Value> for PrivateFrame {
         Ok(self.owner.parent()?.get_position_mode())
     }
     fn positions(&mut self) -> Result<Vec<Position>, ExchangeError> {
-        Ok(self.owner.parent()?.base.store.positions().to_vec())
+        Ok(self.owner.parent()?.base.store.positions()?.to_vec())
     }
     fn positions_len(&mut self, p: &Vec<Position>) -> Result<usize, ExchangeError> {
         Ok(p.len())
@@ -657,7 +663,7 @@ impl events::FetchHost for PrivateFrame {
             .map_err(Into::into)
     }
     fn loaded(&mut self) -> Result<Vec<(JsString, bool)>, ExchangeError> {
-        Ok(crate::adapter_runtime::loaded(&self.owner.parent()?.base))
+        crate::adapter_runtime::loaded(&self.owner.parent()?.base)
     }
     fn update_orders(
         &mut self,

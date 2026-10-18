@@ -65,6 +65,25 @@ async function run(kind){
   let subscribed=0;r.subscribe=()=>{subscribed++;};r.onMessage({data:'{"event":"auth","success":true}'});
   return {sent:c.sent,maps,timestamp,subscribed,asyncError,url,listeners};
  }
+ if(kind==='heartbeat-audit'){
+  const results=[];
+  for(const [channel,method] of [['public','ping'],['private','ping'],['public','handlePingEvent']]){
+   for(const mode of ['success','disposed','send-fail','clock-fail','set-fail','dynamic-send','stringify-fail','retained-payload']){
+    const trace=[],sent=[],sentinel={units:'\uD800a\uDC00',own:undefined};let timestamp;
+    const c=setup({performance:{now(){trace.push('now');if(mode==='clock-fail')throw sentinel;return -0;}},JSON:{stringify(value){trace.push('stringify');assert.equal(value.event,method==='ping'?'ping':'pong');if(mode==='stringify-fail')throw sentinel;return mode==='retained-payload'?'\uD800a\uDC00':JSON.stringify(value);}}});
+    const socket=new c[channel==='public'?'WooPublicWebsocket':'WooPrivateWebscoket']({});
+    const member=channel==='private'?'sendWithLog':'send';
+    const send=function(value){assert.equal(this,socket);trace.push('send');sent.push(Array.from({length:value.length},(_,i)=>value.charCodeAt(i)));if(mode==='send-fail')throw sentinel;};
+    let current=mode==='dynamic-send'&&method==='ping'?()=>{throw Error('stale sender')}:send;
+    Object.defineProperty(socket,'isDisposed',{get(){trace.push('disposed');return mode==='disposed'?'\uD800':false;}});
+    Object.defineProperty(socket,'pingAt',{set(value){trace.push('set:pingAt');assert(Object.is(value,-0));timestamp=value;if(mode==='set-fail')throw sentinel;if(mode==='dynamic-send')current=send;}});
+    Object.defineProperty(socket,member,{get(){trace.push('get:'+member);return current;}});
+    let caught=false;try{assert.equal(socket[method].call({}),undefined);}catch(error){assert.equal(error,sentinel);caught=true;}
+    results.push({channel,method,mode,trace,sent,caught,timestampSet:timestamp!==undefined});
+   }
+  }
+  return results;
+ }
  if(kind==='heartbeat'){
   const trace=[],calls=[];const c=setup({performance:{now:()=>{trace.push('now');return 79;}},JSON:{stringify:obj=>{trace.push('stringify');return JSON.stringify(obj);}}});const r=new c.WooPublicWebsocket({});r.send=()=>{throw Error('stale send');};Object.defineProperty(r,'pingAt',{set(value){assert.equal(value,79);trace.push('set:pingAt');this.send=value=>calls.push(value);}});r.ping();r.handlePingEvent();return {trace,calls};
  }

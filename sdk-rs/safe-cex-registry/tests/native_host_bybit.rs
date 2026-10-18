@@ -168,7 +168,7 @@ fn bybit_ticker_socket_preserves_coercion_type_errors_through_native_registry() 
             );
             assert_eq!(error.message, "Cannot convert object to primitive value");
             assert!(
-                h.store.tickers().is_empty(),
+                h.store.tickers().unwrap().is_empty(),
                 "coercion fails before ticker mutation"
             );
             h.exchange.dispose().unwrap();
@@ -216,7 +216,8 @@ fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
                 .unwrap();
             let mut original = ExchangeError::new("ticker subscriber rejected");
             original.name = "TickerSubscriberError".into();
-            original.response = Some(json!({"status":418,"data":{"reason":"listener"}}));
+            original = original
+                .with_retained_response(json!({"status":418,"data":{"reason":"listener"}}).into());
             original.store_subscriber_ids = vec![71];
             let cause: safe_cex_types::StoreSubscriberError = original.clone().into();
             let thrown = cause.clone();
@@ -248,7 +249,7 @@ fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
                 ))
                 .unwrap_err();
             assert_eq!(
-                h.store.tickers()[0].last,
+                h.store.tickers().unwrap()[0].last,
                 42.,
                 "mutation commits before rejection: {name:?}"
             );
@@ -258,7 +259,10 @@ fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
                 "native socket retains error name: {name:?}"
             );
             assert_eq!(error.message, original.message);
-            assert_eq!(error.response, original.response);
+            assert_eq!(
+                error.retained_response_input(),
+                original.retained_response_input()
+            );
             assert_eq!(error.store_subscriber_cause, Some(cause));
             assert_eq!(error.store_subscriber_ids.len(), 2);
             assert_eq!(error.store_subscriber_ids[0], 71);
@@ -614,7 +618,7 @@ fn registry_selects_demo_origin_before_any_transport_rewrite() {
                         "key":"origin-key", "secret":"origin-secret", "testnet":testnet
                     }))
                     .unwrap(),
-                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                    Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 )
                 .unwrap();
             assert_eq!(exchange.get_account().await.unwrap().user_id, "12345");

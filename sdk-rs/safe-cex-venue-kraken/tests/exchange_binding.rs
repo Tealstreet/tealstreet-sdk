@@ -100,7 +100,7 @@ fn fetch_tickers_reads_the_rest_snapshot_for_known_markets() {
     assert_eq!(tickers.len(), 1);
     assert_eq!(tickers[0].symbol, SYMBOL);
     assert_eq!(tickers[0].mark, 30000.25);
-    assert_eq!(tickers[0].index, 30000.1);
+    assert_eq!(tickers[0].index, Some(30000.1));
 }
 
 #[test]
@@ -429,7 +429,7 @@ fn change_margin_type_merges_refreshed_positions_into_the_store() {
     .expect("seed positions");
     h.drive(h.venue().change_margin_type(true, Some(SYMBOL.into())))
         .expect("changeMarginType");
-    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    let positions = safe_cex_store::Store::positions(h.store.as_ref()).unwrap();
     let symbols: Vec<&str> = positions.iter().map(|p| p.symbol.as_str()).collect();
     assert!(
         symbols.contains(&"PF_ETHUSD") && symbols.contains(&SYMBOL),
@@ -474,15 +474,15 @@ fn start_loads_markets_tickers_connects_sockets_and_ticks() {
     for _ in 0..10 {
         h.runtime.advance(100.0);
     }
-    assert_eq!(h.store.markets().len(), 1);
-    assert_eq!(h.store.tickers().len(), 1);
-    let loaded = h.store.loaded().clone();
+    assert_eq!(h.store.markets().unwrap().len(), 1);
+    assert_eq!(h.store.tickers().unwrap().len(), 1);
+    let loaded = h.store.loaded().unwrap().clone();
     assert!(loaded.markets && loaded.tickers);
     assert!(
         loaded.orders && loaded.positions && loaded.balance,
         "{loaded:?}"
     );
-    assert_eq!(h.store.orders().len(), 1);
+    assert_eq!(h.store.orders().unwrap().len(), 1);
     let urls: Vec<String> = h
         .runtime
         .sockets
@@ -1001,7 +1001,7 @@ fn constructed_private_orders_frame_updates_store() {
         &h,
         json!({"feed":"open_orders_snapshot","orders":[{"order_id":"frame-order","instrument":SYMBOL,"type":"lmt","direction":0,"qty":3,"filled":0.5,"limit_price":29100}]}),
     );
-    let rows = h.store.orders();
+    let rows = h.store.orders().unwrap();
     assert_eq!(rows.len(), 1);
     let order = &rows[0];
     assert_eq!(
@@ -1035,7 +1035,7 @@ fn constructed_private_fill_frame_updates_order_and_emits_fill() {
         &h,
         json!({"feed":"fills","fills":[{"order_id":"o-1","instrument":SYMBOL,"qty":0.25,"price":30002,"buy":true}]}),
     );
-    let rows = h.store.orders();
+    let rows = h.store.orders().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!((rows[0].filled, rows[0].remaining), (0.25, 1.75));
     let fills = fills.borrow();
@@ -1066,7 +1066,7 @@ fn constructed_private_position_frame_updates_store() {
         &h,
         json!({"feed":"open_positions","positions":[{"instrument":SYMBOL,"balance":3,"entry_price":29000,"mark_price":30000,"pnl":7,"liquidation_threshold":25000}]}),
     );
-    let rows = h.store.positions();
+    let rows = h.store.positions().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].symbol, SYMBOL);
     assert_eq!(
@@ -1086,7 +1086,7 @@ fn constructed_private_balance_frame_updates_store() {
         &h,
         json!({"feed":"account_balances","accounts":{"flex":{"type":"multiCollateralMarginAccount","portfolioValue":1250,"availableMargin":1100,"initialMargin":100,"maintenanceMargin":50,"pnl":9}}}),
     );
-    let b = h.store.balance();
+    let b = h.store.balance().unwrap();
     assert_eq!(
         (b.total, b.free, b.used, b.upnl),
         (1250.0, 1100.0, 150.0, 9.0)
@@ -1149,8 +1149,8 @@ fn spot_private_fixture() -> Harness {
         }}))
     );
     assert_eq!(h.http.calls("/0/private/GetWebSocketsToken").len(), 1);
-    assert_eq!(h.store.balance().total, 100.0);
-    assert_eq!(h.store.positions().len(), 2);
+    assert_eq!(h.store.balance().unwrap().total, 100.0);
+    assert_eq!(h.store.positions().unwrap().len(), 2);
     h
 }
 
@@ -1263,7 +1263,7 @@ fn constructed_private_ingress_keeps_surrogate_frames_neighbors_and_raw_info() {
 fn constructed_spot_private_orders_frame_updates_real_store() {
     let h = spot_private_fixture();
     private_frame(&h, spot_private_order_frame());
-    let orders = h.store.orders().to_vec();
+    let orders = h.store.orders().unwrap().to_vec();
     assert_eq!(orders.len(), 1);
     let order = &orders[0];
     assert_eq!(
@@ -1288,7 +1288,7 @@ fn constructed_spot_private_orders_frame_updates_real_store() {
             "order_id":"spot-frame-order","exec_type":"canceled"
         }]}),
     );
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
 }
 
 #[test]
@@ -1314,10 +1314,13 @@ fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
         }]}),
     );
     assert_eq!(
-        (h.store.orders()[0].filled, h.store.orders()[0].remaining),
+        (
+            h.store.orders().unwrap()[0].filled,
+            h.store.orders().unwrap()[0].remaining
+        ),
         (0.75, 2.25)
     );
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Open);
     let fills = fills.borrow();
     assert_eq!(fills.len(), 1);
     let fill = &fills[0];
@@ -1360,7 +1363,7 @@ fn constructed_spot_private_balance_frame_refreshes_authoritative_rest_store() {
     );
     h.runtime.advance(1000.0);
     assert_eq!(h.http.calls("/0/private/Balance").len(), before + 1);
-    let b = h.store.balance();
+    let b = h.store.balance().unwrap();
     assert_eq!((b.free, b.used, b.total, b.upnl), (132.0, 0.0, 132.0, 0.0));
     let currencies = b.currencies.as_ref().unwrap();
     assert_eq!(currencies["USD"].as_balance().unwrap().total, 125.0);
@@ -1371,14 +1374,14 @@ fn constructed_spot_private_balance_frame_refreshes_authoritative_rest_store() {
 fn constructed_spot_private_position_topic_preserves_rest_owned_store() {
     let h = spot_private_fixture();
     private_frame(&h, spot_private_order_frame());
-    let orders = h.store.orders().to_vec();
+    let orders = h.store.orders().unwrap().to_vec();
     assert_eq!(
         orders.len(),
         1,
         "ignored-topic witness starts with a real WS order"
     );
-    let positions = h.store.positions().to_vec();
-    let balance = h.store.balance().clone();
+    let positions = h.store.positions().unwrap().to_vec();
+    let balance = h.store.balance().unwrap().clone();
     let fills = std::rc::Rc::new(std::cell::Cell::new(0));
     let saved = fills.clone();
     h.venue().base().on(
@@ -1394,9 +1397,9 @@ fn constructed_spot_private_position_topic_preserves_rest_owned_store() {
             "symbol":"XBT/USD","contracts":99,"unrealizedPnl":123
         }]}),
     );
-    assert_eq!(&*h.store.orders(), orders.as_slice());
-    assert_eq!(&*h.store.positions(), positions.as_slice());
-    assert_eq!(&*h.store.balance(), &balance);
+    assert_eq!(&h.store.orders().unwrap(), orders.as_slice());
+    assert_eq!(&h.store.positions().unwrap(), positions.as_slice());
+    assert_eq!(&h.store.balance().unwrap(), &balance);
     assert_eq!(
         fills.get(),
         0,
@@ -1713,7 +1716,7 @@ fn ticker_corpus(name: ExchangeName, source_name: &str, count: usize) {
                 .unwrap();
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),
@@ -1831,5 +1834,260 @@ fn retained_numeric_prefixes_match_source_before_utf8_string_admission() {
             source[expected]["number"],
             "actual source {expected}"
         );
+    }
+}
+
+#[test]
+fn eager_typed_wrapper_starts_futures_request_before_the_waiter_is_polled() {
+    let h = futures(|_| {});
+    let waiter = h.venue().fetch_markets();
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls("/v3/instruments").len(),
+        1,
+        "runtime sends the request without polling the returned waiter"
+    );
+    let markets = h.drive(waiter).unwrap();
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].symbol, SYMBOL);
+    assert_eq!(
+        h.http.calls("/v3/instruments").len(),
+        1,
+        "polling the waiter must not restart the body"
+    );
+}
+
+#[test]
+fn eager_typed_wrapper_starts_spot_request_before_the_waiter_is_polled() {
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok("GET", "/0/public/OHLC", json!({"error":[],"result":{}}));
+    });
+    let waiter = h
+        .venue()
+        .fetch_ohlcv(serde_json::from_value(json!({"symbol":"BTC/USD","interval":"1m"})).unwrap());
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls("/0/public/OHLC").len(),
+        1,
+        "Spot request starts without polling the returned waiter"
+    );
+    let candles = h.drive(waiter).unwrap();
+    assert!(candles.is_empty());
+    assert_eq!(h.http.calls("/0/public/OHLC").len(), 1);
+}
+
+#[test]
+fn eager_unit_wrapper_continues_after_an_unpolled_waiter_is_dropped() {
+    let h = futures(|http| {
+        http.ok(
+            "PUT",
+            "/v3/leveragepreferences",
+            json!({"result":"success"}),
+        );
+    });
+    loaded(&h);
+    h.http.hold_responses.set(true);
+    let waiter = h.venue().set_leverage(SYMBOL.into(), 500.0, None);
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls("/v3/leveragepreferences").len(),
+        1,
+        "unit wrapper starts signed request without polling the waiter"
+    );
+    h.runtime.pump();
+    assert!(
+        !h.runtime
+            .console
+            .borrow()
+            .iter()
+            .any(|(_, message)| message.contains("Leverage set to")),
+        "response is still held"
+    );
+    drop(waiter);
+    h.http.release_responses();
+    h.runtime.pump();
+    assert!(
+        h.runtime
+            .console
+            .borrow()
+            .iter()
+            .any(|(level, message)| level == "info"
+                && message.contains("Leverage set to 50x for PF_XBTUSD")),
+        "runtime must finish the real body after its waiter is dropped"
+    );
+    assert_eq!(h.http.calls("/v3/leveragepreferences").len(), 1);
+}
+
+#[test]
+fn eager_unit_wrapper_preserves_rejection_instead_of_throwing_from_the_trait_call() {
+    let h = futures(|_| {});
+    let waiter = h.venue().set_leverage("UNKNOWN".into(), 2.0, None);
+    assert!(
+        h.runtime
+            .console
+            .borrow()
+            .iter()
+            .any(|(_, message)| message.contains("Market UNKNOWN not found")),
+        "source rejection reporting runs before its Promise returns"
+    );
+    let error = h.drive(waiter).unwrap_err();
+    assert!(
+        error.message.contains("Market UNKNOWN not found"),
+        "{}",
+        error.message
+    );
+    assert!(h.http.calls("/v3/leveragepreferences").is_empty());
+}
+
+#[test]
+fn eager_wrapper_live_source_prefix_and_detached_continuation() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/eager-wrapper-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["receipts"].as_array().unwrap().len(), 3);
+    assert_eq!(receipt["synchronousHttpPrefixes"], 3);
+    assert_eq!(receipt["detachedContinuation"], true);
+    assert_eq!(receipt["rejectionPrefix"], true);
+}
+
+#[test]
+fn historical_fill_ingress_keeps_valid_rows_with_unread_native_data() {
+    use safe_cex_exchange::js_runtime::value::from_retained_input;
+    use safe_cex_types::retained_json::RetainedJsonInput;
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fill-ingress-source.cjs"
+        ))
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let corpus: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(corpus["caseCount"], 12);
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 12);
+    let string = |value: &Value| {
+        String::from_utf16_lossy(
+            &value["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_u64().unwrap() as u16)
+                .collect::<Vec<_>>(),
+        )
+    };
+    for case in cases {
+        let raw = case["raw"].as_str().unwrap();
+        let retained =
+            RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
+        let body = from_retained_input(retained);
+        let h = futures(|http| {
+            http.route_native("GET", "/v3/fills", 200.0, body);
+            http.ok("GET", "/v3/fills", json!({"result":"success","fills":[]}));
+        });
+        loaded(&h);
+        let actual = h
+            .drive(
+                h.venue().fetch_historical_fills(
+                    serde_json::from_value(
+                        json!({"from":1_699_999_998_000_f64,"to":1_700_000_000_000_f64}),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let expected = case["output"].as_array().unwrap();
+        assert_eq!(expected.len(), 2, "independent source row count");
+        assert_eq!(
+            actual.len(),
+            2,
+            "retained fill page {}: {:?}",
+            case["label"],
+            h.runtime.console.borrow()
+        );
+        for (fill, expected) in actual.iter().zip(expected) {
+            assert_eq!(
+                fill.id.as_deref(),
+                Some(string(&expected["id"]).as_str()),
+                "{}",
+                case["label"]
+            );
+            assert_eq!(fill.symbol, string(&expected["symbol"]));
+            if expected["orderId"]["undefined"] == true {
+                assert!(fill.order_id.is_none());
+            } else {
+                assert_eq!(
+                    fill.order_id.as_deref(),
+                    Some(string(&expected["orderId"]).as_str())
+                );
+            }
+            for (field, number) in [
+                ("timestamp", fill.timestamp),
+                ("price", fill.price),
+                ("qty", fill.qty),
+            ] {
+                assert_eq!(
+                    format!("{:016x}", number.to_bits()),
+                    expected[field]["bits"].as_str().unwrap(),
+                    "{} {field}",
+                    case["label"]
+                );
+            }
+            if expected["realizedPnl"]["undefined"] == true {
+                assert!(fill.realized_pnl.is_none());
+            } else {
+                assert_eq!(
+                    format!("{:016x}", fill.realized_pnl.unwrap().to_bits()),
+                    expected["realizedPnl"]["bits"].as_str().unwrap()
+                );
+            }
+            assert_eq!(
+                fill.side,
+                if string(&expected["side"]) == "buy" {
+                    OrderSide::Buy
+                } else {
+                    OrderSide::Sell
+                }
+            );
+            assert_eq!(fill.maker, expected["maker"].as_bool());
+            assert!(
+                fill.commission.is_none()
+                    && fill.commission_asset.is_none()
+                    && fill.position_side.is_none()
+            );
+        }
+        let requests = h.http.calls("/v3/fills");
+        assert_eq!(
+            requests.len(),
+            2,
+            "first complete page followed by empty terminator"
+        );
+        assert_eq!(
+            requests[0].params,
+            json!({}),
+            "unwindowed newest page retains PnL"
+        );
+        assert_eq!(
+            requests[1].url,
+            "/v3/fills?lastFillTime=2023-11-14T22%3A13%3A19.001Z"
+        );
+        assert!(h.runtime.reports.borrow().is_empty());
+        h.venue().dispose().unwrap();
     }
 }

@@ -1,9 +1,10 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_bingx::{
     data_reads::{BingxDataReads, ReadTransport},
@@ -72,7 +73,7 @@ fn sorted(v: &Value) -> Value {
     }
 }
 fn ticker(v: &Ticker) -> Value {
-    json!({"id":v.id,"symbol":v.symbol,"bid":number(v.bid),"ask":number(v.ask),"last":number(v.last),"mark":number(v.mark),"index":number(v.index),"percentage":number(v.percentage),"fundingRate":number(v.funding_rate),"fundingTime":number(v.funding_time),"volume":number(v.volume),"quoteVolume":number(v.quote_volume),"openInterest":number(v.open_interest)})
+    json!({"id":v.id,"symbol":v.symbol,"bid":number(v.bid),"ask":number(v.ask),"last":number(v.last),"mark":number(v.mark),"index":v.index.map(number).unwrap_or(Value::Null),"percentage":number(v.percentage),"fundingRate":number(v.funding_rate),"fundingTime":number(v.funding_time),"volume":number(v.volume),"quoteVolume":number(v.quote_volume),"openInterest":number(v.open_interest)})
 }
 struct Host {
     input: Value,
@@ -404,7 +405,14 @@ fn public_stream_matches_actual_typescript() {
             "BINGX-PUBLIC callbacks {variant}"
         );
         assert_eq!(
-            json!(store.tickers().iter().map(ticker).collect::<Vec<_>>()),
+            json!(
+                store
+                    .tickers()
+                    .unwrap()
+                    .iter()
+                    .map(ticker)
+                    .collect::<Vec<_>>()
+            ),
             c["tickers"],
             "BINGX-PUBLIC native ticker bits {variant}"
         );
@@ -570,7 +578,8 @@ fn ticker_write_failure_preserves_original_cause() {
             let mut cause = ExchangeError::new("subscriber cause");
             cause.name = "ListenerError".into();
             cause.store_subscriber_ids = vec![71, 83];
-            cause.response = Some(json!({"data":{"msg":"subscriber denied"}}));
+            cause =
+                cause.with_retained_response((json!({"data":{"msg":"subscriber denied"}})).into());
             Err(StoreSubscriberError::new("subscriber cause").with_cause(Rc::new(cause)))
         }),
     );
@@ -592,12 +601,12 @@ fn ticker_write_failure_preserves_original_cause() {
         "BINGX-PUBLIC subscriber outer boundary"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(json!({"data":{"msg":"subscriber denied"}}))
     );
-    assert_eq!(store.tickers()[0].last, 13.5);
+    assert_eq!(store.tickers().unwrap()[0].last, 13.5);
     assert_eq!(
-        store.tickers()[0].mark,
+        store.tickers().unwrap()[0].mark,
         13.25,
         "BINGX-PUBLIC partial first write before rejection"
     );

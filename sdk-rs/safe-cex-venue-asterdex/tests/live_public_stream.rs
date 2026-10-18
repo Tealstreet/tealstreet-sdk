@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 #[path = "support/subscription_runtime.rs"]
 mod host;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask, LogSeverity},
@@ -9,7 +10,7 @@ use safe_cex_exchange::{
         WsSocket,
     },
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     TransportProvider,
     socket::{SocketFrame, TunnelHost},
@@ -274,7 +275,7 @@ fn ticker(actual: &Ticker, expected: &Value, label: &str) {
         ("ask", actual.ask),
         ("last", actual.last),
         ("mark", actual.mark),
-        ("index", actual.index),
+        ("index", actual.index.unwrap()),
         ("percentage", actual.percentage),
         ("openInterest", actual.open_interest),
         ("fundingRate", actual.funding_rate),
@@ -509,9 +510,12 @@ fn compare(family: &str) {
             let expected = &c["snapshots"][i];
             state(&s.subscriptions.state(), expected, name);
             if expected.get("ticker").is_none() {
-                assert!(store.tickers().is_empty(), "{name} native removed ticker");
+                assert!(
+                    store.tickers().unwrap().is_empty(),
+                    "{name} native removed ticker"
+                );
             } else {
-                ticker(&store.tickers()[0], &expected["ticker"], name);
+                ticker(&store.tickers().unwrap()[0], &expected["ticker"], name);
             }
             assert_eq!(
                 parent.events.borrow().len(),

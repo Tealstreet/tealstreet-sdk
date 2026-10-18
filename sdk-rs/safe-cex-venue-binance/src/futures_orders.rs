@@ -20,14 +20,14 @@ pub fn format_futures_create_order(
 ) -> Result<BinanceOrderPayloads, ExchangeError> {
     let market = base
         .store
-        .markets_by_symbol()
+        .markets_by_symbol()?
         .get(&opts.symbol)
         .cloned()
         .ok_or_else(|| ExchangeError::new(format!("Market {} not found", opts.symbol)))?;
-    let is_hedged = base.store.options().is_hedged;
+    let is_hedged = base.store.options()?.is_hedged;
     if opts.r#type == OrderType::TrailingStopLoss {
-        let ticker = base.store.tickers_by_symbol().get(&opts.symbol).cloned();
-        let positions = base.store.positions().to_vec();
+        let ticker = base.store.tickers_by_symbol()?.get(&opts.symbol).cloned();
+        let positions = base.store.positions()?.to_vec();
         let algo = crate::trailing_orders::format_create_trailing_stop_loss_order(
             opts,
             Some(&market),
@@ -59,7 +59,7 @@ pub fn format_futures_create_order(
     };
     let existing = base
         .store
-        .positions()
+        .positions()?
         .iter()
         .any(|p| p.symbol == opts.symbol && p.side == opposite && p.contracts.abs() > 0.0);
     let use_close = wants_close && existing;
@@ -127,7 +127,7 @@ pub fn format_futures_create_order(
         if reduce_only {
             insert(&mut request, "reduceOnly", "true");
         }
-        let max = market.limits.amount.max;
+        let max = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         let lots = if amount > max {
             (amount / max).ceil()
         } else {

@@ -53,7 +53,7 @@ fn production_native_retry_flags_read_live_owner_after_held_http() {
                 None,
                 safe_cex_exchange::native::NativeHttpEvents::default(),
             );
-            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
             Store::update(store.as_ref(), StoreUpdate {
                 orders: Some(vec![serde_json::from_value(json!({
                     "id":"existing-order", "symbol":"BTCUSDT", "status":"open", "type":"limit", "side":"buy",
@@ -106,12 +106,13 @@ fn production_native_retry_flags_read_live_owner_after_held_http() {
                 "retry flag reads current completed snapshot state"
             );
             assert_eq!(
-                store.loaded().orders,
+                store.loaded().unwrap().orders,
                 !malformed,
                 "live stale flag controls the real snapshot publication"
             );
             let ids: Vec<_> = store
                 .orders()
+                .unwrap()
                 .iter()
                 .map(|order| order.id.clone())
                 .collect();

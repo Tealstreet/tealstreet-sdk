@@ -215,10 +215,30 @@ impl WsRuntime for Runtime {
 
 #[derive(Default)]
 pub struct Http {
+    held: Mutex<Option<Arc<Hold>>>,
     pub sent: Mutex<Vec<RestRequest>>,
     routes: Mutex<Vec<(String, String, VecDeque<(u16, RestResponseBody)>)>>,
 }
+#[derive(Default)]
+pub struct Hold {
+    released: std::sync::atomic::AtomicBool,
+    wakers: Mutex<Vec<Waker>>,
+}
+impl Hold {
+    pub fn release(&self) {
+        self.released
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        for waker in self.wakers.lock().unwrap().drain(..) {
+            waker.wake();
+        }
+    }
+}
 impl Http {
+    pub fn hold_responses(&self) -> Arc<Hold> {
+        let hold = Arc::new(Hold::default());
+        *self.held.lock().unwrap() = Some(hold.clone());
+        hold
+    }
     pub fn route(&self, method: &str, path: &str, status: u16, value: Value) {
         self.route_body(
             method,
@@ -287,13 +307,28 @@ impl RestAdapter for Http {
             }
             None => panic!("unscripted {} {}", request.method, request.url),
         };
-        Box::pin(async move { result })
+        let hold = self.held.lock().unwrap().clone();
+        let mut result = Some(result);
+        Box::pin(std::future::poll_fn(move |cx| {
+            if let Some(hold) = &hold {
+                let mut wakers = hold.wakers.lock().unwrap();
+                if !hold.released.load(std::sync::atomic::Ordering::SeqCst) {
+                    wakers.push(cx.waker().clone());
+                    return Poll::Pending;
+                }
+            }
+            Poll::Ready(
+                result
+                    .take()
+                    .expect("terminal HTTP polled after settlement"),
+            )
+        }))
     }
 }
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Arc<Http>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<WeexExchange>,
 }
 pub fn options() -> ExchangeOptions {
@@ -306,7 +341,7 @@ pub fn harness(options: ExchangeOptions, script: impl FnOnce(&Http)) -> Harness 
     let http = Arc::new(Http::default());
     script(&http);
     let host = safe_cex_exchange::js_runtime::client::rest_http_host(runtime.clone(), http.clone());
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = WeexExchange::new(
         ExchangeName::Weex,
         options,

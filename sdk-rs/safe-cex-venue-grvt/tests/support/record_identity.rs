@@ -1,9 +1,14 @@
 use super::enum_identity::NativeEnum;
 use super::*;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_grvt::types::*;
 
 pub(super) trait NativeIdentity {
     fn assert_native(&self, expected: &Value, path: &str);
+    fn assert_retained(&self, expected: &Input, path: &str) {
+        let view = expected.clone().decode_native::<Value>(false).unwrap();
+        self.assert_native(&view, path);
+    }
 }
 impl NativeIdentity for String {
     fn assert_native(&self, expected: &Value, path: &str) {
@@ -34,6 +39,16 @@ impl NativeIdentity for f64 {
     }
 }
 impl<T: NativeIdentity> NativeIdentity for Option<T> {
+    fn assert_retained(&self, expected: &Input, path: &str) {
+        if let Some(value) = self {
+            value.assert_retained(expected, path);
+        } else {
+            assert!(
+                matches!(expected, Input::Null | Input::Undefined),
+                "GRVT native absent retained identity {path}"
+            );
+        }
+    }
     fn assert_native(&self, expected: &Value, path: &str) {
         if let Some(value) = self {
             value.assert_native(expected, path);
@@ -43,6 +58,19 @@ impl<T: NativeIdentity> NativeIdentity for Option<T> {
     }
 }
 impl<T: NativeIdentity> NativeIdentity for Vec<T> {
+    fn assert_retained(&self, expected: &Input, path: &str) {
+        let Input::Array(expected) = expected else {
+            panic!("GRVT expected retained array {path}")
+        };
+        assert_eq!(
+            self.len(),
+            expected.len(),
+            "GRVT native retained array length {path}"
+        );
+        for (i, (actual, expected)) in self.iter().zip(expected).enumerate() {
+            actual.assert_retained(expected, &format!("{path}[{i}]"));
+        }
+    }
     fn assert_native(&self, expected: &Value, path: &str) {
         let expected = expected.as_array().unwrap();
         assert_eq!(
@@ -56,6 +84,10 @@ impl<T: NativeIdentity> NativeIdentity for Vec<T> {
     }
 }
 impl NativeIdentity for safe_cex_num::numeric_ingress::JsNumberInput {
+    fn assert_retained(&self, expected: &Input, path: &str) {
+        let actual = self.clone().decode::<Input>().unwrap();
+        assert_retained_data(&actual, expected, path);
+    }
     fn assert_native(&self, expected: &Value, path: &str) {
         assert_eq!(
             serde_json::to_value(self).unwrap(),
@@ -64,9 +96,57 @@ impl NativeIdentity for safe_cex_num::numeric_ingress::JsNumberInput {
         );
     }
 }
+
+// Inspect native opaque contents before a JSON writer can replace units or
+// numeric bits. The old Value-only expectation cannot represent these inputs.
+fn assert_retained_data(actual: &Input, expected: &Input, path: &str) {
+    let number = |value: &Input| match value {
+        Input::Float(value) => Some(*value),
+        Input::Lexeme(value) => Some(value.parse::<f64>().unwrap()),
+        _ => None,
+    };
+    if let Some(expected) = number(expected) {
+        assert_eq!(
+            number(actual).unwrap().to_bits(),
+            expected.to_bits(),
+            "GRVT retained number bits {path}"
+        );
+        return;
+    }
+    match (actual, expected) {
+        (Input::Array(actual), Input::Array(expected)) => {
+            assert_eq!(
+                actual.len(),
+                expected.len(),
+                "GRVT retained array length {path}"
+            );
+            for (i, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+                assert_retained_data(actual, expected, &format!("{path}[{i}]"));
+            }
+        }
+        (Input::Object(actual), Input::Object(expected)) => {
+            assert_eq!(
+                actual.len(),
+                expected.len(),
+                "GRVT retained object length {path}"
+            );
+            for (i, ((key, actual), (expected_key, expected))) in
+                actual.iter().zip(expected).enumerate()
+            {
+                assert_eq!(key, expected_key, "GRVT retained key units {path}[{i}]");
+                assert_retained_data(actual, expected, &format!("{path}[{i}]"));
+            }
+        }
+        _ => assert_eq!(actual, expected, "GRVT retained native contents {path}"),
+    }
+}
 macro_rules! native_record {
     ($ty:ident { $($field:ident => $wire:literal),* $(,)? }) => {
         impl NativeIdentity for $ty {
+            fn assert_retained(&self, expected: &Input, path: &str) {
+                let Self { $($field),* } = self;
+                $($field.assert_retained(expected.get($wire).unwrap_or(&Input::Undefined), &format!("{path}.{}", $wire));)*
+            }
             fn assert_native(&self, expected: &Value, path: &str) {
                 let Self { $($field),* } = self;
                 $($field.assert_native(&expected[$wire], &format!("{path}.{}", $wire));)*

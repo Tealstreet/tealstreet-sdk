@@ -339,10 +339,10 @@ fn actual_typescript_batch_response_decoder() {
         [7, 40],
         "BATCH-DECODE completed native comparisons"
     );
-    assert!(
-        js_from_str::<BackpackOrderRequest>(corpus["boundary"]["requestRaw"].as_str().unwrap())
-            .is_err(),
-        "BATCH-DECODE surrogate request refusal"
+    typed_utf16::assert_projection(
+        corpus["boundary"]["requestRaw"].as_str().unwrap(),
+        &(js_from_str::<BackpackOrderRequest>(corpus["boundary"]["requestRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     assert_eq!(corpus["boundary"]["result"], json!(["ok"]));
 }
@@ -748,9 +748,13 @@ fn actual_typescript_cancel_symbol_orders() {
             assert_eq!(case["outcome"]["sameReplacement"], stage == "logger");
         }
     }
-    assert!(
-        js_from_str::<String>(corpus["cancelBoundary"]["symbolRaw"].as_str().unwrap()).is_err(),
-        "CANCEL-SYMBOL native surrogate refusal"
+    typed_utf16::assert_projection(
+        corpus["cancelBoundary"]["symbolRaw"].as_str().unwrap(),
+        &(js_from_str::<String>(corpus["cancelBoundary"]["symbolRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     assert_eq!(corpus["cancelBoundary"]["ok"], true);
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -365,3 +365,21 @@ numbers and the production typed-field frame adapter. The projection control
 changes that actual venue adapter, requires its compiled bit assertion to fail
 and restores exact bytes. This finite cohort does not replace underlying model
 contracts or claim every read method or arbitrary input-object identity.
+
+The shared retained/numeric typed decoder now replaces isolated UTF-16 units
+with U+FFFD in materialized String fields instead of rejecting the entire record.
+`tests/string_boundaries.rs` retains the live source corpus and exact unit/path
+pins, measures that accepted typed-view cost, and checks that ignored strings
+leave declared fields intact. Standalone serde_json::Value parsing and the
+separate bounded recursion behavior retain their own explicit checks.
+
+The two assigned FIX-audit rows are classified in `DIVERGENCE_FIX_AUDIT.md`.
+The production PEM decoder retains its native codec cause and the maintained
+`atob` name/message branches; the eleven separately labelled signing profiles
+reach both constructed WS-auth and validated REST-placement hooks. The pure
+unit-error facade remains outside that assembly. Starbase intent serialization
+is accepted only while the builder has no live transport/Store consumer; native
+blocked results still borrow the exact typed caller. Before activation, revisit
+caller-only own fields/order. `scripts/divergence-binding-controls.py` requires
+compiled production failures, exact restoration and the live inert-builder
+reachability control; existing source corpora and identity assertions stay intact.

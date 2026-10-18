@@ -257,7 +257,7 @@ pub fn fixture(
 ) -> (
     Rc<safe_cex_venue_orderly::native_exchange::OrderlyExchange>,
     Rc<Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     Arc<Wire>,
 ) {
     fixture_for(safe_cex_types::ExchangeName::TealstreetDex, options)
@@ -268,7 +268,7 @@ pub fn fixture_for(
 ) -> (
     Rc<safe_cex_venue_orderly::native_exchange::OrderlyExchange>,
     Rc<Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     Arc<Wire>,
 ) {
     use safe_cex_venue_orderly::native_exchange::{OrderlyDependencies, OrderlyExchange};
@@ -286,7 +286,7 @@ pub fn fixture_for(
     });
     #[expect(clippy::arc_with_non_send_sync)]
     let wire = Arc::new(Wire::default());
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let rt = runtime.clone();
     let transport = wire.clone();
     let venue = OrderlyExchange::new(

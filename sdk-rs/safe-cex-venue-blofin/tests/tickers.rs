@@ -1,7 +1,8 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, Ticker};
 use safe_cex_venue_blofin::tickers::*;
 use serde_json::{Value, json};
@@ -30,7 +31,7 @@ fn info(value: safe_cex_types::retained_json::RetainedJsonInput) -> Value {
 fn native(ticker: Ticker) -> Value {
     assert!(ticker.mid_price.is_none(), "ticker_mid_price_absent");
     let mut value = json!({"id":ticker.id,"symbol":ticker.symbol,"bid":bits(ticker.bid),"ask":bits(ticker.ask),
-        "last":bits(ticker.last),"mark":bits(ticker.mark),"index":bits(ticker.index),"percentage":bits(ticker.percentage),
+        "last":bits(ticker.last),"mark":bits(ticker.mark),"index":bits(ticker.index.expect("numeric ticker source profile")),"percentage":bits(ticker.percentage),
         "fundingRate":bits(ticker.funding_rate),"fundingTime":bits(ticker.funding_time),"volume":bits(ticker.volume),
         "quoteVolume":bits(ticker.quote_volume),"openInterest":bits(ticker.open_interest)});
     if let Some(raw) = ticker.info {
@@ -126,28 +127,31 @@ fn live_tickers_corpus() {
                     result
                         .as_ref()
                         .err()
-                        .is_some_and(|e| Rc::ptr_eq(e, &sentinel)),
+                        .is_some_and(|e| matches!(e, safe_cex_venue_blofin::reads::ReadError::Emitter(e) if Rc::ptr_eq(e, &sentinel))),
                     "ticker_host_error_identity"
                 );
             }
             if case["fallbackAlias"] == true {
+                let stored = store.tickers().unwrap();
                 assert!(
                     result
                         .as_ref()
-                        .is_ok_and(|rows| rows.as_ptr() != store.tickers().as_ptr()),
+                        .is_ok_and(|rows| rows.as_ptr() != stored.as_ptr()),
                     "ticker_owned_fallback_boundary"
                 );
             }
             let actual = match result {
                 Ok(v) => json!({"ok":v.into_iter().map(native).collect::<Vec<_>>()}),
-                Err(e) => {
+                Err(safe_cex_venue_blofin::reads::ReadError::Emitter(e)) => {
                     json!({"error":"Error","message":e.as_str(),"identity":Rc::ptr_eq(&e,&sentinel)})
                 }
+                Err(e) => panic!("unexpected non-emitter fixture failure: {e:?}"),
             };
             assert_eq!(
                 json!(
                     store
                         .tickers()
+                        .unwrap()
                         .iter()
                         .cloned()
                         .map(native)
