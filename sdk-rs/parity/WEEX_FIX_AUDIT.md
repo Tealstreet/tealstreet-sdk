@@ -93,3 +93,11 @@ PASS on that refreshed source (`/tmp/port-txflow-weex-refresh-fmt.log`,
 `/tmp/port-txflow-weex-refresh-native-clippy.log`, and
 `/tmp/port-txflow-weex-refresh-wasm-clippy.log`). Every Cargo invocation used
 `CARGO_INCREMENTAL=0`, SDK working directory, and one build job where applicable.
+
+Final normal merge `d17b59dc24` also includes #1116 (`b4cd660c24`), whose only
+incoming delta is a Phemex test fixture. WEEX and its dependency sources remain
+byte-identical to the passing scoped/native/WASM checks above. Full formatting,
+strict native all-target Clippy, cancellation **6 PASS**, and full index
+**7563/16672 PASS** were rerun on that merged tree; logs use the
+`/tmp/port-txflow-weex-refresh-final-` prefix. The #1017 hold has ended; this
+refreshed PR enables auto-merge with the merge strategy.
