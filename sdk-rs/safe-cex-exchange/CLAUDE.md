@@ -1855,3 +1855,9 @@ Native exception reporting retains its context through the reporter capability,
 then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
 Serialization errors stay visible; `native_console_default` checks both paths
 against Node and verifies that reporting leaves the retained input unchanged.
+
+Array.join retains UTF16 units through both separator and element coercion;
+UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
+`native_array_join_preserves_utf16_elements_separators_and_coercions` compares
+eight independent Node cases directly as native code units, including holes,
+nullish values, default separators, nested arrays and custom ToString results.
