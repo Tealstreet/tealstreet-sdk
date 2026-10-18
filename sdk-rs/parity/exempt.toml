@@ -7572,3 +7572,19 @@ reason = "Native host callback signature over an existing ordinary receiver, UTF
 [[exempt]]
 rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::set_write_observer"
 reason = "Native host ABI for installing or clearing the single fallible write observer on an ordinary canonical object; refuses other receiver kinds. This is native synchronization of an already shared source options object, without a separate TypeScript method or wire decoder. The source constructor and immediate native account reader tests verify its observable role, plus callback release, reentry and original failure propagation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/for_in.rs::ForInRecord"
+reason = "Native execution state for the JavaScript for-in operator used by Hyperliquid perp/Spot allMids bodies. TS has no named record declaration. It retains original descriptor/prototype referents; the separate accepted contract executes the actual compiler-selected constructor and independent Node key outputs, plus native shadow/deletion/UTF16/getter controls."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/for_in.rs::ForInRecord::get"
+reason = "Native control-record allocation for the source for-in language operation, with nullish empty iteration and original receiver retention. No named TypeScript constructor exists; actual compiler constructor observations remain enforced in accepted contracts, not exempted by this manifest entry."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/for_in.rs::ForInRecord::next_key"
+reason = "Native stepping of the source for-in language operation, using canonical own descriptors and prototype links. It skips deleted candidates, marks hidden names visited and never reads values. Actual Node/native order and compiled hidden-shadow/missing-prototype mutation controls pin this behavior; no named SDK method corresponds to the interpreter step."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::own_properties"
+reason = "Stock intrinsic descriptor-name/enumerability metadata in the existing retained PrototypeRealm, consumed by canonical for-in enumeration without reading values or allocating another heap. Native/Node property-set and flag witnesses cover six actual intrinsic roles; there is no named TypeScript SDK method and public intrinsic descriptor reflection remains refused."
