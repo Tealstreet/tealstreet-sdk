@@ -1,34 +1,16 @@
 //! Portfolio read orchestration; the raw request hook is supplied by the venue host.
 use crate::portfolio::{format_balance, format_open_positions, format_orders, format_positions};
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{
-    js_number_output, js_truthy,
-    numeric_ingress::{JsNumberInput, JsNumberOutput, js_deserialize_passthrough},
-};
-use serde::Serialize;
-#[derive(Serialize)]
-#[serde(transparent)]
-struct RawTruthiness {
-    value: serde_json::Value,
-}
-impl JsNumberOutput for RawTruthiness {
-    fn check_number_output(&self) {
-        js_number_output!(self, struct {} passthrough {value});
-    }
-}
+use safe_cex_num::numeric_ingress::JsNumberInput;
 fn truthy_input(input: Option<JsNumberInput>) -> Result<Option<JsNumberInput>, ExchangeError> {
     let Some(input) = input else {
         return Ok(None);
     };
     let raw = input
         .clone()
-        .decode_with(|d| js_deserialize_passthrough(d).map(|value| RawTruthiness { value }))
+        .decode::<safe_cex_types::retained_json::RetainedJsonInput>()
         .map_err(|e| ExchangeError::new(e.to_string()))?;
-    Ok(if js_truthy(Some(&raw.value)) {
-        Some(input)
-    } else {
-        None
-    })
+    Ok(if raw.is_truthy() { Some(input) } else { None })
 }
 use safe_cex_store::Store;
 use safe_cex_types::{Balance, Order, Position};

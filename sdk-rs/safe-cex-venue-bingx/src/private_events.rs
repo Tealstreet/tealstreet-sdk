@@ -1,15 +1,13 @@
 //! Private fills/account bodies over the shared Store and landed REST position reads.
 use crate::{constants, data_reads::BingxDataReads};
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
-use safe_cex_num::{
-    TableHit, js_number, js_string, js_table_lookup, js_truthy, math_max, parse_float, subtract,
-};
+use safe_cex_num::{TableHit, js_table_lookup, math_max, subtract};
 use safe_cex_store::StoreUpdate;
 use safe_cex_types::{
     MarginType, Order, OrderStatus, OrderTimeInForce, OrderType, Position, PositionMode,
     PositionSide, model_utils::create_position_id,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -20,24 +18,22 @@ fn type_error(message: impl Into<String>) -> ExchangeError {
     e.name = "TypeError".into();
     e
 }
-fn text(value: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(value).map_err(|e| type_error(e.message))
+fn text(value: Option<&Input>) -> Result<String, ExchangeError> {
+    safe_cex_num::js_retained_string(value).map_err(|e| type_error(e.message))
 }
-fn first<'a>(row: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+fn first<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     for (i, key) in keys.iter().enumerate() {
         let v = row.get(*key);
-        if v.is_some_and(|v| !v.is_null()) || i + 1 == keys.len() {
+        if v.is_some_and(|v| !v.is_nullish()) || i + 1 == keys.len() {
             return v;
         }
     }
     None
 }
-fn float(value: Option<&Value>) -> Result<f64, ExchangeError> {
-    Ok(parse_float(&text(value)?))
+fn float(value: Option<&Input>) -> Result<f64, ExchangeError> {
+    safe_cex_num::js_retained_parse_float(value).map_err(|e| type_error(e.message))
 }
-fn number(value: Option<&Value>) -> Result<f64, ExchangeError> {
-    js_number(value).map_err(|e| type_error(e.message))
-}
+
 fn table<T: Copy>(rows: &[(&str, T)], key: &str) -> Result<Option<T>, ExchangeError> {
     match js_table_lookup(rows, key) {
         TableHit::Mapped(v) => Ok(Some(*v)),
@@ -45,17 +41,29 @@ fn table<T: Copy>(rows: &[(&str, T)], key: &str) -> Result<Option<T>, ExchangeEr
         TableHit::Inherited(_) => Err(type_error("BingX typed enum refuses an inherited callable")),
     }
 }
-fn strict_true(value: Option<&Value>) -> bool {
-    value == Some(&Value::Bool(true)) || value == Some(&Value::String("true".into()))
-}
+
 fn finite_or_zero(value: f64) -> f64 {
     if value.is_finite() { value } else { 0.0 }
 }
 
-pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>, ExchangeError> {
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
+fn number(value: Option<&Input>) -> Result<f64, ExchangeError> {
+    safe_cex_num::js_retained_number(value).map_err(|e| type_error(e.message))
+}
+fn strict_true(value: Option<&Input>) -> bool {
+    value.is_some_and(|v| matches!(v, Input::Bool(true)) || v.text_equals("true"))
+}
+pub fn map_order<I: Clone + Into<Input>>(
+    o: &I,
+    orders: &[Order],
+    now: f64,
+) -> Result<Option<Order>, ExchangeError> {
+    let retained: Input = o.clone().into();
+    let o = &retained;
     let id = first(o, &["orderId", "orderID", "i"]);
     let symbol = first(o, &["symbol", "s"])
-        .and_then(Value::as_str)
+        .and_then(Input::as_text)
+        .and_then(|s| String::from_utf16(s).ok())
         .map(|s| s.replace('-', ""));
     let kind = table(
         &constants::ORDER_TYPE,
@@ -88,10 +96,10 @@ pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>,
     } else {
         number(raw_amount)?
     };
-    let zero = json!(0);
+    let zero = Input::Float(0.0);
     let filled = number(
         first(o, &["executedQty", "z"])
-            .filter(|v| !v.is_null())
+            .filter(|v| !v.is_nullish())
             .or(Some(&zero)),
     )?;
     if !amount.is_finite() || !filled.is_finite() {
@@ -181,7 +189,7 @@ pub trait PrivateEventHost {
         callback: Rc<dyn Fn() -> Result<(), ExchangeError>>,
     ) -> Result<(), ExchangeError>;
     fn spawn(&self, future: ExchangeFuture<'static, ()>) -> Result<(), ExchangeError>;
-    fn emit_fill(&self, payload: Value) -> Result<(), ExchangeError>;
+    fn emit_fill(&self, payload: Input) -> Result<(), ExchangeError>;
     fn report_exception(&self, error: &ExchangeError);
 }
 pub struct BingxPrivateEvents {
@@ -205,31 +213,33 @@ impl BingxPrivateEvents {
             emitted_fill_qty_by_order_id: RefCell::default(),
         })
     }
-    pub fn normalize_symbol(&self, symbol: Option<&Value>) -> Result<String, ExchangeError> {
-        let empty = json!("");
-        text(if js_truthy(symbol) {
+    pub fn normalize_symbol(&self, symbol: Option<&Input>) -> Result<String, ExchangeError> {
+        let empty = Input::Text(vec![]);
+        text(if symbol.is_some_and(Input::is_truthy) {
             symbol
         } else {
             Some(&empty)
         })
         .map(|s| s.replace('-', ""))
     }
-    pub fn extract_account_positions(&self, event: &Value) -> Vec<Value> {
+    pub fn extract_account_positions(&self, event: &Input) -> Vec<Input> {
         for key in ["P", "B", "p"] {
             let Some(rows) = event
                 .get("a")
                 .and_then(|a| a.get(key))
-                .and_then(Value::as_array)
+                .and_then(Input::as_array)
             else {
                 continue;
             };
             let positions = rows
                 .iter()
                 .filter(|row| {
-                    (row.is_object() || row.is_array())
+                    matches!(row, Input::Object(_) | Input::Array(_))
                         && row
                             .get("s")
-                            .and_then(Value::as_str)
+                            .and_then(Input::as_text)
+                            .and_then(|v| String::from_utf16(v).ok())
+                            .as_deref()
                             .is_some_and(|s| !s.is_empty())
                         && [
                             "pa",
@@ -315,12 +325,16 @@ impl BingxPrivateEvents {
             self.host.report_exception(&e);
         }
     }
-    pub fn handle_order_events(self: &Rc<Self>, events: &[Value]) -> Result<(), ExchangeError> {
+    pub fn handle_order_events(self: &Rc<Self>, events: &[Input]) -> Result<(), ExchangeError> {
         for event in events {
             let data = event
                 .get("o")
                 .ok_or_else(|| type_error("Cannot read properties of undefined (reading 'X')"))?;
-            let status = data.get("X").and_then(Value::as_str);
+            let owned_status = data
+                .get("X")
+                .and_then(Input::as_text)
+                .and_then(|v| String::from_utf16(v).ok());
+            let status = owned_status.as_deref();
             if matches!(status, Some("PARTIALLY_FILLED" | "FILLED")) {
                 let id = text(data.get("i"))?;
                 let previous = self
@@ -329,9 +343,9 @@ impl BingxPrivateEvents {
                     .iter()
                     .find(|(k, _)| k == &id)
                     .map_or(0.0, |(_, v)| *v);
-                let zero = json!(0);
-                let cumulative = float(data.get("z").filter(|v| !v.is_null()).or(Some(&zero)))?;
-                let direct = float(data.get("l").filter(|v| !v.is_null()).or(Some(&zero)))?;
+                let zero = Input::Float(0.0);
+                let cumulative = float(data.get("z").filter(|v| !v.is_nullish()).or(Some(&zero)))?;
+                let direct = float(data.get("l").filter(|v| !v.is_nullish()).or(Some(&zero)))?;
                 let delta = if cumulative.is_finite() {
                     math_max(cumulative - previous, 0.0)
                 } else {
@@ -349,8 +363,8 @@ impl BingxPrivateEvents {
                     if status == Some("FILLED") {
                         let price = float(
                             data.get("ap")
-                                .filter(|v| js_truthy(Some(v)))
-                                .or_else(|| data.get("p").filter(|v| js_truthy(Some(v))))
+                                .filter(|v| v.is_truthy())
+                                .or_else(|| data.get("p").filter(|v| v.is_truthy()))
                                 .or(Some(&zero)),
                         )?;
                         let amount = if cumulative.is_finite() && cumulative > 0.0 {
@@ -360,18 +374,29 @@ impl BingxPrivateEvents {
                         };
                         let symbol = data
                             .get("s")
-                            .and_then(Value::as_str)
+                            .and_then(Input::as_text)
+                            .and_then(|v| String::from_utf16(v).ok())
+                            .as_deref()
                             .ok_or_else(|| type_error("fill symbol has no replace method"))?
                             .replace('-', "");
                         let side = table(&constants::ORDER_SIDE, &text(data.get("S"))?)?;
-                        let mut payload =
-                            json!({"symbol":symbol,"price":finite_or_zero(price),"amount":amount});
+                        let mut payload = Input::from(
+                            json!({"symbol":symbol,"price":finite_or_zero(price),"amount":amount}),
+                        );
                         if let Some(id) = data.get("i") {
-                            payload["id"] = id.clone();
+                            payload
+                                .as_object_mut()
+                                .unwrap()
+                                .push(("id".encode_utf16().collect(), id.clone()));
                         }
                         if let Some(side) = side {
-                            payload["side"] = serde_json::to_value(side)
-                                .map_err(|e| ExchangeError::new(e.to_string()))?;
+                            payload.as_object_mut().unwrap().push((
+                                "side".encode_utf16().collect(),
+                                Input::from(
+                                    serde_json::to_value(side)
+                                        .map_err(|e| ExchangeError::new(e.to_string()))?,
+                                ),
+                            ));
                         }
                         self.host.emit_fill(payload)?;
                     }
@@ -405,7 +430,12 @@ impl BingxPrivateEvents {
             }
             if matches!(status, Some("CANCELED" | "EXPIRED" | "FILLED")) {
                 let id = text(data.get("i"))?;
-                if let Some(stored_id) = data.get("i").and_then(Value::as_str) {
+                if let Some(stored_id) = data
+                    .get("i")
+                    .and_then(Input::as_text)
+                    .and_then(|v| String::from_utf16(v).ok())
+                    .as_deref()
+                {
                     self.parent
                         .base
                         .store
@@ -428,7 +458,7 @@ impl BingxPrivateEvents {
     }
     pub async fn handle_account_events(
         self: &Rc<Self>,
-        events: &[Value],
+        events: &[Input],
     ) -> Result<(), ExchangeError> {
         let account_mode = match self.parent.get_or_fetch_position_mode(false).await {
             Ok(mode) => Some(mode),
@@ -447,17 +477,21 @@ impl BingxPrivateEvents {
                 if symbol.is_empty() {
                     continue;
                 }
-                let zero = json!(0);
+                let zero = Input::Float(0.0);
                 let raw = float(
                     first(&update, &["pa", "positionAmt"])
-                        .filter(|v| !v.is_null())
+                        .filter(|v| !v.is_nullish())
                         .or(Some(&zero)),
                 )?;
                 if !raw.is_finite() {
                     continue;
                 }
-                let ws = update.get("ps").and_then(Value::as_str).unwrap_or("");
-                let fallback = if matches!(ws, "LONG" | "SHORT") {
+                let ws = update
+                    .get("ps")
+                    .and_then(Input::as_text)
+                    .and_then(|v| String::from_utf16(v).ok())
+                    .unwrap_or_default();
+                let fallback = if matches!(ws.as_str(), "LONG" | "SHORT") {
                     PositionMode::Hedged
                 } else {
                     PositionMode::OneWay
@@ -476,7 +510,7 @@ impl BingxPrivateEvents {
                     .filter(|p| p.symbol == symbol)
                     .collect::<Vec<_>>();
                 let mapped = if mode == PositionMode::Hedged {
-                    table(&constants::POSITION_SIDE, ws)?
+                    table(&constants::POSITION_SIDE, &ws)?
                 } else {
                     None
                 };
@@ -510,7 +544,7 @@ impl BingxPrivateEvents {
                     continue;
                 }
                 let scalar = |keys: &[&str], old: Option<f64>| -> Result<f64, ExchangeError> {
-                    if let Some(v) = first(&update, keys).filter(|v| !v.is_null()) {
+                    if let Some(v) = first(&update, keys).filter(|v| !v.is_nullish()) {
                         float(Some(v))
                     } else {
                         Ok(old.unwrap_or(0.0))
@@ -530,7 +564,9 @@ impl BingxPrivateEvents {
                 )?);
                 let margin = update
                     .get("mt")
-                    .and_then(Value::as_str)
+                    .and_then(Input::as_text)
+                    .and_then(|v| String::from_utf16(v).ok())
+                    .as_deref()
                     .map(|m| {
                         if m.to_lowercase() == "isolated" {
                             MarginType::Isolated

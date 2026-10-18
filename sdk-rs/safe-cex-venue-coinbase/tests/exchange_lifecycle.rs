@@ -46,9 +46,9 @@ fn portfolio(id: &str) -> Portfolio {
     Rc::new(RefCell::new(PortfolioState {
         uuid: id.into(),
         r#type: "SPOT".into(),
-        metadata: serde_json::Map::from_iter([
-            ("name".into(), json!("named")),
-            ("deleted".into(), json!(false)),
+        metadata: indexmap::IndexMap::from_iter([
+            ("name".into(), json!("named").into()),
+            ("deleted".into(), json!(false).into()),
         ]),
     }))
 }

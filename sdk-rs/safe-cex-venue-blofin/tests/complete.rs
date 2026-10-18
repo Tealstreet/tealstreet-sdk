@@ -3,7 +3,6 @@ mod host;
 #[path = "support/retained_assert.rs"]
 mod retained_assert;
 use host::*;
-use safe_cex_num::numeric_ingress::js_value_as_f64;
 use safe_cex_types::*;
 use safe_cex_venue_blofin::{exchange::*, private_stream_data::*, public_stream_data::*};
 use serde_json::{Value, json};
@@ -52,27 +51,6 @@ fn number(n: f64, e: &Value) {
             u64::from_str_radix(e["number"].as_str().unwrap(), 16).unwrap(),
             "native numeric bits"
         )
-    }
-}
-fn plain(n: &Value, e: &Value) {
-    if e.get("number").is_some() {
-        number(js_value_as_f64(n).unwrap(), e)
-    } else {
-        match (n, e) {
-            (Value::Object(n), Value::Object(e)) => {
-                assert_eq!(n.len(), e.len(), "native object count");
-                for (k, n) in n {
-                    plain(n, &e[k]);
-                }
-            }
-            (Value::Array(n), Value::Array(e)) => {
-                assert_eq!(n.len(), e.len(), "native array count");
-                for (n, e) in n.iter().zip(e) {
-                    plain(n, e);
-                }
-            }
-            _ => assert_eq!(n, e, "native primitive"),
-        }
     }
 }
 fn effects(n: &Value, e: &Value) {

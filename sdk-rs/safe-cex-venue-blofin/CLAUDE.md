@@ -358,3 +358,9 @@ false are checked with distinct good rows and finite Store resets. All native
 Ticker numeric bits match the constructed TS exchange and DefaultStore. The
 shared control runner misroutes the live last-price field and requires compiled
 failure followed by exact-restored success.
+
+Model `info` uses canonical `RetainedJsonInput` inside its existing presence
+wrapper. Read numbers and UTF-16 fields directly before any JSON report; source
+computed numbers use `Float`. Consumer coercion uses the shared retained Number,
+parseFloat and String helpers. JSON rendering belongs at the explicit output
+boundary, with no alternate model-info carrier.

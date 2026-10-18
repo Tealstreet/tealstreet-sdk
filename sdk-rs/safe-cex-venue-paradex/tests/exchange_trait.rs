@@ -337,9 +337,14 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
     assert_eq!(order.amount, 0.012);
     assert_eq!(order.remaining, 0.009);
     assert_eq!(order.filled.to_bits(), (0.012_f64 - 0.009).to_bits());
-    assert_eq!(
-        order.info.as_ref().unwrap().get("market").unwrap(),
-        "BTC-USD-PERP"
+    assert!(
+        order
+            .info
+            .as_ref()
+            .unwrap()
+            .get("market")
+            .unwrap()
+            .text_equals("BTC-USD-PERP")
     );
     drop(orders);
     push(

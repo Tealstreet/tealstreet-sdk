@@ -487,10 +487,8 @@ fn execution_rows<E>(
 ) -> Result<Vec<Execution>, ServiceError<E>> {
     let mut out = Vec::new();
     for row in rows {
-        if crate::utility::is_known_non_swap_instrument(&UtilityInput::from_retained(
-            (row.clone()).into(),
-        ))
-        .map_err(ServiceError::Coercion)?
+        if crate::utility::is_known_non_swap_instrument(&UtilityInput::from_retained(row.clone()))
+            .map_err(ServiceError::Coercion)?
         {
             continue;
         }

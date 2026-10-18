@@ -500,10 +500,14 @@ pub fn get_max_algo_orders_limit(
     };
     for filter in filters {
         // Array.find evaluates each predicate until the first matching filter.
-        if filter.is_null() {
+        if filter.is_nullish() {
             return Err(JsCoercionError {
                 name: "TypeError",
-                message: "Cannot read properties of null (reading 'filterType')",
+                message: if filter.is_null() {
+                    "Cannot read properties of null (reading 'filterType')"
+                } else {
+                    "Cannot read properties of undefined (reading 'filterType')"
+                },
             });
         }
         if filter
@@ -573,10 +577,14 @@ pub fn get_tick_size(market: &safe_cex_types::Market) -> Result<f64, JsCoercionE
             });
         };
         for filter in filters {
-            if filter.is_null() {
+            if filter.is_nullish() {
                 return Err(JsCoercionError {
                     name: "TypeError",
-                    message: "Cannot read properties of null (reading 'filterType')",
+                    message: if filter.is_null() {
+                        "Cannot read properties of null (reading 'filterType')"
+                    } else {
+                        "Cannot read properties of undefined (reading 'filterType')"
+                    },
                 });
             }
             if filter
@@ -585,7 +593,7 @@ pub fn get_tick_size(market: &safe_cex_types::Market) -> Result<f64, JsCoercionE
             {
                 let tick = filter.get("tickSize");
                 if tick.is_some_and(Input::is_truthy) {
-                    return Ok(safe_cex_num::js_retained_parse_float(tick)?);
+                    return safe_cex_num::js_retained_parse_float(tick);
                 }
                 break;
             }
