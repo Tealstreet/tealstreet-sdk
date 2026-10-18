@@ -939,6 +939,14 @@ Position-mode failure extras also retain raw message units while the source
 continues with its `oneway` placement fallback. Runtime report contexts remain
 canonical retained inputs through the terminal reporting capability.
 
+The ticker prototype witness in `tests/ticker_prototype_native.rs` passes raw
+frames through constructed primary/demo/inverse/spot sockets on NativeRuntime.
+It compares 192 maintained-source cases against the full TS DefaultStore:
+stock prototype members, own shadows, dictionary prototype tickers, parse
+failures, notifications and the real `undefined` ID target. The handler uses
+Store's canonical lookup instead of the borrowed own-entry map. SDK timing and
+onMessage handler-table prototype dispatch remain separate rows.
+
 The three no-socket send/subscribe rejection-timing rows now have a real native
 reconciliation witness in `tests/detached_reconnect_native.rs`: constructed
 primary/demo exchanges, actual Store notification and native stderr reporting.

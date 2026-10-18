@@ -218,6 +218,20 @@ No generation guard, local task registry, or invented core API is substituted.
 
 The extracted ticker handler retained `StoreMutationError`, but the production `PublicProtocol::register_handlers` callback still replaced it with a message-only `ExchangeError`. The native-registry regression in `tests/native_host_bybit.rs` now exercises the four actual Bybit-family constructors and the registered ticker callback, asserting the committed update, skipped later subscriber, original error name/response/cause and appended subscriber-ID chain. The callback uses the existing canonical Store-error conversion. `scripts/ticker-event-fixtures.mjs` also asserts that each maintained TS ticker method propagates the exact subscriber error after committing the patch.
 
+## Ticker prototype lookup reconciliation
+
+The earlier inherited-symbol finding is repaired independently of notifications.
+The native `ticker_prototype_native` target constructs every public Bybit family
+with NativeRuntime, real DefaultStore and production message handlers. Its 192
+source cases execute the maintained ticker methods and complete DefaultStore,
+including stock Object.prototype members, own shadows, a ticker installed as the
+dictionary prototype, malformed prices and a real ticker whose ID is `undefined`.
+The committed regression observes no error on master where TS throws TypeError;
+the canonical Store lookup makes parsing and subsequent target resolution agree.
+The older 1,944-case test now asserts equality for the twelve inherited cases
+instead of asserting the buggy skip. This closes ticker-symbol membership only;
+onMessage's handler-table prototype dispatch and private onOpen remain separate.
+
 ## Current native reconnect timing reconciliation
 
 The three send/subscribe findings above described an older core. Current
