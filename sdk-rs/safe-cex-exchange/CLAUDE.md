@@ -140,6 +140,14 @@ A capability binding carries the actual callback and its origin together:
 base fallback, explicit empty override, or venue implementation. Only the SDK
 constructs base-fallback bindings; registering an override removes the brand.
 Support is never inferred from a returned empty vector or a separate boolean.
+This is a native implementation, not execution of base.ts's Symbol-keyed
+Object.defineProperty helpers. `tests/capability_brand_source.cjs` executes the
+unchanged maintained helpers with real Node Symbol descriptors; two focused
+`core_contract` tests compare all ten method brands, retained bindings after
+replacement, unbranded overrides and original callback results. The compiled
+cross-method and stale-brand controls are in `scripts/capability-brand-controls.py`.
+General JS Symbol-keyed descriptor support remains unavailable; it is unreachable
+from native capability branding and is not implemented by this typed metadata.
 The branded throwing defaults are `start`, `placeOrder` and the three option
 reads (`fetchOptionChain`, `fetchOptionExpiries`, `fetchAccountGreeks`), which
 reject naming the venue rather than return an empty chain; the branded empty

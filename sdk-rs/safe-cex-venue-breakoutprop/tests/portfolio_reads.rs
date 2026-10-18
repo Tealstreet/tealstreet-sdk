@@ -397,10 +397,72 @@ fn inherited_and_utf8_read_boundaries() {
     }
     for case in ORACLE["utf8"].as_array().unwrap() {
         assert_eq!(case["codeUnit"], 55296, "read_source_surrogate");
-        assert!(
-            serde_json::from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).is_err(),
-            "read_utf8_boundary"
-        );
+        let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let fetch = || std::future::ready(Ok::<_, String>(Some(input.clone())));
+        let report = |_: &str| -> Result<(), ExchangeError> {
+            panic!("retained symbol is not a source mapping error")
+        };
+        match case["method"].as_str().unwrap() {
+            "fetchBalance" => {
+                let balance = run(fetch_balance(fetch, &store, &|ms| ms, &report, |e| {
+                    e.message
+                }))
+                .unwrap();
+                assert_eq!(
+                    balance
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("portfolios")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .get("positions")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .get("symbol")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+                assert!(balance.used > 0.0);
+            }
+            "fetchOpenPositions" => assert!(
+                run(fetch_open_positions(
+                    fetch,
+                    &store,
+                    &|ms| ms,
+                    &report,
+                    |e| e.message
+                ))
+                .is_err(),
+                "closed Position symbol refusal"
+            ),
+            "fetchOrders" => assert!(
+                run(fetch_orders(fetch, &store, &|ms| ms, &report, |e| e.message)).is_err(),
+                "closed Order symbol refusal"
+            ),
+            "fetchPositions" => {
+                assert!(
+                    serde_json::from_str::<Vec<String>>(r#"["\ud800"]"#).is_err(),
+                    "closed requested-symbol input"
+                );
+                assert!(
+                    run(fetch_positions(
+                        fetch,
+                        &store,
+                        &|ms| ms,
+                        None,
+                        &report,
+                        |e| e.message
+                    ))
+                    .unwrap()
+                    .is_empty()
+                );
+            }
+            method => panic!("unknown surrogate read {method}"),
+        }
     }
 }
 
