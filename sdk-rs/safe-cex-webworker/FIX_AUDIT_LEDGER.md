@@ -9,7 +9,7 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | --- | --- | --- | --- |
 | 2 | ChaserOrderManager#tryPlaceOrders | FIX | Canonical eager continuation and await checkpoints; late-stop cancellation survives a dropped waiter. |
 | 3 | ChaserOrderManager#emitComplete | FIX | Canonical settlement and retained fill reconciliation after caller abandonment. |
-| 4 | chaserOrderManagerInstance | OPEN | Constructed module/receiver composition. |
+| 4 | chaserOrderManagerInstance | ACCEPT | Pure empty-list allocation; actual module/thread identity and real-engine witness below. |
 | 5 | TwapInstance.resume | FIX | Canonical Promise settlement; immediate prefix and rejection profiles below. |
 | 6 | TwapInstance.terminate | FIX | Same settlement boundary; synchronous cleanup and partial-commit order preserved. |
 | 7 | UpdatePositionsHandler.handleUpdatePositions | FIX | Shared eager boundary; source/native timing profiles below. |
@@ -20,7 +20,7 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 20 | start | OPEN | Constructed worker session/bootstrap lifecycle. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
 | 22 | defaultChaserState | OPEN | Native default ownership and caller mutation. |
-| 23 | ChaserOrderManager | OPEN | Constructed manager and receiver contracts. |
+| 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
 | 25 | ChaserCompleteEvent | OPEN | Native event payload. |
 | 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
@@ -144,3 +144,35 @@ Rows 26/78 remain OPEN: typed Exchange arguments still reject values TS forwards
 primitive throws are not ExchangeError, and raw dispatcher defaults still differ
 from source object spread. The retained carrier review must resolve those costs;
 this timing change supplies no authorization for accepting them.
+
+## Manager composition: rows 4 and 23
+
+The maintained manager has no constructor body: its only instance initializer is
+an empty array, and its module export constructs that manager once. Allocation
+runs no exchange, host callback, timer or Promise. The native accessor delays this
+allocation until first access and retains one manager per host thread. Independent
+threads model independent worker module realms, rather than a process-global
+non-Send Rc. This delay has no caller-visible prefix or continuation to lose.
+
+The explicit host/callback composition category ruling authorizes row 23's
+required native bindings. There are no default-success supervision, cancellation
+or completion leaves. The existing ChaserEngine implements those bodies; its
+ChaserHost supplies terminal venue/runtime capabilities. This classification
+covers linking and manager ownership, not arbitrary method replacement, startup
+ordering or the independently mapped method behavior.
+
+The real-engine composition test executes the maintained module in two separate
+VM realms and native singleton access on separate threads. It compares shared
+manager/list identity, independent managers, empty construction without terminal
+calls, immediate add registration/logging, stopped-instance cleanup and exactly
+one completion. Native size/fill bits are asserted before the finite source
+profile. The native path uses ChaserOrderManager, ChaserEngine, BaseExchange,
+DefaultStore and the canonical runtime; the supplied host owns only terminal
+capabilities. Existing dispatch and engine cases retain reentrant list changes,
+listener failures, cancellation, placement and reconciliation floors. A compiled
+control rebinds supervision to a fresh manager instead of the registered one;
+the named composition assertion fails with an uncleared singleton. Exact
+production bytes are restored before the positive replay and required gates.
+
+No worker-carrier or numeric-depth row is closed by this evidence. Rows 21/22,
+24/25 and 75 retain their independent state/default/event/options review.
