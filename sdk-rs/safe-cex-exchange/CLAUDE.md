@@ -1713,3 +1713,31 @@ resolution operation. Serial helpers use it before awaiting input and callback
 results, preserving synchronous then lookup, deferred invocation, first-call
 settlement and original rejection identity. General direct await/async-return
 and combinator adoption remains a separately recorded follow-up after #901.
+
+Ordinary Js objects, including host-resource objects, allocate with the active
+PrototypeRealm's real Object.prototype reference. A None prototype slot is null,
+so there is no implicit stock-prototype String fallback. Legacy __proto__ writes
+and Object.setPrototypeOf reuse one ordinary Object/Function metadata operation:
+primitive legacy values are ignored, own data/accessor shadows retain their
+behavior, original receivers are preserved, and cycle/non-extensibility checks
+run before mutation. Opaque resources remain attached to the same referent and
+are neither inherited nor copied by changing its prototype.
+
+The Object facade exposes the same realm prototype as a nonenumerable immutable
+property. setPrototypeOf validates target/prototype in source order, preserves
+primitive target identity, and bypasses shadowable __proto__ properties. Mutable
+prototype storage for arrays, Map/Set and other nonordinary variants remains a
+separate representation boundary; unsupported changes refuse explicitly.
+`tests/js_object_prototypes.rs` compares actual Node observations with production
+allocation/property algorithms and the installed Object facade.
+
+Native host objects retain one opaque Rc<dyn Any> on their canonical ObjectData.
+Js::host_object creates the ordinary reference, and resource<T> downcasts only its
+own attachment; prototypes and object spread never transfer that native slot.
+Ordinary descriptors, reflection, freeze and explicit JSON use the existing JS
+property operations, with the resource excluded from those property views.
+The native resource target checks original Rc identity, number bits, type refusal,
+private-slot mutation through freeze, inherited getter receivers and final release.
+Independent dropped-retention and leaked-retention faults must compile, fail named
+assertions, restore exact source and pass. This adds no native resource wire codec
+and does not switch a Hyperliquid consumer or change default prototype policy.
