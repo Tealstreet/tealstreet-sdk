@@ -338,18 +338,12 @@ fn axios_error(response: &Js, config: &Js) -> Result<Thrown, Thrown> {
     error.define("response", response.clone())?;
     error.define("config", config.clone())?;
     error.define("isAxiosError", Js::Bool(true))?;
-    if let Js::Number(status) = &status {
-        let code = if (400.0..500.0).contains(status) {
-            Some("ERR_BAD_REQUEST")
-        } else if (500.0..600.0).contains(status) {
-            Some("ERR_BAD_RESPONSE")
-        } else {
-            None
-        };
-        if let Some(code) = code {
-            error.define("code", Js::str(code))?;
-        }
-    }
+    let code = if matches!(&status, Js::Number(status) if (400.0..500.0).contains(status)) {
+        "ERR_BAD_REQUEST"
+    } else {
+        "ERR_BAD_RESPONSE"
+    };
+    error.define("code", Js::str(code))?;
     error.define("status", status)?;
     Ok(Thrown::new(error))
 }

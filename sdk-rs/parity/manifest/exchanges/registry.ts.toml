@@ -43,6 +43,14 @@ status = "divergent"
 note = "CHOSEN: web_binance selects the actual source module ./binance/binance.exchange and export BinanceExchange through the web_load module-host operation. This entry takes the constructor-capability and caller-owned continuation profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::web_binance. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
+ts = "exchangeRegistry.binanceinverse"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "exchangeRegistry.binancepm"
 kind = "field-fn"
 layer = "adapted"

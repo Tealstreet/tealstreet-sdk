@@ -4315,6 +4315,7 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
 
 #[test]
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+<<<<<<< HEAD
 fn native_http_factory_diagnostics_keep_shallow_bodies_headers_and_capture_guards() {
     use safe_cex_exchange::{js_runtime::client::factory, native::native_runtime};
     use safe_cex_store::venue_rest_diagnostics::{
@@ -4427,4 +4428,39 @@ fn native_http_factory_diagnostics_keep_shallow_bodies_headers_and_capture_guard
             );
             body.delete(&utf16("self"));
         }));
+=======
+fn native_http_factory_preserves_axios_status_error_codes() {
+    use safe_cex_exchange::{js_runtime::client::factory, native::native_runtime};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(
+        tokio::task::LocalSet::new().run_until(async {
+            let runtime = native_runtime();
+            let owner = factory_owner(runtime.clone());
+            for (status, code) in [(304, "ERR_BAD_RESPONSE"), (404, "ERR_BAD_REQUEST"), (500, "ERR_BAD_RESPONSE")] {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let origin = format!("http://{}", listener.local_addr().unwrap());
+                let server = tokio::task::spawn_local(async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut bytes = Vec::new();
+                    while !bytes.windows(4).any(|part| part == b"\r\n\r\n") {
+                        let mut part = [0; 4096];
+                        let count = stream.read(&mut part).await.unwrap();
+                        assert!(count > 0, "native client sends complete HTTP headers");
+                        bytes.extend_from_slice(&part[..count]);
+                    }
+                    assert!(String::from_utf8_lossy(&bytes).starts_with("GET /status "));
+                    stream.write_all(format!("HTTP/1.1 {status} Source refusal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let xhr = factory::create(host, &safe_cex_transport::DirectTransport,
+                    Js::object(vec![("baseURL", Js::str(&origin))]),
+                    &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]), &owner).unwrap();
+                let error = await_js(xhr.call_method("get", vec![Js::str("/status")]).unwrap()).await.unwrap_err();
+                assert_eq!(error.value.get("code").unwrap().to_display(), code, "actual native HTTP {status} retains Axios settlement code");
+                server.await.unwrap();
+            }
+        })
+    );
+>>>>>>> test/native-http-error-codes
 }
