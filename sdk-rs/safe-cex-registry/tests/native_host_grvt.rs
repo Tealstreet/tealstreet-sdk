@@ -1,10 +1,10 @@
 //! GRVT through the registry, common HTTP factory and real local reqwest IO.
 #![cfg(not(target_arch = "wasm32"))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_registry::{
     native_host::{hyperliquid_rate_limiter, native_venue_host_with},
     rust_venues::rust_constructor,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, native::ReqwestAdapter,
 };

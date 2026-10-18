@@ -255,3 +255,11 @@ Hosted-signature fixtures use the shared wake-aware Release gate. The native
 registry private-socket witness holds the real signer future, observes user.auth
 only after its wake, and requires the server auth acknowledgement before aop_p
 subscription.
+
+The two non-UTF-8 FIX-audit rows are priced through the production binding in
+DIVERGENCE_FIX_AUDIT.md. Common SDK invoke/invoke_unit now call the actual JS
+member before boxing and await its existing Promise; do not add another spawn.
+Private reconciliation already retains its eager prefix, detached continuation
+and source silent catch. Keep the original receiver/Store identities and both
+disposal guards; generic helper diagnostics must not become public rejections.
+Run tests/divergence_timing_controls.py and the full parity/cancellation gates.

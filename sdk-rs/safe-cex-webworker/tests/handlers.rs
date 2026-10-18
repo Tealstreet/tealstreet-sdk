@@ -235,7 +235,11 @@ fn market_buffer_timeout_cooldown_reset_and_disposal_are_independent() {
         instance_id: None,
         data: Some(json!({"symbol":"SECRET_SYMBOL","account":"PRIVATE_ACCOUNT","subId":"a"})),
     };
-    assert!(handler.buffer_until_markets_loaded(subscription.clone()));
+    assert!(
+        handler
+            .buffer_until_markets_loaded(subscription.clone())
+            .unwrap()
+    );
     runtime.advance(129_999);
     assert!(sent.borrow().is_empty());
     runtime.advance(130_000);
@@ -252,26 +256,34 @@ fn market_buffer_timeout_cooldown_reset_and_disposal_are_independent() {
     assert_eq!(data[1]["sentryData"]["extra"]["pendingAgeMs"], 30_000.0);
     assert!(!data.to_string().contains("SECRET_SYMBOL"));
     assert!(!data.to_string().contains("PRIVATE_ACCOUNT"));
-    handler.buffer_until_markets_loaded(subscription.clone());
+    handler
+        .buffer_until_markets_loaded(subscription.clone())
+        .unwrap();
     runtime.advance(160_000);
     assert_eq!(sent.borrow().len(), 1);
     runtime.advance(430_000);
-    handler.buffer_until_markets_loaded(subscription.clone());
+    handler
+        .buffer_until_markets_loaded(subscription.clone())
+        .unwrap();
     runtime.advance(460_000);
     assert_eq!(sent.borrow().len(), 2);
     assert_eq!(
         sent.borrow()[1].data.as_ref().unwrap()[1]["sentryData"]["extra"]["suppressedPendingTimeoutReports"],
         1
     );
-    handler.buffer_until_markets_loaded(subscription.clone());
+    handler
+        .buffer_until_markets_loaded(subscription.clone())
+        .unwrap();
     store.data.borrow_mut().markets=vec![serde_json::from_value(json!({"id":"BTC","symbol":"BTC","base":"BTC","quote":"USDT","active":true,"precision":{"amount":1,"price":1},"limits":{"amount":{"min":1,"max":5},"leverage":{"min":1,"max":100}}})).unwrap()];
     runtime.advance(460_500);
     assert_eq!(replayed.borrow().len(), 1);
     store.data.borrow_mut().markets.clear();
-    handler.buffer_until_markets_loaded(subscription.clone());
+    handler
+        .buffer_until_markets_loaded(subscription.clone())
+        .unwrap();
     runtime.advance(490_500);
     assert_eq!(sent.borrow().len(), 3); // A successful flush resets the cooldown episode.
-    handler.buffer_until_markets_loaded(subscription);
+    handler.buffer_until_markets_loaded(subscription).unwrap();
     handler.dispose();
     runtime.advance(530_000);
     assert_eq!(sent.borrow().len(), 3);
@@ -1084,7 +1096,9 @@ fn market_timeout_host_failures_retain_fired_deadline_until_flush() {
             instance_id: None,
             data: None,
         };
-        handler.buffer_until_markets_loaded(payload.clone());
+        handler
+            .buffer_until_markets_loaded(payload.clone())
+            .unwrap();
         runtime.advance(130_000);
         assert_eq!(
             runtime.exceptions.borrow().len(),
@@ -1099,7 +1113,7 @@ fn market_timeout_host_failures_retain_fired_deadline_until_flush() {
                 "native post failed"
             }
         );
-        handler.buffer_until_markets_loaded(payload);
+        handler.buffer_until_markets_loaded(payload).unwrap();
         runtime.advance(160_000);
         assert_eq!(
             calls.get(),
@@ -1115,11 +1129,13 @@ fn market_timeout_host_failures_retain_fired_deadline_until_flush() {
         );
         assert_eq!(calls.get(), 1);
         store.data.borrow_mut().markets.clear();
-        handler.buffer_until_markets_loaded(StoreWorkerPayload {
-            op: StoreWorkerOp::SubscribeOHLCV,
-            instance_id: None,
-            data: None,
-        });
+        handler
+            .buffer_until_markets_loaded(StoreWorkerPayload {
+                op: StoreWorkerOp::SubscribeOHLCV,
+                instance_id: None,
+                data: None,
+            })
+            .unwrap();
         runtime.advance(190_500);
         assert_eq!(
             calls.get(),

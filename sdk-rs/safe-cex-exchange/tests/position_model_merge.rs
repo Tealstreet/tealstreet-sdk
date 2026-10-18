@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_json, from_typed, to_json},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use serde_json::Value;
 use std::{collections::BTreeSet, process::Command, rc::Rc};
 
@@ -52,7 +52,7 @@ fn position_upserts_distinguish_absent_undefined_and_present_fields() {
         let field = case["field"].as_str().unwrap();
         let mode = case["mode"].as_str().unwrap();
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         let sibling = from_json(&source["seed"]);
         sibling.define("id", Js::str("sibling")).unwrap();
         facade
@@ -82,7 +82,7 @@ fn position_upserts_distinguish_absent_undefined_and_present_fields() {
             }
             _ => panic!("unexpected source presence mode"),
         }
-        let revision = native.update_ids().positions;
+        let revision = native.update_ids().unwrap().positions;
         let argument = if method == "addOrUpdatePosition" {
             incoming
         } else {
@@ -90,11 +90,11 @@ fn position_upserts_distinguish_absent_undefined_and_present_fields() {
         };
         facade.call_method(method, vec![argument]).unwrap();
         assert_eq!(
-            native.update_ids().positions,
+            native.update_ids().unwrap().positions,
             revision + 1.0,
             "{method}/{field}/{mode}"
         );
-        let positions = native.positions();
+        let positions = native.positions().unwrap();
         assert_eq!(positions.len(), 2);
         let position = positions.iter().find(|p| p.id == "p").unwrap();
         assert_eq!(position.contracts, 0.0, "closed position applied");

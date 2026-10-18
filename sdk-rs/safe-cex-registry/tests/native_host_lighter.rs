@@ -1,11 +1,11 @@
 //! Both Lighter registry names over real local HTTP and the supplied shared limiter.
 #![cfg(not(target_arch = "wasm32"))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::websocket::WsRuntime;
 use safe_cex_registry::{
     native_host::{hyperliquid_rate_limiter, native_venue_host_with},
     rust_venues::{RustVenueHost, rust_constructor},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, native::ReqwestAdapter,
 };

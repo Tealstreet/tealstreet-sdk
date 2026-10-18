@@ -214,7 +214,7 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         let market = venue(&rt)?
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == base.symbol)
             .cloned()
@@ -258,7 +258,7 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         let ticker = venue(&rt)?
             .base
             .store
-            .tickers()
+            .tickers()?
             .iter()
             .find(|t| t.symbol == base.symbol)
             .cloned();
@@ -421,14 +421,14 @@ async fn trading_stop(rt: &Rt, opts: Js, trailing: bool) -> Result<Js, Thrown> {
     let market = parent
         .base
         .store
-        .markets()
+        .markets()?
         .iter()
         .find(|m| m.symbol == base.symbol)
         .cloned();
     let ticker = parent
         .base
         .store
-        .tickers()
+        .tickers()?
         .iter()
         .find(|t| t.symbol == base.symbol)
         .cloned();

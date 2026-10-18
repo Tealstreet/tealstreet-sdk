@@ -117,7 +117,7 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
         };
         update_positions_with_leverage(&venue, &symbol, &leverage).unwrap();
         assert_eq!(
-            store.positions()[0].leverage,
+            store.positions().unwrap()[0].leverage,
             8.0,
             "LEVERAGE native positive symbol commit"
         );
@@ -133,12 +133,13 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
 
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Position, StoreData};
 use safe_cex_webworker::{
     call_method::CallMethodHandler, positions::UpdatePositionsHandler,
@@ -426,7 +427,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                     unsubscribe_second();
                     continue;
                 }
-                let state = store.serialize();
+                let state = store.serialize().unwrap();
                 assert_eq!(
                     venue.base.is_disposed(),
                     dispose,

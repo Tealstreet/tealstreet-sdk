@@ -211,7 +211,7 @@ fn construct(
     BitgetExchange::new(
         name,
         options,
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         BitgetDependencies {
             runtime,
             http,

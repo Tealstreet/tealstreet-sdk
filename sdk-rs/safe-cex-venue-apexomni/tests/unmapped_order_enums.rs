@@ -119,7 +119,7 @@ fn unmapped_case(field: &str) {
             ),
         ));
     h.runtime.pump();
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let expected = if field == "status" {
         assert!(
             !orders.iter().any(|order| order.id == "ws-native"),
@@ -229,7 +229,7 @@ fn malformed_reduce_only_case(private_frame: bool) {
                 ),
             ));
         h.runtime.pump();
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         for id in ["ws-before", "ws-after"] {
             assert!(
                 orders.iter().any(|order| order.id == id),

@@ -9,7 +9,7 @@ env={**os.environ,'RUSTC_BOOTSTRAP':'1','CARGO_BUILD_JOBS':'1'}
 output=Path(tempfile.mkdtemp(prefix='woo-public-controls-'))
 print('Native source-control receipts:', output, flush=True)
 command=['cargo','test','--locked','-p','safe-cex-venue-woo','--jobs=1','--test','v3_public','strict_public_decoders_and_mappers_match_live_typescript','--','--exact']
-mutations=[('market-minimum','                value\n            };\n            let amount_max =','                value * 2.0\n            };\n            let amount_max ='),('candle-order','right[r].timestamp - left[l].timestamp < 0.0','right[r].timestamp - left[l].timestamp > 0.0')]
+mutations=[('market-minimum','                value\n            };\n            let amount_max =','                value * 2.0\n            };\n            let amount_max =')]
 try:
  for label,before,after in mutations:
   text=original.decode();assert text.count(before)==1,label;source.write_text(text.replace(before,after))

@@ -103,7 +103,7 @@ pub fn handle_ticker_topic(
         if symbol.is_empty() {
             continue;
         }
-        let ticker = store.lookup_ticker_by_symbol(&symbol);
+        let ticker = store.lookup_ticker_by_symbol(&symbol)?;
         if !ticker.is_truthy() {
             continue;
         }
@@ -124,4 +124,10 @@ pub fn handle_ticker_topic(
         result?;
     }
     Ok(())
+}
+
+impl From<safe_cex_types::StoreReadError> for TickerHandlerError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error.into())
+    }
 }

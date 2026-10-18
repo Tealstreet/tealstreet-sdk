@@ -2,21 +2,21 @@ use crate::chaser::ChaserOrderInstance;
 use safe_cex_types::{ExchangeName, OrderSide, PositionSide};
 
 // ts: ChaserOrderManager.hasReachedTargetPosition
-pub fn has_reached_target_position(instance: &ChaserOrderInstance) -> bool {
+pub fn has_reached_target_position(instance: &ChaserOrderInstance) -> Result<bool, ExchangeError> {
     let options = instance.options();
     let options = options.borrow();
     if instance.exchange.base().name != ExchangeName::Bybitdemo
         || options.reduce_only == Some(true)
         || instance.target_position_contracts().is_none()
     {
-        return false;
+        return Ok(false);
     }
     let target_side = if options.side == OrderSide::Buy {
         PositionSide::Long
     } else {
         PositionSide::Short
     };
-    let positions = instance.exchange.base().store.positions();
+    let positions = instance.exchange.base().store.positions()?;
     let contracts = positions
         .iter()
         .find(|p| p.symbol == options.symbol && p.side == target_side)
@@ -26,18 +26,18 @@ pub fn has_reached_target_position(instance: &ChaserOrderInstance) -> bool {
     } else {
         contracts.abs()
     };
-    instance
+    Ok(instance
         .target_position_contracts()
-        .is_some_and(|target| contracts >= target - 1e-12)
+        .is_some_and(|target| contracts >= target - 1e-12))
 }
 
 // ts: ChaserOrderManager.bybitDemoPositionFill
-pub fn bybit_demo_position_fill(instance: &ChaserOrderInstance) -> f64 {
+pub fn bybit_demo_position_fill(instance: &ChaserOrderInstance) -> Result<f64, ExchangeError> {
     if instance.exchange.base().name != ExchangeName::Bybitdemo {
-        return 0.0;
+        return Ok(0.0);
     }
     let Some(target) = instance.target_position_contracts() else {
-        return 0.0;
+        return Ok(0.0);
     };
     let options = instance.options();
     let options = options.borrow();
@@ -47,7 +47,7 @@ pub fn bybit_demo_position_fill(instance: &ChaserOrderInstance) -> f64 {
     } else {
         PositionSide::Short
     };
-    let positions = instance.exchange.base().store.positions();
+    let positions = instance.exchange.base().store.positions()?;
     let contracts = positions
         .iter()
         .find(|p| p.symbol == options.symbol && p.side == target_side)
@@ -57,7 +57,10 @@ pub fn bybit_demo_position_fill(instance: &ChaserOrderInstance) -> f64 {
     } else {
         contracts.abs()
     } - starting_contracts;
-    safe_cex_num::math_min(options.size, safe_cex_num::math_max(0.0, delta))
+    Ok(safe_cex_num::math_min(
+        options.size,
+        safe_cex_num::math_max(0.0, delta),
+    ))
 }
 
 // ts: ChaserOrderManager.getBybitDemoDeadPrivateWsReason
@@ -67,9 +70,9 @@ pub fn get_bybit_demo_dead_private_ws_reason(
     if exchange.base().name != ExchangeName::Bybitdemo {
         return Ok(None);
     }
-    let health = exchange.base().store.socket_health();
+    let health = exchange.base().store.socket_health()?;
     let Some(health) = health
-        .as_deref()
+        .as_ref()
         .filter(|health| safe_cex_num::js_truthy(Some(health)))
     else {
         return Ok(None);
@@ -109,8 +112,8 @@ pub async fn wait_for_bybit_demo_private_ws(
         let paused = exchange
             .base()
             .store
-            .socket_health()
-            .as_deref()
+            .socket_health()?
+            .as_ref()
             .and_then(|health| health.get("privateReconnectPaused"))
             == Some(&serde_json::Value::Bool(true));
         if paused {
@@ -137,17 +140,18 @@ pub fn log(
     )
 }
 
-pub fn get_current_orders(instance: &ChaserOrderInstance) -> Vec<safe_cex_types::Order> {
+pub fn get_current_orders(
+    instance: &ChaserOrderInstance,
+) -> Result<Vec<safe_cex_types::Order>, ExchangeError> {
     let ids = instance.current_order_ids();
-    instance
+    Ok(instance
         .exchange
         .base()
         .store
-        .orders()
-        .iter()
+        .orders()?
+        .into_iter()
         .filter(|order| ids.contains(&order.id))
-        .cloned()
-        .collect()
+        .collect())
 }
 
 pub fn check_and_mark_if_complete(
@@ -172,7 +176,7 @@ pub fn check_and_mark_if_complete(
             .exchange
             .base()
             .store
-            .positions()
+            .positions()?
             .iter()
             .any(|position| {
                 position.symbol == symbol
@@ -185,7 +189,7 @@ pub fn check_and_mark_if_complete(
         }
     }
     if !instance.current_order_ids().is_empty() {
-        let orders = get_current_orders(instance);
+        let orders = get_current_orders(instance)?;
         let ids = orders
             .iter()
             .map(|order| {
@@ -229,15 +233,27 @@ pub fn find_best_price(
     let symbol = instance.options().borrow().symbol.clone();
     let store = &instance.exchange.base().store;
     let market = table_or_array(
-        store.markets_by_symbol().get(&symbol).cloned(),
+        store.markets_by_symbol()?.get(&symbol).cloned(),
         &symbol,
-        || store.markets().iter().find(|m| m.symbol == symbol).cloned(),
-    );
+        || {
+            Ok(store
+                .markets()?
+                .iter()
+                .find(|m| m.symbol == symbol)
+                .cloned())
+        },
+    )?;
     let ticker = table_or_array(
-        store.tickers_by_symbol().get(&symbol).cloned(),
+        store.tickers_by_symbol()?.get(&symbol).cloned(),
         &symbol,
-        || store.tickers().iter().find(|t| t.symbol == symbol).cloned(),
-    );
+        || {
+            Ok(store
+                .tickers()?
+                .iter()
+                .find(|t| t.symbol == symbol)
+                .cloned())
+        },
+    )?;
     if !market.is_truthy_by(|_| true) || !ticker.is_truthy_by(|_| true) {
         log("no market or ticker found", instance)?;
         instance.mark_complete(Some("No market or ticker found"));
@@ -291,16 +307,18 @@ pub fn find_best_price(
 fn table_or_array<T>(
     own: Option<T>,
     symbol: &str,
-    fallback: impl FnOnce() -> Option<T>,
-) -> safe_cex_num::TableHit<T> {
+    fallback: impl FnOnce() -> Result<Option<T>, ExchangeError>,
+) -> Result<safe_cex_num::TableHit<T>, ExchangeError> {
     use safe_cex_num::TableHit;
     if let Some(value) = own {
-        return TableHit::Mapped(value);
+        return Ok(TableHit::Mapped(value));
     }
-    match safe_cex_num::js_table_lookup::<&str, ()>(&[], symbol) {
-        TableHit::Inherited(member) => TableHit::Inherited(member),
-        _ => fallback().map_or(TableHit::Missing, TableHit::Mapped),
-    }
+    Ok(
+        match safe_cex_num::js_table_lookup::<&str, ()>(&[], symbol) {
+            TableHit::Inherited(member) => TableHit::Inherited(member),
+            _ => fallback()?.map_or(TableHit::Missing, TableHit::Mapped),
+        },
+    )
 }
 
 use safe_cex_exchange::{

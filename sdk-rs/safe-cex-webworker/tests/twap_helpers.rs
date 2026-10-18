@@ -1,11 +1,11 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::{ExchangeCapabilities, PlaceOrderBinding},
     exchange::{BaseExchange, Exchange},
     runtime::ExchangeError,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, PlaceOrderOpts};
 use safe_cex_webworker::{
     task_types::TwapOptions,
