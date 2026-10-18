@@ -73,16 +73,25 @@ fn float(value: Option<&Input>) -> Result<f64, ExchangeError> {
     safe_cex_num::js_retained_parse_float(value).map_err(|e| type_error(e.message))
 }
 fn alias<'a>(value: &'a Input, key: &str) -> Result<Option<&'a Input>, ExchangeError> {
-    let native = safe_cex_exchange::js_runtime::value::from_retained_input(value.clone());
-    if !safe_cex_exchange::js_runtime::library::in_operator(&native, key)
-        .map_err(|e| e.to_exchange_error())?
-    {
+    if value.is_nullish() {
         return Ok(None);
     }
-    value
-        .get(key)
-        .map(Some)
-        .ok_or_else(|| type_error("typed read field refuses inherited callable"))
+    let native = safe_cex_exchange::js_runtime::value::from_retained_input(value.clone());
+    for key in [
+        key.to_owned(),
+        safe_cex_num::lodash_snake_case(key),
+        safe_cex_num::lodash_camel_case(key),
+    ] {
+        if safe_cex_exchange::js_runtime::library::in_operator(&native, &key)
+            .map_err(|e| e.to_exchange_error())?
+        {
+            return value
+                .get(&key)
+                .map(Some)
+                .ok_or_else(|| type_error("typed read field refuses inherited callable"));
+        }
+    }
+    Ok(None)
 }
 fn describe(value: Option<&Input>) -> Result<String, ExchangeError> {
     value

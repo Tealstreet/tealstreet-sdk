@@ -204,7 +204,7 @@ fn account_reads_match_actual_typescript() {
                 .as_object_mut()
                 .unwrap()
                 .retain(|(key, _)| key != &"userId".encode_utf16().collect::<Vec<_>>());
-            expected.as_object_mut().unwrap().remove("userId");
+            expected.as_object_mut().unwrap().shift_remove("userId");
         } else {
             assert_eq!(
                 native.as_object().unwrap().len(),
@@ -235,9 +235,16 @@ fn account_reads_match_actual_typescript() {
             json!([97, 55296, 98]),
             "BINGX-READ source surrogate"
         );
-        assert!(
-            serde_json::from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).is_err(),
-            "BINGX-READ UTF8 refusal"
+        let input = serde_json::from_str::<JsNumberInput>(case["raw"].as_str().unwrap())
+            .expect("retained HTTP input accepts lone UTF16");
+        let balance = ready(fetch_primary_balance_data(move |_| {
+            std::future::ready(Ok(input))
+        }))
+        .expect("opaque account row survives the real retained decoder");
+        assert_eq!(
+            serde_json::json!(balance.get("userId").and_then(Input::as_text).unwrap()),
+            case["units"],
+            "BINGX-READ retained account row UTF16"
         );
     }
 }
