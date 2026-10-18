@@ -2,13 +2,12 @@
 use crate::legacy_fills::{WooLegacyFillsQuery, fetch_legacy_transaction_history_rows};
 use safe_cex_transport::{RestAdapter, RestFailure, RestRequest};
 use safe_cex_types::{QueryValue, retained_json::RetainedJsonInput};
-use serde_json::Value;
 
 async fn request_rows(
     adapter: &dyn RestAdapter,
     query: &WooLegacyFillsQuery,
     symbol: Option<String>,
-) -> Result<Vec<Value>, RestFailure> {
+) -> Result<Vec<RetainedJsonInput>, RestFailure> {
     let mut values = vec![("limit".into(), QueryValue::Number(query.limit))];
     if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
         values.push(("symbol".into(), QueryValue::String(symbol)));
@@ -39,9 +38,6 @@ async fn request_rows(
         }
         native => native,
     };
-    let data = data
-        .into_value()
-        .map_err(|error| RestFailure::pre_transmit(error.to_string(), request))?;
     Ok(crate::response::parse_transaction_rows_from_response(&data).to_vec())
 }
 
@@ -49,7 +45,7 @@ async fn request_rows(
 pub async fn fetch_transaction_history_rows(
     adapter: &dyn RestAdapter,
     query: &WooLegacyFillsQuery,
-) -> Result<Vec<Value>, RestFailure> {
+) -> Result<Vec<RetainedJsonInput>, RestFailure> {
     let Some(symbol) = query.symbol.as_deref().filter(|s| !s.is_empty()) else {
         return request_rows(adapter, query, None).await;
     };
