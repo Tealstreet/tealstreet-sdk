@@ -44,7 +44,7 @@ function fixture(name){
 }
 function attempt(action){try{action();return null}catch(e){return e.name}}
 function domain(view,key){const d=Object.getOwnPropertyDescriptor(view,key);return {own:Object.hasOwn(view,key),keys:Object.keys(view),descriptor:d?{enumerable:d.enumerable,writable:d.writable,configurable:d.configurable}:null,json:JSON.stringify(view)}}
-const identity=[],deletion=[],overlays=[],integrity=[],generations=[],unicode=[],partialWrites=[];
+const identity=[],deletion=[],overlays=[],integrity=[],generations=[],unicode=[],partialWrites=[],reentry=[];
 for(const name of names){
  {
   const f=fixture(name),row=f.view[f.key];
@@ -123,4 +123,31 @@ for(const value of [-0,NaN,Infinity,-Infinity]){
  assert.equal(Object.is(row.bid,value),true);assert.equal(f.view[f.key],row);
  bits.push({value:Object.is(value,-0)?'-0':String(value),same:true});
 }
-process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites}));
+// Evaluate object bases at their source expression sites, independently of
+// getters/setters that publish a different Store generation during evaluation.
+{
+ const f=fixture('tickersById'),oldMap=f.view,oldRow=oldMap.t;
+ const selector={get id(){f.store.update({tickers:[{...ticker,bid:99}]});return 't'}};
+ f.store.updateTicker(selector,{bid:7});
+ assert.equal(oldRow.bid,7);assert.equal(f.store.tickersById.t,oldRow);
+ assert.equal(f.store.tickers[0].bid,99);assert.notEqual(f.store.tickersById,oldMap);
+ reentry.push({case:'base-before-selector-getter',oldBid:oldRow.bid,stateBid:f.store.tickers[0].bid,mapUsesOldRow:f.store.tickersById.t===oldRow});
+}
+{
+ const f=fixture('tickersById'),oldMap=f.view,oldRow=oldMap.t;let retainedBid=1;
+ Object.defineProperty(oldRow,'bid',{enumerable:true,configurable:true,get(){return retainedBid},set(value){retainedBid=value;f.store.update({tickers:[{...ticker,bid:99}]})}});
+ f.write();
+ assert.equal(oldRow.bid,7);assert.equal(f.store.tickersById.t,oldRow);
+ assert.equal(f.store.tickersBySymbol.BTCUSD,oldRow);assert.equal(f.store.tickers[0].bid,99);
+ reentry.push({case:'setter-republishes-before-map-statements',oldBid:oldRow.bid,stateBid:f.store.tickers[0].bid,mapUsesOldRow:true});
+}
+{
+ const f=fixture('tickersById'),oldMap=f.view,oldRow=oldMap.t;
+ Object.defineProperty(oldRow,'id',{enumerable:true,configurable:true,get(){f.store.update({tickers:[{...ticker,bid:99}]});return 't'}});
+ f.write();
+ assert.equal(oldRow.bid,7);assert.notEqual(f.store.tickersById.t,oldRow);
+ assert.equal(f.store.tickersById.t.bid,99);assert.equal(f.store.tickersBySymbol.BTCUSD,oldRow);
+ assert.equal(oldMap.t,oldRow);assert.equal(f.store.tickers[0].bid,99);
+ reentry.push({case:'assignment-base-before-id-getter',oldBid:oldRow.bid,stateBid:f.store.tickers[0].bid,idMapUsesNewRow:true,symbolMapUsesOldRow:true});
+}
+process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry}));
