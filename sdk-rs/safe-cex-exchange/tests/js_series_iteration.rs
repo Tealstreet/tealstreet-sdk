@@ -17,15 +17,34 @@ fn describe(value: &Js) -> Value {
         Js::Number(value) => json!({"bits":format!("{:016x}",value.to_bits())}),
         Js::Undefined => json!({"undefined":true}),
         Js::Null => json!({"null":true}),
+        Js::String(units) => json!({"units":units.as_ref()}),
+        Js::BigInt(value) => json!({"bigint":value.to_string()}),
         _ => json!({"kind":value.type_of()}),
     }
 }
 fn scope() -> Rc<ScopeShared<()>> {
+    scope_at_install(true)
+}
+fn scope_at_install(published: bool) -> Rc<ScopeShared<()>> {
     let runtime = native_runtime();
     let http = client::rest_http_host(
         runtime.clone(),
         Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
     );
+    if !published {
+        return Rc::new_cyclic(|weak| {
+            let globals = Js::object(vec![]);
+            globals::install_builtins(&globals, weak.clone());
+            library::install_library(&globals, weak.clone());
+            ScopeShared::new(
+                runtime,
+                http,
+                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                globals,
+                (),
+            )
+        });
+    }
     let shared = Rc::new(ScopeShared::new(
         runtime,
         http,
@@ -82,6 +101,14 @@ async fn observe(shared: &Rc<ScopeShared<()>>, method: &str, label: &str) -> Val
             object
         }
         "string" => Js::str("ab"),
+        "special-values" => Js::array(vec![
+            Js::Number(f64::NAN),
+            Js::Number(-0.0),
+            Js::Number(f64::INFINITY),
+            Js::Number(f64::NEG_INFINITY),
+            Js::BigInt(Rc::new(123.into())),
+            Js::utf16(&[0xd800]),
+        ]),
         _ => Js::array(vec![Js::Number(7.0), Js::Number(8.0)]),
     };
     let module = shared.globals.get("p-iteration").unwrap();
@@ -179,7 +206,7 @@ fn installed_series_helpers_match_package_live_slots_awaits_and_receivers() {
         String::from_utf8_lossy(&output.stderr)
     );
     let expected: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(expected.len(), 38);
+    assert_eq!(expected.len(), 40);
     let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -194,6 +221,87 @@ fn installed_series_helpers_match_package_live_slots_awaits_and_receivers() {
                 case,
                 "SERIES_SOURCE {method}/{label} native package observations"
             );
+        }
+    });
+}
+
+#[test]
+fn series_module_roots_survive_export_removal_and_release_with_scope() {
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_series_module_source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    assert_eq!(String::from_utf8(source.stdout).unwrap().trim(), "[0]");
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        for published in [false, true] {
+            let shared = scope_at_install(published);
+            let weak_scope = Rc::downgrade(&shared);
+            let module = shared.globals.get("p-iteration").unwrap();
+            let Js::Object(data) = &module else {
+                unreachable!()
+            };
+            let weak_module = Rc::downgrade(data);
+            let escaped = module.get("mapSeries").unwrap();
+            drop(module);
+            shared
+                .globals
+                .delete(&"p-iteration".encode_utf16().collect::<Vec<_>>());
+            assert!(!shared.globals.has_own("p-iteration"));
+            let expected = weak_module.clone();
+            let callback = Js::function("callback", move |this, _| {
+                let module = expected
+                    .upgrade()
+                    .expect("SERIES_MODULE original module root");
+                assert!(
+                    this.same_reference(&Js::Object(module)),
+                    "SERIES_MODULE original receiver"
+                );
+                Ok(Js::Number(-0.0))
+            });
+            let pending = escaped
+                .call(
+                    Js::Undefined,
+                    vec![Js::array(vec![Js::Number(1.0)]), callback, Js::Number(0.0)],
+                )
+                .expect("SERIES_MODULE bootstrap and post-publication roots");
+            let result = await_js(pending).await.unwrap();
+            assert_eq!(
+                result.get("0").unwrap().as_f64().unwrap().to_bits(),
+                (-0.0_f64).to_bits()
+            );
+            let json = shared
+                .globals
+                .get("JSON")
+                .unwrap()
+                .call_method("stringify", vec![result])
+                .unwrap();
+            assert_eq!(
+                json.to_display(),
+                "[0]",
+                "SERIES_MODULE actual JS stringify"
+            );
+            drop(shared);
+            assert!(
+                weak_scope.upgrade().is_none(),
+                "SERIES_MODULE no retained scope cycle"
+            );
+            assert!(
+                weak_module.upgrade().is_none(),
+                "SERIES_MODULE no retained module cycle"
+            );
+            drop(escaped);
         }
     });
 }

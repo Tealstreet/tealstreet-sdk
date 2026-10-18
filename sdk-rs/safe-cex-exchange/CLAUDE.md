@@ -1654,3 +1654,12 @@ HTTP_STATS singleton after proxy authorization, including rejected HTTP statuses
 Its normal response interceptor preserves the source absence of recordError.
 The native runtime request-counter regression uses actual HTTP200/404 receipts;
 it fails with an unchanged total on the previous factory.
+
+The installed p-iteration serial helpers read live lengths and inherited slots,
+await each input and callback result, and preserve sparse result indices. Callback
+`call` lookup precedes the input read. Falsy thisArg values select the original
+CommonJS module receiver; the shared scope roots that module while exported
+functions hold weak references. Both pre-publication and live installation use
+that same scope-owned root. `tests/js_series_iteration.rs` compares forty actual
+installed-package cases and checks escaped exports, signed-zero stringify and
+scope/module release; its two compiled mutation controls restore exact source.
