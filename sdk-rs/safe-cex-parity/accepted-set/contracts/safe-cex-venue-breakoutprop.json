@@ -10931,7 +10931,7 @@
       }
     },
     "evidence": "Captures the raw numeric portfolio input once and exposes its actual native JS value separately from retained info. It reads no declaration-only field and imposes no whole PortfolioResponse validation; actual host/source tests cover consumed fields.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); match super::decode(&input) { Ok((native, raw)) => { let portfolios=native.get(\"portfolios\").ok(); let count=portfolios.as_ref().and_then(|p|p.array_values()).map(|p|p.len()); let first=portfolios.and_then(|p|p.get(\"0\").ok()).and_then(|p|p.get(\"account\").ok()).and_then(|v|safe_cex_exchange::js_runtime::value::to_typed::<String>(&v).ok()); serde_json::json!({\"ok\":true,\"count\":count,\"first\":first,\"unknown\":raw.get(\"unknown\")}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); match super::decode(&input) { Ok((native, raw)) => { let portfolios=native.get(\"portfolios\").ok(); let count=portfolios.as_ref().and_then(|p|p.array_values().expect(\"array property reads\")).map(|p|p.len()); let first=portfolios.and_then(|p|p.get(\"0\").ok()).and_then(|p|p.get(\"account\").ok()).and_then(|v|safe_cex_exchange::js_runtime::value::to_typed::<String>(&v).ok()); serde_json::json!({\"ok\":true,\"count\":count,\"first\":first,\"unknown\":raw.get(\"unknown\")}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
