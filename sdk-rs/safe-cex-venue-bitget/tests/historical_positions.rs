@@ -1,10 +1,10 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::{CapabilityBinding, ExchangeCapabilities},
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     journal::{HistoricalPositionOptions, JournalFolder},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_bitget::history_reads::fetch_historical_positions;
 use serde_json::{Value, json};
@@ -125,7 +125,7 @@ impl JournalFolder for Folder {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        _: Box<dyn Fn(&str) -> String + 'a>,
+        _: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         assert!(
             std::ptr::eq(venue.base(), self.expected_base),
@@ -270,7 +270,7 @@ fn historical_positions_preserves_failure_and_cancellation() {
     };
     let mut folder = folder(vec![], &venue);
     let mut failure = ExchangeError::new("original folder failure");
-    failure.response = Some(json!({"code":17}));
+    failure = failure.with_retained_response(json!({"code":17}).into());
     failure.store_subscriber_ids = vec![3, 1];
     let ptr = std::ptr::from_ref(failure.metadata.as_ref());
     let expected = failure.clone();

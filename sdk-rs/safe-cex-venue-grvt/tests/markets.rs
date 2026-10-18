@@ -1,6 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Market;
 use safe_cex_venue_grvt::markets::{fetch_markets, refresh_markets};
 use serde_json::{Value, json};
@@ -430,7 +431,7 @@ fn refresh_markets_native_store_and_effect_order() {
                 }
             },
         ));
-        let current = store.markets();
+        let current = store.markets().unwrap();
         let expected = row["markets"].as_array().unwrap();
         assert_eq!(current.len(), 2, "REFRESH independent native count");
         assert_eq!(expected.len(), 2, "REFRESH independent source count");

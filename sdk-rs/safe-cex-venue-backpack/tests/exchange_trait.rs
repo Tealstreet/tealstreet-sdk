@@ -88,11 +88,11 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     // 3 start (public-data-only fixture: markets, tickers, then account slots loaded)
     drive(&rt, venue.start()).unwrap();
     assert!(
-        store.loaded().markets && store.loaded().tickers,
+        store.loaded().unwrap().markets && store.loaded().unwrap().tickers,
         "start loads public state"
     );
     assert!(
-        store.loaded().orders,
+        store.loaded().unwrap().orders,
         "public-only start marks account state loaded"
     );
     calls(&wire);
@@ -240,7 +240,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 .unwrap();
             runtime.pump();
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
     }
     assert!(
         runtime.errors.borrow().is_empty(),

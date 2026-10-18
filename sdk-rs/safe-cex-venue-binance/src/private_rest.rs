@@ -17,7 +17,6 @@ use crate::{
     request_weight::{Failure, type_error},
 };
 use safe_cex_types::{OrderStatus, OrderType};
-use serde_json::Value;
 use std::{
     cell::Cell,
     future::{Future, poll_fn},
@@ -395,12 +394,12 @@ fn arg(v: EventValue) -> SnapshotArgument {
 }
 pub(crate) fn error_message(e: &Failure) -> EventValue {
     let venue = e
-        .response
+        .retained_response_input()
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("msg"))
         .cloned()
-        .map(EventValue::from_json)
+        .map(safe_cex_exchange::js_runtime::value::from_retained_input)
         .unwrap_or(EventValue::Undefined);
     let message = safe_cex_exchange::js_runtime::value::Thrown::from((**e).clone())
         .value
@@ -481,11 +480,11 @@ pub async fn fetch_futures_orders(
                 ],
             )?;
             let response = e
-                .response
+                .retained_response_input()
                 .as_ref()
                 .and_then(|v| v.get("data"))
                 .cloned()
-                .map(EventValue::from_json)
+                .map(safe_cex_exchange::js_runtime::value::from_retained_input)
                 .unwrap_or(EventValue::Undefined);
             console(
                 b,
@@ -798,11 +797,13 @@ pub async fn find_futures_order_by_client_id(
     match result {
         Ok(v) => Ok(v),
         Err(e) => {
-            if e.response
+            if e.retained_response_input()
                 .as_ref()
                 .and_then(|v| v.get("data"))
                 .and_then(|v| v.get("code"))
-                .and_then(Value::as_f64)
+                .cloned()
+                .map(safe_cex_exchange::js_runtime::value::from_retained_input)
+                .and_then(|value| value.as_f64())
                 == Some(-2013.0)
             {
                 Ok(record([

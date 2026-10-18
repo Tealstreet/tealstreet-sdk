@@ -87,13 +87,13 @@ fn milliseconds(value: Option<f64>) -> Option<f64> {
 }
 fn message(error: &ExchangeError) -> Result<String, ExchangeError> {
     if let Some(value) = error
-        .response
+        .retained_response_input()
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("msg"))
-        && safe_cex_num::js_truthy(Some(value))
+        && safe_cex_num::js_retained_truthy(value)
     {
-        return text(&J::from(value.clone()));
+        return text(value);
     }
     Ok(if error.message.is_empty() {
         error.js_error_string()
@@ -132,13 +132,11 @@ impl ApexOmniExchange {
             let raw = executions::row_symbol(row);
             if !matches!(raw, J::Undefined | J::Null) && !text(raw)?.is_empty() {
                 let symbol = text(raw)?;
-                let resolved = self
-                    .base
-                    .store
-                    .markets_by_id()
-                    .get(&symbol)
-                    .cloned()
-                    .or_else(|| self.base.store.markets_by_symbol().get(&symbol).cloned());
+                let resolved = self.base.store.markets_by_id()?.get(&symbol).cloned();
+                let resolved = match resolved {
+                    Some(value) => Some(value),
+                    None => self.base.store.markets_by_symbol()?.get(&symbol).cloned(),
+                };
                 let symbol = resolved.as_ref().map_or(symbol, |m| {
                     if m.id.is_empty() {
                         m.symbol.clone()
@@ -349,7 +347,7 @@ impl ApexOmniExchange {
         let Some(symbol) = opts.symbol.as_ref().filter(|s| !s.is_empty()) else {
             return Ok(Vec::new());
         };
-        let Some(market) = self.base.store.markets_by_symbol().get(symbol).cloned() else {
+        let Some(market) = self.base.store.markets_by_symbol()?.get(symbol).cloned() else {
             return Ok(Vec::new());
         };
         let limit = math_min(math_max(opts.limit.unwrap_or(100.), 1.), 100.);

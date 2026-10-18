@@ -4,6 +4,32 @@ Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
 
+## Canonical Store owner
+
+`native_store::DefaultStore` owns one material `Js` graph. State arrays, rows and
+all four dictionaries expose their actual referents through the native facade;
+granular writes mutate existing rows, while full replacement and reset publish
+new generations. Retained values have no back-reference to the Store owner.
+Native mutations use the shared property/iterator algorithms and notify the live
+ordered listener registry. Typed subscribers project only at their reached slot.
+Graph-backed typed reads return `StoreReadError` with property/projection phase
+and the opaque original cause; conversion recovers that cause before diagnostics.
+The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
+
+Native snapshots retain their own undefined properties; JSON serialization is a
+separate boundary. Retained config reads keep absence distinct from an own
+undefined or null value. Source `for` loops recheck live input lengths, while
+`forEach`, `map`, `filter` and `findIndex` keep their captured iteration lengths.
+Object literal spreads finish before evaluating the following explicit fields.
+Position audits read each reached row after earlier id getters and evaluate
+diagnostic arguments before the terminal sink, preserving prethrow writes and
+skipping later revision/notification statements on failure.
+`Object.seal` and `Object.freeze` share the canonical descriptor integrity
+operation; sealing preserves existing writable bits and both retain accessors.
+Strict writes to string primitives distinguish existing read-only length/index
+slots from missing properties. The actual Bitget dictionary facade witness pins
+both errors against the maintained Store and preserves the typed projection refusal.
+
 ## Abstract venue hooks
 
 `Exchange` is the object-safe venue protocol surface. Venue implementations
@@ -1047,12 +1073,13 @@ The js_runtime typed-value bridge uses the shared native serialization capture a
 
 JS socket properties are the source of truth for typed lifecycle grouping. BaseExchange installs weak, lazy lookups for the eight source fields; these create socket cores after venue assembly and observe property replacement/removal on each lookup. The JS runtime regression checks source order, public/private grouping and disposal.
 
-The js_runtime socket terminal preserves Binary as the host binary object: native
-Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
-Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
+The js_runtime socket terminal preserves Binary as Blob on native and wasm,
+matching both the source WebSocket default and the reconnecting wrapper’s explicit
+`binaryType = "blob"`, including its Node ws transport. Exact bytes remain behind
+ArrayBuffer; Blob.text performs UTF-8 replacement only when requested;
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
-checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+checks non-UTF-8 bytes, size, explicit conversion and unchanged text frames.
 
 Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
 JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
@@ -1870,6 +1897,21 @@ UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 `native_array_join_preserves_utf16_elements_separators_and_coercions` compares
 eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
+
+## Retained error responses
+
+ExchangeError has no cached JSON response field. retained_response_input reads the
+nearest response origin in its cause chain: the original RestFailure for transport
+failures, or the existing RetainedJsonInput inside the API-error origin wrapper.
+with_retained_response is construction glue for API-created errors, not a transport
+response update API. Prior opaque causes stay on the same source chain.
+
+Native error policies and callbacks read retained data before coercion or reporting.
+response_json_view computes the explicitly lossy decision-5 model/report view on
+demand; it never replaces the retained response or becomes a second authority.
+The real Binance cancel-symbol witness compares both signed DELETE calls, original
+failure propagation and emitted UTF-16/argument lists with the maintained class.
+error_response_origins separately pins nearest-origin selection across a chain.
 
 `eager::start_eager` is the typed async SDK call boundary. It starts the body
 through the existing canonical Promise driver at call time, retains native `T`

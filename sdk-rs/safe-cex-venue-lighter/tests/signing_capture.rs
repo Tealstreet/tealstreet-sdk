@@ -59,7 +59,7 @@ fn lighter_signing_preimages_stay_pinned_to_live_typescript() {
         "80a41622a9e4ffa00356a84e16cedf2a26fe5896a61033f1679e22e714588314"
     );
     expected["sources"]["packages/safe-cex/src/types.ts"] =
-        Value::String("1ada92cad6c002e006b02043f95794c69fec3f6496b09957cba642e0b71a7ebd".into());
+        Value::String("3b04c8e33f14ab717d803d4eec76cd20cb304c1b810cac59cfd85e685fcfbbb6".into());
     for field in [
         "captureHeader",
         "versions",

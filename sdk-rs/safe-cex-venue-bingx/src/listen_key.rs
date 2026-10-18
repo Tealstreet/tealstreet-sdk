@@ -82,8 +82,8 @@ fn text(value: Option<&Value>) -> Result<String, ExchangeError> {
     })
 }
 fn error_message(error: &ExchangeError) -> Result<String, ExchangeError> {
-    let msg = error
-        .response
+    let response_view = error.response_json_view();
+    let msg = response_view
         .as_ref()
         .and_then(|r| r.get("data"))
         .and_then(|d| d.get("msg"));
@@ -310,8 +310,8 @@ impl BingxListenKey {
             self.host.warning(&format!(
                 "Failed to refresh BingX listen key: {message}. Retrying in 30s"
             ))?;
-            let status = error
-                .response
+            let response_view = error.response_json_view();
+            let status = response_view
                 .as_ref()
                 .and_then(|r| r.get("status"))
                 .and_then(js_value_as_f64);

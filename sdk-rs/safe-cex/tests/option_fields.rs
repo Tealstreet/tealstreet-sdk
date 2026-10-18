@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     store::facade,
     value::{Js, from_json, from_typed, to_json},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_types::{
     OptionGreeks, OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, PositionOption,
 };
@@ -62,7 +62,7 @@ fn option_fields_survive_shared_store_patches_merges_and_source_facade_reads() {
         .zip(rows)
     {
         let core = Rc::new(DefaultStore::new());
-        let store = facade(core);
+        let store = facade(core).unwrap();
         store
             .call_method(
                 "update",

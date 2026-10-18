@@ -79,7 +79,7 @@ where
         Ok(entries) => Ok(entries),
         Err(error) => {
             let message = error
-                .response
+                .response_json_view()
                 .as_ref()
                 .and_then(|response| response.get("data"))
                 .and_then(|data| data.get("msg"))

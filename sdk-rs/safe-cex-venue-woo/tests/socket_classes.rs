@@ -4,7 +4,8 @@ mod fixture;
 mod frames;
 use fixture::*;
 use frames::Frame;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_venue_woo::{public_streams::StreamOps, socket_classes::*};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
@@ -594,7 +595,7 @@ fn native_public_bindings_execute_and_retain_shared_state() {
     ] {
         h.method(&r, method, vec![h.payload(rows)]).unwrap();
     }
-    let tickers = h.store.tickers();
+    let tickers = h.store.tickers().unwrap();
     assert_eq!(tickers.len(), 1);
     let ticker = &tickers[0];
     assert_eq!(
@@ -936,7 +937,7 @@ fn native_immutable_ingress_prices_caller_mutation() {
     h.method(&r, "handleTickersStreamEvents", vec![input])
         .unwrap();
     assert_eq!(
-        h.store.tickers()[0].last,
+        h.store.tickers().unwrap()[0].last,
         31.,
         "WOO-CLASS native immutable ingress cost"
     );

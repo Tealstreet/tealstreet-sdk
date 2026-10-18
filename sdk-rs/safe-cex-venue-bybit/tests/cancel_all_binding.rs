@@ -87,7 +87,7 @@ fn cancel_all_dispatches_once_per_symbol_and_retires_snapshot_rows() {
         assert_eq!(calls[0].body["symbol"], "BTCUSDT");
         assert_eq!(calls[1].body["symbol"], "ETHUSDT");
         assert!(
-            h.store.orders().is_empty(),
+            h.store.orders().unwrap().is_empty(),
             "{name:?}: partial id/symbol retirement rows must be accepted"
         );
     }
@@ -138,7 +138,7 @@ fn cancel_symbol_reports_venue_rejection_without_throwing_or_retiring() {
         h.drive(h.venue().cancel_symbol_orders("BTCUSDT".into()))
             .unwrap();
         assert_eq!(h.wire.calls("/v5/order/cancel-all").len(), 1);
-        assert_eq!(h.store.orders()[0].id, "keep");
+        assert_eq!(h.store.orders().unwrap()[0].id, "keep");
         assert_eq!(
             *errors.borrow(),
             vec![json!(["Exchange Error: cancel refused", {"suppressConsoleLog": false}])]

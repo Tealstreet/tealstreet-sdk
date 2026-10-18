@@ -9,7 +9,7 @@ use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::value::{Js, Thrown},
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
-    runtime::{Cleanup, ExchangeError, ListenerCleanup, RemoteSigner},
+    runtime::{Cleanup, ExchangeError, ExchangeRuntime, ListenerCleanup, RemoteSigner},
     throttle::{ThrottleManager, symbol_metadata_throttler},
     websocket::WsRuntime,
 };
@@ -62,6 +62,7 @@ pub struct NativeAccountSpec {
     pub proxy_token: Option<Rc<dyn Fn() -> NativeAccountFuture<String>>>,
 }
 pub struct NativeAccount {
+    replay_runtime: Option<Rc<safe_cex_exchange::native::NativeRuntime>>,
     exchange: Rc<dyn Exchange>,
     store: Rc<dyn Store>,
     signer: Option<Rc<HostSigner>>,
@@ -215,25 +216,54 @@ fn host_error(message: impl Into<String>) -> NativeValue {
 
 /// Build an account through its bound registry Rust constructor.
 pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>, NativeValue> {
+    open_native_account_with_replay(spec, None)
+}
+
+/// Replay is an explicit diagnostic host selection, never an exchange option.
+pub fn open_native_account_with_replay(
+    spec: NativeAccountSpec,
+    epoch: Option<f64>,
+) -> Result<Rc<NativeAccount>, NativeValue> {
     let name: ExchangeName = serde_json::from_value(Value::String(spec.exchange.clone()))
         .map_err(|e| host_error(e.to_string()))?;
     let options: ExchangeOptions = spec
         .options
         .decode()
         .map_err(|e| host_error(e.to_string()))?;
-    let runtime: Rc<dyn WsRuntime> = match spec.proxy_token {
-        Some(token) => {
-            let source: ProxyTokenSource = Rc::new(move || {
-                let pending = token();
-                Box::pin(async move {
-                    pending
-                        .await
-                        .map_err(|error| TransportError::Host(error_text(&error)))
-                })
-            });
-            native_tealstreet_runtime(source)
+    if epoch.is_some()
+        && (spec.sign.is_some()
+            || spec.proxy_token.is_some()
+            || options.public_data_only != Some(true)
+            || !options.key.is_empty()
+            || !options.secret.is_empty())
+    {
+        return Err(host_error(
+            "replay requires a keyless direct public-data account",
+        ));
+    }
+    if epoch.is_some_and(|epoch| {
+        !epoch.is_finite() || epoch < 0.0 || epoch.fract() != 0.0 || epoch > 8.64e15
+    }) {
+        return Err(host_error("invalid replay epoch"));
+    }
+    let replay_runtime = epoch.map(safe_cex_exchange::native::native_replay_runtime);
+    let runtime: Rc<dyn WsRuntime> = if let Some(runtime) = &replay_runtime {
+        runtime.clone()
+    } else {
+        match spec.proxy_token {
+            Some(token) => {
+                let source: ProxyTokenSource = Rc::new(move || {
+                    let pending = token();
+                    Box::pin(async move {
+                        pending
+                            .await
+                            .map_err(|error| TransportError::Host(error_text(&error)))
+                    })
+                });
+                native_tealstreet_runtime(source)
+            }
+            None => native_runtime(),
         }
-        None => native_runtime(),
     };
     let adapters = Rc::new(|| {
         reqwest_adapter()
@@ -260,13 +290,14 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
     };
     let constructor = rust_constructor(&name, host.clone())
         .ok_or_else(|| host_error(format!("no Rust constructor for {}", spec.exchange)))?;
-    let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = constructor
         .construct(name, options, store.clone())
         .map_err(|error| exchange_error(&error))?;
     bind_http_events(&host, &exchange);
     let symbol_metadata_throttler = symbol_metadata_throttler(exchange.clone());
     Ok(Rc::new(NativeAccount {
+        replay_runtime,
         exchange,
         store,
         signer,
@@ -277,6 +308,61 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
         store_deliveries: Rc::default(),
         stream_listeners: Rc::default(),
     }))
+}
+
+/// Native parser receipts and controlled replay clock. Only isolated replay
+/// accounts opened by the addon can call this diagnostic surface.
+pub fn native_account_replay_control(
+    account: Rc<NativeAccount>,
+    request: NativeValue,
+) -> NativeAccountFuture<NativeValue> {
+    Box::pin(async move {
+        let runtime = account
+            .replay_runtime
+            .as_ref()
+            .ok_or_else(|| host_error("account has no replay host"))?;
+        let clock = runtime.replay_clock.as_ref().expect("replay host clock");
+        let operation: String = request
+            .get("op")
+            .ok_or_else(|| host_error("missing replay op"))?
+            .decode()
+            .map_err(|e| host_error(e.to_string()))?;
+        match operation.as_str() {
+            "begin" => {
+                safe_cex_exchange::replay_clock::activate(clock).map_err(|e| exchange_error(&e))?;
+                // Cancel the startup Store tail at the same observation boundary
+                // as lodash.cancel() in TS. Do not rewrite any emitted payload.
+                for delivery in account
+                    .store_deliveries
+                    .borrow()
+                    .iter()
+                    .filter_map(Weak::upgrade)
+                {
+                    delivery.reset_replay_throttle();
+                }
+            }
+            "advance" => {
+                let at: f64 = request
+                    .get("atMs")
+                    .ok_or_else(|| host_error("missing replay time"))?
+                    .decode()
+                    .map_err(|e| host_error(e.to_string()))?;
+                safe_cex_exchange::replay_clock::advance(clock, at)
+                    .await
+                    .map_err(|e| exchange_error(&e))?;
+            }
+            "receipt" => {}
+            _ => return Err(host_error("unknown replay operation")),
+        }
+        safe_cex_exchange::native::replay_checkpoint(runtime);
+        // A handler return is the synchronous processing boundary. Ready source
+        // Promise continuations run at the real host checkpoint before receipt.
+        runtime.sleep(0).await.map_err(|e| exchange_error(&e))?;
+        safe_cex_exchange::native::replay_checkpoint(runtime);
+        encode(
+            json!({"atMs": safe_cex_exchange::replay_clock::elapsed(clock), "pendingJobs": safe_cex_exchange::native::replay_pending_jobs(runtime), "transport": safe_cex_exchange::native::native_frame_receipts(runtime), "sockets": account.exchange.base().get_all_sockets().iter().flat_map(|socket| socket.frame_drain_receipts()).collect::<Vec<_>>() }),
+        )
+    })
 }
 
 /// ts: RemoteSigner.onAvailabilityChange, driven from the host's signer session.
@@ -635,7 +721,8 @@ pub fn native_account_call(
             }
             "cancelAllOrders" => done(venue.cancel_all_orders().await).map(|_| NativeValue::Null),
             "mintClientOrderId" => {
-                encode(base.mint_client_order_id(&arg::<safe_cex_types::PlaceOrderOpts>(&args, 0)?))
+                done(base.mint_client_order_id(&arg::<safe_cex_types::PlaceOrderOpts>(&args, 0)?))
+                    .and_then(encode)
             }
             "placeOrderWithClientOrderId" => {
                 let order: PlaceOrderOpts = arg(&args, 0)?;

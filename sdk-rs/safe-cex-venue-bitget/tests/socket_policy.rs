@@ -75,8 +75,9 @@ fn native_ping(input: PingInput) -> Observation {
     } else {
         "send"
     };
-    let mut original = Box::new(ExchangeError::new("send failed"));
-    original.response = Some(json!({"marker":59}));
+    let original = Box::new(
+        ExchangeError::new("send failed").with_retained_response(json!({"marker":59}).into()),
+    );
     let pointer = std::ptr::from_ref(original.as_ref());
     let clock = || {
         events.borrow_mut().push("clock");
@@ -113,7 +114,7 @@ fn native_ping(input: PingInput) -> Observation {
         );
         assert_eq!(error.message, "send failed", "PING native error message");
         assert_eq!(
-            error.response,
+            error.response_json_view(),
             Some(json!({"marker":59})),
             "PING native error metadata"
         );

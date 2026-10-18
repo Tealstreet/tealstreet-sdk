@@ -1,7 +1,8 @@
 include!("cardinality.rs.inc");
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::js_from_str;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, StoreSubscriberError};
 use safe_cex_venue_bitrue::{read_helpers::*, wire::OpaqueValue};
 use serde_json::{Value, json};
@@ -131,7 +132,7 @@ fn leverage_matches_actual_typescript_and_store() {
                     let response = json!({"status":409,"data":{"msg":"listener-specific"}});
                     if recovered {
                         let mut original = ExchangeError::new("observer failure");
-                        original.response = Some(response);
+                        original = original.with_retained_response(response.into());
                         original.code =
                             Some(safe_cex_exchange::js_runtime::value::Js::str("E_RECOVERED"));
                         // IDs from prior Store boundaries may repeat the new
@@ -185,7 +186,7 @@ fn leverage_matches_actual_typescript_and_store() {
                             "leverage subscriber identity: fallback"
                         );
                     }
-                    let mut observed = json!({"type":"error","name":error.name,"message":error.message,"response":error.response});
+                    let mut observed = json!({"type":"error","name":error.name,"message":error.message,"response":error.response_json_view()});
                     if let Some(code) = error.code.as_ref() {
                         observed["code"] = safe_cex_exchange::js_runtime::value::to_json(code)
                             .expect("finite fixture error code");
@@ -214,7 +215,7 @@ fn leverage_matches_actual_typescript_and_store() {
             row["laterNotifications"].as_u64().unwrap(),
             "leverage native parity: setMarketMaxLeverage fanout stops; {row}"
         );
-        let markets = store.markets();
+        let markets = store.markets().unwrap();
         let expected_markets = row["markets"].as_array().unwrap();
         assert_eq!(
             expected_markets.len(),

@@ -2,7 +2,7 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_json, from_typed, to_retained_input, to_typed},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{process::Command, rc::Rc, sync::OnceLock};
@@ -145,7 +145,7 @@ fn retained_info_round_trips_all_models_through_production_store_facade() {
             row.define("info", input(&case["input"]["value"])).unwrap();
         }
         info(&round_trip(model, &row), &case["input"]);
-        let facade = store::facade(Rc::new(DefaultStore::new()));
+        let facade = store::facade(Rc::new(DefaultStore::new())).unwrap();
         let collection = if model == "balance" {
             "balance".into()
         } else {
@@ -174,7 +174,7 @@ fn retained_info_patches_use_production_store_without_json_copy() {
     assert_eq!(cases.len(), 52);
     for case in cases {
         let model = case["model"].as_str().unwrap();
-        let facade = store::facade(Rc::new(DefaultStore::new()));
+        let facade = store::facade(Rc::new(DefaultStore::new())).unwrap();
         let collection = format!("{model}s");
         facade
             .call_method(
@@ -218,7 +218,7 @@ fn retained_info_coercions_read_the_native_store_value() {
     assert_eq!(cases.len(), 20, "native info coercion source floor");
     for case in cases {
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native);
+        let facade = store::facade(native).unwrap();
         let market = from_json(&source()["cases"][0]["base"]);
         market.set("info", input(&case["value"])).unwrap();
         facade
@@ -270,17 +270,21 @@ fn retained_config_uses_the_production_store_update_without_json_copy() {
     assert_eq!(cases.len(), 13, "native opaque config source floor");
     for case in cases {
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         facade
             .call_method(
                 "update",
                 vec![Js::object(vec![("zkLinkConfig", input(&case["input"]))])],
             )
             .unwrap();
-        let config = native.zk_link_config().expect("native config committed");
-        observe(&from_typed(&*config).unwrap(), &case["stored"]);
+        let config = native
+            .zk_link_config()
+            .unwrap()
+            .expect("native config committed");
+        observe(&from_typed(&config).unwrap(), &case["stored"]);
         assert!(
             safe_cex_store::Store::serialize(native.as_ref())
+                .unwrap()
                 .zk_link_config
                 .is_none(),
             "source snapshot omits config"
@@ -294,7 +298,7 @@ fn retained_config_replacement_preserves_top_level_undefined() {
     assert_eq!(cases.len(), 13, "native config replacement source floor");
     for case in cases {
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         facade
             .call_method(
                 "update",
@@ -308,8 +312,9 @@ fn retained_config_replacement_preserves_top_level_undefined() {
             .unwrap();
         let config = native
             .zk_link_config()
+            .unwrap()
             .expect("present config after replacement");
-        observe(&from_typed(&*config).unwrap(), &case["stored"]);
+        observe(&from_typed(&config).unwrap(), &case["stored"]);
     }
 }
 
@@ -320,7 +325,7 @@ fn retained_wrapper(kind: &str) {
     assert_eq!(cases.len(), 13, "native {kind} wrapper comparison floor");
     for case in cases {
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         let record = input(&case["record"]);
         let update = if case["kind"] == "currency" {
             let balance = from_json(
@@ -344,11 +349,11 @@ fn retained_wrapper(kind: &str) {
             .call_method("update", vec![update])
             .unwrap_or_else(|e| panic!("{} {}: {e:?}", case["kind"], case["profile"]));
         let model = if case["kind"] == "currency" {
-            let balance = native.balance();
+            let balance = native.balance().unwrap();
             let row = balance.currencies.as_ref().unwrap().get("USDT").unwrap();
             from_typed(row).unwrap()
         } else {
-            let rows = native.displayed_positions();
+            let rows = native.displayed_positions().unwrap();
             from_typed(&rows[0]).unwrap()
         };
         info(&model, &case["stored"]);

@@ -11,12 +11,25 @@ struct Failure {
     message: String,
     response: Option<Value>,
 }
-fn error(name: &'static str, message: String) -> Rc<Failure> {
-    Rc::new(Failure {
+#[derive(Clone, Debug)]
+struct FailureRef(Rc<Failure>);
+impl std::ops::Deref for FailureRef {
+    type Target = Failure;
+    fn deref(&self) -> &Failure {
+        &self.0
+    }
+}
+impl From<safe_cex_types::StoreReadError> for FailureRef {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        panic!("unexpected read failure in finite pagination fixture: {error}")
+    }
+}
+fn error(name: &'static str, message: String) -> FailureRef {
+    FailureRef(Rc::new(Failure {
         name: name.into(),
         message,
         response: None,
-    })
+    }))
 }
 fn ready<F: Future>(future: F) -> F::Output {
     match pin!(future).poll(&mut Context::from_waker(Waker::noop())) {
@@ -62,11 +75,11 @@ fn position_pagination_reinitialization_and_error_identity_match_source() {
                 let page = c["pages"][index.get()].clone();
                 index.set(index.get() + 1);
                 let response = if let Some(e) = page.get("requestError") {
-                    let e = Rc::new(Failure {
+                    let e = FailureRef(Rc::new(Failure {
                         name: "Error".into(),
                         message: e["message"].as_str().unwrap().into(),
                         response: e.get("response").cloned(),
-                    });
+                    }));
                     *original.borrow_mut() = Some(e.clone());
                     Err(e)
                 } else {
@@ -125,7 +138,7 @@ fn position_pagination_reinitialization_and_error_identity_match_source() {
                     original
                         .borrow()
                         .as_ref()
-                        .is_some_and(|original| Rc::ptr_eq(original, &e)),
+                        .is_some_and(|original| Rc::ptr_eq(&original.0, &e.0)),
                     c["error"]["sameRequestError"].as_bool().unwrap(),
                     "error identity case{i}"
                 );
@@ -146,7 +159,7 @@ fn dropping_pending_position_read_does_not_mark_reinit_or_map() {
         &reinit,
         |_, _| {
             calls.set(calls.get() + 1);
-            std::future::pending::<Result<Value, Rc<Failure>>>()
+            std::future::pending::<Result<Value, FailureRef>>()
         },
         |_| Ok("inverse".into()),
         |_| {
@@ -178,7 +191,7 @@ fn dropping_between_position_pages_keeps_state_and_mapping_untouched() {
         Some("inverse"),
         None,
         &reinit,
-        |_, _| -> std::pin::Pin<Box<dyn Future<Output = Result<Value, Rc<Failure>>> + '_>> {
+        |_, _| -> std::pin::Pin<Box<dyn Future<Output = Result<Value, FailureRef>> + '_>> {
             calls.set(calls.get() + 1);
             if calls.get() == 1 {
                 Box::pin(std::future::ready(Ok(
@@ -221,7 +234,8 @@ fn inverse_outer_fanout_preserves_later_errors_and_requests() {
 }
 
 fn assert_inverse_composition(fanout: bool) {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_types::{MarginType, Market, Ticker};
     let output = std::process::Command::new("node")
         .arg(concat!(
@@ -406,7 +420,7 @@ fn assert_inverse_composition(fanout: bool) {
                 "later source error wins: {label}"
             );
             if label.ends_with("request-error") {
-                assert!(Rc::ptr_eq(&failure, &request_failure));
+                assert!(Rc::ptr_eq(&failure.0, &request_failure.0));
             }
         } else if label.starts_with("ordinary") {
             let positions = result.unwrap();
@@ -462,7 +476,7 @@ fn inverse_fanout_drop_releases_request_without_later_category() {
         let drops = Rc::new(Cell::new(0));
         let categories = RefCell::new(Vec::new());
         let reinit = Cell::new(false);
-        let store = safe_cex_store::store::DefaultStore::new();
+        let store = safe_cex_exchange::native_store::DefaultStore::new();
         let mut future = Box::pin(fetch_inverse_position_fanout(
             None,
             || Ok(vec!["linear".into(), "inverse".into()]),
@@ -480,7 +494,7 @@ fn inverse_fanout_drop_releases_request_without_later_category() {
                     if index == 1 {
                         std::future::pending::<()>().await;
                     }
-                    Ok::<_, Rc<Failure>>(json!({"retMsg":"OK","result":{"list":[]}}))
+                    Ok::<_, FailureRef>(json!({"retMsg":"OK","result":{"list":[]}}))
                 }
             },
             |_| Ok("inverse".into()),

@@ -128,6 +128,12 @@ impl Realm {
         &mut self,
         thrown: &Value,
     ) -> safe_cex_exchange::runtime::ExchangeError {
+        let native_error = thrown
+            .object()
+            .and_then(|o| o.borrow().native_error.clone());
+        if let Some(error) = native_error {
+            return (*error).clone();
+        }
         let message = if thrown
             .object()
             .is_some_and(|o| matches!(o.borrow().kind, Kind::Error))
@@ -151,7 +157,14 @@ impl Realm {
             if let Ok(response) = self.get_str(thrown, "response")
                 && !response.is_nullish()
             {
-                error.response = self.to_serde(&response).ok();
+                let response = match self.capture_typed_value(&response, 0) {
+                    Ok(value) => value,
+                    Err(cause) => return self.exchange_error(&cause),
+                };
+                match safe_cex_exchange::js_runtime::value::to_retained_input(&response) {
+                    Ok(response) => error = error.with_retained_response(response),
+                    Err(cause) => return cause.into(),
+                }
             }
         }
         error

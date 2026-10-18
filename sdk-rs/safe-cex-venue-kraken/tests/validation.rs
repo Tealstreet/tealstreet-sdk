@@ -128,7 +128,9 @@ fn compare(family: &str) {
         let released = Cell::new(false);
         let late = Cell::new(false);
         let mut original = ExchangeError::new(case["message"].as_str().unwrap_or("read failure"));
-        original.metadata.response = case.get("response").cloned();
+        if let Some(response) = case.get("response") {
+            original = original.with_retained_response(response.clone().into());
+        }
         let read = |request: ValidationRead| {
             assert_eq!(
                 request.method,
@@ -337,7 +339,7 @@ fn futures_utf16_representation_boundary() {
                 ))
             } else {
                 let mut error = ExchangeError::new("original");
-                error.metadata.response = Some(json!({"data":{"error":"😀"}}));
+                error = error.with_retained_response((json!({"data":{"error":"😀"}})).into());
                 Err(error)
             }))
         };

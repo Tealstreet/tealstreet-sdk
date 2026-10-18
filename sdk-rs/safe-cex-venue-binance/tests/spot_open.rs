@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{runtime::*, websocket::*};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::ExchangeOptions;
 use safe_cex_venue_binance::spot_open::*;
@@ -483,7 +484,8 @@ fn catch_emitter_failure_escapes_unchanged_and_skips_force_close() {
             sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
                 "emitter-code"
             )));
-            sentinel.response = Some(json!({"data":{"msg":"emitter-response"}}));
+            sentinel = sentinel
+                .with_retained_response((json!({"data":{"msg":"emitter-response"}})).into());
             if emitter_throws {
                 *parent.emit_failure.borrow_mut() = Some(sentinel.clone());
             }

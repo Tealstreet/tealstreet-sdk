@@ -149,15 +149,17 @@ fn position_adapter_native_source_parity() {
         let mode = case["mode"].as_str().unwrap();
         let mut symbol = |id: &str| {
             trace.borrow_mut().push(serde_json::json!(["symbol", id]));
-            if mode == "unknown" {
+            Ok(if mode == "unknown" {
                 None
             } else {
                 Some(format!("mapped:{id}"))
-            }
+            })
         };
         let mut currency = |id: &str| {
             trace.borrow_mut().push(serde_json::json!(["currency", id]));
-            Some(if mode == "empty-currency" { "" } else { "USDC" }.into())
+            Ok(Some(
+                if mode == "empty-currency" { "" } else { "USDC" }.into(),
+            ))
         };
         let mut scale = |id: &str| {
             trace.borrow_mut().push(serde_json::json!(["scale", id]));
@@ -187,7 +189,7 @@ fn position_adapter_native_source_parity() {
         if expected.get("error").is_some() {
             assert_eq!(expected["error"], "TypeError");
             assert_eq!(
-                actual.err().as_deref(),
+                actual.err().map(|error| error.to_string()).as_deref(),
                 expected["message"].as_str(),
                 "ADAPTER native error {index}"
             );
@@ -218,7 +220,7 @@ fn position_adapter_native_source_parity() {
         let actual = num(raw.as_ref());
         if case["result"].get("error").is_some() {
             assert_eq!(
-                actual.err().as_deref(),
+                actual.err().map(|error| error.to_string()).as_deref(),
                 case["result"]["message"].as_str(),
                 "ADAPTER native numeric error"
             );

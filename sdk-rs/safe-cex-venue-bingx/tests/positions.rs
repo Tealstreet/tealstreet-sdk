@@ -1,11 +1,12 @@
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_bingx::data_reads::{BingxDataReads, PositionMetadata, ReadTransport};
 use serde_json::{Value, json};
@@ -226,7 +227,7 @@ impl ReadTransport for Transport {
                 || (error["scope"] == "order-b" && params.unwrap()["orderId"] == "b"));
         let result = if rejected {
             let mut e = ExchangeError::new(error["message"].as_str().unwrap());
-            e.response = Some(json!({"data":{"msg":error["msg"]}}));
+            e = e.with_retained_response((json!({"data":{"msg":error["msg"]}})).into());
             e.store_subscriber_ids = vec![71, 83];
             Err(e)
         } else {
@@ -327,10 +328,10 @@ fn fixture(
     )
 }
 fn state(store: &DefaultStore) -> Value {
-    let leverage = Store::fetched_leverage(store);
+    let leverage = Store::fetched_leverage(store).unwrap();
     let leverage=Value::Object(leverage.iter().map(|(key,v)|(key.clone(),json!({"buyLeverage":number(v.buy_leverage),"sellLeverage":number(v.sell_leverage)}))).collect());
-    let ids = Store::update_ids(store);
-    json!({"positions":Store::positions(store).iter().map(position).collect::<Vec<_>>(),"orders":Store::orders(store).iter().map(order).collect::<Vec<_>>(),"fetchedLeverage":leverage,"updateIds":{"orders":number(ids.orders),"positions":number(ids.positions)}})
+    let ids = Store::update_ids(store).unwrap();
+    json!({"positions":Store::positions(store).unwrap().iter().map(position).collect::<Vec<_>>(),"orders":Store::orders(store).unwrap().iter().map(order).collect::<Vec<_>>(),"fetchedLeverage":leverage,"updateIds":{"orders":number(ids.orders),"positions":number(ids.positions)}})
 }
 #[test]
 fn positions_match_actual_typescript() {
@@ -541,7 +542,9 @@ fn metadata_disposal_guard_after_both_requests() {
         "BINGX-POS disposal occurs after both requests start"
     );
     assert!(
-        Store::fetched_leverage(store.as_ref()).contains_key("BTCUSDT"),
+        Store::fetched_leverage(store.as_ref())
+            .unwrap()
+            .contains_key("BTCUSDT"),
         "BINGX-POS leverage completion remains observable"
     );
 }
@@ -575,7 +578,8 @@ fn write_failures_preserve_subscriber_cause_and_partial_effects() {
                 let mut cause = ExchangeError::new("subscriber cause");
                 cause.name = "ListenerError".into();
                 cause.store_subscriber_ids = vec![71, 83];
-                cause.response = Some(json!({"data":{"msg":"subscriber denied"}}));
+                cause = cause
+                    .with_retained_response((json!({"data":{"msg":"subscriber denied"}})).into());
                 Err(StoreSubscriberError::new("subscriber cause").with_cause(Rc::new(cause)))
             }),
         );
@@ -623,6 +627,7 @@ fn write_failures_preserve_subscriber_cause_and_partial_effects() {
             );
             assert_eq!(
                 Store::orders(store.as_ref())
+                    .unwrap()
                     .iter()
                     .find(|o| o.id == "k")
                     .unwrap()
@@ -632,7 +637,7 @@ fn write_failures_preserve_subscriber_cause_and_partial_effects() {
             );
         } else {
             assert_eq!(
-                Store::positions(store.as_ref())[0].symbol,
+                Store::positions(store.as_ref()).unwrap()[0].symbol,
                 "BTCUSDT",
                 "BINGX-POS refreshed positions survive notification failure"
             );
@@ -691,7 +696,9 @@ fn rejected_metadata_pair_keeps_pending_leverage_sibling_running() {
         "BINGX-POS rejection does not wait for pending sibling"
     );
     assert!(
-        !Store::fetched_leverage(store.as_ref()).contains_key("BTCUSDT"),
+        !Store::fetched_leverage(store.as_ref())
+            .unwrap()
+            .contains_key("BTCUSDT"),
         "BINGX-POS pending sibling has not written yet"
     );
     let mut tasks = host.tasks.borrow_mut().drain(..).collect::<Vec<_>>();
@@ -703,7 +710,7 @@ fn rejected_metadata_pair_keeps_pending_leverage_sibling_running() {
     release.set(true);
     ready(tasks.pop().unwrap());
     assert_eq!(
-        Store::fetched_leverage(store.as_ref())["BTCUSDT"].buy_leverage,
+        Store::fetched_leverage(store.as_ref()).unwrap()["BTCUSDT"].buy_leverage,
         17.0,
         "BINGX-POS sibling writes after pair rejection"
     );

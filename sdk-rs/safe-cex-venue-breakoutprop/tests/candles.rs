@@ -103,9 +103,7 @@ fn actual_candle_read() {
         let trace = RefCell::new(Vec::<Value>::new());
         let errors = RefCell::new(Vec::<Value>::new());
         let mut original = ExchangeError::new("original-rejection");
-        original.response = Some(
-            json!({"data":{"msg":if *name=="empty-msg"{json!("")}else if *name=="object-msg"{json!({"detail":"venue"})}else{json!("venue-message")}}}),
-        );
+        original = original.with_retained_response((json!({"data":{"msg":if *name=="empty-msg"{json!("")}else if *name=="object-msg"{json!({"detail":"venue"})}else{json!("venue-message")}}})).into());
         original.store_subscriber_ids = vec![19, 31];
         let mut logger_error = ExchangeError::new("logger-rejection");
         logger_error.store_subscriber_ids = vec![47, 59];

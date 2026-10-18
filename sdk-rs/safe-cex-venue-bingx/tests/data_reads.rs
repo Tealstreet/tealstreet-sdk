@@ -1,12 +1,13 @@
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_bingx::data_reads::*;
 use serde_json::{Value, json};
@@ -156,7 +157,8 @@ impl ReadTransport for Transport {
             if !self.input["error"].is_null() {
                 let mut error =
                     ExchangeError::new(self.input["error"]["message"].as_str().unwrap());
-                error.response = Some(self.input["error"]["response"].clone());
+                error =
+                    error.with_retained_response(self.input["error"]["response"].clone().into());
                 error.store_subscriber_ids = vec![71, 83];
                 return Err(error);
             }
@@ -281,14 +283,14 @@ fn data_reads_match_actual_typescript() {
         );
         counts[family] += 1;
         let (venue, store, transport, host) = fixture(case["input"].clone());
-        let cached = Store::balance_handle(store.as_ref());
+        let cached = Store::balance_handle(store.as_ref()).unwrap();
         let result:Result<Value,ExchangeError>=match method {
             "validateAccount"=>ready(venue.validate_account()).map(|v|{let mut out=json!({"error":v.error});if let Some(b)=v.balance{out["balance"]=balance(&b);}out}),
-            "fetchBalance"=>ready(venue.fetch_balance()).map(|v|{if index%4>=2{assert!(std::sync::Arc::ptr_eq(&v,&cached),"BINGX-DATA retained balance fallback");}balance(&v)}),
+            "fetchBalance"=>ready(venue.fetch_balance()).map(|v|{if index%4>=2{assert!(v.native_value().downcast::<safe_cex_exchange::js_runtime::value::Js>().unwrap().same_reference(&cached.native_value().downcast::<safe_cex_exchange::js_runtime::value::Js>().unwrap()),"BINGX-DATA retained balance fallback");}balance(&v.read().unwrap())}),
             "fetchMarkets"=>ready(venue.fetch_markets()).map(|v|Value::Array(v.iter().map(market).collect())),
             "fetchTickersRaw"=>ready(venue.fetch_tickers_raw()).map(|v|observe(&serde_json::to_value(v).unwrap())),
             "formatTickers"=>venue.format_tickers(&RawTickers { dailys:case["input"]["raw"].get("dailys").cloned().map(Into::into),prices:case["input"]["raw"].get("prices").cloned().map(Into::into) }).map(|v|Value::Array(v.iter().map(ticker).collect())),
-            "fetchTickers"=>ready(venue.fetch_tickers()).map(|v|{assert_eq!(Store::tickers(store.as_ref()).len(),v.len(),"BINGX-DATA native published tickers");Value::Array(v.iter().map(ticker).collect())}),
+            "fetchTickers"=>ready(venue.fetch_tickers()).map(|v|{assert_eq!(Store::tickers(store.as_ref()).unwrap().len(),v.len(),"BINGX-DATA native published tickers");Value::Array(v.iter().map(ticker).collect())}),
             "fetchLeverageForSymbol"=>ready(venue.fetch_leverage_for_symbol("BTCUSDT")).map(|v|v.map_or(Value::Null,|v|json!({"buyLeverage":number(v.buy_leverage),"sellLeverage":number(v.sell_leverage)}))),
             "fetchMarginModeForSymbol"=>ready(venue.fetch_margin_mode_for_symbol("BTCUSDT")).map(|v|json!(v)),
             "getOrFetchPositionMode"=>ready(async {let a=venue.get_or_fetch_position_mode(false).await?;let b=venue.get_or_fetch_position_mode(false).await?;let c=venue.get_or_fetch_position_mode(true).await?;Ok(json!([a,b,c]))}),
@@ -376,7 +378,7 @@ fn data_reads_match_actual_typescript() {
             "BINGX-DATA native report labels {method}"
         );
         if method == "fetchLeverageForSymbol" {
-            let leverage = Store::fetched_leverage(store.as_ref());
+            let leverage = Store::fetched_leverage(store.as_ref()).unwrap();
             assert_eq!(
                 leverage["OLD"].buy_leverage, 2.0,
                 "BINGX-DATA retain unrelated leverage"
@@ -395,7 +397,7 @@ fn data_reads_match_actual_typescript() {
         "BINGX-DATA source lone surrogate"
     );
     let (venue, _, _, _) = fixture(json!({"rawResponse":corpus()["boundary"]["raw"]}));
-    let balance = ready(venue.fetch_balance()).unwrap();
+    let balance = ready(venue.fetch_balance()).unwrap().read().unwrap();
     assert_eq!(
         json!(
             balance
@@ -443,7 +445,7 @@ fn store_notification_identity_is_retained() {
         "BINGX-DATA subscriber outer boundary appended"
     );
     assert_eq!(
-        Store::tickers(store.as_ref()).len(),
+        Store::tickers(store.as_ref()).unwrap().len(),
         1,
         "BINGX-DATA write precedes failing notification"
     );
@@ -485,7 +487,7 @@ fn typed_market_and_leverage_fields_refuse_source_dynamic_values() {
         "BINGX-DATA typed leverage refusal"
     );
     assert_eq!(
-        Store::fetched_leverage(store.as_ref()).len(),
+        Store::fetched_leverage(store.as_ref()).unwrap().len(),
         1,
         "BINGX-DATA refused leverage is not published"
     );
@@ -534,7 +536,7 @@ fn disposed_after_response_does_not_publish_tickers() {
         "BINGX-DATA sequential raw reads complete"
     );
     assert!(
-        Store::tickers(store.as_ref()).is_empty(),
+        Store::tickers(store.as_ref()).unwrap().is_empty(),
         "BINGX-DATA in-flight disposal suppresses Store write"
     );
 }

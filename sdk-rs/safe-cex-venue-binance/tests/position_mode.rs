@@ -23,7 +23,8 @@ fn fixture_error() -> ExchangeError {
     error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "fixture-code"
     )));
-    error.response = Some(json!({"status":503,"data":{"msg":"venue message"}}));
+    error =
+        error.with_retained_response((json!({"status":503,"data":{"msg":"venue message"}})).into());
     error
 }
 
@@ -66,7 +67,7 @@ fn position_mode_readers_match_live_source() {
             Ok(value) => (json!(value), Value::Null),
             Err(actual) => (
                 Value::Null,
-                json!({"name":actual.name,"message":actual.message,"code":observed_error_code(&actual.code),"same":actual==error,"response":actual.response}),
+                json!({"name":actual.name,"message":actual.message,"code":observed_error_code(&actual.code),"same":actual==error,"response":actual.response_json_view()}),
             ),
         };
         assert_eq!(

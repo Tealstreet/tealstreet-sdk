@@ -51,7 +51,7 @@ pub fn observe<'a, E: Exchange, T>(
         );
     }
     let snapshot = || {
-        let balance = h.store.balance();
+        let balance = h.store.balance().unwrap();
         (
             balance.clone(),
             [
@@ -60,10 +60,10 @@ pub fn observe<'a, E: Exchange, T>(
                 balance.total.to_bits(),
                 balance.upnl.to_bits(),
             ],
-            h.store.orders().to_vec(),
-            h.store.positions().to_vec(),
-            h.store.markets().to_vec(),
-            h.store.tickers().to_vec(),
+            h.store.orders().unwrap().to_vec(),
+            h.store.positions().unwrap().to_vec(),
+            h.store.markets().unwrap().to_vec(),
+            h.store.tickers().unwrap().to_vec(),
         )
     };
     let before = snapshot();

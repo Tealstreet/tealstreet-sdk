@@ -1,8 +1,8 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_asterdex::{
     types::AsterDEXAPIVersion,

@@ -219,7 +219,7 @@ fn private_handlers_commit_before_original_subscriber_failure_and_abort_later_ef
             result.unwrap();
         }
         if kind == "order" {
-            let orders = store.orders();
+            let orders = store.orders().unwrap();
             assert_eq!(orders.len(), 2, "private native committed order count");
             assert_eq!(orders[0].id, "order-closed");
             assert_eq!(orders[1].id, "order-canceled");
@@ -238,7 +238,7 @@ fn private_handlers_commit_before_original_subscriber_failure_and_abort_later_ef
                 assert_eq!(hooks[0].1.to_bits(), 510f64.to_bits());
             }
         } else if kind == "position" {
-            let positions = store.positions();
+            let positions = store.positions().unwrap();
             assert_eq!(
                 positions.len(),
                 1,
@@ -274,7 +274,7 @@ fn private_handlers_commit_before_original_subscriber_failure_and_abort_later_ef
                 ],
                 "private native full stop effect order"
             );
-            let orders = store.orders();
+            let orders = store.orders().unwrap();
             assert_eq!(orders.len(), 1);
             assert_eq!(orders[0].id, format!("{kind}-terminal"));
             assert_eq!(orders[0].status, OrderStatus::Canceled);

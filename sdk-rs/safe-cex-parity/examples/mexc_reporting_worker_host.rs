@@ -1,12 +1,12 @@
 //! Real MEXC reader -> BaseExchange -> installed worker bridge -> browser post.
 #[cfg(target_arch = "wasm32")]
 mod browser {
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_exchange::{
         exchange::{BaseExchange, Exchange, ExchangeSettings},
         runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
         websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
     };
-    use safe_cex_store::store::DefaultStore;
     use safe_cex_transport::{
         RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
         TransportProvider, socket::TunnelHost,
