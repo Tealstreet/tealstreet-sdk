@@ -147,20 +147,24 @@ impl Js {
             .to_number()?
             .clamp(0.0, 9_007_199_254_740_991.0) as usize;
         let mut values = Vec::new();
+        let mut undefined = 0;
         for index in 0..length {
             if self.has_index(index) {
-                values.push(self.get(&index.to_string())?);
+                let value = self.get(&index.to_string())?;
+                if value.is_undefined() {
+                    undefined += 1;
+                } else {
+                    values.push(value);
+                }
             }
         }
-        super::super::sorting::stable_sort(&mut values, |x, y| {
-            if x.is_undefined() || y.is_undefined() {
-                Ok(x.is_undefined().cmp(&y.is_undefined()))
-            } else {
-                compare(x, y)
-            }
-        })?;
-        let count = values.len();
-        for (index, value) in values.into_iter().enumerate() {
+        super::super::sorting::stable_sort(&mut values, &mut compare)?;
+        let count = values.len() + undefined;
+        for (index, value) in values
+            .into_iter()
+            .chain(std::iter::repeat_n(Js::Undefined, undefined))
+            .enumerate()
+        {
             self.set(&index.to_string(), value)?;
         }
         for index in count..length {

@@ -247,11 +247,12 @@ console.log(JSON.stringify([0,1,2,3,4,7,8,9,21,22,31,32,33,63,64,65,129].map(n=>
 #[test]
 fn native_inconsistent_sort_matches_node_comparison_schedule() {
     let output = std::process::Command::new("node").args(["-e", r#"
+if (process.versions.node !== '24.20.0') throw new Error('Use CI parity oracle Node 24.20.0 for V8 comparison scheduling');
 const lengths = [0,1,2,3,7,8,16,22,31,32,33,63,64,65,95,96,127,128,129,255,256,257,511,512,513,1024,2048];
 const results = [];
 for (let i = 0; i < 4096; ++i) {
   const seed = Math.imul(i+1, 2654435761) >>> 0;
-  const n = lengths[i % lengths.length], mode = i % 6, pattern = Math.floor(i/6) % 5;
+  const n = lengths[i % lengths.length], mode = Math.floor(i/lengths.length) % 6, pattern = Math.floor(i/(lengths.length*6)) % 5;
   let input = seed;
   const rows = Array.from({length:n}, (_, id) => {
     input = (Math.imul(input, 1664525) + 1013904223) >>> 0;
@@ -279,7 +280,7 @@ for (let i = 0; i < 4096; ++i) {
   });
   results.push({seed,n,mode,pattern,ids:rows.map(x=>x.id),calls,trace,state});
 }
-console.log(JSON.stringify({engine:process.versions.v8,results}));
+console.log(JSON.stringify({node:process.versions.node,engine:process.versions.v8,results}));
 "#]).output().unwrap();
     assert!(
         output.status.success(),
@@ -287,6 +288,11 @@ console.log(JSON.stringify({engine:process.versions.v8,results}));
         String::from_utf8_lossy(&output.stderr)
     );
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["node"], "24.20.0",
+        "run with the CI parity oracle Node version"
+    );
+    assert!(result["engine"].as_str().unwrap().starts_with("13.6."));
     let cases = result["results"].as_array().unwrap();
     assert_eq!(cases.len(), 4096);
     for (case_index, case) in cases.iter().enumerate() {
@@ -338,4 +344,77 @@ console.log(JSON.stringify({engine:process.versions.v8,results}));
             result["engine"]
         );
     }
+}
+
+#[test]
+fn native_sort_compacts_undefined_before_comparing() {
+    let output = std::process::Command::new("node").args(["-e", r#"
+const results = [7,32,64,129].map(n => {
+  const a = Array.from({length:n}, (_,id) => id%3===0 ? undefined : id);
+  for (let i=0; i<n; i+=7) delete a[i];
+  const calls=[];
+  a.sort((a,b)=>{calls.push([a,b]); return (a+b)%5===0 ? NaN : (b%11)-(a%11);});
+  return {calls,ids:Array.from({length:n},(_,i)=>!(i in a)?'hole':a[i]===undefined?'undefined':a[i])};
+});
+console.log(JSON.stringify(results));
+"#]).output().unwrap();
+    assert!(output.status.success());
+    let expected: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    run(|_| async move {
+        for (n, expected) in [7, 32, 64, 129].into_iter().zip(expected) {
+            let array = Js::array(
+                (0..n)
+                    .map(|id| {
+                        if id % 3 == 0 {
+                            Js::Undefined
+                        } else {
+                            Js::Number(id as f64)
+                        }
+                    })
+                    .collect(),
+            );
+            for id in (0..n).step_by(7) {
+                array
+                    .delete(&id.to_string().encode_utf16().collect::<Vec<_>>())
+                    .unwrap();
+            }
+            let calls = Rc::new(std::cell::RefCell::new(Vec::new()));
+            let sink = calls.clone();
+            array
+                .call_method(
+                    "sort",
+                    vec![Js::function("non-total comparator", move |_, args| {
+                        let a = arg(&args, 0).to_number()? as usize;
+                        let b = arg(&args, 1).to_number()? as usize;
+                        sink.borrow_mut().push([a, b]);
+                        Ok(Js::Number(if (a + b) % 5 == 0 {
+                            f64::NAN
+                        } else {
+                            (b % 11) as f64 - (a % 11) as f64
+                        }))
+                    })],
+                )
+                .unwrap();
+            let ids: Vec<_> = (0..n)
+                .map(|i| {
+                    let key = i.to_string();
+                    if !array.has_index(i) {
+                        serde_json::json!("hole")
+                    } else {
+                        let v = array.get(&key).unwrap();
+                        if v.is_undefined() {
+                            serde_json::json!("undefined")
+                        } else {
+                            serde_json::json!(v.as_f64().unwrap() as usize)
+                        }
+                    }
+                })
+                .collect();
+            assert_eq!(
+                serde_json::json!({"calls":*calls.borrow(),"ids":ids}),
+                expected,
+                "V8 undefined compaction n={n}"
+            );
+        }
+    });
 }
