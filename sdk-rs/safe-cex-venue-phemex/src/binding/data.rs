@@ -161,7 +161,7 @@ impl DataHost for Host {
             "get",
             vec![Js::str(e), Js::object(vec![("params", Js::object(p))])],
         )?;
-        Ok(Box::pin(await_js(result)))
+        Ok(Box::pin(await_js(&self.rt.exchange_runtime(), result)))
     }
     fn error_value(&mut self, e: &Thrown) -> Js {
         e.value.clone()

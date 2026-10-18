@@ -3,6 +3,7 @@ use crate::ws_controls::{Result, Value, WsHost};
 pub trait ReportHost: WsHost {
     fn ticker_patch_refusal(
         &self,
+        error: &Self::Error,
         symbol: &[u16],
         fields: &[(&str, Value<Self>)],
     ) -> Result<Self, Option<String>>;
@@ -107,12 +108,14 @@ fn public_stream<H: ReportHost>(
                     ),
                 ],
             };
-            if let Some(message) = h.ticker_patch_refusal(&symbol, &fields)? {
-                refusals.push(message);
-                return Ok(());
+            let patch = h.object(fields.clone())?;
+            if let Err(error) = h.call(function, Some(store), vec![ticker, patch]) {
+                if let Some(message) = h.ticker_patch_refusal(&error, &symbol, &fields)? {
+                    refusals.push(message);
+                } else {
+                    return Err(error);
+                }
             }
-            let patch = h.object(fields)?;
-            h.call(function, Some(store), vec![ticker, patch])?;
         }
         Ok(())
     })?;

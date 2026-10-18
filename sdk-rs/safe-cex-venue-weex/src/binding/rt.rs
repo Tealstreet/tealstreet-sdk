@@ -61,7 +61,7 @@ impl Host {
     ) -> Result<JsFuture<'static>, Thrown> {
         let xhr = self.root("xhr")?;
         let pending = xhr.call_method(method, std::vec![endpoint, config])?;
-        Ok(Box::pin(await_js(pending)))
+        Ok(Box::pin(await_js(&self.0.exchange_runtime(), pending)))
     }
     pub fn warn(&self, message: Js) -> Result<(), Thrown> {
         self.call("log", std::vec![message, Js::str("warning")])?;

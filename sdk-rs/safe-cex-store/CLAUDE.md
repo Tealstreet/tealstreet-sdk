@@ -193,3 +193,7 @@ source truthiness rule; Order/Position own-undefined merge semantics are unchang
 Opaque zkLinkConfig uses the same retained carrier through Store.update and its
 borrowed getter. The source snapshot still omits this configuration. The core
 native Store witness compares thirteen configuration profiles with TypeScript.
+
+Required numeric Ticker patch fields reject own Undefined as a typed patch error.
+Candidate publication remains atomic; optional-field and info presence policies
+are unchanged. Orderly's real socket census covers per-row refusal and siblings.

@@ -3,6 +3,9 @@ mod canonical_value;
 #[cfg(feature = "native")]
 #[path = "support/lifecycle_aliases.rs"]
 mod lifecycle_aliases;
+#[cfg(feature = "native")]
+#[path = "support/public_frame_guard.rs"]
+mod public_frame_guard;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -4773,7 +4776,10 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
     use safe_cex_transport::{
         RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
     };
-    use std::sync::{Arc, Mutex};
+    use std::{
+        io::Write,
+        sync::{Arc, Mutex},
+    };
     struct Response {
         status: u16,
         header: &'static str,
@@ -4798,8 +4804,12 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             Box::pin(async move { Ok(response) })
         }
     }
+    let mut source_input = vec![];
+    let mut native_pauses = vec![];
     for (status, header, value, duration) in [
         (200, "x-mbx-used-weight-1m", "1920", 60_000.0),
+        (200, "X-MbX-UsEd-WeIgHt-1m", "1920", 60_000.0),
+        (429, "ReTrY-AfTeR", "2.5", 2_500.0),
         (429, "retry-after", "2.5", 2_500.0),
         (429, "retry-after", "invalid", 60_000.0),
     ] {
@@ -4852,7 +4862,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(
             owner.paused_until.get(),
             1_000.0 + duration,
-            "native request-weight observer must run on HTTP status {status}"
+            "native request-weight observer must run on HTTP status {status} header {header}"
         );
         assert!(owner.paused());
         let requests = requests.lock().unwrap();
@@ -4864,8 +4874,38 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(path, "/fapi/v1/openOrders");
         assert!(query.contains("timestamp="));
         assert!(query.contains("signature="));
+        source_input
+            .push(json!({"status":status,"header":header,"value":value,"now":runtime.now.get()}));
+        native_pauses.push(owner.paused_until.get());
         owner.dispose().unwrap();
     }
+    let mut source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-weight-headers-source.cjs"
+        ))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    source
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source_input).unwrap())
+        .unwrap();
+    let source = source.wait_with_output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source_pauses: Vec<f64> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        native_pauses, source_pauses,
+        "all five native request outcomes match actual TS/Axios guards"
+    );
 }
 
 #[test]
@@ -5423,6 +5463,148 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
     drop(requests);
     owner.dispose().unwrap();
     assert!(runtime.reported.borrow().is_empty());
+}
+
+#[cfg(feature = "native")]
+#[path = "support/snapshot_future_binding.rs"]
+mod snapshot_future_binding;
+
+#[cfg(feature = "native")]
+#[path = "support/public_listener_aliases.rs"]
+mod public_listener_aliases;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_leverage_aliases_update_account_market_overlay() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{Arc, Mutex};
+    struct Brackets(Arc<Mutex<Vec<RestRequest>>>);
+    impl RestAdapter for Brackets {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.lock().unwrap().push(request);
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: None,
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(
+                    serde_json::to_vec(&json!([
+                        {"symbol":"BTCUSDT","brackets":[{"initialLeverage":"125"}]},
+                        {"symbol":"ETHUSDT","brackets":[{"initialLeverage":0}]}
+                    ]))
+                    .unwrap(),
+                ),
+            })))
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM] {
+        let runtime = Rc::new(Runtime::default());
+        let calls = Arc::<Mutex<Vec<RestRequest>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Brackets(calls.clone())),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let markets: Vec<safe_cex_types::Market> = ["BTCUSDT", "ETHUSDT", "SOLUSDT"].into_iter().map(|symbol|
+            serde_json::from_value(json!({"id":symbol,"symbol":symbol,"base":symbol.trim_end_matches("USDT"),"quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.01},"limits":{"amount":{"min":0.01,"max":9},"leverage":{"min":1,"max":3},"price":{"min":0.1,"max":999999}}})).unwrap()
+        ).collect();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(if venue == Venue::PM {
+                "binancepm"
+            } else {
+                "binance"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store,
+            dependencies,
+        )
+        .unwrap();
+        let publications = Rc::new(Cell::new(0));
+        let notifications = publications.clone();
+        let unsubscribe = owner.base.store.subscribe(Box::new(move |_, from_worker| {
+            assert!(!from_worker);
+            notifications.set(notifications.get() + 1);
+            Ok(())
+        }));
+        let operation = owner.invoke(Method::Overlay, vec![]);
+        run(
+            &runtime,
+            safe_cex_venue_binance::class_jobs::reaction(operation),
+        )
+        .unwrap();
+        let observed = owner.base.store.markets();
+        assert_eq!(
+            observed.len(),
+            markets.len(),
+            "overlay preserves market count {venue:?}"
+        );
+        assert_eq!(
+            observed[0].limits.leverage.max, 125.0,
+            "the actual leverage future publishes its account-specific maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[1].limits.leverage.max, 3.0,
+            "zero bracket leaves the original maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[2].limits.leverage.max, 3.0,
+            "absent bracket leaves the original maximum {venue:?}"
+        );
+        for (actual, seed) in observed.iter().zip(&markets) {
+            let mut expected = seed.clone();
+            if expected.symbol == "BTCUSDT" {
+                expected.limits.leverage.max = 125.0;
+            }
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(expected).unwrap(),
+                "overlay preserves every other market field {venue:?}"
+            );
+        }
+        drop(observed);
+        assert_eq!(
+            publications.get(),
+            1,
+            "one live Store publication {venue:?}"
+        );
+        unsubscribe();
+        let requests = calls.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "the actual leverage loader starts exactly one native request {venue:?}"
+        );
+        let (path, query) = requests[0].url.split_once('?').unwrap();
+        assert_eq!(
+            path,
+            if venue == Venue::PM {
+                "/papi/v1/um/leverageBracket"
+            } else {
+                "/fapi/v1/leverageBracket"
+            }
+        );
+        assert!(query.contains("timestamp="));
+        assert!(query.contains("signature="));
+        assert!(runtime.reported.borrow().is_empty());
+        drop(requests);
+        owner.dispose().unwrap();
+    }
 }
 
 #[test]

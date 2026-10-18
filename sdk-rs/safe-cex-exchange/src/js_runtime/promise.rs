@@ -110,7 +110,10 @@ impl Promise {
         let driver = promise.clone();
         let jobs = promise.0.borrow().jobs.clone();
         jobs.start(Box::pin(async move {
-            driver.settle(adopt(body).await);
+            match body.await {
+                Ok(value) => resolve_promise(driver, value),
+                Err(error) => driver.settle(Err(error)),
+            }
         }));
         promise
     }
@@ -253,52 +256,59 @@ fn resolve_promise(promise: Promise, value: Js) {
     }));
 }
 
-async fn adopt(body: JsFuture<'static>) -> Result<Js, Thrown> {
-    let mut value = body.await?;
-    while let Js::Promise(inner) = &value {
-        let inner = inner.clone();
-        jobs::yield_current().await;
-        value = inner.wait().await?;
-    }
-    Ok(value)
-}
-
-/// `await value`: promises are awaited, any other value resolves to itself.
-pub async fn await_js(value: Js) -> Result<Js, Thrown> {
-    if !matches!(value, Js::Promise(_)) {
-        jobs::yield_current().await;
-    }
-    let mut value = value;
-    while let Js::Promise(promise) = &value {
-        let promise = promise.clone();
-        value = promise.wait().await?;
-    }
-    Ok(value)
+/// `await value`: canonical resolution followed by exactly one await boundary.
+pub fn await_js(
+    runtime: &Rc<dyn ExchangeRuntime>,
+    value: Js,
+) -> impl std::future::Future<Output = Result<Js, Thrown>> + 'static + use<> {
+    let runtime = runtime.clone();
+    async move { Promise::resolve(&runtime, value).wait().await }
 }
 
 /// Promise.all registers every element's resolution reaction synchronously.
 pub fn all(runtime: &Rc<dyn ExchangeRuntime>, values: Vec<Js>) -> Promise {
-    combine(runtime, values, false)
+    combine(runtime, values.into_iter().map(Ok), false)
 }
 
 /// Promise.allSettled keeps fulfillment order and original rejection values.
 pub fn all_settled(runtime: &Rc<dyn ExchangeRuntime>, values: Vec<Js>) -> Promise {
-    combine(runtime, values, true)
+    combine(runtime, values.into_iter().map(Ok), true)
 }
 
-fn combine(runtime: &Rc<dyn ExchangeRuntime>, values: Vec<Js>, settled: bool) -> Promise {
+/// Resolve/register each yielded input before advancing the original iterator.
+pub(super) fn all_iterable(
+    runtime: &Rc<dyn ExchangeRuntime>,
+    value: &Js,
+    settled: bool,
+) -> Promise {
+    let iterator = match super::iterator::IteratorRecord::get(value) {
+        Ok(iterator) => iterator,
+        Err(error) => return Promise::settled(runtime, Err(error)),
+    };
+    let values = std::iter::from_fn(move || iterator.step_value().transpose());
+    combine(runtime, values, settled)
+}
+
+fn combine(
+    runtime: &Rc<dyn ExchangeRuntime>,
+    values: impl Iterator<Item = Result<Js, Thrown>>,
+    settled: bool,
+) -> Promise {
     let result = Promise::pending(runtime);
-    if values.is_empty() {
-        result.settle(Ok(Js::array(vec![])));
-        return result;
-    }
-    let remaining = Rc::new(std::cell::Cell::new(values.len()));
-    let output = Rc::new(RefCell::new(vec![None; values.len()]));
-    for (index, value) in values.into_iter().enumerate() {
-        let input = match value {
-            Js::Promise(promise) => promise,
-            other => Promise::settled(runtime, Ok(other)),
+    // Keep the iteration sentinel until all yielded reactions are registered.
+    let remaining = Rc::new(std::cell::Cell::new(1));
+    let output = Rc::new(RefCell::new(vec![]));
+    for (index, value) in values.enumerate() {
+        let value = match value {
+            Ok(value) => value,
+            Err(error) => {
+                result.settle(Err(error));
+                return result;
+            }
         };
+        output.borrow_mut().push(None);
+        let input = Promise::resolve(runtime, value);
+        remaining.set(remaining.get() + 1);
         let result = result.clone();
         let remaining = remaining.clone();
         let output = output.clone();
@@ -332,6 +342,15 @@ fn combine(runtime: &Rc<dyn ExchangeRuntime>, values: Vec<Js>, settled: bool) ->
                 Ok(Js::Undefined)
             }),
         );
+    }
+    remaining.set(remaining.get() - 1);
+    if remaining.get() == 0 {
+        let values = output
+            .borrow()
+            .iter()
+            .map(|value| value.clone().expect("every fulfilled combinator slot"))
+            .collect();
+        result.settle(Ok(Js::array(values)));
     }
     result
 }

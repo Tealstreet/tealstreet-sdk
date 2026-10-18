@@ -56,8 +56,8 @@ fn orders_value(orders: &CancelOrders<Js>) -> Js {
     Js::array(orders.borrow().clone())
 }
 
-fn settled_future(value: Js) -> JsFuture<'static> {
-    Box::pin(await_js(value))
+fn settled_future(rt: &Rt, value: Js) -> JsFuture<'static> {
+    Box::pin(await_js(&rt.exchange_runtime(), value))
 }
 
 /// Invoke the captured Promise combinator over pending handles that the returned
@@ -68,7 +68,7 @@ fn combine<'a>(rt: &Rt, function: Js, inputs: Vec<JsFuture<'a>>) -> Result<JsFut
     let handles = Js::array(pending.iter().cloned().map(Js::Promise).collect());
     let combined = function.call(rt.global("Promise")?, vec![handles])?;
     let mut inputs: Vec<Option<JsFuture<'a>>> = inputs.into_iter().map(Some).collect();
-    let mut outcome = settled_future(combined);
+    let mut outcome = settled_future(rt, combined);
     Ok(Box::pin(poll_fn(move |cx| {
         for (slot, promise) in inputs.iter_mut().zip(&pending) {
             if let Some(future) = slot
@@ -88,7 +88,7 @@ fn promise_member(rt: &Rt, name: &str) -> Result<Js, Thrown> {
 
 /// `this.<path>(...args)` started now; the future awaits its (possibly promise) result.
 fn call_now(rt: &Rt, path: &str, args: Vec<Js>) -> Result<JsFuture<'static>, Thrown> {
-    Ok(settled_future(rt.call_path(path, args)?))
+    Ok(settled_future(rt, rt.call_path(path, args)?))
 }
 
 impl CancellationHost for Rt {
@@ -314,9 +314,11 @@ impl CancellationHost for Rt {
         }
         let client = self.path("unlimitedXHR")?;
         let response = client.call_method("post", vec![Js::str(endpoint), body])?;
-        Ok(Box::pin(
-            async move { await_js(response).await.map(|_| ()) },
-        ))
+        Ok(Box::pin(async move {
+            await_js(&self.exchange_runtime(), response)
+                .await
+                .map(|_| ())
+        }))
     }
     fn schedule_write_check(&self) -> Result<(), Thrown> {
         self.call_path("schedulePrivateStreamWriteCheck", vec![])
@@ -525,9 +527,11 @@ impl OrderReadsHost for Rt {
             return Err(Thrown::type_error("this.xhr.get is not a function"));
         }
         let response = get.call(client, vec![url, Js::object(vec![("params", params)])])?;
-        Ok(Box::pin(
-            async move { await_js(response).await?.get("data") },
-        ))
+        Ok(Box::pin(async move {
+            await_js(&self.exchange_runtime(), response)
+                .await?
+                .get("data")
+        }))
     }
     fn promise_function(&self, settled: bool) -> Result<Js, Thrown> {
         promise_member(self, if settled { "allSettled" } else { "all" })
