@@ -30,8 +30,12 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
+
+#[path = "../../../../test-support/virtual_time.rs"]
+mod virtual_time;
+use virtual_time::{SleepWakers, WakeSignal};
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
@@ -69,6 +73,7 @@ impl WsSocket for Io {
 struct Runtime {
     now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
+    sleepers: SleepWakers,
     sockets: RefCell<Vec<Rc<Io>>>,
     dials: RefCell<Vec<String>>,
 }
@@ -80,12 +85,14 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     fn pump(&self) {
+        let signal = Arc::new(WakeSignal::default());
+        let waker = signal.waker();
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -101,13 +108,15 @@ impl Runtime {
             }
             let spawned = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !spawned {
+            self.sleepers.wake_due(self.now.get());
+            if !progressed && !spawned && !signal.take() {
                 return;
             }
         }
     }
     fn advance(&self, ms: f64) {
         self.now.set(self.now.get() + ms);
+        self.sleepers.wake_due(self.now.get());
         self.pump();
     }
     fn socket(&self) -> Rc<Io> {
@@ -128,10 +137,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleep_waker = self.sleepers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleep_waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
