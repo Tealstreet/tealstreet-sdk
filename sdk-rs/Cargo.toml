@@ -16,7 +16,6 @@ members = [
     "safe-cex-registry",
     "safe-cex-venue-bybit",
     "safe-cex-venue-binance",
-    "safe-cex-venue-binanceinverse",
     "safe-cex-venue-okx",
     "safe-cex-venue-bitget",
     "safe-cex-venue-blofin",
@@ -104,7 +103,6 @@ safe-cex-venue-kucoin = { path = "safe-cex-venue-kucoin" }
 safe-cex-venue-mexc = { path = "safe-cex-venue-mexc" }
 safe-cex-venue-backpack = { path = "safe-cex-venue-backpack" }
 safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
-safe-cex-venue-binanceinverse = { path = "safe-cex-venue-binanceinverse" }
 safe-cex-venue-bingx = { path = "safe-cex-venue-bingx" }
 safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
 safe-cex-venue-bitrue = { path = "safe-cex-venue-bitrue" }

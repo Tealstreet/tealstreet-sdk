@@ -246,7 +246,7 @@ pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Rc<Http>,
     pub store: Rc<safe_cex_store::store::DefaultStore>,
-    pub exchange: Rc<safe_cex_venue_binanceinverse::BinanceInverseExchange>,
+    pub exchange: Rc<safe_cex_venue_binance::inverse::BinanceInverseExchange>,
 }
 pub fn fixture(public_only: bool, testnet: bool) -> Harness {
     let runtime = Rc::new(Runtime::default());
@@ -258,11 +258,11 @@ pub fn fixture(public_only: bool, testnet: bool) -> Harness {
     });
     let store = Rc::new(safe_cex_store::store::DefaultStore::new());
     let options=serde_json::from_value(serde_json::json!({"key":"fixture-key","secret":"fixture-secret","testnet":testnet,"publicDataOnly":public_only,"tuning":{"consoleLogging":false}})).unwrap();
-    let exchange = safe_cex_venue_binanceinverse::BinanceInverseExchange::new(
+    let exchange = safe_cex_venue_binance::inverse::BinanceInverseExchange::new(
         safe_cex_types::ExchangeName::Binanceinverse,
         options,
         store.clone(),
-        safe_cex_venue_binanceinverse::BinanceInverseDependencies {
+        safe_cex_venue_binance::inverse::BinanceInverseDependencies {
             runtime: runtime.clone(),
             http: http.clone(),
             external_public_data: None,

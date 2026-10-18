@@ -6,7 +6,7 @@ mod lifecycle;
 mod ops;
 mod orders;
 mod reads;
-#[path = "generated/binanceinverse.rs"]
+#[path = "../generated/binanceinverse.rs"]
 pub mod types;
 mod ws_private;
 mod ws_public;
@@ -193,13 +193,4 @@ impl BinanceInverseExchange {
     pub fn base(&self) -> &Rc<BaseExchange> {
         self.scope.base()
     }
-}
-
-/// Source optional fields admit omission, while a present null still fails.
-fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::Deserialize<'de>,
-{
-    T::deserialize(deserializer).map(Some)
 }

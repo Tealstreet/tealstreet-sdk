@@ -607,16 +607,18 @@ impl RustVenueHost for NativeVenueHost {
 
     fn binanceinverse(
         &self,
-    ) -> Result<safe_cex_venue_binanceinverse::BinanceInverseDependencies, ExchangeError> {
-        Ok(safe_cex_venue_binanceinverse::BinanceInverseDependencies {
-            runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
-                self.runtime.clone(),
-                (self.adapter)()?,
-                self.remote.clone(),
-            ),
-            external_public_data: Some(gateway_factory(self.runtime.clone())),
-        })
+    ) -> Result<safe_cex_venue_binance::inverse::BinanceInverseDependencies, ExchangeError> {
+        Ok(
+            safe_cex_venue_binance::inverse::BinanceInverseDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
     }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError> {
         Ok(safe_cex_venue_binance::native_host::native_dependencies(

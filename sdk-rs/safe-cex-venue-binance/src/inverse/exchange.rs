@@ -1,5 +1,5 @@
 //! Typed public binding to the actual COIN-M parent receiver.
-use crate::BinanceInverseExchange;
+use super::BinanceInverseExchange;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},

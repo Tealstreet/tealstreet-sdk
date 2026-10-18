@@ -1,5 +1,5 @@
 //! Native operations shared by the source-corresponding COIN-M class bodies.
-use crate::Rt;
+use super::Rt;
 use safe_cex_exchange::js_runtime::{
     library::in_operator,
     promise::{JsFuture, await_js},
@@ -148,8 +148,8 @@ pub(crate) fn install_sync(
 }
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
-    crate::reads::install(rt)?;
-    crate::lifecycle::install(rt)?;
-    crate::orders::install(rt)?;
+    super::reads::install(rt)?;
+    super::lifecycle::install(rt)?;
+    super::orders::install(rt)?;
     Ok(())
 }

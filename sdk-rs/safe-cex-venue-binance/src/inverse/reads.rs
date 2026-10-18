@@ -1,5 +1,5 @@
 //! binanceinverse.exchange.ts read methods; raw response graphs remain native.
-use crate::{Rt, ops::*};
+use super::{Rt, ops::*};
 use safe_cex_exchange::js_runtime::{
     promise::JsFuture,
     value::{Js, Thrown, arg},

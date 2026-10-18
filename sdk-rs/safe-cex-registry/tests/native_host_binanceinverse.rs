@@ -32,7 +32,10 @@ fn inverse_registry_constructs_real_binding_and_signs_account_read() {
             "construction does not send venue requests"
         );
         let validation = h.exchange.validate_account().await.unwrap();
-        assert_eq!(validation.error, safe_cex_types::AccountValidationError::from(""));
+        assert_eq!(
+            validation.error,
+            safe_cex_types::AccountValidationError::from("")
+        );
         let balance = validation.balance.expect("source USD aggregation");
         assert_eq!(balance.total, 100.0);
         assert_eq!(balance.free, 75.0);

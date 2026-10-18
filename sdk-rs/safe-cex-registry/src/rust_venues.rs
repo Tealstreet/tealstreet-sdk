@@ -207,7 +207,7 @@ pub trait RustVenueHost {
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn binanceinverse(
         &self,
-    ) -> Result<safe_cex_venue_binanceinverse::BinanceInverseDependencies, ExchangeError> {
+    ) -> Result<safe_cex_venue_binance::inverse::BinanceInverseDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "Binance inverse dependencies were not supplied by this host",
         ))
@@ -480,7 +480,7 @@ pub fn binance_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
 
 pub fn binanceinverse_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
-        let exchange = safe_cex_venue_binanceinverse::BinanceInverseExchange::new(
+        let exchange = safe_cex_venue_binance::inverse::BinanceInverseExchange::new(
             name,
             options,
             store,

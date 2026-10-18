@@ -14,6 +14,8 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+pub mod inverse;
+
 pub mod account_fetch;
 pub mod account_leverage_overlay;
 pub mod account_validation;

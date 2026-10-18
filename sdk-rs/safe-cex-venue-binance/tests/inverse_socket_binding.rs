@@ -1,4 +1,5 @@
 //! Actual public venue constructor must install both maintained socket classes.
+#[path = "support/inverse_runtime.rs"]
 mod support;
 use safe_cex_exchange::socket_lifecycle::SocketSlot;
 #[test]

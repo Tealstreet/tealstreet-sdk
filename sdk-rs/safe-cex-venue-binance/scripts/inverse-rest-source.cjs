@@ -2,7 +2,7 @@
 // I/O is scripted; every request still crosses the actual source interceptors.
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const {root, load} = require('./source-loader.cjs');
+const {root, load} = require('./inverse-source-loader.cjs');
 const {BinanceInverseExchange} = load(path.join(root, 'packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts'));
 const {DefaultStore} = load(path.join(root, 'packages/safe-cex/src/store/store.base.ts'));
 const market = {symbol:'BTCUSD_PERP',baseAsset:'BTC',quoteAsset:'USD',marginAsset:'BTC',contractSize:100,contractType:'PERPETUAL',contractStatus:'TRADING',filters:[{filterType:'PRICE_FILTER',tickSize:'0.1'},{filterType:'LOT_SIZE',stepSize:'1',minQty:'1',maxQty:'10'},{filterType:'MARKET_LOT_SIZE',minQty:'2',maxQty:'20'}]};

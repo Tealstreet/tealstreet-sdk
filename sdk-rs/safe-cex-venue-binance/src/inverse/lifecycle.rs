@@ -1,5 +1,5 @@
 //! COIN-M reconciliation state and request-weight guards.
-use crate::{Rt, ops::*};
+use super::{Rt, ops::*};
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
