@@ -10,8 +10,8 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 const cohort = {
   order_operations: ['OperationFuture', 'Operation', 'Delete', 'Sync', 'Status'],
   order_batches: ['Post', 'Classifier', 'Log'],
-  private_session: ['RateHook', 'KeyFuture', 'NativeKeyFuture', 'RetryAction'],
-  private_helpers: ['RefreshCallback'], private_events: ['PrivateHandler'],
+  private_session: ['RateHook', 'NativeKeyFuture', 'RetryAction'],
+  private_events: ['PrivateHandler'],
   private_event_value: ['EventArray'],
 };
 const names = Object.entries(cohort).flatMap(([module, aliases]) =>
@@ -22,6 +22,9 @@ const { metadata, pkg, target, found, aliases, macroOrigins } = acceptedAliasCon
   workspace: root, packageName: 'safe-cex-venue-binance', aliasNames: names, jobs: 1,
 });
 assert.ok(aliases.every(alias => alias.generics.params.length === 0));
+for (const retired of ['private_session::KeyFuture', 'private_helpers::RefreshCallback']) {
+  assert.ok(!found.publicAliases.some(alias => alias.name === `safe_cex_venue_binance::${retired}`));
+}
 fs.writeFileSync(path.join(metadata.target_directory, 'private-order-alias-inventory.json'),
   `${JSON.stringify(aliases, null, 2)}\n`);
 const results = runProbes(root, metadata, [{

@@ -3704,3 +3704,8 @@ the sole difference is documentation. Frozen install, format and diff checks pas
 Independent draft review found only the corrected test prefix bound. CodeRabbit
 returned its review limit and has not completed a bot review. These are native-host
 ID and topic witnesses; they do not claim whole-venue parity or live order probes.
+
+`PRIVATE_HELPERS_GATE_EXITS.json` and `PRIVATE_HELPERS_MERGE_GATE_EXITS.json`
+are historical extraction receipts, including the retired timer-only copies.
+The current shared detach target retains its32 source cases; actual receiver
+key/retry/refresh evidence is documented in `PRIVATE_ORDER_ALIAS_REVIEW.md`.

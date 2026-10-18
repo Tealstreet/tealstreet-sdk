@@ -624,3 +624,10 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+The private/order alias review covers thirteen live capabilities with individual
+compiler contracts and actual native binding/fault witnesses. See
+`PRIVATE_ORDER_ALIAS_REVIEW.md` and `scripts/private-order-alias-contracts.mjs`.
+`RefreshCallback` and `KeyFuture` were retired with test-only scheduling and key
+wrappers. Keep the live receiver's native key future, retry/refresh methods and
+single shared detach helper; do not restore parallel helpers for the census.

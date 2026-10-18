@@ -301,7 +301,9 @@ fn native_key_and_retry_capabilities_reconnect_and_cancel_refresh() {
     let owner = owner(http.clone(), runtime.clone());
     let errors = events(&owner, "error");
     run(&runtime, owner.private.connect_and_subscribe()).unwrap();
-    for _ in 0..12 {runtime.pump();}
+    for _ in 0..12 {
+        runtime.pump();
+    }
     assert_eq!(http.count("/fapi/v1/listenKey"), 1);
     assert!(!owner.private.connect.connecting.get());
     assert!(owner.private.connect.resync_orders.get());
@@ -353,7 +355,9 @@ fn native_key_future_stays_pending_until_terminal_response() {
     assert_eq!(http.count("/fapi/v1/listenKey"), 1);
     http.held.store(false, Ordering::SeqCst);
     run(&runtime, call).unwrap();
-    for _ in 0..12 {runtime.pump();}
+    for _ in 0..12 {
+        runtime.pump();
+    }
     assert!(!owner.private.connect.connecting.get());
     assert!(runtime.sleeps.borrow().contains(&1800000));
     owner.dispose().unwrap();
