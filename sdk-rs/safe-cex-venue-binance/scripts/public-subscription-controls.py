@@ -25,7 +25,7 @@ def run(label):
 
 faults = [
     ('subscribe_binance_public', b'    subscribe(keys, count, send)',
-     b'    let _ = (keys, count, send);\n    Ok(())'),
+     b'    subscribe(keys.into_iter().take(0), count, send)'),
     ('subscribe', b'let mut id = 10.0;', b'let mut id = 11.0;'),
 ]
 try:
