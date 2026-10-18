@@ -31,10 +31,11 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected task")
     }
-    fn console(&self, severity: &str, message: &str) {
-        self.console
-            .borrow_mut()
-            .push((severity.into(), message.into()));
+    fn console_values(&self, severity: &str, values: &[Js]) {
+        self.console.borrow_mut().push((
+            severity.into(),
+            safe_cex_exchange::runtime::console_text(values),
+        ));
     }
     fn unique_id(&self) -> String {
         "fixture".into()
@@ -48,7 +49,7 @@ impl ExchangeRuntime for Runtime {
     fn report_exception(&self, e: &ExchangeError, _: &Value) {
         panic!("unexpected error: {}", e.message)
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &Js, _: &Value) {
         panic!("unexpected raw error")
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
