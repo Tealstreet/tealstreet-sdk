@@ -787,3 +787,16 @@ Use `private_classes --features native` for actual native private frame/Store,
 public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
+
+### Canonical private socket construction
+
+ExchangeOwner constructs PrivateSocket directly for Futures, PM and Spot. The
+three former Rust socket facades contained only new/Deref and had no Rust caller;
+the live TypeScript classes remain mapped to the canonical constructor and state.
+`private_owner_binding` in the native `private_classes` target observes the actual
+parent Rc, family/default bits, order-frame Store effects and Spot authentication
+at terminal socket send. `scripts/private-owner-controls.py` separately corrupts
+family selection and HMAC payload forwarding, requires named compiled failures,
+then restores exact production bytes and requires passes. These execution proofs
+do not classify the remaining Auth/PrivateState raw APIs or erase the documented
+UTF-8 frame boundary.
