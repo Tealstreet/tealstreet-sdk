@@ -930,8 +930,7 @@ impl Graph {
 
     pub fn audit_positions(&self, remove_dupes: bool) -> Result<(), Thrown> {
         let positions = self.get("positions")?;
-        let unique =
-            crate::js_runtime::library::uniq_by(positions.iterable_values()?, &Js::str("id"))?;
+        let unique = crate::js_runtime::library::uniq_by(&positions, &Js::str("id"))?;
         if length(&unique)? != length(&self.get("positions")?)? {
             eprintln!("Duplicate positions detected...");
             if remove_dupes {

@@ -215,4 +215,11 @@ for(const packed of [false,true]){
  store.updatePositions([[{id:'c'},{contracts:7}],[{id:'x'},{contracts:8}]]);
  assert.equal(positions[2].contracts,7);ordering.push({case:'live-id-index-length',contracts:positions[2].contracts});
 }
+{
+ const store=new DefaultStore(),cause={opaque:'\uD800'},replacement={id:'c',contracts:1};
+ const first={contracts:1},poison={id:'b',get contracts(){throw cause}};
+ const positions=[first,poison];Object.defineProperty(first,'id',{enumerable:true,configurable:true,get(){positions[1]=replacement;return 'a'}});
+ store.update({positions});assert.equal(store.positions[1],replacement);
+ ordering.push({case:'audit-reached-row-order',replacement:true});
+}
 process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances,ordering}));

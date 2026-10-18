@@ -689,3 +689,51 @@ fn position_id_index_rechecks_length_after_a_row_id_getter() {
         case["contracts"].as_f64()
     );
 }
+
+#[test]
+fn position_audit_reads_each_row_after_the_preceding_id_getter() {
+    let expected = source();
+    assert!(
+        expected["ordering"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|case| case["case"] == "audit-reached-row-order")
+    );
+    let (_, facade) = fixture();
+    let first = Js::object(vec![("contracts", Js::Number(1.0))]);
+    let poison = Js::object(vec![("id", Js::str("b"))]);
+    let cause = Js::object(vec![("opaque", Js::utf16(&[0xd800]))]);
+    poison
+        .define_accessor(
+            "contracts",
+            Some(Rc::new(move |_| Err(Thrown::new(cause.clone())))),
+            None,
+        )
+        .unwrap();
+    let replacement = Js::object(vec![("id", Js::str("c")), ("contracts", Js::Number(1.0))]);
+    let positions = Js::array(vec![first.clone(), poison]);
+    let captured = positions.clone();
+    let next = replacement.clone();
+    first
+        .define_accessor(
+            "id",
+            Some(Rc::new(move |_| {
+                captured.set("1", next.clone())?;
+                Ok(Js::str("a"))
+            })),
+            None,
+        )
+        .unwrap();
+    facade
+        .call_method("update", vec![Js::object(vec![("positions", positions)])])
+        .expect("audit must not visit the row replaced by the preceding getter");
+    assert!(
+        facade
+            .get("positions")
+            .unwrap()
+            .get("1")
+            .unwrap()
+            .same_reference(&replacement)
+    );
+}
