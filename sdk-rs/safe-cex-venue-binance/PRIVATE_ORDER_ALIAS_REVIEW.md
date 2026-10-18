@@ -66,3 +66,12 @@ cargo test --locked -p safe-cex-venue-binance --jobs 1 --test private_session co
 This finite native/default review does not exempt values passed through the
 capabilities, other public aliases, arbitrary callbacks or the feature matrix.
 Generated receipts and compiler snapshots remain under `target/`.
+
+Measured receipts on the reviewed source: thirteen authenticated native capability
+classifications pass, separately from seven native binding tests. All thirteen
+production faults compile and fail their named assertion, and every exact
+restoration passes. The32 live detach cases and all three connection groups pass;
+strict native Clippy passes for the three touched integration targets. Required
+all-features cancellation passes six tests, with only its explicit discovery
+exporter ignored. Invention/status parity passes7563 rows/16696 public items.
+These figures describe this finite checkpoint, not global behavioral equivalence.

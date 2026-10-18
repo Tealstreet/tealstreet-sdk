@@ -16,7 +16,7 @@ kind = "method"
 layer = "adapted"
 rs = [ "safe-cex-venue-binance/src/private_classes.rs::PrivateState::dispose" ]
 status = "ported"
-note = "Mapped to safe-cex-venue-binance/src/private_classes.rs::PrivateState::dispose. The actual native receiver clears retry then current refresh before disposing its core socket. The separate typed timer replica had no production caller and was removed with its fake-only oracle cases; native key/retry/refresh tests exercise the surviving path."
+note = "The production target safe-cex-venue-binance/src/private_classes.rs::PrivateState::dispose clears retry then current refresh before disposing its core socket. The separate typed timer replica had no production caller and was removed with its fake-only oracle cases; native key/retry/refresh tests exercise the surviving path."
 
 [[symbol]]
 ts = "BinancePrivateWebsocket.connectAndSubscribe"
@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket"
 status = "ported"
-note = "Captures previous socket once; removes message/close/open listeners through per-call optional binding, then preserves OPEN/CONNECTING short-circuit reads and closes the captured socket. Native values/errors/counts precede independently counted source effects; one compiling control per new row. Typed timer-registry handles, data cells, numeric ready-state and configured fallible operations are body boundaries; concrete class/registry/socket/handler/arrow wiring and full async keepalive composition remain pending. Rename target: `safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket`."
+note = "Both native receivers already call safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket to capture the old socket once, remove message/close/open against current handlers, then preserve OPEN/CONNECTING short-circuit reads before closing it. The single live helper retains all32 maintained-source/native cases across both variants. The unused PM copy was removed; real native key/retry bindings continue through this shared path."
 
 [[symbol]]
 ts = "BinancePrivateWebsocket.onMessage"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-binance/src/private_classes.rs::PrivateState::schedule_refresh" ]
 status = "ported"
-note = "Mapped to safe-cex-venue-binance/src/private_classes.rs::PrivateState::schedule_refresh. The actual constructor uses this single implementation for current-method resolution, refresh cancellation and deferred registration. The oracle-only timer replica and its callback alias were retired; real native key/retry/refresh proofs remain in tests/private_classes.rs::private_order_aliases."
+note = "The production target safe-cex-venue-binance/src/private_classes.rs::PrivateState::schedule_refresh is shared by both constructors for current-method resolution, refresh cancellation and deferred registration. The oracle-only timer replica and its callback alias were retired; real native key/retry/refresh proofs remain in tests/private_classes.rs::private_order_aliases."
 
 [[symbol]]
 ts = "BinancePrivateWebsocket#updateListenKey"
