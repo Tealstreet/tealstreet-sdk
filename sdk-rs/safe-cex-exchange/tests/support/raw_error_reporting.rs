@@ -37,7 +37,8 @@ fn raw_reporter_retains_native_message_and_original_error_without_reading_code()
             Err(Thrown::type_error("unexpected eager code read"))
         })),
         None,
-    );
+    )
+    .expect("test accessor target permits definition");
     assembled
         .this
         .call_method(
@@ -148,13 +149,15 @@ fn raw_reporter_preserves_native_error_before_any_metadata_projection() {
     assembled.runtime.worker.set(true);
     let observed = observe_errors(&assembled);
     let error = Thrown::type_error("native subtype").value;
-    error.define_accessor(
-        "code",
-        Some(Rc::new(|_| {
-            Err(Thrown::type_error("unexpected code getter"))
-        })),
-        None,
-    );
+    error
+        .define_accessor(
+            "code",
+            Some(Rc::new(|_| {
+                Err(Thrown::type_error("unexpected code getter"))
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     assembled
         .this
         .call_method("emitAndLogError", vec![error.clone()])
@@ -274,14 +277,16 @@ fn raw_reporter_accessor_reads_follow_actual_source_order() {
         for (key, value) in values {
             let label = format!("{label}.{key}");
             let trace = trace.clone();
-            object.define_accessor(
-                key,
-                Some(Rc::new(move |_| {
-                    trace.borrow_mut().push(label.clone());
-                    Ok(value.clone())
-                })),
-                None,
-            );
+            object
+                .define_accessor(
+                    key,
+                    Some(Rc::new(move |_| {
+                        trace.borrow_mut().push(label.clone());
+                        Ok(value.clone())
+                    })),
+                    None,
+                )
+                .expect("test accessor target permits definition");
         }
         object
     };
@@ -487,13 +492,15 @@ fn raw_reporter_installed_console_retains_values_without_coercion() {
     use safe_cex_exchange::js_runtime::value::error_object;
     let (runtime, shared) = scoped_globals();
     let error = error_object("TypeError", "native reason");
-    error.define_accessor(
-        "message",
-        Some(Rc::new(|_| {
-            panic!("console inspection must not execute message getter")
-        })),
-        None,
-    );
+    error
+        .define_accessor(
+            "message",
+            Some(Rc::new(|_| {
+                panic!("console inspection must not execute message getter")
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     shared
         .globals
         .get("console")

@@ -11,7 +11,7 @@ fn testnet(this: &Js) -> Result<bool, super::value::Thrown> {
 
 // ts: BitgetExchange.apiProductType / apiMarginCoin / apiUtaCategory / usesUtaRouting
 // ts: BitgetUSDCExchange / BitgetInverseExchange override apiProductType and apiMarginCoin
-pub(crate) fn install(rt: &Rt) {
+pub(crate) fn install(rt: &Rt) -> Result<(), super::value::Thrown> {
     let this = &rt.this;
     let variant = rt.shared.extra.variant;
     let product: Getter = Rc::new(move |this| {
@@ -42,13 +42,14 @@ pub(crate) fn install(rt: &Rt) {
         )))
     });
     let suppress: Getter = Rc::new(|this| this.get("_suppressBitgetValidationErrorEmission"));
-    this.define_accessor("apiProductType", Some(product), None);
-    this.define_accessor("apiMarginCoin", Some(margin), None);
-    this.define_accessor("apiUtaCategory", Some(category), None);
-    this.define_accessor("usesUtaRouting", Some(uta), None);
+    this.define_accessor("apiProductType", Some(product), None)?;
+    this.define_accessor("apiMarginCoin", Some(margin), None)?;
+    this.define_accessor("apiUtaCategory", Some(category), None)?;
+    this.define_accessor("usesUtaRouting", Some(uta), None)?;
     this.define_accessor(
         "suppressBitgetValidationErrorEmission",
         Some(suppress),
         None,
-    );
+    )?;
+    Ok(())
 }

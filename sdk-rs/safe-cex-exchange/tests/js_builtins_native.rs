@@ -302,7 +302,8 @@ process.stdout.write(JSON.stringify(rows));
                             }))
                         })),
                         None,
-                    );
+                    )
+                    .expect("test accessor target permits definition");
                 }
             }
             let observed = match ops::to_numeric(&obj) {

@@ -43,13 +43,15 @@ fn selector(tag: &str) -> Js {
         )]),
         "throwing_id" => {
             let object = Js::object(vec![]);
-            object.define_accessor(
-                "id",
-                Some(Rc::new(|_| {
-                    Err(Thrown::error("RangeError", "selector getter"))
-                })),
-                None,
-            );
+            object
+                .define_accessor(
+                    "id",
+                    Some(Rc::new(|_| {
+                        Err(Thrown::error("RangeError", "selector getter"))
+                    })),
+                    None,
+                )
+                .expect("test accessor target permits definition");
             object
         }
         _ => panic!("unknown source selector {tag}"),
