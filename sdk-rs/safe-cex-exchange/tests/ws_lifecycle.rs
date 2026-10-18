@@ -999,10 +999,15 @@ mod js_sockets {
         let received = received.borrow();
         assert_eq!(received.len(), 2);
         assert!(
-            matches!(&received[0], Js::Object(object) if object.class == "Buffer"),
-            "binary frame remains a Buffer"
+            matches!(&received[0], Js::Object(object) if object.class == "Blob"),
+            "native socket uses the source WebSocket/reconnecting wrapper default Blob"
         );
-        let bytes = received[0].get("bytes").unwrap().array_values().unwrap();
+        assert_eq!(received[0].get("size").unwrap().as_f64(), Some(4.0));
+        let Js::Promise(buffer) = received[0].call_method("arrayBuffer", vec![]).unwrap() else {
+            panic!("Blob.arrayBuffer returns a Promise")
+        };
+        let buffer = buffer.result().unwrap().unwrap();
+        let bytes = buffer.get("bytes").unwrap().array_values().unwrap();
         assert_eq!(
             bytes
                 .iter()
@@ -1010,22 +1015,14 @@ mod js_sockets {
                 .collect::<Vec<_>>(),
             vec![0, 128, 255, 65]
         );
-        assert_eq!(received[0].get("byteLength").unwrap().as_f64(), Some(4.0));
+        assert_eq!(buffer.get("byteLength").unwrap().as_f64(), Some(4.0));
+        let Js::Promise(text) = received[0].call_method("text", vec![]).unwrap() else {
+            panic!("Blob.text returns a Promise")
+        };
         assert_eq!(
-            received[0]
-                .get("buffer")
-                .unwrap()
-                .get("bytes")
-                .unwrap()
-                .array_values()
-                .unwrap()
-                .len(),
-            4
-        );
-        assert_eq!(
-            received[0].to_display(),
+            text.result().unwrap().unwrap().to_display(),
             "\0��A",
-            "Buffer text conversion stays explicit"
+            "Blob text conversion stays explicit"
         );
         assert!(matches!(&received[1], Js::String(_)));
         assert_eq!(received[1].to_display(), "plain");
