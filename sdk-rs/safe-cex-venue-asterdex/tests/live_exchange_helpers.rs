@@ -1571,10 +1571,10 @@ fn exchange_helpers_match_typescript() {
             number(value),
             "TS in-memory nonfinite numeric info"
         );
-        if value.is_nan() {
+        if c["kind"] == "position" && value.is_nan() {
             assert!(
                 result.unwrap_err().to_string().contains("refuses NaN"),
-                "native metadata NaN refusal"
+                "explicit Value input refusal"
             );
             continue;
         }

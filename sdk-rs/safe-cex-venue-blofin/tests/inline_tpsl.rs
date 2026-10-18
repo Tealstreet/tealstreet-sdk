@@ -1,8 +1,6 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
-use safe_cex_num::numeric_ingress::{
-    js_from_str, js_from_value, js_from_value_ref, js_value_as_f64,
-};
+use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_types::{
     Order, OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
     OrderType,

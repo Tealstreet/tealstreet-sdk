@@ -176,3 +176,9 @@ behavior, requiring a compiled native failure and exact restored pass.
 companions and their direct shape/native-value witnesses. The focused
 `scripts/accepted-wire-contracts.mjs` retains all 608 observations and every
 compiler field, including each separately executed public-wrapper boundary.
+
+Model `info` uses canonical `RetainedJsonInput` inside its existing presence
+wrapper. Read numbers and UTF-16 fields directly before any JSON report; source
+computed numbers use `Float`. Consumer coercion uses the shared retained Number,
+parseFloat and String helpers. JSON rendering belongs at the explicit output
+boundary, with no alternate model-info carrier.

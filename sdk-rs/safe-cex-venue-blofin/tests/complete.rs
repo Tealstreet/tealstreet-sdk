@@ -54,27 +54,6 @@ fn number(n: f64, e: &Value) {
         )
     }
 }
-fn plain(n: &Value, e: &Value) {
-    if e.get("number").is_some() {
-        number(js_value_as_f64(n).unwrap(), e)
-    } else {
-        match (n, e) {
-            (Value::Object(n), Value::Object(e)) => {
-                assert_eq!(n.len(), e.len(), "native object count");
-                for (k, n) in n {
-                    plain(n, &e[k]);
-                }
-            }
-            (Value::Array(n), Value::Array(e)) => {
-                assert_eq!(n.len(), e.len(), "native array count");
-                for (n, e) in n.iter().zip(e) {
-                    plain(n, e);
-                }
-            }
-            _ => assert_eq!(n, e, "native primitive"),
-        }
-    }
-}
 fn effects(n: &Value, e: &Value) {
     match (n, e) {
         (Value::Number(a), Value::Number(b)) => {
