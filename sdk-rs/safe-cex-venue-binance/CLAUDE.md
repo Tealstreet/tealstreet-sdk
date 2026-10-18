@@ -656,6 +656,13 @@ macro provenance across each source scope; wildcard imports can hide that proof
 even when the current business logic compiles. Import changes also require review
 of any affected source pins; nested helper bodies keep their existing contracts.
 
+The public frame RAII guard lives at module scope so compiler discovery covers
+its lifetime and Drop implementation. The native `public_frame_guard` test in
+`private_classes` checks packet release after success, rejection and unwind,
+original failure identity and the next real Store ticker update for all families.
+`scripts/public-frame-guard-controls.py` removes the actual pop, requires a compiled
+packet-retention failure and restores the exact source before requiring GREEN.
+
 The private-construction Clone reviews in the Binance construction policy cover
 three reusable capabilities: the inverse listener retry context, shared class
 settlement observations and captured private arrows with their receiver/base

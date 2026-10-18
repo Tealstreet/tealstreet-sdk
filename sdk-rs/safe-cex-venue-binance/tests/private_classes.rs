@@ -3,6 +3,9 @@ mod canonical_value;
 #[cfg(feature = "native")]
 #[path = "support/lifecycle_aliases.rs"]
 mod lifecycle_aliases;
+#[cfg(feature = "native")]
+#[path = "support/public_frame_guard.rs"]
+mod public_frame_guard;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
