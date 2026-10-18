@@ -31,8 +31,8 @@ output admission reuses the original array when no row is refused and retains
 each surviving native row rather than rebuilding or serializing it.
 
 `tests/delegated_fix_audit.rs` drives all three live constructors (primary,
-demo and dedicated inverse). Its fixed matrix has 24 malformed-field cases:
-2 fields × 4 values × 3 constructors. Additional cases cover all-refused,
+demo and dedicated inverse). Its fixed matrix has 48 malformed-field cases:
+2 fields × 4 values × 3 constructors × 2 routes (primary execution and fallback). Additional cases cover all-refused,
 missing fee asset, source numeric-order-ID conversion, later-page error
 priority and refusal-listener propagation. The unchanged full reader oracle
 continues checking requests, results and diagnostics against maintained TS.

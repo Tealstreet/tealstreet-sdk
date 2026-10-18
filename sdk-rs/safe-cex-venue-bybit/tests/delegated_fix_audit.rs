@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 fn recovery_row(id: &str, fee_asset: Value) -> Value {
     json!({"orderId":id,"orderStatus":"Filled","symbol":"BTCUSD","side":"Sell",
         "cumExecQty":"2","avgPrice":"100","updatedTime":"1700000001000",
-        "cumExecFee":"-0.25","feeCurrency":fee_asset})
+        "cumExecFee":"-0.25","feeCurrency":fee_asset,
+        "execQty":"2","execPrice":"100","execTime":"1700000001000","execFee":"-0.25"})
 }
 fn options() -> ExecutionsOptions {
     serde_json::from_value(json!({"symbol":"BTCUSD",
@@ -37,49 +38,60 @@ fn refusals(h: &support::Harness) -> Vec<String> {
 }
 
 fn malformed_history_neighbors(name: ExchangeName) {
-    for (input_field, output_field) in [("symbol", "symbol"), ("feeCurrency", "commissionAsset")] {
-        for value in [
-            json!({"asset":"unsupported"}),
-            json!(["USDT"]),
-            json!(true),
-            json!(12),
-        ] {
-            let mut bad = recovery_row("bad", json!("USDT"));
-            bad[input_field] = value.clone();
-            let h = support::harness_as(name.clone(), support::options(), |wire| {
-                wire.ok("GET", "/v5/execution/list", json!({"list":[]}));
-                wire.ok(
-                    "GET",
-                    "/v5/order/history",
-                    json!({"list":[
-                        recovery_row("first", json!("USDT")), bad,
-                        recovery_row("last", json!("BTC"))]}),
+    for route in ["history", "execution"] {
+        for (input_field, output_field) in
+            [("symbol", "symbol"), ("feeCurrency", "commissionAsset")]
+        {
+            for value in [
+                json!({"asset":"unsupported"}),
+                json!(["USDT"]),
+                json!(true),
+                json!(12),
+            ] {
+                let mut bad = recovery_row("bad", json!("USDT"));
+                bad[input_field] = value.clone();
+                let h = support::harness_as(name.clone(), support::options(), |wire| {
+                    let list = json!([
+                        recovery_row("first", json!("USDT")),
+                        bad,
+                        recovery_row("last", json!("BTC"))
+                    ]);
+                    wire.ok(
+                        "GET",
+                        "/v5/execution/list",
+                        json!({"list":if route == "execution" { list.clone() } else { json!([]) }}),
+                    );
+                    wire.ok("GET", "/v5/order/history", json!({"list":list}));
+                });
+                let rows = read(&h);
+                assert_eq!(
+                    rows.iter()
+                        .map(|r| r.order_id.as_deref().unwrap())
+                        .collect::<Vec<_>>(),
+                    ["first", "last"],
+                    "BYBIT-HISTORY-ROW {name:?}/{route}/{output_field}/{value}"
                 );
-            });
-            let rows = read(&h);
-            assert_eq!(
-                rows.iter()
-                    .map(|r| r.order_id.as_deref().unwrap())
-                    .collect::<Vec<_>>(),
-                ["first", "last"],
-                "BYBIT-HISTORY-ROW {name:?}/{output_field}/{value}"
-            );
-            assert_eq!(rows[0].commission_asset.as_deref(), Some("USDT"));
-            assert_eq!(rows[1].commission_asset.as_deref(), Some("BTC"));
-            assert!(rows.iter().all(|r| r.symbol == "BTCUSD"
-                && r.qty == 2.
-                && r.price == 100.
-                && r.timestamp == 1700000001.
-                && r.commission == Some(0.25)));
-            let logs = refusals(&h);
-            assert_eq!(logs.len(), 1, "BYBIT-HISTORY-ROW one visible refusal");
-            assert!(
-                logs[0].contains(&format!("{output_field}={value}: expected string")),
-                "BYBIT-HISTORY-ROW exact field/value: {logs:?}"
-            );
-            assert_eq!(h.wire.calls("/v5/order/history").len(), 1);
-            assert!(h.runtime.reports.borrow().is_empty());
-            h.venue().dispose().unwrap();
+                assert_eq!(rows[0].commission_asset.as_deref(), Some("USDT"));
+                assert_eq!(rows[1].commission_asset.as_deref(), Some("BTC"));
+                assert!(rows.iter().all(|r| r.symbol == "BTCUSD"
+                    && r.qty == 2.
+                    && r.price == 100.
+                    && r.timestamp == 1700000001.
+                    && r.commission == Some(0.25)));
+                let logs = refusals(&h);
+                assert_eq!(logs.len(), 1, "BYBIT-HISTORY-ROW one visible refusal");
+                assert!(
+                    logs[0].contains(&format!("{output_field}={value}: expected string")),
+                    "BYBIT-HISTORY-ROW exact field/value: {logs:?}"
+                );
+                assert_eq!(h.wire.calls("/v5/execution/list").len(), 1);
+                assert_eq!(
+                    h.wire.calls("/v5/order/history").len(),
+                    usize::from(route == "history")
+                );
+                assert!(h.runtime.reports.borrow().is_empty());
+                h.venue().dispose().unwrap();
+            }
         }
     }
 }
