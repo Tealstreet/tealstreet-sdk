@@ -7,7 +7,11 @@ pub fn source(venue: &str) -> Value {
         .args([
             "--import",
             "tsx",
-            "sdk-rs/parity/scripts/ticker-native-source.cjs",
+            if ["asterdex", "orderly", "woo"].contains(&venue) {
+                "sdk-rs/parity/scripts/ticker-strict-source.cjs"
+            } else {
+                "sdk-rs/parity/scripts/ticker-native-source.cjs"
+            },
             venue,
         ])
         .output()
@@ -25,6 +29,8 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
         .into_iter()
         .map(|asset| {
             let (id, symbol) = match venue {
+                "asterdex" | "woo" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                "orderly" => (format!("PERP_{asset}_USDC"), format!("{asset}USDC")),
                 "bingx" => (format!("{asset}-USDT"), format!("{asset}USDT")),
                 "bitget" => (format!("{asset}-bitget-market"), format!("{asset}USDT")),
                 "grvt" => (format!("{asset}_USDT_Perp"), format!("{asset}_USDT_PERP")),
@@ -85,6 +91,41 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
             ticker
         })
         .collect()
+}
+
+#[allow(dead_code)] // Only strict-field corpora observe refusals.
+pub fn assert_refusals(reports: &str, case: &Value) {
+    let refusals = case["refusals"].as_array().unwrap();
+    if refusals.is_empty() {
+        assert!(
+            reports.is_empty(),
+            "native ticker unexpected reports {case}: {reports}"
+        );
+    } else {
+        for refusal in refusals {
+            for key in ["symbol", "field", "value"] {
+                let fragment = refusal[key].as_str().unwrap();
+                assert!(
+                    reports.contains(fragment),
+                    "native ticker missing {key}={fragment}: {reports}"
+                );
+            }
+        }
+    }
+}
+
+#[allow(dead_code)] // Only strict-field corpora have a refusal floor.
+pub fn assert_case_counts(cases: &[Value], frames: usize, refusals: usize) {
+    for (key, expected) in [("frames", frames), ("refusals", refusals)] {
+        assert_eq!(
+            cases
+                .iter()
+                .map(|case| case[key].as_array().unwrap().len())
+                .sum::<usize>(),
+            expected,
+            "native ticker corpus {key} floor"
+        );
+    }
 }
 
 pub fn assert_native(tickers: &[Ticker], case: &Value) {

@@ -971,6 +971,59 @@ fn stream_fixture() -> (
     }
     (venue, rt, store, wire)
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let corpus = ticker_coercion::source("asterdex");
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 252);
+    ticker_coercion::assert_case_counts(cases, 372, 12);
+    let (venue, rt, store, _) = stream_fixture();
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    for case in cases {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("asterdex")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        rt.console.borrow_mut().clear();
+        rt.errors.borrow_mut().clear();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                    safe_cex_transport::socket::SocketFrame::Text(frame.as_str().unwrap().into()),
+                ));
+            for _ in 0..8 {
+                rt.pump();
+            }
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_refusals(&rt.console.borrow().join("\n"), case);
+        assert!(
+            rt.errors.borrow().is_empty(),
+            "native ticker {:?}",
+            rt.errors.borrow()
+        );
+    }
+    venue.dispose().unwrap();
+}
 #[test]
 fn public_frames_preserve_partial_depth_and_candle_semantics() {
     use safe_cex_exchange::websocket::WsEvent;
