@@ -28,7 +28,7 @@ async function open(t) {
 
 test('Orderly auth expiry posts the TS deactivation status and suppresses the disposal Store reset', { timeout: 10000 }, async t => {
   const h = await open(t);
-  await h.call('start');
+  assert.equal(await h.call('start'), false, 'auth deactivation cancels the real worker startup');
   await delay(50);
   assert.equal(h.seen.length, 1, 'the real signed account read reaches the local server');
   assert.ok(h.seen[0].includes('/v1/client/info'));

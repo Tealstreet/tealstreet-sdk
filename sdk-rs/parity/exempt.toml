@@ -7418,6 +7418,14 @@ rs = "safe-cex-ffi/src/native_value.rs::JsData"
 reason = "napi ABI glue: FromNapiValue/ToNapiValue wrapper for the shared owned tree, preserving own undefined, numeric bits, UTF-16 keys/strings and BigInt across the addon boundary. It applies the same explicit cycle/depth/unsupported-value profile; actual Node account-value regressions cover it. No independently declared TypeScript model."
 
 [[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::NativeAccount::cancel_startup"
+reason = "Native host lifecycle glue: invalidate pending startup delivery synchronously before an asynchronously dispatched disposal; no standalone TypeScript API. Actual Node native-account-startup tests prove cancellation and suppression of a late full snapshot."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::NativeAccount::exchange_name"
+reason = "Typed native-account identity accessor for host worker logging, with no standalone TypeScript declaration. Reads the actual constructed exchange name instead of decoding it again or adding a prohibited bindings-to-types dependency. Actual native-account-startup tests assert the exchange/account error context."
+
+[[exempt]]
 rs = "safe-cex-registry/src/native_value.rs::NativeValue"
 reason = "Native account ABI alias of the shared OwnedJsValue tree. Re-export preserves the registry/FFI seam after moving the implementation into exchange; it adds no data policy, serializer or independently declared TypeScript type."
 
