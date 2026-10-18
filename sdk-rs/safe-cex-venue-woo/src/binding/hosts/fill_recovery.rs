@@ -225,7 +225,7 @@ impl body::Host for Frame {
     }
     fn call(&mut self, c: Prepared, args: Vec<Js>) -> Result<Task<Js, Thrown>, Thrown> {
         let result = self.invoke(c, args)?;
-        Ok(Box::pin(await_js(result)))
+        Ok(Box::pin(await_js(&self.rt()?.exchange_runtime(), result)))
     }
     fn root(&mut self, k: &str) -> Result<Js, Thrown> {
         let this = self.this()?;

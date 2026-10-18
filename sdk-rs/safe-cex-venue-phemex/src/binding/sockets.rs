@@ -674,7 +674,7 @@ impl private::AuthHost for Host {
         ]))
     }
     async fn sign(&mut self, s: Js, r: Js) -> Result<Js, Thrown> {
-        await_js(s.call_method("sign", vec![r])?).await
+        await_js(&self.rt.exchange_runtime(), s.call_method("sign", vec![r])?).await
     }
     fn reply_error(&mut self, r: &Js) -> Result<bool, Thrown> {
         Ok(r.get("error")?.truthy())

@@ -473,7 +473,9 @@ async fn dispatch(rt: Rt, n: &str, a: Vec<Js>, c: Vec<Js>) -> Result<Js, Thrown>
                     let promise = rt
                         .this
                         .call_method("fetchIncomeHistory", vec![from_typed(&opts)?])?;
-                    Ok::<_, Thrown>(async move { to_typed(&await_js(promise).await?) })
+                    Ok::<_, Thrown>(async move {
+                        to_typed(&await_js(&rt.exchange_runtime(), promise).await?)
+                    })
                 },
             )
             .await?;
@@ -558,7 +560,7 @@ async fn dispatch(rt: Rt, n: &str, a: Vec<Js>, c: Vec<Js>) -> Result<Js, Thrown>
                         .get("xhr")?
                         .call_method("get", vec![Js::str(endpoint)])?;
                     Ok::<_, Thrown>(async move {
-                        let data = await_js(value).await?.get("data")?;
+                        let data = await_js(&rt.exchange_runtime(), value).await?.get("data")?;
                         to_typed(&data)
                     })
                 },
@@ -585,6 +587,7 @@ fn describe(rt: &Rt, e: &Thrown) -> Result<Option<String>, Thrown> {
 }
 async fn data(rt: Rt, endpoint: &str) -> Result<Option<serde_json::Value>, Thrown> {
     let result = await_js(
+        &rt.exchange_runtime(),
         rt.this
             .get("xhr")?
             .call_method("get", vec![Js::str(endpoint)])?,
@@ -601,8 +604,9 @@ fn init(
     rt: &Rt,
 ) -> Result<Option<safe_cex_exchange::js_runtime::promise::JsFuture<'static>>, Thrown> {
     let value = rt.this.get("sdkInitPromise")?;
+    let runtime = rt.exchange_runtime();
     Ok(value.truthy().then(|| {
-        Box::pin(async move { await_js(value).await })
+        Box::pin(async move { await_js(&runtime, value).await })
             as safe_cex_exchange::js_runtime::promise::JsFuture<'static>
     }))
 }
@@ -640,6 +644,7 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
             let rt = rt.clone();
             Ok::<_, Thrown>(async move {
                 let response = await_js(
+                    &rt.exchange_runtime(),
                     rt.this
                         .get("xhr")?
                         .call_method("get", vec![Js::str(endpoint)])?,

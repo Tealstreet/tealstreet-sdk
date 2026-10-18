@@ -21,12 +21,16 @@ fn report(this: &Js, message: &str) -> Result<(), ExchangeError> {
 
 /// Resolve `{ positionMode, marginType }` through the receiver's resolveSymbolPositioning.
 async fn positioning_field(
+    rt: Rt,
     this: Js,
     symbol: String,
     field: &'static str,
 ) -> Result<Option<Js>, ExchangeError> {
-    let resolved =
-        await_js(this.call_method("resolveSymbolPositioning", vec![Js::str(&symbol)])?).await?;
+    let resolved = await_js(
+        &rt.exchange_runtime(),
+        this.call_method("resolveSymbolPositioning", vec![Js::str(&symbol)])?,
+    )
+    .await?;
     let value = if resolved.is_nullish() {
         Js::Undefined
     } else {
@@ -72,7 +76,8 @@ pub(crate) fn install(rt: &Rt) {
                 Ok(rt.clone().spawn(Box::pin(async move {
                     let this = rt.this.clone();
                     let uses_uta = this.get("usesUtaRouting")?.truthy();
-                    let resolve = |s: &str| positioning_field(this.clone(), s.to_owned(), field);
+                    let resolve =
+                        |s: &str| positioning_field(rt.clone(), this.clone(), s.to_owned(), field);
                     let result = if field == "positionMode" {
                         let mode = crate::positioning::get_or_fetch_position_mode(
                             &symbol,

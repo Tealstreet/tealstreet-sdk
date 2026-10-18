@@ -413,7 +413,7 @@ fn dispatch(
                         if matches!(decision, Js::Null | Js::Object(_) | Js::Promise(_)) {
                             // axios-retry treats a resolved non-false result as
                             // approval, while a rejected async predicate refuses.
-                            await_js(decision)
+                            await_js(&runtime, decision)
                                 .await
                                 .is_ok_and(|value| !value.strict_equals(&Js::Bool(false)))
                         } else {
@@ -469,14 +469,18 @@ fn dispatch(
 
 /// Axios' `promise.then(onFulfilled, onRejected)` link: a missing handler passes
 /// the settlement through; a rejection handler's return recovers the chain.
-async fn chain_step(interceptor: &Interceptor, current: Result<Js, Thrown>) -> Result<Js, Thrown> {
+async fn chain_step(
+    runtime: &Rc<dyn ExchangeRuntime>,
+    interceptor: &Interceptor,
+    current: Result<Js, Thrown>,
+) -> Result<Js, Thrown> {
     let (on_fulfilled, on_rejected) = interceptor;
     match current {
         Ok(value) if on_fulfilled.is_callable() => {
-            await_js(on_fulfilled.call(Js::Undefined, vec![value])?).await
+            await_js(runtime, on_fulfilled.call(Js::Undefined, vec![value])?).await
         }
         Err(error) if on_rejected.is_callable() => {
-            await_js(on_rejected.call(Js::Undefined, vec![error.value])?).await
+            await_js(runtime, on_rejected.call(Js::Undefined, vec![error.value])?).await
         }
         settled => settled,
     }
@@ -493,7 +497,7 @@ async fn send_once(
     let mut current = Ok(merged_config(defaults, &request)?);
     let requests: Vec<Interceptor> = state.borrow().requests.iter().rev().cloned().collect();
     for interceptor in &requests {
-        current = chain_step(interceptor, current).await;
+        current = chain_step(&host.runtime(), interceptor, current).await;
     }
     current = match current {
         Ok(config) => dispatch_request(host, config).await,
@@ -501,7 +505,7 @@ async fn send_once(
     };
     let responses: Vec<Interceptor> = state.borrow().responses.clone();
     for interceptor in &responses {
-        current = chain_step(interceptor, current).await;
+        current = chain_step(&host.runtime(), interceptor, current).await;
     }
     current
 }
@@ -510,7 +514,11 @@ async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
     let adapter = config.get("adapter")?;
     let custom_adapter = adapter.is_callable();
     let response = if custom_adapter {
-        await_js(adapter.call(Js::Undefined, vec![config.clone()])?).await?
+        await_js(
+            &host.runtime(),
+            adapter.call(Js::Undefined, vec![config.clone()])?,
+        )
+        .await?
     } else {
         host.send(config.clone()).await?
     };
@@ -600,13 +608,15 @@ fn rest_response(response: &Js) -> Result<RestResponse, Thrown> {
 /// pipeline (interceptors, signing, retry). A rejection keeps its JS value so
 /// [`JsRestAdapter::thrown`] can rethrow it unchanged.
 pub struct JsRestAdapter {
+    runtime: Rc<dyn ExchangeRuntime>,
     xhr: Js,
     rejection: RefCell<Option<Thrown>>,
 }
 
 impl JsRestAdapter {
-    pub fn new(xhr: Js) -> Self {
+    pub fn new(runtime: Rc<dyn ExchangeRuntime>, xhr: Js) -> Self {
         Self {
+            runtime,
             xhr,
             rejection: RefCell::default(),
         }
@@ -641,7 +651,7 @@ impl JsRestAdapter {
         } else {
             self.xhr.call_method(&method, vec![url, config])?
         };
-        rest_response(&await_js(pending).await?)
+        rest_response(&await_js(&self.runtime, pending).await?)
     }
     /// The body's `RestFailure` as JS: this adapter's own rejection as-is, else a host Error.
     pub fn thrown(&self, failure: RestFailure) -> Thrown {

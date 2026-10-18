@@ -1990,71 +1990,17 @@ Own code, source/oracle/manifests and shared dependencies are byte-unchanged, so
 Merged extractor text explicitly reports `Would update 0 manifests; 0 added, 0 orphaned symbols.`, exit0; diff check exit0. Keyed tomllib census against the fetched integration still moves4 pending->ported,0->divergent. Full records are committed in `POSITION_REFRESH_FINAL_MERGE_GATE_EXITS.json`; the previous enumeration floor and unrun checks/composition limits still apply.
 
 
-## Nine message entry and market candle forwarding rows (2026-10-14)
+## Retired message-entry extraction harness
 
-Moved **9 pending -> ported, 0 -> divergent**, keyed tomllib census over Binance
-manifests: **149/22/115 -> 158/22/106**. Fresh feature base actually used:
-`976c7bf08eb0d23329d7dfd9042035e3aabe2358`; no unreviewed external feature ancestor. Gate candidate
-`43867bba39aeae3c85356c413a41b603d0b5412a`, immediate parent `277451975db8872eed8346888e82d764b062e827`.
-`MESSAGE_ENTRY_GATE_EXITS.json` commits exact commands, full outputs, measured
-exits, twenty-one restored input hashes, per-control call sites and census rows.
-
-Ported five public onMessage wrappers, Futures/PM private onMessage routers, and
-Futures/PM public listenOHLCV companion-market forwards. Public data extraction
-precedes disposal; actual shared core traffic tracking precedes configured dispatch.
-Private routing uses actual core tracking/stats and production shared parsers:
-Futures protects bigint IDs/returns non-string input unchanged; PM coerces input,
-rounds JSON numbers and catches coercion errors to null. Separate event/id ifs
-reread retained payloads after callbacks. Delegates preserve original options,
-callback and cleanup handles and configured callback error identity.
-
-Scoped `message_entry` target, configured TypeScript, `--include-ignored`: baseline
-and exact final restore **9 passed, 0 failed, 0 ignored, exit0**. Nine compiling
-native controls each fail the named case0 assertion, **exit101**: public dispatch
-count **0 vs1** (five rows), private callback count **0 vs1** (two rows), options
-limit **8 vs7** (two rows). Two actual TS body controls complete native lane
-assertions first, then fail named source assertions, **exit101**: Futures account
-route trace length **native6 vs source4**, PM delegate limit **native7 vs source8**.
-All inputs restored byte-for-byte; no compiling selected control survived.
-Scoped cargo check (`--all-targets --jobs2`), extractor check, scoped rustfmt and
-diff check each **exit0**. Extractor text: `Would update 0 manifests; 0 added,
-0 orphaned symbols.` Latest manifest writer **exit0**, `Updated 5 manifests;
-0 added, 0 orphaned symbols.` Native decoded fields, identity, independent counts
-and real core state precede source comparisons for each lane; no roundtrip gate.
-
-Enumeration is a **154-case floor**: public5x14/private2x36 stop `preinitialized`,
-delegate2x6 stop `repeat-cleanup`; eleven compiling controls stop at iteration11,
-PM source delegate case0. Preliminary PM coercion mismatch (exit101) was corrected;
-an unchanged failed exploratory retry and an initial dispatch control compile
-failure are inventoried explicitly. That compile failure was **not** a kill.
-Earlier documentation-stage measurements keep their original SHA, with fresh
-final gates above. Read-only sub-agent review approved candidate `43867bba39aeae3c85356c413a41b603d0b5412a`.
-
-Configured data accessor/dispatch/diagnostic/handler/pong/market methods and their
-receivers remain class boundaries. Shared core health/stats errors cross the
-by-value ExchangeError API: name/message/metadata are retained; original native
-error-object identity is **not claimed**. Captured primitive cells stay immutable;
-object/array cells retain value/kind/identity and allow property/element mutations;
-whole-cell replacement is outside the configured data contract. Public dispatcher
-and concrete class wiring remain pending. Timer jobs retained but not executed;
-no timer execution/cancellation ownership proof. Full Binance test suite (only new
-target ran), workspace build, host clippy, wasm clippy, CI, arbitrary executable
-property hooks/own-undefined non-JSON payloads, whole venue and cross-engine
-verification **not run**. No whole-158-port proof claim.
-
-
-### Message-entry integration merge-down preservation
-
-Merged reviewed integration `ab593ef7504191a1cfd2bb094ef066aedd4c5c25` down. Preservation/extractor gate SHA
-`6be0546e09264f14d4275d68491317f51c00a6a9`. Actual `git diff --exit-code 43867bba39aeae3c85356c413a41b603d0b5412a HEAD -- <Binance>/src <Binance>/tests`
-exit **0**; source/oracle/manifests exit **0**; shared dependency inputs
-exit **0**. Original control measurements remain bound to `43867bba39aeae3c85356c413a41b603d0b5412a`;
-controls/rustfmt were not rerun. All compared inputs are byte-unchanged: tests/cargo/controls retain their original candidate SHA; tests/cargo were not rerun here.
-Merged extractor exit0 explicitly reports `Would update 0 manifests; 0 added,
-0 orphaned symbols.` Diff check exit0. Keyed tomllib against fetched integration
-moves9 pending->ported,0->divergent, census `{'ported': 149, 'divergent': 22, 'pending': 115}` -> `{'ported': 158, 'divergent': 22, 'pending': 106}`.
-Full commands/exits/outputs/hash comparisons committed in
-`MESSAGE_ENTRY_MERGE_GATE_EXITS.json`. Prior floor, boundaries and unrun claims apply.
+The four callback-only message/forwarding modules and their nine-entry harness
+were retired after a tracked production-source caller audit found only their
+function definitions. Registry and N-API construction reach the concrete
+`exchange_classes`, `private_classes` and `public_classes` paths. The wasm FFI
+currently exports only `parity_probe` and `version`, with no legacy message entry.
+The legacy receipt files described that removed harness and were retired with it.
+Manifest rows retain the existing live `PrivateState::on_message`,
+`PublicState::on_message` and `PublicState::listen_ohlcv` mappings. Constructed
+native frame/Store tests remain in `tests/private_classes.rs`.
 
 
 ## Eight REST response and reconciliation helpers (2026-10-14)
