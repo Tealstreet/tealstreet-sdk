@@ -37,7 +37,11 @@ def measure(label):
     log = Path("/tmp/port-txflow-residual-" + label + ".log")
     results_file = TARGET / "accepted-set-results.json"
     results_file.unlink(missing_ok=True)
-    env = dict(os.environ, CARGO_BUILD_JOBS="1", CARGO_TARGET_DIR=str(TARGET))
+    # Keep rustdoc and its subsequent compiler/probe checks in one isolated
+    # bootstrap environment; toggling it invalidates proc-macro dependency
+    # fingerprints on every package. Normal test builds use another target.
+    env = dict(os.environ, RUSTC_BOOTSTRAP="1", CARGO_BUILD_JOBS="1",
+               CARGO_TARGET_DIR=str(TARGET))
     with log.open("w") as output:
         status = subprocess.run(COMMAND, cwd=ROOT, env=env,
                                 stdout=output, stderr=subprocess.STDOUT)

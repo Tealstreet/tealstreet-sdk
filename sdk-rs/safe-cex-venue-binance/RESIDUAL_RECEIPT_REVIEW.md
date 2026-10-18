@@ -11,9 +11,9 @@ executed native observations, rather than diagnostic or exemption records:
 | `private_helpers::detach_binance_private_socket` | 14 | Captured socket state and fallible native callback ports |
 
 The assigned fifth owner, `detach_binance_pm_private_socket`, is a duplicate
-tail being deleted in #938. Its source mapping and maintained-source cases move
-to the surviving shared helper there. This review adds no duplicate contract
-for that pending deletion. Public callable aliases remain with their existing
+tail deleted by merged #938 (`70ebaee37a`). Its source mapping and
+maintained-source cases now use the surviving shared helper. This review adds
+no duplicate contract for that retired declaration. Public callable aliases remain with their existing
 owners, and the separate `closed_pnl` mapper is outside this cohort.
 
 The adapters in `scripts/residual-receipt-observers.rs` receive the actual

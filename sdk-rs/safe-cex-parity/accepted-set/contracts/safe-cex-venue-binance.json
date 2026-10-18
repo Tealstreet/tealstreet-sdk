@@ -21229,7 +21229,7 @@
         ]
       }
     },
-    "evidence": "Executes actual async reader with typed HistoricalTradeOptions, ready terminal GET and emitter ports. Native observations pin guard short-circuits, clock sampling, ordered range queries, sequential pages, malformed/primitive pages, stable descending time ordering, truthy response-message selection and exact native emitter code identity. Closed-time bits are captured directly before JSON; closed_pnl field mapping belongs to its separate owned corpus. Existing 658-case maintained reader oracle and pending/drop test cover the broader reader boundary. No arbitrary thenable/getter or raw JS rejection parity is claimed.",
+    "evidence": "Executes actual async reader with typed HistoricalTradeOptions, ready terminal GET and emitter ports. Native observations pin guard short-circuits, clock sampling, ordered range queries, sequential pages, malformed/primitive pages, stable descending time ordering, truthy response-message selection and exact native emitter code identity. Closed-time bits are captured directly before JSON; closed_pnl field mapping belongs to its separate owned corpus. Existing 658-case maintained reader oracle and pending/drop test cover the broader reader boundary. No arbitrary thenable/getter or raw JS rejection parity is claimed. Query numeric values are observed by binary64 bits before the finite JSON trace; expected time carriers retain the production f64 representation.",
     "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/residual-receipt-observers.rs\")); } let host=witness::Reader::new($value); let result=witness::run($type(&host.opts, host.public, ||host.now(), |path,params|host.get(path,params), |message|host.emit(message))); host.observe(result) }",
     "cases": [
       {
@@ -21324,10 +21324,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             }
           ],
           "clockCalls": 0,
@@ -21396,10 +21410,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             }
           ],
           "clockCalls": 0,
@@ -21447,10 +21475,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             }
           ],
           "clockCalls": 0,
@@ -21498,10 +21540,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             }
           ],
           "clockCalls": 0,
@@ -21551,10 +21607,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "emit": "Cannot read properties of null (reading 'realizedPnl')"
@@ -21592,10 +21662,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "emit": {
@@ -21633,10 +21717,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "emit": "request failed"
@@ -21673,10 +21771,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 1,
+                "startTime": 0.0,
+                "endTime": 1.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "3ff0000000000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "emit": "venue"
@@ -21711,10 +21823,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 604800000,
+                "startTime": 0.0,
+                "endTime": 604800000.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "41c2064200000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "get": "/fapi/v1/userTrades",
@@ -21726,10 +21852,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 604800001,
-                "endTime": 604800001,
+                "startTime": 604800001.0,
+                "endTime": 604800001.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "41c2064200800000"
+                ],
+                [
+                  "endTime",
+                  "41c2064200800000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             }
           ],
           "clockCalls": 0,
@@ -21760,10 +21900,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 0,
-                "endTime": 604800000,
+                "startTime": 0.0,
+                "endTime": 604800000.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "0000000000000000"
+                ],
+                [
+                  "endTime",
+                  "41c2064200000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "get": "/fapi/v1/userTrades",
@@ -21775,10 +21929,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 604800001,
-                "endTime": 1209600001,
+                "startTime": 604800001.0,
+                "endTime": 1209600001.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "41c2064200800000"
+                ],
+                [
+                  "endTime",
+                  "41d2064200400000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "get": "/fapi/v1/userTrades",
@@ -21790,10 +21958,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 1209600002,
-                "endTime": 1814400002,
+                "startTime": 1209600002.0,
+                "endTime": 1814400002.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "41d2064200800000"
+                ],
+                [
+                  "endTime",
+                  "41db096300800000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "get": "/fapi/v1/userTrades",
@@ -21805,10 +21987,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 1814400003,
-                "endTime": 2419200003,
+                "startTime": 1814400003.0,
+                "endTime": 2419200003.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "41db096300c00000"
+                ],
+                [
+                  "endTime",
+                  "41e2064200600000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             },
             {
               "get": "/fapi/v1/userTrades",
@@ -21820,10 +22016,24 @@
               ],
               "params": {
                 "symbol": "BTCUSDT",
-                "startTime": 2419200004,
-                "endTime": 3000000000,
+                "startTime": 2419200004.0,
+                "endTime": 3000000000.0,
                 "limit": 1000
-              }
+              },
+              "paramBits": [
+                [
+                  "startTime",
+                  "41e2064200800000"
+                ],
+                [
+                  "endTime",
+                  "41e65a0bc0000000"
+                ],
+                [
+                  "limit",
+                  "408f400000000000"
+                ]
+              ]
             }
           ],
           "clockCalls": 1,

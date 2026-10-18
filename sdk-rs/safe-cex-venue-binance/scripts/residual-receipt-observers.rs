@@ -270,7 +270,16 @@ impl Reader {
         params: Value,
     ) -> std::future::Ready<Result<Option<Value>, ExchangeError>> {
         self.calls.set(self.calls.get() + 1);
-        self.trace.borrow_mut().push(json!({"get":path,"keys":params.as_object().unwrap().keys().collect::<Vec<_>>(),"params":params}));
+        let keys = params.as_object().unwrap().keys().collect::<Vec<_>>();
+        let parameter_bits = params
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter_map(|(key, value)| value.as_f64().map(|value| json!([key, bits(value)])))
+            .collect::<Vec<_>>();
+        self.trace
+            .borrow_mut()
+            .push(json!({"get":path,"keys":keys,"paramBits":parameter_bits,"params":params}));
         std::future::ready(
             if self.input["reject"].as_u64() == Some(self.calls.get() as u64) {
                 let mut e = ExchangeError::new("request failed");
