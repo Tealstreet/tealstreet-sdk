@@ -77,13 +77,21 @@ fn market(native: &Market, source: &Value, numeric_max: &Value) {
         "price precision",
     );
     let limits = &f["limits"]["fields"];
+    if let safe_cex_types::NumericValue::Text(value) = &native.limits.amount.max {
+        string(
+            value,
+            &limits["amount"]["fields"]["max"],
+            "raw amount maximum",
+        );
+    }
+
     number(
         native.limits.amount.min,
         &limits["amount"]["fields"]["min"],
         "amount min",
     );
     number(
-        native.limits.amount.max,
+        safe_cex_num::numeric_value_to_number(&native.limits.amount.max),
         numeric_max,
         "amount max at shared numeric model boundary",
     );

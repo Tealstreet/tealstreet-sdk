@@ -185,7 +185,7 @@ impl BackpackExchange {
                     active: m.active,
                     read_only: m.is_read_only.unwrap_or(false),
                     amount_min: m.limits.amount.min,
-                    amount_max: m.limits.amount.max,
+                    amount_max: safe_cex_num::numeric_value_to_number(&m.limits.amount.max),
                     price_precision: m.precision.price,
                     amount_precision: m.precision.amount,
                 }))

@@ -50,7 +50,7 @@ pub fn market(id: &str, symbol: &str, contract_size: Option<f64>) -> safe_cex_ty
             cost: None,
             amount: MarketLimitsAmount {
                 min: 0.5,
-                max: 1000.0,
+                max: (1000.0).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: 1.0,

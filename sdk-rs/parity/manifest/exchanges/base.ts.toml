@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/base.ts"
-rust_files = [ "safe-cex-crypto/src/lib.rs", "safe-cex-exchange/src/capabilities.rs", "safe-cex-exchange/src/error_reporting.rs", "safe-cex-exchange/src/exchange.rs", "safe-cex-exchange/src/journal.rs", "safe-cex-exchange/src/js_runtime/base_exchange.rs", "safe-cex-exchange/src/js_runtime/builtins.rs", "safe-cex-exchange/src/js_runtime/client.rs", "safe-cex-exchange/src/js_runtime/ccxt.rs", "safe-cex-exchange/src/js_runtime/globals.rs", "safe-cex-exchange/src/js_runtime/library.rs", "safe-cex-exchange/src/js_runtime/ops.rs", "safe-cex-exchange/src/js_runtime/promise.rs", "safe-cex-exchange/src/js_runtime/regexp.rs", "safe-cex-exchange/src/js_runtime/scope.rs", "safe-cex-exchange/src/js_runtime/sockets.rs", "safe-cex-exchange/src/js_runtime/store.rs", "safe-cex-exchange/src/js_runtime/value.rs", "safe-cex-exchange/src/native.rs", "safe-cex-exchange/src/order_operations.rs", "safe-cex-exchange/src/runtime.rs", "safe-cex-exchange/src/snapshots.rs", "safe-cex-exchange/src/socket_lifecycle.rs", "safe-cex-exchange/src/waiters.rs", "safe-cex-exchange/src/worker.rs", "safe-cex-store/src/socket_health.rs", "safe-cex-transport/src/polling.rs", "safe-cex-exchange/src/js_runtime/collections.rs" ]
+rust_files = [ "safe-cex-crypto/src/lib.rs", "safe-cex-exchange/src/capabilities.rs", "safe-cex-exchange/src/error_reporting.rs", "safe-cex-exchange/src/exchange.rs", "safe-cex-exchange/src/journal.rs", "safe-cex-exchange/src/js_runtime/base_exchange.rs", "safe-cex-exchange/src/js_runtime/builtins.rs", "safe-cex-exchange/src/js_runtime/client.rs", "safe-cex-exchange/src/js_runtime/ccxt.rs", "safe-cex-exchange/src/js_runtime/globals.rs", "safe-cex-exchange/src/js_runtime/library.rs", "safe-cex-exchange/src/js_runtime/ops.rs", "safe-cex-exchange/src/js_runtime/promise.rs", "safe-cex-exchange/src/js_runtime/regexp.rs", "safe-cex-exchange/src/js_runtime/scope.rs", "safe-cex-exchange/src/js_runtime/sockets.rs", "safe-cex-exchange/src/js_runtime/store.rs", "safe-cex-exchange/src/js_runtime/value.rs", "safe-cex-exchange/src/native.rs", "safe-cex-exchange/src/order_operations.rs", "safe-cex-exchange/src/runtime.rs", "safe-cex-exchange/src/snapshots.rs", "safe-cex-exchange/src/socket_lifecycle.rs", "safe-cex-exchange/src/waiters.rs", "safe-cex-exchange/src/worker.rs", "safe-cex-store/src/socket_health.rs", "safe-cex-transport/src/polling.rs", "safe-cex-exchange/src/js_runtime/collections.rs", "safe-cex-num/src/lib.rs" ]
 
 [[symbol]]
 ts = "normalizeSymbols"
@@ -486,9 +486,9 @@ note = "Split: core emit-before-reject policy and immutable validated payload fo
 ts = "BaseExchange#wouldSplitOrder"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::would_split_order"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::would_split_order", "safe-cex-num/src/lib.rs::numeric_value_to_number" ]
 status = "ported"
-note = "safe-cex-exchange/src/exchange.rs::BaseExchange::would_split_order is the typed Rust composition of this source symbol."
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::would_split_order is the typed Rust composition of this source symbol. Split member `safe-cex-num/src/lib.rs::numeric_value_to_number` - shared Number conversion for retained Number/Text market limit properties at this method's maxSize > 0 and adjustedAmount > maxSize comparisons. The source relational operators coerce numeric text; the Rust typed carrier makes that conversion explicit only at numeric consumers, retaining source text in emitted Market values. Other numeric consumers use the same helper and existing shared string-number parser."
 
 [[symbol]]
 ts = "BaseExchange#assertCallerClientOrderIdUnsplit"

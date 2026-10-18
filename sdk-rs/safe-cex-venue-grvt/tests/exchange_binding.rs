@@ -234,7 +234,10 @@ fn refresh_markets_replaces_metadata_when_instrument_ids_are_unchanged() {
         market.precision.price, 0.25,
         "refresh must replace metadata"
     );
-    assert_eq!(market.limits.amount.max, 77.0);
+    assert_eq!(
+        safe_cex_num::numeric_value_to_number(&market.limits.amount.max),
+        77.0
+    );
     let info = market.info.as_ref().unwrap();
     assert!(info.get("ih").unwrap().text_equals("0x030502"));
     assert_eq!(

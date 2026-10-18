@@ -165,7 +165,10 @@ fn fetch_markets_joins_fees_and_prelaunch_markets() {
     assert!(btc.active);
     assert_eq!(btc.precision.price, 0.1);
     assert_eq!(btc.precision.amount, 0.001);
-    assert_eq!(btc.limits.amount.max, 100.0);
+    assert_eq!(
+        safe_cex_num::numeric_value_to_number(&btc.limits.amount.max),
+        100.0
+    );
     assert_eq!(btc.limits.leverage.max, 100.0);
     assert_eq!(btc.taker_fee, Some(0.00055), "fee joined by symbol");
     assert_eq!(btc.maker_fee, Some(0.0002));
