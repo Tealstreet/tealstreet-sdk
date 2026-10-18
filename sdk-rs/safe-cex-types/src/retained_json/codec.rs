@@ -32,6 +32,50 @@ impl<'de> serde::Deserialize<'de> for Payload {
     }
 }
 
+enum Tag {
+    Undefined,
+    Null,
+    Bool,
+    Text,
+    Lexeme,
+    Float,
+    Array,
+    Object,
+}
+impl<'de> serde::Deserialize<'de> for Tag {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct TagVisitor;
+        impl Visitor<'_> for TagVisitor {
+            type Value = Tag;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a string")
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Tag, E> {
+                match value {
+                    "Undefined" => Ok(Tag::Undefined),
+                    "Null" => Ok(Tag::Null),
+                    "Bool" => Ok(Tag::Bool),
+                    "Text" => Ok(Tag::Text),
+                    "Lexeme" => Ok(Tag::Lexeme),
+                    "Float" => Ok(Tag::Float),
+                    "Array" => Ok(Tag::Array),
+                    "Object" => Ok(Tag::Object),
+                    _ => Err(E::custom("invalid retained tag")),
+                }
+            }
+            fn visit_bytes<E: de::Error>(self, bytes: &[u8]) -> Result<Tag, E> {
+                let text = std::str::from_utf8(bytes)
+                    .map_err(|_| E::invalid_value(de::Unexpected::Bytes(bytes), &self))?;
+                self.visit_str(text)
+            }
+            fn visit_byte_buf<E: de::Error>(self, bytes: Vec<u8>) -> Result<Tag, E> {
+                self.visit_bytes(&bytes)
+            }
+        }
+        d.deserialize_string(TagVisitor)
+    }
+}
+
 pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Input, D::Error> {
     struct PayloadVisitor;
     impl<'de> Visitor<'de> for PayloadVisitor {
@@ -40,52 +84,51 @@ pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Inp
             f.write_str("a retained native payload")
         }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Input, A::Error> {
-            let tag: String = seq
+            let tag: Tag = seq
                 .next_element()?
                 .ok_or_else(|| de::Error::custom("missing retained tag"))?;
-            let value = match tag.as_str() {
-                "Undefined" => {
+            let value = match tag {
+                Tag::Undefined => {
                     seq.next_element::<()>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?;
                     Input::Undefined
                 }
-                "Null" => {
+                Tag::Null => {
                     seq.next_element::<()>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?;
                     Input::Null
                 }
-                "Bool" => Input::Bool(
+                Tag::Bool => Input::Bool(
                     seq.next_element::<bool>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
                 ),
-                "Text" => Input::Text(
+                Tag::Text => Input::Text(
                     seq.next_element::<Units>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?
                         .0,
                 ),
-                "Lexeme" => Input::Lexeme(
+                Tag::Lexeme => Input::Lexeme(
                     seq.next_element::<String>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
                 ),
-                "Float" => Input::Float(
+                Tag::Float => Input::Float(
                     seq.next_element::<f64>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
                 ),
-                "Array" => Input::Array(
+                Tag::Array => Input::Array(
                     seq.next_element::<Vec<Payload>>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?
                         .into_iter()
                         .map(|value| value.0)
                         .collect(),
                 ),
-                "Object" => Input::Object(
+                Tag::Object => Input::Object(
                     seq.next_element::<Vec<(Units, Payload)>>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?
                         .into_iter()
                         .map(|(key, value)| (key.0, value.0))
                         .collect(),
                 ),
-                _ => return Err(de::Error::custom("invalid retained tag")),
             };
             if seq.next_element::<de::IgnoredAny>()?.is_some() {
                 return Err(de::Error::custom("extra retained payload"));

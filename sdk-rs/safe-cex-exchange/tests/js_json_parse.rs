@@ -472,7 +472,7 @@ fn native_market_info_decode_does_not_expand_each_utf16_unit_into_a_value() {
             text.len()
         );
         assert!(
-            allocated < text.len() * 11 / 2,
+            allocated < text.len() * 29 / 6,
             "typed capture exceeds its allocation budget: {allocated} allocated bytes for {} input bytes",
             text.len()
         );
