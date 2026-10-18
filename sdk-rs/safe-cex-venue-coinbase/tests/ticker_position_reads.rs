@@ -1,3 +1,7 @@
+#[path = "support/retained_info.rs"]
+mod retained_info;
+#[path = "support/retained_mutation.rs"]
+mod retained_mutation;
 use safe_cex_types::{MarginType, Market, Position, PositionMode, PositionSide, Ticker};
 use safe_cex_venue_coinbase::{
     market_position_reads::*,
@@ -99,7 +103,7 @@ fn failure(value: Value) -> PortfolioFailure {
     Rc::new(PortfolioThrown::from_value(Some(value)))
 }
 fn item(value: &Value) -> ReadItem {
-    Rc::new(RefCell::new(value.clone()))
+    Rc::new(RefCell::new(value.clone().into()))
 }
 fn cached_ticker() -> Rc<ReadTicker> {
     Rc::new(ReadTicker {fields:serde_json::from_value::<Ticker>(json!({"id":"cached-ticker","symbol":"CACHED","bid":1,"ask":2,"last":3,"mark":4,"index":5,"percentage":6,"openInterest":7,"fundingRate":8,"fundingTime":9,"volume":10,"quoteVolume":11})).unwrap(),info:None})
@@ -265,7 +269,7 @@ fn assert_ticker(v: &ReadTicker, e: &Value, label: &str) {
         "{label}: absent native optional ticker fields"
     );
     if let Some(info) = &v.info {
-        assert_json(Some(&info.borrow()), &e["info"], label);
+        retained_info::assert_info(Some(&info.borrow()), &e["info"], label);
     } else {
         assert!(e.get("info").is_none(), "{label}: absent info");
     }
@@ -329,7 +333,7 @@ fn assert_position(v: &ReadPosition, e: &Value, label: &str) {
         assert!(e.get("extra").is_none(), "{label}");
     }
     if let Some(info) = &v.info {
-        assert_json(Some(&info.borrow()), &e["info"], label);
+        retained_info::assert_info(Some(&info.borrow()), &e["info"], label);
     } else {
         assert!(e.get("info").is_none(), "{label}");
     }
@@ -594,7 +598,7 @@ fn cfm_lookup_callback_reloads_product_id_and_retains_info() {
     let source = items[0].clone();
     *r.host.hook.borrow_mut() = Some(Rc::new(move |id| {
         assert_eq!(id, "A", "lookup reads original product ID");
-        source.borrow_mut()["product_id"] = json!("B");
+        retained_mutation::set(&mut source.borrow_mut(), "product_id", json!("B").into());
     }));
     let promise = fetch_open_positions_cfm(r.clone());
     tasks.drain();
@@ -613,7 +617,7 @@ fn cfm_lookup_callback_reloads_product_id_and_retains_info() {
         "CFM callback info retains original root"
     );
     r.host.markets.borrow_mut()[0].borrow_mut().is_expiring = Some(false);
-    items[0].borrow_mut()["product_id"] = json!("A");
+    retained_mutation::set(&mut items[0].borrow_mut(), "product_id", json!("A").into());
     r.host
         .replies
         .borrow_mut()

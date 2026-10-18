@@ -91,10 +91,17 @@ pub fn format_order_type(raw_type: &str, mut console_error: impl FnMut(&str, &st
 }
 
 // ts: normalizeCfmContractSize
-pub fn normalize_cfm_contract_size(value: &Value) -> Option<f64> {
-    let size = match value {
-        Value::Number(value) => value.as_f64().unwrap_or(f64::NAN),
-        Value::String(value) => safe_cex_num::number_from_string(value),
+pub fn normalize_cfm_contract_size<
+    I: Clone + Into<safe_cex_types::retained_json::RetainedJsonInput>,
+>(
+    value: &I,
+) -> Option<f64> {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let value: Input = value.clone().into();
+    let size = match &value {
+        Input::Float(_) | Input::Lexeme(_) | Input::Text(_) => {
+            safe_cex_num::js_retained_number(Some(&value)).ok()?
+        }
         _ => f64::NAN,
     };
     (size.is_finite() && size > 0.0).then_some(size)

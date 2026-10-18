@@ -1478,76 +1478,67 @@ pub fn normalize_coinbase_starbase_order(
     }
 }
 
-fn private_order_info(gateway: &CoinbaseStarbasePrivateOrder) -> Value {
+fn private_order_info(
+    gateway: &CoinbaseStarbasePrivateOrder,
+) -> safe_cex_types::retained_json::RetainedJsonInput {
     use CoinbaseStarbaseOrderPrice as Price;
-    let mut info = serde_json::Map::new();
-    info.insert("id".into(), Value::String(gateway.id.clone()));
-    info.insert(
-        "instrumentName".into(),
-        Value::String(gateway.instrument_name.clone()),
-    );
-    info.insert(
-        "legacySavedSymbol".into(),
-        Value::String(gateway.legacy_saved_symbol.clone()),
-    );
-    info.insert(
-        "state".into(),
-        Value::String(order_state_text(gateway.state).into()),
-    );
-    info.insert(
-        "type".into(),
-        Value::String(order_type_text(gateway.r#type).into()),
-    );
-    info.insert(
-        "timeInForce".into(),
-        Value::String(time_in_force_text(gateway.time_in_force).into()),
-    );
-    info.insert(
-        "direction".into(),
-        Value::String(direction_text(gateway.direction).into()),
-    );
-    let price = match gateway.price {
-        Price::Number(value) => Value::from(value),
-        Price::Market(_) => Value::String("market_price".into()),
-    };
-    info.insert("price".into(), price);
-    insert_optional(&mut info, "averagePrice", gateway.average_price);
-    info.insert("label".into(), Value::String(gateway.label.clone()));
-    info.insert("postOnly".into(), Value::Bool(gateway.post_only));
-    insert_optional(&mut info, "reduceOnly", gateway.reduce_only);
-    info.insert(
-        "creationTimestampMs".into(),
-        Value::from(gateway.creation_timestamp_ms),
-    );
-    info.insert(
-        "lastUpdateTimestampMs".into(),
-        Value::from(gateway.last_update_timestamp_ms),
-    );
-    insert_optional(&mut info, "gatewayAmount", gateway.gateway_amount);
-    insert_optional(
-        &mut info,
-        "gatewayFilledAmount",
-        gateway.gateway_filled_amount,
-    );
-    insert_optional(&mut info, "gatewayContracts", gateway.gateway_contracts);
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let text = |value: &str| Input::Text(value.encode_utf16().collect());
+    let mut fields = vec![
+        ("id", text(&gateway.id)),
+        ("instrumentName", text(&gateway.instrument_name)),
+        ("legacySavedSymbol", text(&gateway.legacy_saved_symbol)),
+        ("state", text(order_state_text(gateway.state))),
+        ("type", text(order_type_text(gateway.r#type))),
+        (
+            "timeInForce",
+            text(time_in_force_text(gateway.time_in_force)),
+        ),
+        ("direction", text(direction_text(gateway.direction))),
+        (
+            "price",
+            match gateway.price {
+                Price::Number(value) => Input::Float(value),
+                Price::Market(_) => text("market_price"),
+            },
+        ),
+        ("label", text(&gateway.label)),
+        ("postOnly", Input::Bool(gateway.post_only)),
+        (
+            "creationTimestampMs",
+            Input::Float(gateway.creation_timestamp_ms),
+        ),
+        (
+            "lastUpdateTimestampMs",
+            Input::Float(gateway.last_update_timestamp_ms),
+        ),
+    ];
+    for (key, value) in [
+        ("averagePrice", gateway.average_price),
+        ("gatewayAmount", gateway.gateway_amount),
+        ("gatewayFilledAmount", gateway.gateway_filled_amount),
+        ("gatewayContracts", gateway.gateway_contracts),
+        ("triggerPrice", gateway.trigger_price),
+    ] {
+        if let Some(value) = value {
+            fields.push((key, Input::Float(value)));
+        }
+    }
+    if let Some(value) = gateway.reduce_only {
+        fields.push(("reduceOnly", Input::Bool(value)));
+    }
     if let Some(value) = gateway.trigger {
-        info.insert("trigger".into(), Value::String(trigger_text(value).into()));
+        fields.push(("trigger", text(trigger_text(value))));
     }
-    insert_optional(&mut info, "triggerPrice", gateway.trigger_price);
     if let Some(value) = &gateway.trigger_order_id {
-        info.insert("triggerOrderId".into(), Value::String(value.clone()));
+        fields.push(("triggerOrderId", text(value)));
     }
-    Value::Object(info)
-}
-
-fn insert_optional<T: Into<Value>>(
-    object: &mut serde_json::Map<String, Value>,
-    key: &str,
-    value: Option<T>,
-) {
-    if let Some(value) = value {
-        object.insert(key.into(), value.into());
-    }
+    Input::Object(
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.encode_utf16().collect(), value))
+            .collect(),
+    )
 }
 
 fn order_state_text(value: CoinbaseStarbaseOrderState) -> &'static str {

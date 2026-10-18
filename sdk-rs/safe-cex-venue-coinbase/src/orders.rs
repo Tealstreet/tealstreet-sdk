@@ -1,33 +1,33 @@
 //! REST-order normalization from coinbase.orders.ts.
-use crate::utils::{normalize_cfm_contract_size, truthy};
+use crate::utils::normalize_cfm_contract_size;
 use safe_cex_num::{add, divide, multiply, number_from_string, subtract};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Market, Order, OrderExtra, OrderSide, OrderStatus, OrderType};
-use serde_json::Value;
 
 struct ResolvedOrderConfig<'a> {
     kind: OrderType,
-    base_size: Option<&'a Value>,
-    quote_size: Option<&'a Value>,
-    price: Option<&'a Value>,
+    base_size: Option<&'a Input>,
+    quote_size: Option<&'a Input>,
+    price: Option<&'a Input>,
 }
 
 // ts: parseUnsignedDecimal
-fn parse_unsigned_decimal(value: Option<&Value>) -> Option<f64> {
-    let value = value?.as_str()?;
+fn parse_unsigned_decimal(value: Option<&Input>) -> Option<f64> {
+    let value = String::from_utf16(value?.as_text()?).ok()?;
     if value.is_empty() {
         return None;
     }
-    let parsed = number_from_string(value);
+    let parsed = number_from_string(&value);
     (parsed.is_finite() && parsed >= 0.0).then_some(parsed)
 }
 
 // ts: resolveOrderConfiguration
-fn resolve_order_configuration(order: &Value) -> Option<ResolvedOrderConfig<'_>> {
+fn resolve_order_configuration(order: &Input) -> Option<ResolvedOrderConfig<'_>> {
     let config = order.get("order_configuration")?;
     let first = |names: &[&str]| {
         names
             .iter()
-            .find_map(|name| config.get(name).filter(|v| truthy(v)))
+            .find_map(|name| config.get(name).filter(|v| v.is_truthy()))
     };
     if let Some(market) = first(&["market_market_ioc", "market_market_fok"]) {
         return Some(ResolvedOrderConfig {
@@ -57,7 +57,7 @@ fn resolve_order_configuration(order: &Value) -> Option<ResolvedOrderConfig<'_>>
             quote_size: None,
             price: stop_limit
                 .get("stop_price")
-                .filter(|v| truthy(v))
+                .filter(|v| v.is_truthy())
                 .or_else(|| stop_limit.get("limit_price")),
         });
     }
@@ -80,11 +80,13 @@ fn resolve_amount_native(config: &ResolvedOrderConfig<'_>) -> Option<f64> {
 // ts: mapCoinbaseRestOrder
 // ts-bug: mapCoinbaseRestOrder reads inherited ORDER_STATUS object members.
 // CORRECTED: OrderStatus admits actual statuses, never a function/prototype object.
-pub fn map_coinbase_rest_order(
-    raw_order: &Value,
+pub fn map_coinbase_rest_order<I: Clone + Into<Input>>(
+    raw_order: &I,
     market: &Market,
     last_update: f64,
 ) -> Option<Order> {
+    let retained: Input = raw_order.clone().into();
+    let raw_order = &retained;
     let resolved = resolve_order_configuration(raw_order)?;
     let amount_native = resolve_amount_native(&resolved)?;
     let filled_native = parse_unsigned_decimal(raw_order.get("filled_size")).unwrap_or(0.0);
@@ -96,7 +98,12 @@ pub fn map_coinbase_rest_order(
     } else {
         1.0
     };
-    let status = match raw_order.get("status")?.as_str()? {
+    let status = match raw_order
+        .get("status")?
+        .as_text()
+        .and_then(|v| String::from_utf16(v).ok())?
+        .as_str()
+    {
         "PENDING" | "OPEN" | "QUEUED" | "CANCEL_QUEUED" | "EDIT_QUEUED" => OrderStatus::Open,
         "FILLED" => OrderStatus::Closed,
         "CANCELLED" | "EXPIRED" | "FAILED" => OrderStatus::Canceled,
@@ -108,16 +115,26 @@ pub fn map_coinbase_rest_order(
     let remaining = multiply(remaining_native, contract_size);
     Some(Order {
         client_order_id: (None).into(),
-        id: raw_order.get("order_id")?.as_str()?.to_owned(),
+        id: raw_order
+            .get("order_id")?
+            .as_text()
+            .and_then(|v| String::from_utf16(v).ok())?
+            .as_str()
+            .to_owned(),
         parent_id: match raw_order.get("client_order_id") {
-            None | Some(Value::Null) => None,
-            Some(id) => Some(id.as_str()?.to_owned()),
+            None | Some(Input::Null | Input::Undefined) => None,
+            Some(id) => Some(
+                id.as_text()
+                    .and_then(|v| String::from_utf16(v).ok())?
+                    .as_str()
+                    .to_owned(),
+            ),
         }
         .into(),
         status: status.into(),
         symbol: market.symbol.clone(),
         r#type: (resolved.kind).into(),
-        side: if raw_order.get("side").and_then(Value::as_str) == Some("BUY") {
+        side: if raw_order.get("side").is_some_and(|v| v.text_equals("BUY")) {
             safe_cex_types::ModelField::Value(OrderSide::Buy)
         } else {
             safe_cex_types::ModelField::Value(OrderSide::Sell)

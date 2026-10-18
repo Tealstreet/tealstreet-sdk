@@ -1,5 +1,7 @@
 #[path = "support/oracle_clock.rs"]
 mod oracle_clock;
+#[path = "support/retained_observe.rs"]
+mod retained_observe;
 
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
@@ -81,7 +83,7 @@ fn order_value(o: &Order) -> Value {
         v["timeInForce"] = json!(t);
     }
     if let Some(info) = o.info.as_ref() {
-        v["info"] = observe(info);
+        v["info"] = retained_observe::observe(info);
     }
     if let Some(t) = o.sl_trigger_type.into_value() {
         v["slTriggerType"] = json!(t);
@@ -335,13 +337,19 @@ impl PrivateDispatchOperations for Host {
             Ok(())
         })
     }
-    fn account(&self, events: Vec<Value>) -> ExchangeFuture<'_, ()> {
+    fn account(
+        &self,
+        events: Vec<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> ExchangeFuture<'_, ()> {
         Box::pin(async move {
             self.call(json!({"op":"account","events":events}));
             Ok(())
         })
     }
-    fn order(&self, events: &[Value]) -> Result<(), ExchangeError> {
+    fn order(
+        &self,
+        events: &[safe_cex_types::retained_json::RetainedJsonInput],
+    ) -> Result<(), ExchangeError> {
         self.call(json!({"op":"order","events":events}));
         Ok(())
     }
