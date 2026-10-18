@@ -692,6 +692,18 @@
     ]
   },
   {
+    "file": "safe-cex-ffi/src/native_exchange.rs",
+    "function": "run_host",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "start",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-lighter-sdk/src/amount_encoding.rs",
     "function": "format_amount",
     "edges": [
