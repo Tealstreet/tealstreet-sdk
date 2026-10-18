@@ -64,3 +64,21 @@ claim that capability. Source observations remain unchanged through the cutover.
 constructor, serial-helper, iterable, microtask and client regressions remain
 required. Any changed cancellation/override producer pin must be reviewed and
 refreshed in the implementation PR before READY.
+
+Implementation receipts:
+
+- The twelve scoped core Promise/client/runtime targets pass 149 tests (one
+  pre-existing ignored test); `js_unhandled_rejections` passes its two native
+  Node/host-discard tests. Existing assertions and corpus floors are retained.
+- After the normal master refresh, the thenable target and all-features
+  cancellation/override/binding gates pass 52 tests with `--include-ignored`.
+  The live override check uses the existing isolated TypeScript installation.
+- Cancellation review updates eleven changed producers, removes the deleted
+  `adopt` and `yield_current` owners, and retains the existing classifications,
+  guard bodies, and enabled drop witnesses. All 225 remaining creators are
+  classified without findings. PromiseWait and Driver Drop bodies are unchanged.
+- Strict native core lint and strict Wasm core/Polymarket library lint pass.
+  The Polymarket 96-case signer corpus now uses its existing constructed exchange
+  scheduler instead of expecting a single synchronous poll; every source field,
+  own-key-order, numeric and exact wire-payload assertion remains in place.
+- Lighter/Phemex unit-test targets compile with the explicit runtime API.
