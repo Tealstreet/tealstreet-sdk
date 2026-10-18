@@ -5783,3 +5783,7 @@ fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
         owner.dispose().unwrap();
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/private_owner_binding.rs"]
+mod private_owner_binding;
