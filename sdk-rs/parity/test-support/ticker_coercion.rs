@@ -41,7 +41,8 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
                 "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
                 "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),
                 "apexomni" => (format!("{asset}-USDC"), format!("{asset}USDC")),
-                "weex" | "phemex" | "binance" | "binancepm" | "binancespot" => {
+                "weex" | "phemex" | "binance" | "binancepm" | "binancespot" | "bybit"
+                | "bybitdemo" | "bybitspot" | "hyrotrader" => {
                     (format!("{asset}USDT"), format!("{asset}USDT"))
                 }
                 "kucoin" => (
@@ -49,6 +50,7 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
                     format!("{asset}USDT"),
                 ),
                 "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
+                "bybitinverse" => (format!("{asset}USD"), format!("{asset}USD")),
                 "blofin" => (format!("{asset}-USDT"), format!("{asset}USDT")),
                 "cryptocom" => (format!("{asset}USD-PERP"), format!("{asset}USD-PERP")),
                 "coinbase" => (format!("{asset}-USDC"), format!("{asset}-USDC")),
