@@ -66,16 +66,20 @@ fn exercise(surface: &str) {
     let depth_cancel = Rc::new(Cell::new(false));
     let orders_cancel = Rc::new(Cell::new(false));
     for name in ["public", "private"] {
-        let weak = Rc::downgrade(&o);
+        // Close callbacks can also run during final Exchange destruction. Inspect
+        // the original retained resources, whose weak identities remain live then.
+        let base = Rc::downgrade(&o.base);
+        let public = Rc::downgrade(p);
+        let private = Rc::downgrade(q);
         let log = calls.clone();
         let depth = depth_cancel.clone();
         let orders = orders_cancel.clone();
         rt.dial_sockets.borrow_mut().push(Rc::new(Socket {
             name,
             close: Rc::new(move |name| {
-                let owner = weak.upgrade().unwrap();
+                let base = base.upgrade().unwrap();
                 if name == "public" {
-                    let public = owner.public_websocket.get().unwrap();
+                    let public = public.upgrade().unwrap();
                     assert!(
                         depth.get() && public.listeners.throttles.borrow().is_empty(),
                         "DISPOSE depth cancellation precedes public close"
@@ -88,9 +92,8 @@ fn exercise(surface: &str) {
                 } else {
                     assert!(
                         orders.get()
-                            && owner
-                                .private_websocket
-                                .get()
+                            && private
+                                .upgrade()
                                 .unwrap()
                                 .state
                                 .orders_timeout
@@ -100,7 +103,7 @@ fn exercise(surface: &str) {
                     );
                 }
                 log.borrow_mut()
-                    .push(format!("{name}:close:{}", owner.base.is_disposed()));
+                    .push(format!("{name}:close:{}", base.is_disposed()));
             }),
             terminate: terminations.clone(),
         }));

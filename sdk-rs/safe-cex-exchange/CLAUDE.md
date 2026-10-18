@@ -1880,3 +1880,14 @@ prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
 boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
+
+`native_final_drop(base, venue_cleanup)` is the single native final-handle teardown
+entrypoint. It marks disposed before venue cleanup and always performs shared
+cleanup afterward, silencing Result errors at destruction. The callback must
+finish cancelling venue-owned tasks/state even if an earlier cleanup returns an
+error. Stored timer callbacks must use weak venue ownership so they cannot keep
+the final external handle alive; held venues must still service them normally.
+This accepted lifetime policy has one core override classification and no source
+super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
+`tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
+cleanup, while Backpack/BingX binding probes cover actual sockets/timers.

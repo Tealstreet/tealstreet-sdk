@@ -62,3 +62,6 @@ pub mod cross_trade;
 
 pub mod fill_event_units;
 pub mod how_facade;
+
+mod native_final_drop;
+pub use native_final_drop::native_final_drop;

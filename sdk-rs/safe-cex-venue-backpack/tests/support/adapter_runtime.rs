@@ -200,6 +200,7 @@ impl WsRuntime for Runtime {
 #[derive(Default)]
 pub struct Wire {
     pub requests: Mutex<Vec<RestRequest>>,
+    pub response_gate: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
     pub bodies: Mutex<BTreeMap<String, RestResponseBody>>,
 }
 impl RestAdapter for Wire {
@@ -213,7 +214,18 @@ impl RestAdapter for Wire {
                 .unwrap(),
             ),
         );
+        let gate = self.response_gate.lock().unwrap().clone();
         Box::pin(async move {
+            if let Some(gate) = gate {
+                std::future::poll_fn(move |_| {
+                    if gate.load(std::sync::atomic::Ordering::SeqCst) {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                })
+                .await;
+            }
             Ok(RestResponse {
                 status: 200,
                 reason: None,

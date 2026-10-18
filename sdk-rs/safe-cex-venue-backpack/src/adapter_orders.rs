@@ -13,7 +13,7 @@ impl BackpackExchange {
         let xhr = self.xhr.clone();
         let balance = self.clone();
         let emit = self.clone();
-        crate::account_reads::validate_account(
+        let future = crate::account_reads::validate_account(
             move |url| {
                 let f = xhr.request("GET", url, JsJsonValue::Undefined, JsJsonValue::Undefined);
                 Ok(async move { f.await.map(|_| ()).map_err(validation_failure) })
@@ -31,24 +31,26 @@ impl BackpackExchange {
                     None,
                 )
             },
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn cancel_orders(self: &Rc<Self>, orders: Vec<Order>) -> ExchangeFuture<'static, ()> {
         let orders = Rc::new(orders);
         let len = orders.clone();
         let owner = self.clone();
-        crate::account_reads::cancel_orders(
+        let future = crate::account_reads::cancel_orders(
             move || Ok(len.len()),
             move |i| Ok(orders.get(i).cloned().map(|o| std::future::ready(Ok(o)))),
             move |o| Ok(owner.cancel_order(o)),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn cancel_all_orders(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
         let len = self.clone();
         let element = self.clone();
         let xhr = self.xhr.clone();
         let log = self.clone();
-        crate::account_reads::cancel_all_orders(
+        let future = crate::account_reads::cancel_all_orders(
             move || Ok(len.base.store.markets().len()),
             move |i| {
                 Ok(element
@@ -76,7 +78,8 @@ impl BackpackExchange {
                 })
             },
             move |m, s| log.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn set_leverage(self: &Rc<Self>, leverage: f64) -> ExchangeFuture<'static, ()> {
         let f = self.xhr.request(
@@ -93,7 +96,7 @@ impl BackpackExchange {
         let emit = self.clone();
         let fetch = self.clone();
         let update = self.clone();
-        Box::pin(async move {
+        let future = Box::pin(async move {
             crate::account_reads::set_leverage(
                 &owner.account_leverage_limit,
                 leverage,
@@ -134,7 +137,8 @@ impl BackpackExchange {
                 },
             )
             .await
-        })
+        });
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn change_position_mode(&self, hedged: bool) -> ExchangeFuture<'static, ()> {
         crate::account_reads::change_position_mode(
@@ -223,7 +227,7 @@ impl BackpackExchange {
         let build = self.clone();
         let xhr = self.xhr.clone();
         let decode = self.clone();
-        mapping::place_batch_pair(
+        let future = mapping::place_batch_pair(
             &orders,
             move |n| ids.create_batch_client_ids(n as f64),
             move |o, id| build.build_batch_limit_order_request(o, id.unwrap_or(f64::NAN)),
@@ -234,7 +238,8 @@ impl BackpackExchange {
                 Ok(async move { f.await?.prepared() })
             },
             move |data, requests| decode.decode_batch_order_response(&data, &requests.borrow()),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn place_orders(
         self: &Rc<Self>,
@@ -249,7 +254,7 @@ impl BackpackExchange {
         let single = self.clone();
         let emit = self.clone();
         let log = self.clone();
-        crate::batch_orders::place_orders(
+        let future = crate::batch_orders::place_orders(
             move || pre.base.assert_caller_client_order_ids(&check),
             move || Ok(len.len()),
             move |i| Ok(orders.get(i).cloned()),
@@ -291,7 +296,8 @@ impl BackpackExchange {
                     s,
                 )
             },
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
 }
 

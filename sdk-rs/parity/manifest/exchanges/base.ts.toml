@@ -702,9 +702,9 @@ note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 ts = "BaseExchange.dispose"
 kind = "method"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::dispose", "safe-cex-exchange/src/exchange.rs::Exchange::dispose" ]
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::dispose", "safe-cex-exchange/src/exchange.rs::Exchange::dispose", "safe-cex-exchange/src/native_final_drop.rs::native_final_drop" ]
 status = "ported"
-note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::dispose preserve venue polymorphism. safe-cex-exchange/src/exchange.rs::BaseExchange::dispose is the typed Rust composition of this source symbol."
+note = "Native final-handle destruction additionally uses native_final_drop, the canonical native lifetime primitive classified once in the override gate. It marks disposed, runs venue cleanup, and completes shared teardown despite errors under the coordinator native-drop ruling. This is not a TypeScript dispose/super claim. tests/native_final_drop.rs and real Backpack/BingX Drop bindings witness this accepted native-only lifetime policy. Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::dispose preserve venue polymorphism. safe-cex-exchange/src/exchange.rs::BaseExchange::dispose is the typed Rust composition of this source symbol."
 
 [[symbol]]
 ts = "BaseExchange.listenOHLCVWebworker"
