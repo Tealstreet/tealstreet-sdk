@@ -117,7 +117,13 @@ fn native_market(actual: &Market, expected: &Value) {
     let info = actual.info.as_ref().unwrap();
     for key in ["ih", "bd", "qd"] {
         if expected["info"][key]["undefined"] == true {
-            assert!(info.get(key).is_none(), "MARKETS absent JSON-data {key}");
+            assert!(
+                matches!(
+                    info.get(key),
+                    Some(safe_cex_types::retained_json::RetainedJsonInput::Undefined)
+                ),
+                "MARKETS own undefined {key}"
+            );
         } else if expected["info"][key].get("bits").is_some() {
             number(
                 info.get(key).unwrap().as_f64().unwrap(),
@@ -201,9 +207,7 @@ fn fetch_markets_native_source_outcomes() {
                 ]);
                 std::future::ready(Ok(safe_cex_transport::how::json_parse(
                     row["raw"].as_str().unwrap(),
-                )
-                .into_value()
-                .unwrap()))
+                )))
             },
             |message, severity| {
                 logs += 1;
@@ -254,7 +258,7 @@ fn fetch_markets_native_source_outcomes() {
 fn fetch_markets_reports_typed_row_refusal_after_source_logging() {
     let effects = RefCell::new(Vec::new());
     let result = run(fetch_markets(
-        |_, _| std::future::ready(Ok(json!({"r":[{"i":"x","b":{},"q":"USD"}]}))),
+        |_, _| std::future::ready(Ok(json!({"r":[{"i":"x","b":{},"q":"USD"}]}).into())),
         |text, severity| {
             effects
                 .borrow_mut()
