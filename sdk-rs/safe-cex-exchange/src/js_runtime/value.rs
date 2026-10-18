@@ -1745,7 +1745,10 @@ impl Js {
                         length = if target_length.is_nan() {
                             0.
                         } else {
-                            (target_length.trunc() - bound_args.len() as f64).max(0.)
+                            safe_cex_num::math_max(
+                                target_length.trunc() - bound_args.len() as f64,
+                                0.,
+                            )
                         };
                     }
                     let target_name = this.get("name")?;

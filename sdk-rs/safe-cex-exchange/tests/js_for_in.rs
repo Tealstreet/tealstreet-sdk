@@ -341,3 +341,44 @@ fn bound_metadata_observes_own_length_before_name_and_preserves_utf16() {
     bound.delete(&utf16("name"));
     assert!(!bound.has_own("name"));
 }
+
+#[test]
+fn bound_length_uses_number_only_integer_conversion_and_positive_zero() {
+    let output=Command::new("node").args(["-e",r#"const out=[0,-0,NaN,Infinity,-Infinity,2.9,'4',1n].map(length=>{const f=()=>{};Object.defineProperty(f,'length',{value:length});const v=f.bind(null).length;const bytes=new DataView(new ArrayBuffer(8));bytes.setFloat64(0,v);return bytes.getBigUint64(0).toString(16).padStart(16,'0')});console.log(JSON.stringify(out));"#]).output().unwrap();
+    assert!(output.status.success());
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let object = object();
+    let mut actual = vec![];
+    for value in [
+        Js::Number(0.),
+        Js::Number(-0.),
+        Js::Number(f64::NAN),
+        Js::Number(f64::INFINITY),
+        Js::Number(f64::NEG_INFINITY),
+        Js::Number(2.9),
+        Js::str("4"),
+        Js::BigInt(Rc::new(1.into())),
+    ] {
+        let f = Js::function("f", |_, _| Ok(Js::Undefined));
+        object
+            .call_method(
+                "defineProperty",
+                vec![
+                    f.clone(),
+                    Js::str("length"),
+                    Js::object(vec![("value", value)]),
+                ],
+            )
+            .unwrap();
+        let bound = f.call_method("bind", vec![Js::Null]).unwrap();
+        actual.push(format!(
+            "{:016x}",
+            bound.get("length").unwrap().to_number().unwrap().to_bits()
+        ));
+    }
+    assert_eq!(
+        serde_json::json!(actual),
+        expected,
+        "FOR_IN_METADATA exact bound length bits and nonnumber refusal to coerce"
+    );
+}
