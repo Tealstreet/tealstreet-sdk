@@ -1647,9 +1647,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "f3fc3b68349efef47408e988bde90a6e359fa8336dc2fd1a7c6d33ebd2e7d865",
+      "producer_sha256": "54295a71bc4c3a77beac5daa2fc40085135cbd0193f4439743e747e3037512b3",
       "classification": "no-owned-latch",
-      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing. Reviewed retained string-code origin: after the same child await, synchronous owned metadata capture preserves UTF-16 units before publishing the settled rejection. No task, waiter, reservation or registration is added; the original rejection slot is still written only after settlement."
+      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing. Reviewed retained string-code origin: after the same child await, synchronous owned metadata capture preserves UTF-16 units before publishing the settled rejection. No task, waiter, reservation or registration is added; the original rejection slot is still written only after settlement. Reviewed complete retained REST diagnostics: name, stack, cause and Axios flags are captured synchronously after the same child await through the existing owned origin; no new async boundary, task or cancellation resource."
     },
     {
       "owner": "src/js_runtime/client.rs::JsRestAdapter::send",
