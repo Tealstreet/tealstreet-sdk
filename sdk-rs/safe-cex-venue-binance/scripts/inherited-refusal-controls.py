@@ -9,6 +9,9 @@ from pathlib import Path
 import re
 import subprocess
 
+if not __debug__:
+ raise SystemExit("inherited refusal controls require Python assertions; do not use -O")
+
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_FILE = ROOT / 'safe-cex-venue-binance/src/exchange_trait.rs'
 CASES = [

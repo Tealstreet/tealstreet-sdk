@@ -21,9 +21,10 @@ It mutates each actual inherited method, requires that method's named native
 assertion failure, restores exact source bytes and requires a pass. Compiler
 failures do not satisfy a control. Final source/native comparison must pass.
 
-The source/native run passes9 tests (16 profiles). The eight independent
-production-method controls require compiled named failures and byte-exact
-restored passes, followed by the complete source/native target.
+The source/native run passes9 tests (16 profiles). All eight independent
+production-method controls compiled, failed their named assertions and passed
+after byte-exact restoration, followed by the complete source/native target.
+The runner refuses optimized Python before touching production files.
 
 The shared inherited-constant gate recognizes only these eight exact
 class/Exchange-method pairs. It retains actual compiler API/span, package and
