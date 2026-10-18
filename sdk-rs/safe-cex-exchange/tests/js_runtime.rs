@@ -4312,3 +4312,35 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn native_http_factory_preserves_axios_status_error_codes() {
+    use safe_cex_exchange::{js_runtime::client::factory, native::native_runtime};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(
+        tokio::task::LocalSet::new().run_until(async {
+            let runtime = native_runtime();
+            let owner = factory_owner(runtime.clone());
+            for (status, code) in [(304, "ERR_BAD_RESPONSE"), (404, "ERR_BAD_REQUEST"), (500, "ERR_BAD_RESPONSE")] {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let origin = format!("http://{}", listener.local_addr().unwrap());
+                let server = tokio::task::spawn_local(async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut bytes = [0; 4096];
+                    let count = stream.read(&mut bytes).await.unwrap();
+                    assert!(String::from_utf8_lossy(&bytes[..count]).starts_with("GET /status "));
+                    stream.write_all(format!("HTTP/1.1 {status} Source refusal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let xhr = factory::create(host, &safe_cex_transport::DirectTransport,
+                    Js::object(vec![("baseURL", Js::str(&origin))]),
+                    &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]), &owner).unwrap();
+                let error = await_js(xhr.call_method("get", vec![Js::str("/status")]).unwrap()).await.unwrap_err();
+                assert_eq!(error.value.get("code").unwrap().to_display(), code, "actual native HTTP {status} retains Axios settlement code");
+                server.await.unwrap();
+            }
+        })
+    );
+}
