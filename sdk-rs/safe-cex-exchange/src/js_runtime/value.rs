@@ -139,6 +139,25 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(failure) = error.origin.as_ref().and_then(|origin| {
+            origin
+                .error()
+                .downcast_ref::<safe_cex_transport::RestFailure>()
+        }) && let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            failure.transport_error.as_deref()
+            && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
+        {
+            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                    && String::from_utf16(units).is_err()
+                    && String::from_utf16_lossy(units) == *projected
+                {
+                    value
+                        .set(field, Js::String(units.clone().into()))
+                        .expect("fresh error metadata property");
+                }
+            }
+        }
         if let Some(code) = &error.code {
             value
                 .define("code", code.clone())
