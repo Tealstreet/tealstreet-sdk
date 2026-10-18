@@ -20911,6 +20911,358 @@
     "evidence": "Individual source-role review: safe-cex-venue-binance/src/private_events.rs::PrivateHandler. Authenticated acceptedAliasContext plus the actual native Deserialize/conversion probes in scripts/private-order-alias-contracts.mjs decide this exact alias classification. Separate production behavior is exercised through native_dependencies, real owner/HTTP/socket/Store and primitive terminal ports in tests/private_classes.rs::private_order_aliases::native_private_handler_and_event_array_keep_numeric_fields_before_transport; scripts/private-order-alias-controls.py requires a compiled named fault and exact-restoration pass for this alias. This finite native/default evidence does not exempt argument/result DTOs, arbitrary callbacks or other feature combinations.",
     "reason": "Executable variadic Store/event callback, retaining native argument values. The actual captured handler updates the real Store with signed-zero filled and exact price bits."
   },
+  "safe_cex_venue_binance::cancel_symbol_orders::CancelOrderHandle": {
+    "category": "decoder",
+    "shape": "map",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Order",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "The public CancelOrderHandle is the actual Rc<RefCell<safe_cex_types::Order>> alias. Its qualified Deserialize path forwards the strict map-only Order decoder; it is not a non-decoder capability exemption. Direct native observations inspect required fields, numeric bits, optional ModelField absence/value and rejected fields before projection, plus shared-cell mutation through a cloned handle. The separate constructed Futures Method::CancelSymbol witness holds both real signed DELETEs, observes unchanged pending Store rows, then checks regular/algo terminal states, a retained rejection and an untouched symbol. Portfolio Margin/Spot use live Store rows directly and are not claimed as handle callers. scripts/cancel-order-handle-controls.py independently breaks the live Futures symbol filter and requires compiled native assertion failure and exact restoration success.",
+    "entrypoints": [],
+    "sample": {
+      "id": "sample",
+      "parentId": "sample",
+      "status": "open",
+      "symbol": "sample",
+      "type": "market",
+      "side": "buy",
+      "price": 1,
+      "amount": 1,
+      "filled": 1,
+      "remaining": 1,
+      "reduceOnly": false,
+      "close": false,
+      "info": null,
+      "timeInForce": "GoodTillCancel",
+      "lastUpdate": 1,
+      "triggerType": "mark_price",
+      "tpTriggerType": "mark_price",
+      "slTriggerType": "mark_price",
+      "takeProfit": 1,
+      "stopLoss": 1,
+      "extra": {
+        "remainingNative": 1,
+        "filledInPlacementUnits": 1,
+        "remainingNotional": 1,
+        "conditionalOrderPrice": 1,
+        "rejectReason": "PostOnly",
+        "isFromChaser": false,
+        "chaserId": "sample",
+        "chaserAttempts": 1,
+        "chaserMaxAttempts": 1
+      }
+    },
+    "observation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(handle) => { let alias = std::rc::Rc::clone(&handle); let shared_cell = std::rc::Rc::ptr_eq(&handle, &alias); alias.borrow_mut().remaining = -0.0; let decoded = handle.borrow(); serde_json::json!({\"sharedCell\":shared_cell,\"mutationVisible\":decoded.remaining.to_bits() == (-0.0f64).to_bits(),\"ok\":true,\"id\":decoded.id,\"amountBits\":decoded.amount.to_bits().to_string(),\"priceBits\":decoded.price.value().map(|value| value.to_bits().to_string()),\"priceAbsent\":decoded.price.is_absent(),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,safe_cex_types::ModelField::Value(safe_cex_types::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,safe_cex_types::ModelField::Value(safe_cex_types::OrderSide::Buy)),\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"statusOpen\":matches!(decoded.status,safe_cex_types::ModelField::Value(safe_cex_types::OrderStatus::Open))}) }, Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "cases": [
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "left-order",
+              "symbol": "BTCUSD",
+              "amount": 7,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "id": "right-order",
+            "symbol": "BTCUSD",
+            "amount": 13,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": 31.25,
+            "type": "limit",
+            "side": "buy",
+            "status": "open",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "right-order",
+              "symbol": "BTCUSD",
+              "amount": 13,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "price": 31.25,
+              "type": "limit",
+              "side": "buy",
+              "status": "open",
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "type": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "side": "unknown",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": null,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": true,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": true,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": "true",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": 1,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_venue_binance::order_operations::OperationFuture": {
     "category": "non-decoder",
     "target": {
