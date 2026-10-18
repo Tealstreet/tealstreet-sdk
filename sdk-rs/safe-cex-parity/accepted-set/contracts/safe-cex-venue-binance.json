@@ -404,7 +404,7 @@
             "fundingTime": 8.75,
             "volume": 9.125,
             "quoteVolume": 10.5,
-            "id": "left🚀",
+            "id": "left\ud83d\ude80",
             "symbol": "BTC",
             "midPrice": -0.0,
             "timestamp": 2.5
@@ -429,7 +429,7 @@
             "fundingTime": "4021800000000000",
             "volume": "4022400000000000",
             "quoteVolume": "4025000000000000",
-            "id": "left🚀",
+            "id": "left\ud83d\ude80",
             "symbol": "BTC",
             "midPrice": "8000000000000000",
             "timestamp": "4004000000000000",
@@ -500,7 +500,7 @@
             "fundingTime": 8.75,
             "volume": 9.125,
             "quoteVolume": 10.5,
-            "id": "left🚀",
+            "id": "left\ud83d\ude80",
             "symbol": "BTC",
             "midPrice": -0.0,
             "timestamp": 2.5
@@ -529,7 +529,7 @@
             "fundingTime": 8.75,
             "volume": 9.125,
             "quoteVolume": 10.5,
-            "id": "left🚀",
+            "id": "left\ud83d\ude80",
             "symbol": "BTC",
             "midPrice": -0.0,
             "timestamp": 2.5
@@ -558,7 +558,7 @@
             "fundingTime": 8.75,
             "volume": 9.125,
             "quoteVolume": 10.5,
-            "id": "left🚀",
+            "id": "left\ud83d\ude80",
             "symbol": "BTC",
             "midPrice": -0.0,
             "timestamp": 2.5
@@ -587,7 +587,7 @@
             "fundingTime": 8.75,
             "volume": 9.125,
             "quoteVolume": 10.5,
-            "id": "left🚀",
+            "id": "left\ud83d\ude80",
             "symbol": "BTC",
             "midPrice": -0.0,
             "timestamp": 2.5
@@ -13520,7 +13520,7 @@
       "fundingTime": 8.75,
       "volume": 9.125,
       "quoteVolume": 10.5,
-      "id": "left🚀",
+      "id": "left\ud83d\ude80",
       "symbol": "BTC",
       "midPrice": -0.0,
       "timestamp": 2.5,
@@ -13533,7 +13533,7 @@
       "cases": [
         {
           "input": {
-            "wire": "{\"bid\": -0.0, \"ask\": 1.25, \"last\": -2.5, \"mark\": 3.75, \"index\": 4.125, \"percentage\": 5.5, \"openInterest\": 6.25, \"fundingRate\": -7.5, \"fundingTime\": 8.75, \"volume\": 9.125, \"quoteVolume\": 10.5, \"id\": \"left🚀\", \"symbol\": \"BTC\", \"midPrice\": -0.0, \"timestamp\": 2.5, \"info\": null}"
+            "wire": "{\"bid\": -0.0, \"ask\": 1.25, \"last\": -2.5, \"mark\": 3.75, \"index\": 4.125, \"percentage\": 5.5, \"openInterest\": 6.25, \"fundingRate\": -7.5, \"fundingTime\": 8.75, \"volume\": 9.125, \"quoteVolume\": 10.5, \"id\": \"left\ud83d\ude80\", \"symbol\": \"BTC\", \"midPrice\": -0.0, \"timestamp\": 2.5, \"info\": null}"
           },
           "output": {
             "bid": "8000000000000000",
@@ -13547,7 +13547,7 @@
             "fundingTime": "4021800000000000",
             "volume": "4022400000000000",
             "quoteVolume": "4025000000000000",
-            "id": "left🚀",
+            "id": "left\ud83d\ude80",
             "symbol": "BTC",
             "midPrice": "8000000000000000",
             "timestamp": "4004000000000000",
@@ -13682,7 +13682,7 @@
         "fundingTime": 8.75,
         "volume": 9.125,
         "quoteVolume": 10.5,
-        "id": "left🚀",
+        "id": "left\ud83d\ude80",
         "symbol": "BTC",
         "midPrice": -0.0,
         "timestamp": 2.5,
@@ -13711,7 +13711,7 @@
       "cases": [
         {
           "input": {
-            "wire": "{\"ETH\": {\"bid\": 0.0, \"ask\": 11.25, \"last\": 12.5, \"mark\": 13.75, \"index\": 14.125, \"percentage\": 15.5, \"openInterest\": 16.25, \"fundingRate\": 17.5, \"fundingTime\": 18.75, \"volume\": 19.125, \"quoteVolume\": 20.5, \"id\": \"right\", \"symbol\": \"ETH\"}, \"BTC\": {\"bid\": -0.0, \"ask\": 1.25, \"last\": -2.5, \"mark\": 3.75, \"index\": 4.125, \"percentage\": 5.5, \"openInterest\": 6.25, \"fundingRate\": -7.5, \"fundingTime\": 8.75, \"volume\": 9.125, \"quoteVolume\": 10.5, \"id\": \"left🚀\", \"symbol\": \"BTC\", \"midPrice\": -0.0, \"timestamp\": 2.5, \"info\": null}}"
+            "wire": "{\"ETH\": {\"bid\": 0.0, \"ask\": 11.25, \"last\": 12.5, \"mark\": 13.75, \"index\": 14.125, \"percentage\": 15.5, \"openInterest\": 16.25, \"fundingRate\": 17.5, \"fundingTime\": 18.75, \"volume\": 19.125, \"quoteVolume\": 20.5, \"id\": \"right\", \"symbol\": \"ETH\"}, \"BTC\": {\"bid\": -0.0, \"ask\": 1.25, \"last\": -2.5, \"mark\": 3.75, \"index\": 4.125, \"percentage\": 5.5, \"openInterest\": 6.25, \"fundingRate\": -7.5, \"fundingTime\": 8.75, \"volume\": 9.125, \"quoteVolume\": 10.5, \"id\": \"left\ud83d\ude80\", \"symbol\": \"BTC\", \"midPrice\": -0.0, \"timestamp\": 2.5, \"info\": null}}"
           },
           "output": {
             "keys": [
@@ -13733,7 +13733,7 @@
                   "fundingTime": "4021800000000000",
                   "volume": "4022400000000000",
                   "quoteVolume": "4025000000000000",
-                  "id": "left🚀",
+                  "id": "left\ud83d\ude80",
                   "symbol": "BTC",
                   "midPrice": "8000000000000000",
                   "timestamp": "4004000000000000",
@@ -18791,8 +18791,8 @@
         "trait": "FromStr",
         "reason": "The exact serde_json Map alias implements FromStr; execute the parser directly over both raw object strings and reject primitive/array/malformed strings.",
         "positive": [
-          "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"🚀\"},\"note\":null}",
-          "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"é\"]}"
+          "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"\ud83d\ude80\"},\"note\":null}",
+          "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"e\u0301\"]}"
         ],
         "negative": [
           "[]",
@@ -18804,7 +18804,7 @@
         ],
         "nativeCases": [
           {
-            "input": "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"🚀\"},\"note\":null}",
+            "input": "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"\ud83d\ude80\"},\"note\":null}",
             "output": [
               "object",
               7,
@@ -19006,7 +19006,7 @@
             ]
           },
           {
-            "input": "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"é\"]}",
+            "input": "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"e\u0301\"]}",
             "output": [
               "object",
               5,
@@ -19299,7 +19299,7 @@
       "cases": [
         {
           "input": {
-            "wire": "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"🚀\"},\"note\":null}"
+            "wire": "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"\ud83d\ude80\"},\"note\":null}"
           },
           "output": [
             "object",
@@ -19503,7 +19503,7 @@
         },
         {
           "input": {
-            "wire": "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"é\"]}"
+            "wire": "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"e\u0301\"]}"
           },
           "output": [
             "object",
@@ -36887,7 +36887,7 @@
       }
     ]
   },
-  "safe_cex_venue_binance::order_batches::endpoint": {
+  "safe_cex_venue_binance::order_operations::endpoint": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -36932,14 +36932,14 @@
         "where_predicates": []
       }
     },
-    "reason": "Selects the generated static endpoint from the closed Venue enum and internal literal request keys; it parses no response or model.",
-    "evidence": "The real signed native placement and amendment paths exercise the selector. Classification is distinct from executing those HTTP effects."
+    "reason": "Selects a generated static endpoint using the closed local Venue enum and literal keys owned by the cancel/update bodies. It does not read an HTTP result, parse raw data or construct a domain model. The string parameter is an internal generated-table key, not an admission API.",
+    "evidence": "Reviewed every endpoint call in order_operations.rs against the maintained Futures/PM/Spot cancel bodies. The actual native cancellation/update witnesses in tests/support/private_order_aliases.rs assert signed DELETE /fapi/v1/order before status publication/replacement POST. The maintained order_operations source corpus keeps the three venue table choices. This classification does not execute the selector or claim other keys."
   },
-  "safe_cex_venue_binance::order_batches::post": {
+  "safe_cex_venue_binance::order_operations::delete": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
-      "name": "post",
+      "name": "delete",
       "signature": {
         "inputs": [
           [
@@ -36953,7 +36953,7 @@
                     {
                       "trait_bound": {
                         "trait": {
-                          "path": "safe_cex_venue_binance::order_batches::BatchBindings",
+                          "path": "safe_cex_venue_binance::order_operations::OrderBindings",
                           "args": null
                         },
                         "generic_params": [],
@@ -36966,7 +36966,7 @@
             }
           ],
           [
-            "v",
+            "venue",
             {
               "resolved_path": {
                 "path": "safe_cex_venue_binance::order_operations::Venue",
@@ -36987,12 +36987,52 @@
             }
           ],
           [
-            "payload",
+            "params",
             {
-              "resolved_path": {
-                "path": "safe_cex_exchange::js_runtime::value::Js",
-                "args": null
-              }
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                          "args": null
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
             }
           ]
         ],
@@ -37004,10 +37044,7 @@
                 "args": [
                   {
                     "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                        "args": null
-                      }
+                      "tuple": []
                     }
                   },
                   {
@@ -37029,15 +37066,68 @@
       "generics": {
         "params": [
           {
-            "name": "impl BatchBindings",
+            "name": "impl OrderBindings",
             "kind": {
               "type": {
                 "bounds": [
                   {
                     "trait_bound": {
                       "trait": {
-                        "path": "safe_cex_venue_binance::order_batches::BatchBindings",
+                        "path": "safe_cex_venue_binance::order_operations::OrderBindings",
                         "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<EventValue, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
                       },
                       "generic_params": [],
                       "modifier": "none"
@@ -37053,14 +37143,14 @@
         "where_predicates": []
       }
     },
-    "reason": "Captures the configured POST capability, forwards its already-formatted native payload and awaits its native result without inspecting, parsing or reconstructing it. The callers own response-field interpretation.",
-    "evidence": "The constructed native amendment and batch-placement witnesses exercise actual factories, signer, terminal HTTP and result consumers. This role does not classify the response payload, callback decoder or other continuation."
+    "reason": "Async command forwarding: captures the current configured DELETE capability, evaluates the caller-owned parameter thunk, invokes it with the internal endpoint and awaits the result. It discards the existing native response and returns unit. No schema, wire record or decoded domain value is constructed. Its generic parameter thunk is an executable capability, not a raw model input.",
+    "evidence": "Reviewed capture/evaluation/call/await order against the maintained cancel methods. native_cancel_capabilities_wait_for_http_before_store_status drives the actual native dependencies and signed HTTP, observes pending before release, the exact large textual ID and unchanged Open status, then Canceled only after settlement. native_update_capabilities_cancel_then_format_and_place observes DELETE before replacement POST. These runtime effects are separate from this typed role classification; the result/parameter aliases retain their own contracts."
   },
-  "safe_cex_venue_binance::order_batches::dense": {
+  "safe_cex_venue_binance::order_operations::snapshot": {
     "category": "decoder",
     "api": {
       "kind": "function",
-      "name": "dense",
+      "name": "snapshot",
       "signature": {
         "inputs": [
           [
@@ -37079,7 +37169,7 @@
             }
           ],
           [
-            "expr",
+            "expression",
             {
               "borrowed_ref": {
                 "lifetime": null,
@@ -37152,8 +37242,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Finite native dense-array response output: cardinality, binary64 bits, UTF16 leaves, own undefined, retained child referents and exact map guards before observation encoding. Separate real batch placement executes the live receiver. No sparse/executable profile or Order DTO admission claim.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nmatch $type(&input,\"payloads\",\"map\") { Ok(rows) => { let rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\n serde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
+    "evidence": "Executed finite native collection-output contract. Dense arrays retain native leaf bits/units, own undefined and original object references; nonarray guards preserve the selected source expression/method TypeError. This helper implements the cancel/filter/map collection boundary, not Order DTO admission. Actual native cancellation invokes it before signed HTTP and before Store status effects; typed/array-hole and executable-property profiles are not widened.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nmatch $type(&input,\"orders\",\"filter\") { Ok(rows) => { let rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\n serde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
     "cases": [
       {
         "input": {
@@ -37377,9 +37467,12 @@
                 103,
                 32,
                 39,
-                109,
-                97,
-                112,
+                102,
+                105,
+                108,
+                116,
+                101,
+                114,
                 39,
                 41
               ]
@@ -37411,18 +37504,19 @@
             "message": {
               "kind": "string",
               "units": [
-                112,
-                97,
-                121,
-                108,
                 111,
-                97,
+                114,
                 100,
+                101,
+                114,
                 115,
                 46,
-                109,
-                97,
-                112,
+                102,
+                105,
+                108,
+                116,
+                101,
+                114,
                 32,
                 105,
                 115,
@@ -37470,18 +37564,19 @@
             "message": {
               "kind": "string",
               "units": [
-                112,
-                97,
-                121,
-                108,
                 111,
-                97,
+                114,
                 100,
+                101,
+                114,
                 115,
                 46,
-                109,
-                97,
-                112,
+                102,
+                105,
+                108,
+                116,
+                101,
+                114,
                 32,
                 105,
                 115,
@@ -37529,18 +37624,19 @@
             "message": {
               "kind": "string",
               "units": [
-                112,
-                97,
-                121,
-                108,
                 111,
-                97,
+                114,
                 100,
+                101,
+                114,
                 115,
                 46,
-                109,
-                97,
-                112,
+                102,
+                105,
+                108,
+                116,
+                101,
+                114,
                 32,
                 105,
                 115,
@@ -37634,9 +37730,12 @@
                 103,
                 32,
                 39,
-                109,
-                97,
-                112,
+                102,
+                105,
+                108,
+                116,
+                101,
+                114,
                 39,
                 41
               ]
@@ -37646,11 +37745,11 @@
       }
     ]
   },
-  "safe_cex_venue_binance::order_batches::iterable": {
+  "safe_cex_venue_binance::order_operations::each_map": {
     "category": "decoder",
     "api": {
       "kind": "function",
-      "name": "iterable",
+      "name": "each_map",
       "signature": {
         "inputs": [
           [
@@ -37679,349 +37778,61 @@
                 }
               }
             }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "core::result::Result",
-            "args": {
-              "angle_bracketed": {
-                "args": [
-                  {
-                    "type": {
-                      "tuple": []
-                    }
-                  },
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_venue_binance::request_weight::Failure",
-                        "args": null
+          ],
+          [
+            "f",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                          "args": null
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
                       }
-                    }
-                  }
-                ],
-                "constraints": []
-              }
-            }
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "evidence": "Executed native configured-array guard: unit success for dense arrays and current nonarray TypeError refusals. String refusals are native guard observations, not TS for-of string equivalence; the live typed PlaceOrders entry supplies a placement-options array. This row does not decode individual options or certify general iterable admission. Actual native PlaceOrders drives the guard before formatter/signed POST.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } use safe_cex_exchange::js_runtime::value::Js; let source_case = $value; let input = witness::input(source_case); witness::result($type(&input,\"orders\").map(|()|Js::Undefined)) }",
-    "cases": [
-      {
-        "input": {
-          "data": []
-        },
-        "output": {
-          "kind": "undefined"
-        }
-      },
-      {
-        "input": {
-          "data": [
-            null,
-            false,
-            17
-          ]
-        },
-        "output": {
-          "kind": "undefined"
-        }
-      },
-      {
-        "input": {
-          "data": null
-        },
-        "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              111,
-              114,
-              100,
-              101,
-              114,
-              115,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              105,
-              116,
-              101,
-              114,
-              97,
-              98,
-              108,
-              101
-            ]
-          }
-        }
-      },
-      {
-        "input": {
-          "data": false
-        },
-        "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              111,
-              114,
-              100,
-              101,
-              114,
-              115,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              105,
-              116,
-              101,
-              114,
-              97,
-              98,
-              108,
-              101
-            ]
-          }
-        }
-      },
-      {
-        "input": {
-          "data": 17
-        },
-        "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              111,
-              114,
-              100,
-              101,
-              114,
-              115,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              105,
-              116,
-              101,
-              114,
-              97,
-              98,
-              108,
-              101
-            ]
-          }
-        }
-      },
-      {
-        "input": {
-          "data": "text"
-        },
-        "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              111,
-              114,
-              100,
-              101,
-              114,
-              115,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              105,
-              116,
-              101,
-              114,
-              97,
-              98,
-              108,
-              101
-            ]
-          }
-        }
-      },
-      {
-        "input": {
-          "data": {}
-        },
-        "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              111,
-              114,
-              100,
-              101,
-              114,
-              115,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              105,
-              116,
-              101,
-              114,
-              97,
-              98,
-              108,
-              101
-            ]
-          }
-        }
-      }
-    ]
-  },
-  "safe_cex_venue_binance::order_batches::id": {
-    "category": "decoder",
-    "api": {
-      "kind": "function",
-      "name": "id",
-      "signature": {
-        "inputs": [
-          [
-            "v",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "safe_cex_exchange::js_runtime::value::Js",
-                    "args": null
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
                   }
                 }
-              }
-            }
-          ],
-          [
-            "key",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "primitive": "str"
-                }
-              }
-            }
-          ],
-          [
-            "expression",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "primitive": "str"
-                }
-              }
+              ]
             }
           ]
         ],
@@ -38056,139 +37867,598 @@
         "is_c_variadic": false
       },
       "generics": {
-        "params": [],
+        "params": [
+          {
+            "name": "impl FnMut(EventValue) -> Result<EventValue, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
         "where_predicates": []
       }
     },
-    "evidence": "Native optional response-ID output cases retain missing/null/own undefined, exact strings beyond safe integer range, paired Unicode, native -0/NaN/Infinity conversion, ordinary scalar/array/object conversion and own noncallable toString refusal. This finite output profile does not widen existing String-returning ID admission for lone UTF16, executable conversion hooks or mutable prototypes. Actual signed native bulk placement observes the final textual ID before encoding.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } use safe_cex_exchange::js_runtime::value::Js; let source_case = $value; let input = witness::input(source_case);\nlet native = match source_case[\"profile\"].as_str() {\nSome(\"own-undefined\") => Some(Js::Undefined), Some(\"negative-zero\") => Some(Js::Number(-0.0)),\nSome(\"nan\") => Some(Js::Number(f64::NAN)), Some(\"infinity\") => Some(Js::Number(f64::INFINITY)), _ => None };\nif let Some(value)=native { input.define(\"orderId\",value).unwrap(); }\nwitness::result($type(&input,\"orderId\",\"data.orderId\")) }",
+    "evidence": "Executed finite native map contract: observes every dense native result and callback input before serialization, initial-length behavior during append, live replacement at a later index, fresh result array, object identity, own undefined, binary64 bits and UTF16 units. A callback rejection must retain the original Rc identity and abort later visits. Actual native cancel/update tests supply the production class/Store/HTTP witnesses. Sparse/executable arrays remain outside this configured dense-array boundary.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nlet seen = std::cell::RefCell::new(Vec::new());\nlet sentinel = std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::new(\"visitor sentinel\"));\nlet result = $type(&input,\"orders\",|row| { seen.borrow_mut().push(witness::observe(&row));\nif source_case[\"profile\"] == \"throw-first\" { return Err(sentinel.clone()); }\nif seen.borrow().len()==1 { if let Js::Array(array)=&input { if source_case[\"profile\"]==\"append\" { array.borrow_mut().push(Some(Js::Number(99.0))); } if source_case[\"profile\"]==\"replace\" { array.borrow_mut()[1]=Some(Js::Number(42.0)); } } }\nOk(row) });\nlet input_length=input.array_items().map(|rows|rows.len());\nmatch result { Ok(output) => { let rows=output.array_items().unwrap().into_iter().map(|row|row.expect(\"dense output\")).collect::<Vec<_>>();\nlet rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\nserde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity,\"freshArray\":!output.same_reference(&input),\"visited\":*seen.borrow(),\"inputLength\":input_length}) }, Err(error) => { let same_error=std::rc::Rc::ptr_eq(&error,&sentinel); serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error)),\"sameError\":same_error,\"visited\":*seen.borrow(),\"inputLength\":input_length}) } } }",
     "cases": [
       {
         "input": {
-          "data": {
-            "orderId": null
-          }
+          "data": []
         },
         "output": {
-          "kind": "undefined"
+          "ok": true,
+          "rows": [],
+          "keeps": [],
+          "objectIdentity": true,
+          "freshArray": true,
+          "visited": [],
+          "inputLength": 0
         }
       },
       {
         "input": {
-          "data": {
-            "orderId": "9007199254740993"
-          }
-        },
-        "output": {
-          "kind": "string",
-          "units": [
-            57,
-            48,
-            48,
-            55,
-            49,
-            57,
-            57,
-            50,
-            53,
-            52,
-            55,
-            52,
-            48,
-            57,
-            57,
-            51
+          "data": [
+            {
+              "keep": 17
+            },
+            false
           ]
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            {
+              "kind": "object"
+            },
+            {
+              "kind": "boolean",
+              "value": false
+            }
+          ],
+          "keeps": [
+            {
+              "present": true,
+              "value": {
+                "kind": "number",
+                "bits": "4031000000000000"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          ],
+          "objectIdentity": true,
+          "freshArray": true,
+          "visited": [
+            {
+              "kind": "object"
+            },
+            {
+              "kind": "boolean",
+              "value": false
+            }
+          ],
+          "inputLength": 2
         }
       },
       {
         "input": {
-          "data": {
-            "orderId": 17
-          }
+          "profile": "native-dense"
         },
         "output": {
-          "kind": "string",
-          "units": [
-            49,
-            55
+          "ok": true,
+          "rows": [
+            {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            },
+            {
+              "kind": "undefined"
+            },
+            {
+              "kind": "string",
+              "units": [
+                56320
+              ]
+            },
+            {
+              "kind": "object"
+            },
+            {
+              "kind": "object"
+            }
+          ],
+          "keeps": [
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": true,
+              "value": {
+                "kind": "number",
+                "bits": "4031000000000000"
+              }
+            },
+            {
+              "present": true,
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          ],
+          "objectIdentity": true,
+          "freshArray": true,
+          "visited": [
+            {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            },
+            {
+              "kind": "undefined"
+            },
+            {
+              "kind": "string",
+              "units": [
+                56320
+              ]
+            },
+            {
+              "kind": "object"
+            },
+            {
+              "kind": "object"
+            }
+          ],
+          "inputLength": 7
+        }
+      },
+      {
+        "input": {
+          "profile": "append",
+          "data": [
+            1,
+            2
           ]
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            {
+              "kind": "number",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "4000000000000000"
+            }
+          ],
+          "keeps": [
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          ],
+          "objectIdentity": true,
+          "freshArray": true,
+          "visited": [
+            {
+              "kind": "number",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "4000000000000000"
+            }
+          ],
+          "inputLength": 3
         }
       },
       {
         "input": {
-          "data": {
-            "orderId": false
-          }
-        },
-        "output": {
-          "kind": "string",
-          "units": [
-            102,
-            97,
-            108,
-            115,
-            101
+          "profile": "replace",
+          "data": [
+            1,
+            2
           ]
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            {
+              "kind": "number",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "4045000000000000"
+            }
+          ],
+          "keeps": [
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          ],
+          "objectIdentity": true,
+          "freshArray": true,
+          "visited": [
+            {
+              "kind": "number",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "4045000000000000"
+            }
+          ],
+          "inputLength": 2
         }
       },
       {
         "input": {
-          "data": {
-            "orderId": []
-          }
-        },
-        "output": {
-          "kind": "string",
-          "units": []
-        }
-      },
-      {
-        "input": {
-          "data": {
-            "orderId": {}
-          }
-        },
-        "output": {
-          "kind": "string",
-          "units": [
-            91,
-            111,
-            98,
-            106,
-            101,
-            99,
-            116,
-            32,
-            79,
-            98,
-            106,
-            101,
-            99,
-            116,
-            93
+          "profile": "throw-first",
+          "data": [
+            1,
+            2
           ]
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                118,
+                105,
+                115,
+                105,
+                116,
+                111,
+                114,
+                32,
+                115,
+                101,
+                110,
+                116,
+                105,
+                110,
+                101,
+                108
+              ]
+            }
+          },
+          "sameError": true,
+          "visited": [
+            {
+              "kind": "number",
+              "bits": "3ff0000000000000"
+            }
+          ],
+          "inputLength": 2
         }
       },
       {
         "input": {
-          "data": {
-            "orderId": "paired-🙂"
-          }
+          "data": null
         },
         "output": {
-          "kind": "string",
-          "units": [
-            112,
-            97,
-            105,
-            114,
-            101,
-            100,
-            45,
-            55357,
-            56898
-          ]
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                114,
+                101,
+                97,
+                100,
+                32,
+                112,
+                114,
+                111,
+                112,
+                101,
+                114,
+                116,
+                105,
+                101,
+                115,
+                32,
+                111,
+                102,
+                32,
+                110,
+                117,
+                108,
+                108,
+                32,
+                40,
+                114,
+                101,
+                97,
+                100,
+                105,
+                110,
+                103,
+                32,
+                39,
+                109,
+                97,
+                112,
+                39,
+                41
+              ]
+            }
+          },
+          "sameError": false,
+          "visited": [],
+          "inputLength": null
+        }
+      },
+      {
+        "input": {
+          "data": 17
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                111,
+                114,
+                100,
+                101,
+                114,
+                115,
+                46,
+                109,
+                97,
+                112,
+                32,
+                105,
+                115,
+                32,
+                110,
+                111,
+                116,
+                32,
+                97,
+                32,
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            }
+          },
+          "sameError": false,
+          "visited": [],
+          "inputLength": null
+        }
+      },
+      {
+        "input": {
+          "data": "bad"
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                111,
+                114,
+                100,
+                101,
+                114,
+                115,
+                46,
+                109,
+                97,
+                112,
+                32,
+                105,
+                115,
+                32,
+                110,
+                111,
+                116,
+                32,
+                97,
+                32,
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            }
+          },
+          "sameError": false,
+          "visited": [],
+          "inputLength": null
         }
       },
       {
@@ -38196,7 +38466,151 @@
           "data": {}
         },
         "output": {
-          "kind": "undefined"
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                111,
+                114,
+                100,
+                101,
+                114,
+                115,
+                46,
+                109,
+                97,
+                112,
+                32,
+                105,
+                115,
+                32,
+                110,
+                111,
+                116,
+                32,
+                97,
+                32,
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            }
+          },
+          "sameError": false,
+          "visited": [],
+          "inputLength": null
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::order_operations::has": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "has",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executed property-presence protocol for the source updateOrder price key, including own null/undefined, inherited ordinary undefined and original primitive TypeError. It does not decode Order or UpdateOrderOpts; the registry separately owns those typed argument boundaries. The native update binding witness proves presence selection reaches actual replacement formatting and signed HTTP. Arbitrary executable/intrinsic mutation profiles are excluded.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input=witness::input(source_case);\nif source_case[\"profile\"]==\"own-undefined\" { input.define(\"price\",Js::Undefined).unwrap(); }\nif source_case[\"profile\"]==\"inherited-undefined\" { if let Js::Object(object)=&input { *object.proto.borrow_mut()=Some(Js::object(vec![(\"price\",Js::Undefined)])); } }\nmatch $type(&input,\"price\") { Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
+    "cases": [
+      {
+        "input": {
+          "data": {}
+        },
+        "output": {
+          "ok": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "price": null
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": true
         }
       },
       {
@@ -38205,331 +38619,356 @@
           "profile": "own-undefined"
         },
         "output": {
-          "kind": "undefined"
+          "ok": true,
+          "value": true
         }
       },
       {
         "input": {
           "data": {},
-          "profile": "negative-zero"
+          "profile": "inherited-undefined"
         },
         "output": {
-          "kind": "string",
-          "units": [
-            48
-          ]
+          "ok": true,
+          "value": true
         }
       },
       {
         "input": {
-          "data": {},
-          "profile": "nan"
+          "data": []
         },
         "output": {
-          "kind": "string",
-          "units": [
-            78,
-            97,
-            78
-          ]
+          "ok": true,
+          "value": false
         }
       },
       {
         "input": {
-          "data": {},
-          "profile": "infinity"
+          "data": null
         },
         "output": {
-          "kind": "string",
-          "units": [
-            73,
-            110,
-            102,
-            105,
-            110,
-            105,
-            116,
-            121
-          ]
-        }
-      },
-      {
-        "input": {
-          "data": {
-            "orderId": {
-              "toString": null
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                117,
+                115,
+                101,
+                32,
+                39,
+                105,
+                110,
+                39,
+                32,
+                111,
+                112,
+                101,
+                114,
+                97,
+                116,
+                111,
+                114,
+                32,
+                116,
+                111,
+                32,
+                115,
+                101,
+                97,
+                114,
+                99,
+                104,
+                32,
+                102,
+                111,
+                114,
+                32,
+                39,
+                112,
+                114,
+                105,
+                99,
+                101,
+                39,
+                32,
+                105,
+                110,
+                32,
+                110,
+                117,
+                108,
+                108
+              ]
             }
           }
+        }
+      },
+      {
+        "input": {
+          "data": 17
         },
         "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              100,
-              97,
-              116,
-              97,
-              46,
-              111,
-              114,
-              100,
-              101,
-              114,
-              73,
-              100,
-              63,
-              46,
-              116,
-              111,
-              83,
-              116,
-              114,
-              105,
-              110,
-              103,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              97,
-              32,
-              102,
-              117,
-              110,
-              99,
-              116,
-              105,
-              111,
-              110
-            ]
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                117,
+                115,
+                101,
+                32,
+                39,
+                105,
+                110,
+                39,
+                32,
+                111,
+                112,
+                101,
+                114,
+                97,
+                116,
+                111,
+                114,
+                32,
+                116,
+                111,
+                32,
+                115,
+                101,
+                97,
+                114,
+                99,
+                104,
+                32,
+                102,
+                111,
+                114,
+                32,
+                39,
+                112,
+                114,
+                105,
+                99,
+                101,
+                39,
+                32,
+                105,
+                110,
+                32,
+                49,
+                55
+              ]
+            }
           }
         }
       },
       {
         "input": {
-          "data": {
-            "orderId": {
-              "toString": false
-            }
-          }
+          "data": false
         },
         "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              100,
-              97,
-              116,
-              97,
-              46,
-              111,
-              114,
-              100,
-              101,
-              114,
-              73,
-              100,
-              63,
-              46,
-              116,
-              111,
-              83,
-              116,
-              114,
-              105,
-              110,
-              103,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              97,
-              32,
-              102,
-              117,
-              110,
-              99,
-              116,
-              105,
-              111,
-              110
-            ]
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                117,
+                115,
+                101,
+                32,
+                39,
+                105,
+                110,
+                39,
+                32,
+                111,
+                112,
+                101,
+                114,
+                97,
+                116,
+                111,
+                114,
+                32,
+                116,
+                111,
+                32,
+                115,
+                101,
+                97,
+                114,
+                99,
+                104,
+                32,
+                102,
+                111,
+                114,
+                32,
+                39,
+                112,
+                114,
+                105,
+                99,
+                101,
+                39,
+                32,
+                105,
+                110,
+                32,
+                102,
+                97,
+                108,
+                115,
+                101
+              ]
+            }
           }
         }
       },
       {
         "input": {
-          "data": {
-            "orderId": {
-              "toString": 17
-            }
-          }
+          "data": "bad"
         },
         "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              100,
-              97,
-              116,
-              97,
-              46,
-              111,
-              114,
-              100,
-              101,
-              114,
-              73,
-              100,
-              63,
-              46,
-              116,
-              111,
-              83,
-              116,
-              114,
-              105,
-              110,
-              103,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              97,
-              32,
-              102,
-              117,
-              110,
-              99,
-              116,
-              105,
-              111,
-              110
-            ]
-          }
-        }
-      },
-      {
-        "input": {
-          "data": {
-            "orderId": {
-              "toString": "shadow"
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                117,
+                115,
+                101,
+                32,
+                39,
+                105,
+                110,
+                39,
+                32,
+                111,
+                112,
+                101,
+                114,
+                97,
+                116,
+                111,
+                114,
+                32,
+                116,
+                111,
+                32,
+                115,
+                101,
+                97,
+                114,
+                99,
+                104,
+                32,
+                102,
+                111,
+                114,
+                32,
+                39,
+                112,
+                114,
+                105,
+                99,
+                101,
+                39,
+                32,
+                105,
+                110,
+                32,
+                98,
+                97,
+                100
+              ]
             }
-          }
-        },
-        "output": {
-          "name": {
-            "kind": "string",
-            "units": [
-              84,
-              121,
-              112,
-              101,
-              69,
-              114,
-              114,
-              111,
-              114
-            ]
-          },
-          "message": {
-            "kind": "string",
-            "units": [
-              100,
-              97,
-              116,
-              97,
-              46,
-              111,
-              114,
-              100,
-              101,
-              114,
-              73,
-              100,
-              63,
-              46,
-              116,
-              111,
-              83,
-              116,
-              114,
-              105,
-              110,
-              103,
-              32,
-              105,
-              115,
-              32,
-              110,
-              111,
-              116,
-              32,
-              97,
-              32,
-              102,
-              117,
-              110,
-              99,
-              116,
-              105,
-              111,
-              110
-            ]
           }
         }
       }
@@ -40563,6 +41002,1654 @@
           "midAbsent": true,
           "timestampAbsent": true,
           "infoAbsent": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::order_batches::endpoint": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::order_operations::Venue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Selects the generated static endpoint from the closed Venue enum and internal literal request keys; it parses no response or model.",
+    "evidence": "The real signed native placement and amendment paths exercise the selector. Classification is distinct from executing those HTTP effects."
+  },
+  "safe_cex_venue_binance::order_batches::post": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "post",
+      "signature": {
+        "inputs": [
+          [
+            "b",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "safe_cex_venue_binance::order_batches::BatchBindings",
+                          "args": null
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::order_operations::Venue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl BatchBindings",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_binance::order_batches::BatchBindings",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Captures the configured POST capability, forwards its already-formatted native payload and awaits its native result without inspecting, parsing or reconstructing it. The callers own response-field interpretation.",
+    "evidence": "The constructed native amendment and batch-placement witnesses exercise actual factories, signer, terminal HTTP and result consumers. This role does not classify the response payload, callback decoder or other continuation."
+  },
+  "safe_cex_venue_binance::order_batches::dense": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "dense",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "expr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Finite native dense-array response output: cardinality, binary64 bits, UTF16 leaves, own undefined, retained child referents and exact map guards before observation encoding. Separate real batch placement executes the live receiver. No sparse/executable profile or Order DTO admission claim.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nmatch $type(&input,\"payloads\",\"map\") { Ok(rows) => { let rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\n serde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
+    "cases": [
+      {
+        "input": {
+          "data": []
+        },
+        "output": {
+          "ok": true,
+          "rows": [],
+          "keeps": [],
+          "objectIdentity": true
+        }
+      },
+      {
+        "input": {
+          "data": [
+            {
+              "keep": 17
+            },
+            false
+          ]
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            {
+              "kind": "object"
+            },
+            {
+              "kind": "boolean",
+              "value": false
+            }
+          ],
+          "keeps": [
+            {
+              "present": true,
+              "value": {
+                "kind": "number",
+                "bits": "4031000000000000"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          ],
+          "objectIdentity": true
+        }
+      },
+      {
+        "input": {
+          "profile": "native-dense"
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            },
+            {
+              "kind": "undefined"
+            },
+            {
+              "kind": "string",
+              "units": [
+                56320
+              ]
+            },
+            {
+              "kind": "object"
+            },
+            {
+              "kind": "object"
+            }
+          ],
+          "keeps": [
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "present": true,
+              "value": {
+                "kind": "number",
+                "bits": "4031000000000000"
+              }
+            },
+            {
+              "present": true,
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          ],
+          "objectIdentity": true
+        }
+      },
+      {
+        "input": {
+          "profile": "array"
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            {
+              "kind": "string",
+              "units": [
+                56320
+              ]
+            }
+          ],
+          "keeps": [
+            {
+              "present": false,
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          ],
+          "objectIdentity": true
+        }
+      },
+      {
+        "input": {
+          "data": null
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                114,
+                101,
+                97,
+                100,
+                32,
+                112,
+                114,
+                111,
+                112,
+                101,
+                114,
+                116,
+                105,
+                101,
+                115,
+                32,
+                111,
+                102,
+                32,
+                110,
+                117,
+                108,
+                108,
+                32,
+                40,
+                114,
+                101,
+                97,
+                100,
+                105,
+                110,
+                103,
+                32,
+                39,
+                109,
+                97,
+                112,
+                39,
+                41
+              ]
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": 17
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                112,
+                97,
+                121,
+                108,
+                111,
+                97,
+                100,
+                115,
+                46,
+                109,
+                97,
+                112,
+                32,
+                105,
+                115,
+                32,
+                110,
+                111,
+                116,
+                32,
+                97,
+                32,
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": "bad"
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                112,
+                97,
+                121,
+                108,
+                111,
+                97,
+                100,
+                115,
+                46,
+                109,
+                97,
+                112,
+                32,
+                105,
+                115,
+                32,
+                110,
+                111,
+                116,
+                32,
+                97,
+                32,
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {}
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                112,
+                97,
+                121,
+                108,
+                111,
+                97,
+                100,
+                115,
+                46,
+                109,
+                97,
+                112,
+                32,
+                105,
+                115,
+                32,
+                110,
+                111,
+                116,
+                32,
+                97,
+                32,
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "profile": "missing"
+        },
+        "output": {
+          "ok": false,
+          "error": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                114,
+                101,
+                97,
+                100,
+                32,
+                112,
+                114,
+                111,
+                112,
+                101,
+                114,
+                116,
+                105,
+                101,
+                115,
+                32,
+                111,
+                102,
+                32,
+                117,
+                110,
+                100,
+                101,
+                102,
+                105,
+                110,
+                101,
+                100,
+                32,
+                40,
+                114,
+                101,
+                97,
+                100,
+                105,
+                110,
+                103,
+                32,
+                39,
+                109,
+                97,
+                112,
+                39,
+                41
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::order_batches::iterable": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "iterable",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "expression",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executed native configured-array guard: unit success for dense arrays and current nonarray TypeError refusals. String refusals are native guard observations, not TS for-of string equivalence; the live typed PlaceOrders entry supplies a placement-options array. This row does not decode individual options or certify general iterable admission. Actual native PlaceOrders drives the guard before formatter/signed POST.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } use safe_cex_exchange::js_runtime::value::Js; let source_case = $value; let input = witness::input(source_case); witness::result($type(&input,\"orders\").map(|()|Js::Undefined)) }",
+    "cases": [
+      {
+        "input": {
+          "data": []
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "data": [
+            null,
+            false,
+            17
+          ]
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "data": null
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              111,
+              114,
+              100,
+              101,
+              114,
+              115,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              105,
+              116,
+              101,
+              114,
+              97,
+              98,
+              108,
+              101
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": false
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              111,
+              114,
+              100,
+              101,
+              114,
+              115,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              105,
+              116,
+              101,
+              114,
+              97,
+              98,
+              108,
+              101
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": 17
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              111,
+              114,
+              100,
+              101,
+              114,
+              115,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              105,
+              116,
+              101,
+              114,
+              97,
+              98,
+              108,
+              101
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": "text"
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              111,
+              114,
+              100,
+              101,
+              114,
+              115,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              105,
+              116,
+              101,
+              114,
+              97,
+              98,
+              108,
+              101
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {}
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              111,
+              114,
+              100,
+              101,
+              114,
+              115,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              105,
+              116,
+              101,
+              114,
+              97,
+              98,
+              108,
+              101
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::order_batches::id": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "id",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "expression",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Native optional response-ID output cases retain missing/null/own undefined, exact strings beyond safe integer range, paired Unicode, native -0/NaN/Infinity conversion, ordinary scalar/array/object conversion and own noncallable toString refusal. This finite output profile does not widen existing String-returning ID admission for lone UTF16, executable conversion hooks or mutable prototypes. Actual signed native bulk placement observes the final textual ID before encoding.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } use safe_cex_exchange::js_runtime::value::Js; let source_case = $value; let input = witness::input(source_case);\nlet native = match source_case[\"profile\"].as_str() {\nSome(\"own-undefined\") => Some(Js::Undefined), Some(\"negative-zero\") => Some(Js::Number(-0.0)),\nSome(\"nan\") => Some(Js::Number(f64::NAN)), Some(\"infinity\") => Some(Js::Number(f64::INFINITY)), _ => None };\nif let Some(value)=native { input.define(\"orderId\",value).unwrap(); }\nwitness::result($type(&input,\"orderId\",\"data.orderId\")) }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "orderId": null
+          }
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": "9007199254740993"
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            57,
+            48,
+            48,
+            55,
+            49,
+            57,
+            57,
+            50,
+            53,
+            52,
+            55,
+            52,
+            48,
+            57,
+            57,
+            51
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": 17
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            49,
+            55
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": false
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": []
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": []
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": {}
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            91,
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            32,
+            79,
+            98,
+            106,
+            101,
+            99,
+            116,
+            93
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": "paired-\ud83d\ude42"
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            112,
+            97,
+            105,
+            114,
+            101,
+            100,
+            45,
+            55357,
+            56898
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {}
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "profile": "own-undefined"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "profile": "negative-zero"
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            48
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "profile": "nan"
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            78,
+            97,
+            78
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "profile": "infinity"
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            73,
+            110,
+            102,
+            105,
+            110,
+            105,
+            116,
+            121
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": {
+              "toString": null
+            }
+          }
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              100,
+              97,
+              116,
+              97,
+              46,
+              111,
+              114,
+              100,
+              101,
+              114,
+              73,
+              100,
+              63,
+              46,
+              116,
+              111,
+              83,
+              116,
+              114,
+              105,
+              110,
+              103,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              97,
+              32,
+              102,
+              117,
+              110,
+              99,
+              116,
+              105,
+              111,
+              110
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": {
+              "toString": false
+            }
+          }
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              100,
+              97,
+              116,
+              97,
+              46,
+              111,
+              114,
+              100,
+              101,
+              114,
+              73,
+              100,
+              63,
+              46,
+              116,
+              111,
+              83,
+              116,
+              114,
+              105,
+              110,
+              103,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              97,
+              32,
+              102,
+              117,
+              110,
+              99,
+              116,
+              105,
+              111,
+              110
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": {
+              "toString": 17
+            }
+          }
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              100,
+              97,
+              116,
+              97,
+              46,
+              111,
+              114,
+              100,
+              101,
+              114,
+              73,
+              100,
+              63,
+              46,
+              116,
+              111,
+              83,
+              116,
+              114,
+              105,
+              110,
+              103,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              97,
+              32,
+              102,
+              117,
+              110,
+              99,
+              116,
+              105,
+              111,
+              110
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "orderId": {
+              "toString": "shadow"
+            }
+          }
+        },
+        "output": {
+          "name": {
+            "kind": "string",
+            "units": [
+              84,
+              121,
+              112,
+              101,
+              69,
+              114,
+              114,
+              111,
+              114
+            ]
+          },
+          "message": {
+            "kind": "string",
+            "units": [
+              100,
+              97,
+              116,
+              97,
+              46,
+              111,
+              114,
+              100,
+              101,
+              114,
+              73,
+              100,
+              63,
+              46,
+              116,
+              111,
+              83,
+              116,
+              114,
+              105,
+              110,
+              103,
+              32,
+              105,
+              115,
+              32,
+              110,
+              111,
+              116,
+              32,
+              97,
+              32,
+              102,
+              117,
+              110,
+              99,
+              116,
+              105,
+              111,
+              110
+            ]
+          }
         }
       }
     ]
