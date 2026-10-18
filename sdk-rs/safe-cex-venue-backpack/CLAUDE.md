@@ -405,10 +405,16 @@ comparison and own-field forwarding, including native cell identity, presence,
 number bits and nullish refusal. These entries classify existing receiver roles;
 they do not widen the adapter's prepared-data profile.
 
-`SigningRecord<V>` is live in the WebSocket signing parameter union. Its accepted
-alias registration fixes one `RetainedJsonInput` instantiation of the real
-Rc/RefCell/ordered-pair container, with exact source/expanded compiler targets.
-Native decoder observations check UTF-16 keys, duplicate-key order, values,
-shared ownership and mutation visibility. A separate actual `SigningRecord<Js>`
-witness retains nonfinite values, own undefined and native cell identity;
-neither witness claims a universal decoder for every generic value type.
+The Backpack alias census finds 16 live structural containers: nine have native
+Serde decoders, and seven hold already typed state, callbacks or prepared values.
+The seven generic containers register one fixed instantiation with exact compiler
+source and expanded targets. `scripts/container-alias-contracts.mjs` authenticates
+the full compiler inventory before running this finite cohort; the separate 18
+callable/future and two nominal aliases are outside this cohort.
+
+Native decoder observations inspect UTF-16 keys, duplicate-key order, holes,
+number bits, shared ownership and mutation visibility without JSON projection.
+The four container tests in `adapter_classes.rs` also construct the actual typed
+aliases, including `SigningRecord<Js>`, preserving native nonfinite values, own
+undefined and original cell identity. These observations cover the declared
+instantiations and prepared profiles, not every possible generic value type.

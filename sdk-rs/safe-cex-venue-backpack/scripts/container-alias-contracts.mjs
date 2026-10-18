@@ -23,6 +23,8 @@ const names = [
   "safe_cex_venue_backpack::startup_recovery::NativeMap"
 ];
 const root = fileURLToPath(new URL('../..', import.meta.url));
+const args = process.argv.slice(2);
+assert.ok(args.length <= 1 && args.every(arg => arg === '--expect-unclassified'));
 const { metadata, pkg, target, found, aliases, macroOrigins } = acceptedAliasContext({
   workspace: root, packageName: 'safe-cex-venue-backpack', aliasNames: names, jobs: 1,
 });
@@ -32,5 +34,11 @@ const results = runProbes(root, metadata, [{
   macroOrigins, externalTypeAliases: found.externalTypeAliases,
 }], loadContracts(), { target: 'native', features: [], jobs: 1 });
 assert.deepEqual(results.map(row => row.name).sort(), names);
-for (const result of results) assert.deepEqual(result.failures, [], result.name);
-console.log('Backpack16 actual compiler/container alias receipts PASS');
+if (args.includes('--expect-unclassified')) {
+  for (const result of results) assert.ok(result.failures.some(failure =>
+    failure.includes('public alias needs an accepted-set contract')), result.name);
+  console.log('All 16 Backpack containers fail missing classification by name.');
+} else {
+  for (const result of results) assert.deepEqual(result.failures, [], result.name);
+  console.log('Backpack16 actual compiler/container alias receipts PASS');
+}
