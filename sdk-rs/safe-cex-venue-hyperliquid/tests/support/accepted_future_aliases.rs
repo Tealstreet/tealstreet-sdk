@@ -1,7 +1,8 @@
-//! Fixed production Value monomorphizations only; no decoder or other-host claim.
+//! Fixed production Js monomorphizations only; no decoder or other-host claim.
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use crate::{
     income::IncomeFuture,
-    realm::{Realm, Value, test_runtime::TestRuntime},
+    host::{Host, test_runtime::TestRuntime},
     spot_account_reads::AccountFuture,
     startup_timeout::TimeoutCallback,
 };
@@ -18,8 +19,8 @@ use std::{
     task::{Context, Poll, Wake, Waker},
 };
 
-type NativeFuture = Pin<Box<dyn Future<Output = Result<Value, Value>>>>;
-type NativeCallback = Rc<dyn Fn(Vec<Value>) -> Result<Value, Value>>;
+type NativeFuture = Pin<Box<dyn Future<Output = Result<Js, Thrown>>>>;
+type NativeCallback = Rc<dyn Fn(Vec<Js>) -> Result<Js, Thrown>>;
 
 struct CountWake(AtomicUsize);
 impl Wake for CountWake {
@@ -31,12 +32,12 @@ impl Wake for CountWake {
     }
 }
 struct Controlled {
-    output: Option<Result<Value, Value>>,
+    output: Option<Result<Js, Thrown>>,
     polls: Rc<Cell<usize>>,
     drops: Rc<Cell<usize>>,
 }
 impl Future for Controlled {
-    type Output = Result<Value, Value>;
+    type Output = Result<Js, Thrown>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let previous = self.polls.replace(self.polls.get() + 1);
         if previous == 0 {
@@ -54,24 +55,24 @@ impl Drop for Controlled {
 }
 fn require_spot<
     H: crate::spot_account_reads::SpotAccountHost
-        + crate::ws_ping_lifecycle::WsPingHost<Value = Value, Error = Value>,
+        + crate::ws_ping_lifecycle::WsPingHost<Value = Js, Error = Thrown>,
 >() {
 }
 fn require_income<
-    H: crate::income::IncomeHost + crate::cross_cache::CrossCacheHost<Value = Value, Error = Value>,
+    H: crate::income::IncomeHost + crate::cross_cache::CrossCacheHost<Value = Js, Error = Thrown>,
 >() {
 }
-fn require_timeout<H: crate::startup_timeout::StartupTimeoutHost<Value = Value, Error = Value>>() {}
-fn assert_native(value: &Value, expected: &Value) {
+fn require_timeout<H: crate::startup_timeout::StartupTimeoutHost<Value = Js, Error = Thrown>>() {}
+fn assert_native(value: &Js, expected: &Js) {
     match (value, expected) {
-        (Value::Number(actual), Value::Number(wanted)) => {
+        (Js::Number(actual), Js::Number(wanted)) => {
             assert_eq!(actual.to_bits(), wanted.to_bits())
         }
-        (Value::String(actual), Value::String(wanted)) => {
+        (Js::String(actual), Js::String(wanted)) => {
             assert_eq!(actual.as_ref(), wanted.as_ref())
         }
         _ => assert!(
-            value.strict_equal(expected),
+            value.strict_equals(expected),
             "alias changed native identity or variant"
         ),
     }
@@ -81,16 +82,16 @@ fn future_native<A: 'static>(
     as_native: fn(&mut A) -> &mut NativeFuture,
 ) {
     assert_eq!(TypeId::of::<A>(), TypeId::of::<NativeFuture>());
-    let realm = Realm::new(Rc::new(TestRuntime::default()));
-    let object = realm.object_from(vec![("marker", Value::Number(-0.0))]);
+    let realm = crate::host::test_runtime::host(Rc::new(TestRuntime::default()));
+    let object = realm.object_from(vec![("marker", Js::Number(-0.0))]);
     let error = realm.type_error("future rejection");
     let values = [
-        Value::Undefined,
-        Value::Number(-0.0),
-        Value::Number(f64::INFINITY),
-        Value::String(Rc::from([0xd800_u16, 0x0061])),
+        Js::Undefined,
+        Js::Number(-0.0),
+        Js::Number(f64::INFINITY),
+        Js::String(Rc::from([0xd800_u16, 0x0061])),
         object,
-        error,
+        error.value,
     ];
     for reject in [false, true] {
         for expected in &values {
@@ -98,7 +99,7 @@ fn future_native<A: 'static>(
             let drops = Rc::new(Cell::new(0));
             let native: NativeFuture = Box::pin(Controlled {
                 output: Some(if reject {
-                    Err(expected.clone())
+                    Err(Thrown::new(expected.clone()))
                 } else {
                     Ok(expected.clone())
                 }),
@@ -123,7 +124,8 @@ fn future_native<A: 'static>(
             };
             assert_eq!(polls.get(), 2);
             match (reject, result) {
-                (false, Ok(value)) | (true, Err(value)) => assert_native(&value, expected),
+                (false, Ok(value)) => assert_native(&value, expected),
+                (true, Err(error)) => assert_native(&error.value, expected),
                 _ => panic!("alias swapped fulfillment and rejection"),
             }
             drop(alias);
@@ -132,7 +134,7 @@ fn future_native<A: 'static>(
     }
     let drops = Rc::new(Cell::new(0));
     let alias = make(Box::pin(Controlled {
-        output: Some(Ok(Value::Undefined)),
+        output: Some(Ok(Js::Undefined)),
         polls: Rc::new(Cell::new(0)),
         drops: drops.clone(),
     }));
@@ -145,25 +147,25 @@ fn future_native<A: 'static>(
 }
 #[test]
 fn account_future_fixed_value_preserves_poll_result_and_drop() {
-    require_spot::<Realm>();
-    future_native::<AccountFuture<Value, Value>>(|value| value, |value| value);
+    require_spot::<Host>();
+    future_native::<AccountFuture<Js, Thrown>>(|value| value, |value| value);
 }
 #[test]
 fn income_future_static_fixed_value_preserves_poll_result_and_drop() {
-    require_income::<Realm>();
-    future_native::<IncomeFuture<'static, Value, Value>>(|value| value, |value| value);
+    require_income::<Host>();
+    future_native::<IncomeFuture<'static, Js, Thrown>>(|value| value, |value| value);
 }
 #[test]
 fn timeout_callback_fixed_value_preserves_arguments_result_and_identity() {
-    require_timeout::<Realm>();
+    require_timeout::<Host>();
     assert_eq!(
-        TypeId::of::<TimeoutCallback<Value, Value>>(),
+        TypeId::of::<TimeoutCallback<Js, Thrown>>(),
         TypeId::of::<NativeCallback>()
     );
-    let realm = Realm::new(Rc::new(TestRuntime::default()));
-    let object = realm.object_from(vec![("marker", Value::Number(-0.0))]);
+    let realm = crate::host::test_runtime::host(Rc::new(TestRuntime::default()));
+    let object = realm.object_from(vec![("marker", Js::Number(-0.0))]);
     let thrown = realm.type_error("callback rejection");
-    let calls = Rc::new(RefCell::new(Vec::<Vec<Value>>::new()));
+    let calls = Rc::new(RefCell::new(Vec::<Vec<Js>>::new()));
     let recorded = calls.clone();
     let success = object.clone();
     let failure = thrown.clone();
@@ -176,20 +178,20 @@ fn timeout_callback_fixed_value_preserves_arguments_result_and_identity() {
             Ok(success.clone())
         }
     });
-    let alias: &mut TimeoutCallback<Value, Value> = &mut native;
+    let alias: &mut TimeoutCallback<Js, Thrown> = &mut native;
     let back: &mut NativeCallback = alias;
-    let clone: TimeoutCallback<Value, Value> = back.clone();
+    let clone: TimeoutCallback<Js, Thrown> = back.clone();
     assert!(Rc::ptr_eq(back, &clone));
     let input = vec![
-        Value::Number(-0.0),
-        Value::Number(f64::INFINITY),
-        Value::String(Rc::from([0xd800_u16, 0x0061])),
+        Js::Number(-0.0),
+        Js::Number(f64::INFINITY),
+        Js::String(Rc::from([0xd800_u16, 0x0061])),
         object.clone(),
     ];
     let output = clone(input.clone()).unwrap();
     assert_native(&output, &object);
     let rejected = back(Vec::new()).unwrap_err();
-    assert_native(&rejected, &thrown);
+    assert_native(&rejected.value, &thrown.value);
     let calls = calls.borrow();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].len(), 4);

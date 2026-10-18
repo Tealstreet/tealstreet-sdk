@@ -1,8 +1,9 @@
 //! Exercise the source private class through the production realm/socket bridge.
+use safe_cex_exchange::js_runtime::{value::Js};
 #[allow(dead_code)]
 #[path = "../../tests/support/binding_runtime.rs"]
 mod host;
-use super::Value;
+
 use crate::{
     binding::{HyperliquidDependencies, RuntimeClock},
     exchange::HyperliquidExchange,
@@ -46,7 +47,7 @@ fn private_no_super_dispose_closes_wire_without_force_closing_base() {
     };
     let private = realm.get_str(&instance, "privateWebsocket").unwrap();
     realm
-        .call_method(&private, "connectAndSubscribe", &[Value::Bool(false)])
+        .call_method(&private, "connectAndSubscribe", &[Js::Bool(false)])
         .unwrap();
     runtime.settle();
     let base = exchange.base.get_socket(SocketSlot::Private).unwrap();

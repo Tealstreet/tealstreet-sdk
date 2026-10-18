@@ -1,9 +1,10 @@
 //! Concrete Spot Exchange assembled from the existing Spot class bodies.
+use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use crate::{
     binding::{Binding, HyperliquidDependencies, RuntimeClock, base_exchange_rejection, opt},
     cloid::hyperliquid_client_order_id_rule,
-    realm::{
-        Realm, Value,
+    host::{
+        Host,
         facade_exchange::base_exchange_class,
         facade_rest::{RestDependencies, bind_api_factories},
         facade_socket::{SocketDependencies, base_websocket_class},
@@ -66,7 +67,7 @@ impl HyperliquidSpotExchange {
             binding: RefCell::new(None),
         });
         let exchange: Rc<dyn Exchange> = venue.clone();
-        let mut realm = Realm::new(runtime);
+        let mut realm = Host::new(deps.runtime.clone(), deps.http.clone(), store.clone());
         imports::bind(&realm);
         bind_api_factories(
             &realm,
@@ -108,12 +109,12 @@ impl HyperliquidSpotExchange {
         let options = realm
             .from_typed(&options)
             .map_err(|error| realm.exchange_error(&error))?;
-        let store = store_object(&realm, store);
+        let store = store_object(&realm, store).map_err(|error| error.to_exchange_error())?;
         let mut realm = realm.with_lexical(&class.constructor);
         let instance = realm
             .construct(
                 &class.constructor,
-                &[Value::str("hyperliquidspot"), options, store],
+                &[Js::str("hyperliquidspot"), options, store],
                 None,
             )
             .map_err(|error| realm.exchange_error(&error))?;
@@ -126,19 +127,26 @@ impl HyperliquidSpotExchange {
             .clone()
             .ok_or_else(|| ExchangeError::new("Hyperliquid Spot construction is incomplete"))
     }
-    async fn typed<T: serde::de::DeserializeOwned>(
+    fn launch<T: 'static, F: std::future::Future<Output = Result<T, ExchangeError>> + 'static>(
         &self,
-        name: &str,
-        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
-    ) -> Result<T, ExchangeError> {
-        self.bound()?.typed(name, args).await
+        body: impl FnOnce(Binding) -> F + 'static,
+    ) -> ExchangeFuture<'static, T> {
+        let binding = self.bound();
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move { body(binding?).await })
     }
-    async fn unit(
+    fn typed<T: serde::de::DeserializeOwned + 'static>(
         &self,
-        name: &str,
-        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
-    ) -> Result<(), ExchangeError> {
-        self.bound()?.unit(name, args).await
+        name: &'static str,
+        args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown> + 'static,
+    ) -> ExchangeFuture<'static, T> {
+        self.launch(move |binding| async move { binding.typed(name, args).await })
+    }
+    fn unit(
+        &self,
+        name: &'static str,
+        args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown> + 'static,
+    ) -> ExchangeFuture<'static, ()> {
+        self.launch(move |binding| async move { binding.unit(name, args).await })
     }
     fn listen<T: serde::de::DeserializeOwned + 'static>(
         &self,
@@ -151,9 +159,9 @@ impl HyperliquidSpotExchange {
             instance,
         } = self.bound()?;
         let listener = realm.native("callback", 1, move |realm, _, args| {
-            let value = args.first().cloned().unwrap_or(Value::Undefined);
+            let value = args.first().cloned().unwrap_or(Js::Undefined);
             callback(realm.to_typed::<T>(&value)?);
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         });
         let first = realm
             .from_typed(&first)
@@ -163,18 +171,20 @@ impl HyperliquidSpotExchange {
             .map_err(|error| realm.exchange_error(&error))?;
         Ok(Box::new(move || {
             realm
-                .call(&cleanup, &Value::Undefined, &[])
+                .call(&cleanup, &Js::Undefined, &[])
                 .map(|_| ())
                 .map_err(|error| realm.exchange_error(&error))
         }))
     }
-    async fn order_ids(
-        &self,
+    fn order_ids(&self, name: &'static str, options: impl serde::Serialize + 'static) -> ExchangeFuture<'static, Vec<String>> {
+        self.launch(move |binding| Self::order_ids_bound(binding, name, options))
+    }
+    async fn order_ids_bound(
+        binding: Binding,
         name: &str,
         options: impl serde::Serialize,
     ) -> Result<Vec<String>, ExchangeError> {
-        let (mut realm, ids) = self
-            .bound()?
+        let (mut realm, ids) = binding
             .invoke(name, |realm| Ok(vec![realm.from_typed(&options)?]))
             .await?;
         // Source omitUndefined is lodash/omitBy: its array input produces an
@@ -187,7 +197,7 @@ impl HyperliquidSpotExchange {
             .map_err(|e| realm.exchange_error(&e))?
         {
             let key = key
-                .units()
+                .as_str()
                 .ok_or_else(|| ExchangeError::new("Spot order ID key must be a numeric index"))?;
             let key = String::from_utf16(&key)
                 .map_err(|_| ExchangeError::new("Spot order ID key must be a numeric index"))?;
@@ -200,8 +210,8 @@ impl HyperliquidSpotExchange {
                 ));
             }
             result.push(match value {
-                Value::Number(value) => safe_cex_num::js_number_string(value),
-                Value::String(units) => String::from_utf16(&units).map_err(|_| {
+                Js::Number(value) => safe_cex_num::js_number_string(value),
+                Js::String(units) => String::from_utf16(&units).map_err(|_| {
                     ExchangeError::new("Spot order ID exceeds the native Unicode boundary")
                 })?,
                 _ => {
@@ -252,16 +262,16 @@ impl Exchange for HyperliquidSpotExchange {
     }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
         let checked = self.base.resolve_caller_client_order_id(order.options());
-        Box::pin(async move {
+        self.launch(move |binding| async move {
             checked?;
-            self.order_ids("placeOrder", order.options()).await
+            Self::order_ids_bound(binding, "placeOrder", order.options()).await
         })
     }
     fn place_orders(&self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'_, Vec<String>> {
-        Box::pin(async move {
+        self.launch(move |binding| async move {
             let mut result = vec![];
             for order in orders.orders() {
-                result.extend(self.order_ids("placeOrder", order.options()).await?);
+                result.extend(Self::order_ids_bound(binding.clone(), "placeOrder", order.options()).await?);
             }
             Ok(result)
         })
@@ -295,8 +305,8 @@ impl Exchange for HyperliquidSpotExchange {
     ) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("setLeverage", move |r| {
             Ok(vec![
-                Value::str(&symbol),
-                Value::Number(leverage),
+                Js::str(&symbol),
+                Js::Number(leverage),
                 opt(r, &side)?,
             ])
         }))
@@ -306,7 +316,7 @@ impl Exchange for HyperliquidSpotExchange {
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("changeMarginType", move |r| {
-            Ok(vec![Value::Bool(isolated), opt(r, &symbol)?])
+            Ok(vec![Js::Bool(isolated), opt(r, &symbol)?])
         }))
     }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {

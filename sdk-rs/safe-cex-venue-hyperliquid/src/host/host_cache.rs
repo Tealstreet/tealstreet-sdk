@@ -4,10 +4,10 @@
 //! that exchange's own code but not across exchange instances. Native hosts
 //! have no BroadcastChannel or sessionStorage, so the cache is memory-only,
 //! which is the source's own behavior in a worker without those globals.
+use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use super::{
-    Realm,
+    Host,
     host_core::js,
-    value::{Kind, PropKey, Value},
 };
 use crate::{
     cache_runtime::{self, CacheModule, CacheRuntimeHost, Callback},
@@ -15,36 +15,36 @@ use crate::{
 };
 use std::{cell::RefCell, rc::Rc};
 
-type ModuleSlot = Rc<RefCell<Option<Rc<CacheModule<Value>>>>>;
+type ModuleSlot = Rc<RefCell<Option<Rc<CacheModule<Js>>>>>;
 
-impl CacheRuntimeHost for Realm {
-    fn number(&self, value: f64) -> Value {
-        Value::Number(value)
+impl CacheRuntimeHost for Host {
+    fn number(&self, value: f64) -> Js {
+        Js::Number(value)
     }
-    fn boolean(&self, value: bool) -> Value {
-        Value::Bool(value)
+    fn boolean(&self, value: bool) -> Js {
+        Js::Bool(value)
     }
-    fn equal(&self, a: &Value, b: &Value) -> bool {
-        a.strict_equal(b)
+    fn equal(&self, a: &Js, b: &Js) -> bool {
+        a.strict_equals(b)
     }
-    fn subtract(&mut self, a: &Value, b: &Value) -> Result<Value, Value> {
-        Realm::binary(self, "-", a, b)
+    fn subtract(&mut self, a: &Js, b: &Js) -> Result<Js, Thrown> {
+        Host::binary(self, "-", a, b)
     }
-    fn less(&mut self, a: &Value, b: &Value) -> Result<bool, Value> {
-        Ok(Realm::binary(self, "<", a, b)?.truthy())
+    fn less(&mut self, a: &Js, b: &Js) -> Result<bool, Thrown> {
+        Ok(Host::binary(self, "<", a, b)?.truthy())
     }
-    fn less_equal(&mut self, a: &Value, b: &Value) -> Result<bool, Value> {
-        Ok(Realm::binary(self, "<=", a, b)?.truthy())
+    fn less_equal(&mut self, a: &Js, b: &Js) -> Result<bool, Thrown> {
+        Ok(Host::binary(self, "<=", a, b)?.truthy())
     }
-    fn abstract_string(&mut self, value: &Value) -> Result<JsString, Value> {
-        Ok(js(Realm::to_string(self, value)?))
+    fn abstract_string(&mut self, value: &Js) -> Result<JsString, Thrown> {
+        Ok(js(Host::to_string(self, value)?))
     }
-    fn array(&mut self, values: &[Value]) -> Result<Value, Value> {
+    fn array(&mut self, values: &[Js]) -> Result<Js, Thrown> {
         Ok(self.new_array(values.to_vec()))
     }
-    fn class_definition(&mut self) -> Result<(Value, Value), Value> {
+    fn class_definition(&mut self) -> Result<(Js, Js), Thrown> {
         let slot = self.module_slot();
-        let base = Value::Null;
+        let base = Js::Null;
         self.derived_class(
             "HyperliquidCrossCache",
             0,
@@ -60,61 +60,61 @@ impl CacheRuntimeHost for Realm {
     }
     fn define_method(
         &mut self,
-        prototype: &Value,
+        prototype: &Js,
         name: &JsString,
-        function: &Value,
-    ) -> Result<(), Value> {
+        function: &Js,
+    ) -> Result<(), Thrown> {
         self.define_hidden(
             prototype,
-            PropKey::String(name.0.as_slice().into()),
+            Js::String(name.0.as_slice().into()),
             function.clone(),
         );
         Ok(())
     }
-    fn instance(&mut self, prototype: &Value) -> Result<Value, Value> {
-        Ok(self.alloc(Kind::Ordinary, prototype.object()))
+    fn instance(&mut self, prototype: &Js) -> Result<Js, Thrown> {
+        Ok(self.object_with_prototype(prototype.clone()))
     }
-    fn new_map(&mut self) -> Result<Value, Value> {
-        Ok(Realm::new_map(self))
+    fn new_map(&mut self) -> Result<Js, Thrown> {
+        Ok(Host::new_map(self))
     }
-    fn new_set(&mut self) -> Result<Value, Value> {
-        Ok(Realm::new_set(self))
+    fn new_set(&mut self) -> Result<Js, Thrown> {
+        Ok(Host::new_set(self))
     }
-    fn function(&mut self, capture: Value, body: Callback) -> Result<Value, Value> {
+    fn function(&mut self, capture: Js, body: Callback) -> Result<Js, Thrown> {
         Ok(self.native("", 0, move |r, this, args| {
             cache_runtime::run_callback(r, body, &capture, this, args)
         }))
     }
-    fn broadcast_constructor(&mut self) -> Result<Value, Value> {
-        let globals = Value::Object(self.state.globals.clone());
-        let key = PropKey::str("BroadcastChannel");
+    fn broadcast_constructor(&mut self) -> Result<Js, Thrown> {
+        let globals = self.shared.globals.clone();
+        let key = Js::str("BroadcastChannel");
         if self.has_property(&globals, &key)? {
             self.get(&globals, &key)
         } else {
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         }
     }
-    fn construct_broadcast(&mut self, constructor: &Value, name: &Value) -> Result<Value, Value> {
-        Realm::construct(self, constructor, std::slice::from_ref(name), None)
+    fn construct_broadcast(&mut self, constructor: &Js, name: &Js) -> Result<Js, Thrown> {
+        Host::construct(self, constructor, std::slice::from_ref(name), None)
     }
-    fn destructure(&mut self, value: &Value, keys: &[&str]) -> Result<Vec<Value>, Value> {
+    fn destructure(&mut self, value: &Js, keys: &[&str]) -> Result<Vec<Js>, Thrown> {
         self.object_pattern(value, keys)
     }
 }
 
-impl Realm {
+impl Host {
     fn module_slot(&self) -> ModuleSlot {
         let holder = self.singleton("crossCacheModuleSlot", |r| {
             r.host_object(Rc::new(ModuleSlot::default()))
         });
         holder
-            .host::<ModuleSlot>()
+            .resource::<ModuleSlot>()
             .map(|s| (*s).clone())
             .expect("module slot host object")
     }
 }
 
-fn cache_module(realm: &mut Realm) -> Result<Rc<CacheModule<Value>>, Value> {
+fn cache_module(realm: &mut Host) -> Result<Rc<CacheModule<Js>>, Thrown> {
     let slot = realm.module_slot();
     let existing = slot.borrow().clone();
     match existing {
@@ -127,7 +127,7 @@ fn cache_module(realm: &mut Realm) -> Result<Rc<CacheModule<Value>>, Value> {
     }
 }
 
-pub(crate) fn bind(realm: &Realm) {
+pub(crate) fn bind(realm: &Host) {
     realm.bind_import(
         "getCrossCache",
         realm.native("getCrossCache", 0, |r, _, _| {
@@ -139,7 +139,7 @@ pub(crate) fn bind(realm: &Realm) {
         "hasSeenFill",
         realm.native("hasSeenFill", 1, |r, _, args| {
             let module = cache_module(r)?;
-            let fill = args.first().cloned().unwrap_or(Value::Undefined);
+            let fill = args.first().cloned().unwrap_or(Js::Undefined);
             cache_runtime::has_seen_fill(r, &module, &fill)
         }),
     );
@@ -147,9 +147,9 @@ pub(crate) fn bind(realm: &Realm) {
         "markFillSeen",
         realm.native("markFillSeen", 1, |r, _, args| {
             let module = cache_module(r)?;
-            let fill = args.first().cloned().unwrap_or(Value::Undefined);
+            let fill = args.first().cloned().unwrap_or(Js::Undefined);
             cache_runtime::mark_fill_seen(r, &module, &fill)?;
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         }),
     );
 }

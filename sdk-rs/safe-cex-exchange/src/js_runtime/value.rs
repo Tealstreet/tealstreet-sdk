@@ -1044,7 +1044,7 @@ impl Js {
         }
     }
 
-    pub(super) fn prototype(&self) -> Option<Js> {
+    pub fn prototype(&self) -> Option<Js> {
         match self {
             Js::Object(object) => object.proto.borrow().clone(),
             Js::Function(function) => function.proto.borrow().clone(),
@@ -1110,7 +1110,7 @@ impl Js {
     pub fn get_key(&self, key: &[u16]) -> Result<Js, Thrown> {
         self.get_key_receiver(key, self)
     }
-    fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
+    pub fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
         match self {
             Js::Builtin(reference) => {
                 let Ok(key) = String::from_utf16(key) else {
@@ -1553,10 +1553,10 @@ impl Js {
         })
     }
     /// ToPropertyDescriptor observes fields in order and retains accessor identities.
-    pub(super) fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
+    pub fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
         self.define_property_slot(key, descriptor, false)
     }
-    pub(super) fn define_property_for(&self, key: &Js, descriptor: &Js) -> Result<(), Thrown> {
+    pub fn define_property_for(&self, key: &Js, descriptor: &Js) -> Result<(), Thrown> {
         if matches!(key, Js::SymbolIterator) {
             self.define_property_slot(&[], descriptor, true)
         } else {

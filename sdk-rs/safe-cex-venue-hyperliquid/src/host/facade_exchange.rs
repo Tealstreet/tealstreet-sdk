@@ -1,9 +1,9 @@
 //! The JS `BaseExchange` superclass the ported HyperliquidExchange class
 //! extends. Each inherited member the venue bodies use delegates to the Rust
 //! BaseExchange; members the bodies never reach are absent rather than stubbed.
+use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use super::{
-    Realm,
-    value::{FunctionData, Kind, NativeConstruct, Prop, PropKey, Slot, Thrown, Value},
+    Host,
 };
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput, exchange::BaseExchange,
@@ -12,97 +12,50 @@ use safe_cex_exchange::{
 use safe_cex_types::PlaceOrderOpts;
 use std::rc::Rc;
 
-fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).cloned().unwrap_or(Value::Undefined)
+fn arg(args: &[Js], i: usize) -> Js {
+    args.get(i).cloned().unwrap_or(Js::Undefined)
 }
-fn thrown(r: &Realm, e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
-    let error = r.error(&e.message);
-    if e.name != "Error" {
-        r.define_hidden(&error, PropKey::str("name"), Value::str(&e.name));
-    }
-    error
-}
-/// Keep the argument list distinct from a single argument that is itself an array.
-fn payload(
-    r: &mut Realm,
-    args: &[Value],
-) -> Result<Vec<safe_cex_exchange::js_runtime::value::Js>, Thrown> {
-    args.iter()
-        .map(|value| r.capture_typed_value(value, 0))
-        .collect()
-}
-pub(crate) fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, Thrown> {
-    Ok(match value {
-        Value::Undefined => ExchangeErrorInput::Missing,
-        Value::String(u) => {
-            ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::Js::String(u.clone()))
-        }
-        v if v
-            .object()
-            .is_some_and(|o| matches!(o.borrow().kind, Kind::Error)) =>
-        {
-            ExchangeErrorInput::Error(Box::new(r.exchange_error(v)))
-        }
-        v => ExchangeErrorInput::Raw(r.capture_typed_value(v, 0)?),
-    })
+fn thrown(_: &Host, e: safe_cex_exchange::runtime::ExchangeError) -> Thrown { e.into() }
+pub(crate) fn error_input(_: &mut Host, value: &Js) -> Result<ExchangeErrorInput, Thrown> {
+    Ok(if value.is_undefined() { ExchangeErrorInput::Missing } else { ExchangeErrorInput::Raw(value.clone()) })
 }
 
 /// The JS class; instances are allocated with newTarget's prototype and carry
 /// the source constructor's own fields (`options`, `store`, `emitter`).
 pub(crate) fn base_exchange_class(
-    realm: &mut Realm,
+    realm: &mut Host,
     base: Rc<BaseExchange>,
     external_public_data: Option<ExternalPublicDataFactory>,
-) -> Value {
+) -> Js {
     let prototype = realm.new_object();
-    let construct: NativeConstruct = {
-        let fallback = prototype.object().unwrap().clone();
-        let base = base.clone();
-        Rc::new(move |r, args, new_target| {
-            let proto = r.prototype_of_target(new_target, &fallback)?;
-            let instance = r.alloc(Kind::Ordinary, Some(&proto));
-            r.define_str(&instance, "_exchangeName", arg(args, 0))?;
-            r.define_str(&instance, "options", arg(args, 1))?;
-            r.define_str(&instance, "store", arg(args, 2))?;
-            let emitter = r.new_object();
-            let b = base.clone();
-            let emit = r.native("emit", 1, move |r, _, a| {
-                let event = r.to_rust_string(&arg(a, 0))?;
-                let data = payload(r, a.get(1..).unwrap_or_default())?;
-                b.emit_args(&event, &data).map_err(|e| thrown(r, e))?;
-                Ok(Value::Undefined)
-            });
-            r.define_str(&emitter, "emit", emit)?;
-            r.define_str(&instance, "emitter", emitter)?;
-            Ok(instance)
-        })
-    };
-    let class = realm.function_data(FunctionData {
-        name: realm.js_text("BaseExchange"),
-        length: 3,
-        call: None,
-        construct: Some(construct),
-    });
-    if let Some(o) = class.object() {
-        o.borrow_mut().props.push(Prop {
-            key: PropKey::str("prototype"),
-            slot: Slot::Data(prototype.clone()),
-            enumerable: false,
-            writable: false,
-            configurable: false,
+    let owner = base.clone();
+    let class = realm.constructor("BaseExchange", 3, move |r, args, new_target| {
+        let instance = new_target.allocate_instance()?;
+        r.define_str(&instance, "_exchangeName", arg(args, 0))?;
+        r.define_str(&instance, "options", arg(args, 1))?;
+        r.define_str(&instance, "store", arg(args, 2))?;
+        let b = owner.clone();
+        let emit = r.native("emit", 1, move |r, _, args| {
+            let event = r.to_rust_string(&arg(args, 0))?;
+            b.emit_args(&event, args.get(1..).unwrap_or_default()).map_err(Thrown::from)?;
+            Ok(Js::Undefined)
         });
-    }
-    realm.define_hidden(&prototype, PropKey::str("constructor"), class.clone());
+        r.define_str(&instance, "emitter", Js::object(vec![("emit",emit)]))?;
+        Ok(instance)
+    });
+    class.define_property(&"prototype".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value",prototype.clone())])).expect("fresh base class prototype");
 
-    let method = |realm: &Realm,
+    realm.define_hidden(&prototype, Js::str("constructor"), class.clone());
+
+    let method = |realm: &Host,
                   name: &str,
                   length: u8,
                   body: Rc<
-        dyn Fn(&mut Realm, &Rc<BaseExchange>, &Value, &[Value]) -> Result<Value, Thrown>,
+        dyn Fn(&mut Host, &Rc<BaseExchange>, &Js, &[Js]) -> Result<Js, Thrown>,
     >| {
         let b = base.clone();
         let f = realm.native(name, length, move |r, this, args| body(r, &b, this, args));
-        realm.define_hidden(&prototype, PropKey::str(name), f);
+        realm.define_hidden(&prototype, Js::str(name), f);
     };
     method(
         realm,
@@ -111,11 +64,11 @@ pub(crate) fn base_exchange_class(
         Rc::new(|r, b, _, a| {
             let message = r.to_rust_string(&arg(a, 0))?;
             let severity = match arg(a, 1) {
-                Value::Undefined => "Info".to_owned(),
+                Js::Undefined => "Info".to_owned(),
                 s => r.to_rust_string(&s)?,
             };
             b.log(&message, &severity).map_err(|e| thrown(r, e))?;
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         }),
     );
     method(
@@ -125,21 +78,21 @@ pub(crate) fn base_exchange_class(
         Rc::new(|r, b, _, a| {
             let input = error_input(r, &arg(a, 0))?;
             let message = match arg(a, 1) {
-                Value::Undefined => None,
+                Js::Undefined => None,
                 m => Some(r.to_rust_string(&m)?),
             };
             let extra = match arg(a, 2) {
-                Value::Undefined => None,
+                Js::Undefined => None,
                 x => Some(
                     safe_cex_exchange::js_runtime::value::to_retained_input(
-                        &r.capture_typed_value(&x, 0)?,
+                        &x.clone(),
                     )
                     .map_err(|error| thrown(r, error.to_exchange_error()))?,
                 ),
             };
             b.emit_and_log_error(input, message.as_deref(), extra.as_ref())
                 .map_err(|e| thrown(r, e))?;
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         }),
     );
     method(
@@ -153,8 +106,8 @@ pub(crate) fn base_exchange_class(
                     .resolve_caller_client_order_id(&opts)
                     .map_err(|e| thrown(r, e))?
                 {
-                    Some(id) => Value::str(&id),
-                    None => Value::Undefined,
+                    Some(id) => Js::str(&id),
+                    None => Js::Undefined,
                 },
             )
         }),
@@ -167,7 +120,7 @@ pub(crate) fn base_exchange_class(
             let orders: Vec<PlaceOrderOpts> = r.to_typed(&arg(a, 0))?;
             b.assert_caller_client_order_ids(&orders)
                 .map_err(|e| thrown(r, e))?;
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         }),
     );
     method(
@@ -176,7 +129,7 @@ pub(crate) fn base_exchange_class(
         0,
         Rc::new(|_, b, _, _| {
             Ok(b.get_tick_interval()
-                .map_or(Value::Undefined, Value::Number))
+                .map_or(Js::Undefined, Js::Number))
         }),
     );
     method(
@@ -209,7 +162,7 @@ pub(crate) fn base_exchange_class(
                     })
                     .await
                     .map_err(|error| thrown(&realm, error))?;
-                Ok(Value::Bool(used))
+                Ok(Js::Bool(used))
             })))
         }),
     );
@@ -282,7 +235,7 @@ pub(crate) fn base_exchange_class(
                             .call_method(
                                 &owner,
                                 "fetchIncomeHistoryRange",
-                                &[Value::Number(from), Value::Number(to)],
+                                &[Js::Number(from), Js::Number(to)],
                             )
                             .map_err(|error| realm.exchange_error(&error))?;
                         let result = realm
@@ -332,36 +285,30 @@ pub(crate) fn base_exchange_class(
         0,
         Rc::new(|r, b, _, _| {
             b.dispose().map_err(|e| thrown(r, e))?;
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         }),
     );
     // The Rust base owns disposal (super.dispose() reaches it above); no venue
     // body assigns isDisposed directly, so the setter has nothing to forward.
     let b = base.clone();
     let disposed = realm.native("get isDisposed", 0, move |_, _, _| {
-        Ok(Value::Bool(b.is_disposed()))
+        Ok(Js::Bool(b.is_disposed()))
     });
-    if let Some(o) = prototype.object() {
-        o.borrow_mut().props.push(Prop {
-            key: PropKey::str("isDisposed"),
-            slot: Slot::Accessor {
-                get: Some(disposed),
-                set: Some(realm.native("set isDisposed", 1, |_, _, _| Ok(Value::Undefined))),
-            },
-            enumerable: false,
-            writable: false,
-            configurable: true,
-        });
-    }
+    prototype.define_property(&"isDisposed".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![
+        ("get", disposed),
+        ("set", realm.native("set isDisposed", 1, |_,_,_| Ok(Js::Undefined))),
+        ("configurable", Js::Bool(true)),
+    ])).expect("fresh base prototype getter");
+
     let b = base.clone();
     let public_only = realm.native("get isPublicDataOnly", 0, move |_, _, _| {
-        Ok(Value::Bool(
+        Ok(Js::Bool(
             b.options().public_data_only == Some(true) || !b.can_sign(),
         ))
     });
-    realm.define_getter(&prototype, PropKey::str("isPublicDataOnly"), public_only);
+    realm.define_getter(&prototype, Js::str("isPublicDataOnly"), public_only);
     let b = base.clone();
     let name = realm.native("get name", 0, move |r, _, _| r.from_typed(b.name()));
-    realm.define_getter(&prototype, PropKey::str("name"), name);
+    realm.define_getter(&prototype, Js::str("name"), name);
     class
 }

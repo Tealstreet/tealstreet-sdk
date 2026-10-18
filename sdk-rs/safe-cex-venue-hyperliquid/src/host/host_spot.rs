@@ -1,7 +1,7 @@
 //! Host operations for the existing Spot class, trading and socket bodies.
+use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use super::{
-    Realm,
-    value::{IterSource, Kind, PropKey, Value},
+    Host,
 };
 use crate::{
     spot_client::{self, ClientCallback, SpotClientHost},
@@ -13,16 +13,16 @@ use crate::{
 };
 use std::rc::Rc;
 
-fn arg(args: &[Value], index: usize) -> Value {
-    args.get(index).cloned().unwrap_or(Value::Undefined)
+fn arg(args: &[Js], index: usize) -> Js {
+    args.get(index).cloned().unwrap_or(Js::Undefined)
 }
-fn class_pair(realm: &mut Realm, name: &str) -> Result<(Value, Value), Value> {
+fn class_pair(realm: &mut Host, name: &str) -> Result<(Js, Js), Thrown> {
     let class = realm.global_binding(name)?;
     let prototype = realm.get_str(&class, "prototype")?;
     Ok((class, prototype))
 }
-impl SpotClientHost for Realm {
-    fn client_callback(&mut self, body: ClientCallback<Value>) -> Result<Value, Value> {
+impl SpotClientHost for Host {
+    fn client_callback(&mut self, body: ClientCallback<Js>) -> Result<Js, Thrown> {
         self.native_method("", 1, body)
     }
     fn class_pair(
@@ -30,7 +30,7 @@ impl SpotClientHost for Realm {
         name: &str,
         length: u8,
         base: Option<&str>,
-    ) -> Result<(Value, Value), Value> {
+    ) -> Result<(Js, Js), Thrown> {
         let parent = self.global_binding(base.unwrap_or("Object"))?;
         let kind = name.to_owned();
         let pair = self.derived_class(
@@ -94,52 +94,45 @@ impl SpotClientHost for Realm {
                 }
             }),
         )?;
-        if base.is_none() {
-            pair.0.object().unwrap().borrow_mut().proto =
-                Some(self.intrinsics().function_proto.clone());
-        }
         self.bind_import(name, pair.0.clone());
         Ok(pair)
     }
-    fn define_hidden(&mut self, object: &Value, key: &str, value: &Value) -> Result<(), Value> {
-        Realm::define_hidden(self, object, PropKey::str(key), value.clone());
+    fn define_hidden(&mut self, object: &Js, key: &str, value: &Js) -> Result<(), Thrown> {
+        Host::define_hidden(self, object, Js::str(key), value.clone());
         Ok(())
     }
     fn native_method(
         &mut self,
         name: &str,
         length: u8,
-        body: ClientCallback<Value>,
-    ) -> Result<Value, Value> {
+        body: ClientCallback<Js>,
+    ) -> Result<Js, Thrown> {
         Ok(self.native(name, length, move |r, this, args| {
             spot_client::run_client_callback(r, this, &body, args)
         }))
     }
-    fn allocate_class(&mut self, prototype: &Value, target: &Value) -> Result<Value, Value> {
-        let fallback = prototype
-            .object()
-            .ok_or_else(|| self.type_error("class prototype must be an object"))?;
-        let prototype = self.prototype_of_target(target, fallback)?;
-        Ok(self.alloc(Kind::Ordinary, Some(&prototype)))
+    fn allocate_class(&mut self, prototype: &Js, target: &Js) -> Result<Js, Thrown> {
+        let _ = prototype;
+        target.allocate_instance()
     }
 }
-impl SpotRuntimeHost for Realm {
+impl SpotRuntimeHost for Host {
     fn base_exchange(
         &mut self,
-        args: &[Value; 3],
-        target: &Value,
-        _: &Value,
-    ) -> Result<Value, Value> {
+        args: &[Js; 3],
+        target: &Js,
+        _: &Js,
+    ) -> Result<Js, Thrown> {
         let base = self.global_binding("BaseExchange")?;
         self.construct(&base, args, Some(target))
     }
     fn exchange_arrow(
         &mut self,
-        owner: &Value,
+        owner: &Js,
         name: &str,
         length: u8,
         body: ExchangeMethod,
-    ) -> Result<Value, Value> {
+    ) -> Result<Js, Thrown> {
         let owner = owner.clone();
         let class = self.global_binding("HyperliquidSpotExchange")?;
         Ok(self.native(name, length, move |r, _, args| {
@@ -151,83 +144,80 @@ impl SpotRuntimeHost for Realm {
         name: &str,
         length: u8,
         body: ExchangeMethod,
-    ) -> Result<Value, Value> {
+    ) -> Result<Js, Thrown> {
         let class = self.global_binding("HyperliquidSpotExchange")?;
         Ok(self.native(name, length, move |r, this, args| {
             spot_runtime::run_exchange_method(&mut r.with_lexical(&class), this, body, args)
         }))
     }
 }
-impl SpotTradingHost for Realm {
-    fn trading_callback(&mut self, capture: TradingCallback<Value>) -> Result<Value, Value> {
+impl SpotTradingHost for Host {
+    fn trading_callback(&mut self, capture: TradingCallback<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
             spot_trading::run_trading_callback(r, &capture, args)
         }))
     }
-    fn unary_number(&mut self, value: &Value) -> Result<Value, Value> {
+    fn unary_number(&mut self, value: &Js) -> Result<Js, Thrown> {
         self.unary("+", value)
     }
-    fn has_property(&mut self, key: &str, value: &Value) -> Result<bool, Value> {
-        Realm::has_property(self, value, &PropKey::str(key))
+    fn has_property(&mut self, key: &str, value: &Js) -> Result<bool, Thrown> {
+        Host::has_property(self, value, &Js::str(key))
     }
-    fn trading_binding(&mut self, value: &Value, keys: &[&str]) -> Result<Vec<Value>, Value> {
+    fn trading_binding(&mut self, value: &Js, keys: &[&str]) -> Result<Vec<Js>, Thrown> {
         self.object_pattern(value, keys)
     }
 }
-impl SpotWsHost for Realm {
-    fn event_data(&mut self, event: &Value) -> Result<Value, Value> {
+impl SpotWsHost for Host {
+    fn event_data(&mut self, event: &Js) -> Result<Js, Thrown> {
         Ok(self.object_pattern(event, &["data"])?[0].clone())
     }
-    fn is_nullish(&self, value: &Value) -> bool {
+    fn is_nullish(&self, value: &Js) -> bool {
         value.is_nullish()
     }
-    fn is_array(&mut self, value: &Value) -> Result<bool, Value> {
-        Ok(value
-            .object()
-            .is_some_and(|object| matches!(object.borrow().kind, Kind::Array(_))))
+    fn is_array(&mut self, value: &Js) -> Result<bool, Thrown> {
+        Ok(value.is_array())
     }
-    fn equal(&self, left: &Value, right: &Value) -> bool {
-        left.strict_equal(right)
+    fn equal(&self, left: &Js, right: &Js) -> bool {
+        left.strict_equals(right)
     }
-    fn number(&self, value: f64) -> Value {
-        Value::Number(value)
+    fn number(&self, value: f64) -> Js {
+        Js::Number(value)
     }
-    fn less(&mut self, left: &Value, right: &Value) -> Result<bool, Value> {
+    fn less(&mut self, left: &Js, right: &Js) -> Result<bool, Thrown> {
         Ok(self.binary("<", left, right)?.truthy())
     }
-    fn greater(&mut self, left: &Value, right: &Value) -> Result<bool, Value> {
+    fn greater(&mut self, left: &Js, right: &Js) -> Result<bool, Thrown> {
         Ok(self.binary(">", left, right)?.truthy())
     }
-    fn index(&mut self, value: &Value, key: &Value) -> Result<Value, Value> {
-        Realm::index(self, value, key)
+    fn index(&mut self, value: &Js, key: &Js) -> Result<Js, Thrown> {
+        Host::index(self, value, key)
     }
-    fn array(&mut self) -> Result<Value, Value> {
+    fn array(&mut self) -> Result<Js, Thrown> {
         Ok(self.new_array(vec![]))
     }
-    fn parse_float(&mut self, value: &Value) -> Result<f64, Value> {
+    fn parse_float(&mut self, value: &Js) -> Result<f64, Thrown> {
         let parser = self.global_binding("parseFloat")?;
-        let parsed = self.call(&parser, &Value::Undefined, &[value.clone()])?;
+        let parsed = self.call(&parser, &Js::Undefined, &[value.clone()])?;
         self.to_number(&parsed)
     }
-    fn template_string(&mut self, value: &Value) -> Result<JsString, Value> {
+    fn template_string(&mut self, value: &Js) -> Result<JsString, Thrown> {
         self.to_string(value).map(|units| JsString(units.to_vec()))
     }
-    fn json_parse(&mut self, data: &Value) -> Result<Value, Value> {
+    fn json_parse(&mut self, data: &Js) -> Result<Js, Thrown> {
         let parser = self.global_binding("jsonParse")?;
-        self.call(&parser, &Value::Undefined, &[data.clone()])
+        self.call(&parser, &Js::Undefined, &[data.clone()])
     }
-    fn order_side(&mut self, buy: bool) -> Result<Value, Value> {
+    fn order_side(&mut self, buy: bool) -> Result<Js, Thrown> {
         let side = self.global_binding("OrderSide")?;
         self.get_str(&side, if buy { "Buy" } else { "Sell" })
     }
-    fn for_in(&mut self, value: &Value) -> Result<Value, Value> {
-        let keys = self.for_in_keys(value)?;
-        Ok(self.iterator_object(IterSource::Keys { keys, index: 0 }))
+    fn for_in(&mut self, value: &Js) -> Result<Js, Thrown> {
+        Ok(self.for_in_iterator(value))
     }
-    fn for_in_next(&mut self, iterator: &Value) -> Result<Option<Value>, Value> {
+    fn for_in_next(&mut self, iterator: &Js) -> Result<Option<Js>, Thrown> {
         self.iterator_step(iterator)
     }
-    fn private_class(&mut self) -> Result<(Value, Value), Value> {
+    fn private_class(&mut self) -> Result<(Js, Js), Thrown> {
         SpotClientHost::class_pair(
             self,
             "HyperliquidSpotPrivateWebSocket",
@@ -237,20 +227,20 @@ impl SpotWsHost for Realm {
     }
     fn construct_base(
         &mut self,
-        parent: &Value,
-        target: &Value,
-        _: &Value,
-    ) -> Result<Value, Value> {
+        parent: &Js,
+        target: &Js,
+        _: &Js,
+    ) -> Result<Js, Thrown> {
         let base = self.global_binding("BaseWebSocket")?;
         self.construct(&base, &[parent.clone()], Some(target))
     }
     fn arrow(
         &mut self,
-        capture: &Value,
+        capture: &Js,
         name: &str,
         length: u8,
         body: PrivateMethod,
-    ) -> Result<Value, Value> {
+    ) -> Result<Js, Thrown> {
         let capture = capture.clone();
         let class = self.global_binding("HyperliquidSpotPrivateWebSocket")?;
         Ok(self.native(name, length, move |r, _, args| {
@@ -258,29 +248,29 @@ impl SpotWsHost for Realm {
         }))
     }
 }
-impl SpotPublicHost for Realm {
-    fn append_literal(&mut self, array: &Value, value: &Value) -> Result<(), Value> {
+impl SpotPublicHost for Host {
+    fn append_literal(&mut self, array: &Js, value: &Js) -> Result<(), Thrown> {
         let length = self.get_str(array, "length")?;
         self.set_index(array, &length, value.clone())
     }
-    fn decrement(&mut self, value: &Value) -> Result<Value, Value> {
-        self.binary("-", value, &Value::Number(1.0))
+    fn decrement(&mut self, value: &Js) -> Result<Js, Thrown> {
+        self.binary("-", value, &Js::Number(1.0))
     }
-    fn negate(&mut self, value: &Value) -> Result<Value, Value> {
+    fn negate(&mut self, value: &Js) -> Result<Js, Thrown> {
         self.unary("-", value)
     }
-    fn public_callback(&mut self, capture: PublicCallback<Value>) -> Result<Value, Value> {
+    fn public_callback(&mut self, capture: PublicCallback<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
             public::run_public_callback(r, &capture, args)
         }))
     }
     fn public_arrow(
         &mut self,
-        owner: &Value,
+        owner: &Js,
         name: &str,
         length: u8,
         body: PublicMethod,
-    ) -> Result<Value, Value> {
+    ) -> Result<Js, Thrown> {
         let owner = owner.clone();
         let class = self.global_binding("HyperliquidSpotPublicWebSocket")?;
         Ok(self.native(name, length, move |r, _, args| {
@@ -289,71 +279,25 @@ impl SpotPublicHost for Realm {
     }
     fn base_socket(
         &mut self,
-        parent: &Value,
-        target: &Value,
-        prototype: &Value,
-    ) -> Result<Value, Value> {
+        parent: &Js,
+        target: &Js,
+        prototype: &Js,
+    ) -> Result<Js, Thrown> {
         SpotWsHost::construct_base(self, parent, target, prototype)
     }
-    fn assign_index(&mut self, object: &Value, key: &Value, value: &Value) -> Result<(), Value> {
+    fn assign_index(&mut self, object: &Js, key: &Js, value: &Js) -> Result<(), Thrown> {
         self.set_index(object, key, value.clone())
     }
-    fn delete_index(&mut self, object: &Value, key: &Value) -> Result<(), Value> {
+    fn delete_index(&mut self, object: &Js, key: &Js) -> Result<(), Thrown> {
         let key = self.to_property_key(key)?;
         self.delete(object, &key).map(|_| ())
     }
-    fn record_binding(&mut self, value: &Value, keys: &[&str]) -> Result<Vec<Value>, Value> {
+    fn record_binding(&mut self, value: &Js, keys: &[&str]) -> Result<Vec<Js>, Thrown> {
         self.object_pattern(value, keys)
     }
 }
 
-// The Spot candle reader uses only dayjs(input), subtract and valueOf. Keep
-// calendar arithmetic in the shared library; no second venue date algorithm.
-fn dayjs_object(realm: &Realm, day: safe_cex_exchange::js_runtime::value::Js) -> Value {
-    let result = realm.new_object();
-    let value = day.clone();
-    let value_of = realm.native("valueOf", 0, move |realm, _, _| {
-        let value = value
-            .call_method("valueOf", vec![])
-            .map_err(|error| realm.typed_error(error))?;
-        realm.restore_typed_value(&value)
-    });
-    realm.define_hidden(&result, PropKey::str("valueOf"), value_of);
-    let subtract = realm.native("subtract", 2, move |realm, _, args| {
-        let args = args
-            .iter()
-            .map(|value| realm.capture_typed_value(value, 0))
-            .collect::<Result<Vec<_>, _>>()?;
-        let shifted = day
-            .call_method("subtract", args)
-            .map_err(|error| realm.typed_error(error))?;
-        Ok(dayjs_object(realm, shifted))
-    });
-    realm.define_hidden(&result, PropKey::str("subtract"), subtract);
-    result
-}
-
-pub(super) fn bind_spot_imports(realm: &Realm) -> Result<(), Value> {
-    use safe_cex_exchange::js_runtime::{library::install_library, value::Js};
-    let globals = Js::object(vec![]);
-    install_library::<()>(&globals, std::rc::Weak::new());
-    let dayjs = globals
-        .get("dayjs")
-        .map_err(|error| realm.typed_error(error))?;
-    let function = realm.native("dayjs", 1, move |realm, _, args| {
-        let input = arg(args, 0);
-        let input = if matches!(input, Value::Undefined) {
-            // Supplying now explicitly lets this library import remain scoped
-            // to the existing family realm's runtime and clock owner.
-            Js::Number(realm.runtime().now_ms().trunc())
-        } else {
-            realm.capture_typed_value(&input, 0)?
-        };
-        let day = dayjs
-            .call(Js::Undefined, vec![input])
-            .map_err(|error| realm.typed_error(error))?;
-        Ok(dayjs_object(realm, day))
-    });
-    realm.bind_import("dayjs", function);
+pub(super) fn bind_spot_imports(realm: &Host) -> Result<(), Thrown> {
+    realm.bind_import("dayjs", realm.shared.globals.get("dayjs")?);
     Ok(())
 }

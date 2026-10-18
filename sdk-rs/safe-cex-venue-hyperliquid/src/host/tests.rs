@@ -1,35 +1,36 @@
-use super::{Realm, test_runtime::TestRuntime, value::*};
+use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
+use super::{Host, test_runtime::TestRuntime};
 use std::rc::Rc;
 
-fn realm() -> (Realm, Rc<TestRuntime>) {
+fn realm() -> (Host, Rc<TestRuntime>) {
     let runtime = Rc::new(TestRuntime::default());
-    (Realm::new(runtime.clone()), runtime)
+    (crate::host::test_runtime::host(runtime.clone()), runtime)
 }
-fn text(r: &mut Realm, v: &Value) -> String {
+fn text(r: &mut Host, v: &Js) -> String {
     r.to_rust_string(v).unwrap()
 }
-fn message(r: &mut Realm, e: &Value) -> String {
-    let m = r.get_str(e, "message").unwrap();
+fn message(r: &mut Host, e: &Thrown) -> String {
+    let m = r.get_str(&e.value, "message").unwrap();
     text(r, &m)
 }
 
 #[test]
 fn property_reads_follow_the_prototype_chain_and_nullish_reads_throw() {
     let (mut r, _) = realm();
-    let o = r.object_from(vec![("a", Value::Number(1.0))]);
+    let o = r.object_from(vec![("a", Js::Number(1.0))]);
     assert!(
         r.get_str(&o, "a")
             .unwrap()
-            .strict_equal(&Value::Number(1.0))
+            .strict_equals(&Js::Number(1.0))
     );
     let has = r.get_str(&o, "hasOwnProperty").unwrap();
-    assert!(r.call(&has, &o, &[Value::str("a")]).unwrap().truthy());
-    let e = r.get_str(&Value::Undefined, "x").unwrap_err();
+    assert!(r.call(&has, &o, &[Js::str("a")]).unwrap().truthy());
+    let e = r.get_str(&Js::Undefined, "x").unwrap_err();
     assert_eq!(
         message(&mut r, &e),
         "Cannot read properties of undefined (reading 'x')"
     );
-    let name = r.get_str(&e, "name").unwrap();
+    let name = r.get_str(&e.value, "name").unwrap();
     assert_eq!(text(&mut r, &name), "TypeError");
 }
 
@@ -37,30 +38,30 @@ fn property_reads_follow_the_prototype_chain_and_nullish_reads_throw() {
 fn array_methods_and_exotic_length() {
     let (mut r, _) = realm();
     let a = r.new_array(vec![
-        Value::Number(3.0),
-        Value::Number(1.0),
-        Value::Number(2.0),
+        Js::Number(3.0),
+        Js::Number(1.0),
+        Js::Number(2.0),
     ]);
     let doubled = r.native("", 1, |r, _, args| {
-        r.binary("*", &args[0], &Value::Number(2.0))
+        r.binary("*", &args[0], &Js::Number(2.0))
     });
     let mapped = r.call_method(&a, "map", &[doubled]).unwrap();
-    let joined = r.call_method(&mapped, "join", &[Value::str("-")]).unwrap();
+    let joined = r.call_method(&mapped, "join", &[Js::str("-")]).unwrap();
     assert_eq!(text(&mut r, &joined), "6-2-4");
-    r.call_method(&a, "push", &[Value::Number(9.0)]).unwrap();
+    r.call_method(&a, "push", &[Js::Number(9.0)]).unwrap();
     let len = r.get_str(&a, "length").unwrap();
-    assert_eq!(len.as_number(), Some(4.0));
-    r.set_str(&a, "length", Value::Number(1.0)).unwrap();
+    assert_eq!(len.as_f64(), Some(4.0));
+    r.set_str(&a, "length", Js::Number(1.0)).unwrap();
     let s = r.call_method(&a, "toString", &[]).unwrap();
     assert_eq!(text(&mut r, &s), "3");
     let parts = r
         .call_method(
-            &Value::str("15m"),
+            &Js::str("15m"),
             "split",
             &[r.regexp(r"/(\d+)/").unwrap()],
         )
         .unwrap();
-    let joined = r.call_method(&parts, "join", &[Value::str("|")]).unwrap();
+    let joined = r.call_method(&parts, "join", &[Js::str("|")]).unwrap();
     assert_eq!(text(&mut r, &joined), "|15|m");
 }
 
@@ -69,13 +70,13 @@ fn map_set_iteration_is_live_and_insertion_ordered() {
     let (mut r, _) = realm();
     let map_ctor = r.global_binding("Map").unwrap();
     let m = r.construct(&map_ctor, &[], None).unwrap();
-    r.call_method(&m, "set", &[Value::str("a"), Value::Number(1.0)])
+    r.call_method(&m, "set", &[Js::str("a"), Js::Number(1.0)])
         .unwrap();
-    r.call_method(&m, "set", &[Value::str("b"), Value::Number(2.0)])
+    r.call_method(&m, "set", &[Js::str("b"), Js::Number(2.0)])
         .unwrap();
     let it = r.get_iterator(&m).unwrap();
     let first = r.iterator_step(&it).unwrap().unwrap();
-    r.call_method(&m, "set", &[Value::str("c"), Value::Number(3.0)])
+    r.call_method(&m, "set", &[Js::str("c"), Js::Number(3.0)])
         .unwrap();
     let k = r.get_str(&first, "0").unwrap();
     let mut keys = vec![text(&mut r, &k)];
@@ -99,7 +100,7 @@ fn json_round_trip_keeps_key_order_and_js_numbers() {
     );
     let bad: Vec<u16> = "{oops".encode_utf16().collect();
     let e = r.parse_json(&bad).unwrap_err();
-    let name = r.get_str(&e, "name").unwrap();
+    let name = r.get_str(&e.value, "name").unwrap();
     assert_eq!(text(&mut r, &name), "SyntaxError");
 }
 
@@ -108,17 +109,17 @@ fn promises_adopt_and_then_chains_settle_on_the_runtime() {
     let (mut r, rt) = realm();
     let promise = r.global_binding("Promise").unwrap();
     let inner = r
-        .call_method(&promise, "resolve", &[Value::Number(2.0)])
+        .call_method(&promise, "resolve", &[Js::Number(2.0)])
         .unwrap();
     let add = r.native("", 1, |r, _, args| {
-        r.binary("+", &args[0], &Value::Number(40.0))
+        r.binary("+", &args[0], &Js::Number(40.0))
     });
     let chained = r.call_method(&inner, "then", &[add]).unwrap();
     let outer = r.spawn_value(r.await_value(chained));
     rt.drain();
-    let cell = outer.promise().unwrap();
-    match &cell.borrow().state {
-        PromiseState::Fulfilled(v) => assert_eq!(v.as_number(), Some(42.0)),
+    let Js::Promise(cell) = outer else { panic!("expected promise") };
+    match cell.result() {
+        Some(Ok(v)) => assert_eq!(v.as_f64(), Some(42.0)),
         _ => panic!("promise did not fulfil"),
     };
 }
@@ -130,20 +131,20 @@ fn timers_fire_on_the_virtual_clock_and_clear_cancels() {
     let h = hits.clone();
     let cb = r.native("", 0, move |_, _, _| {
         h.set(h.get() + 1);
-        Ok(Value::Undefined)
+        Ok(Js::Undefined)
     });
     let set_timeout = r.global_binding("setTimeout").unwrap();
     let clear = r.global_binding("clearTimeout").unwrap();
     r.call(
         &set_timeout,
-        &Value::Undefined,
-        &[cb.clone(), Value::Number(100.0)],
+        &Js::Undefined,
+        &[cb.clone(), Js::Number(100.0)],
     )
     .unwrap();
     let id = r
-        .call(&set_timeout, &Value::Undefined, &[cb, Value::Number(50.0)])
+        .call(&set_timeout, &Js::Undefined, &[cb, Js::Number(50.0)])
         .unwrap();
-    r.call(&clear, &Value::Undefined, &[id]).unwrap();
+    r.call(&clear, &Js::Undefined, &[id]).unwrap();
     rt.drain();
     assert_eq!(hits.get(), 1);
     assert_eq!(rt.now.get(), 100.0);
@@ -153,32 +154,32 @@ fn timers_fire_on_the_virtual_clock_and_clear_cancels() {
 fn operators_follow_abstract_semantics() {
     let (mut r, _) = realm();
     let sum = r
-        .binary("+", &Value::str("a"), &Value::Number(1.0))
+        .binary("+", &Js::str("a"), &Js::Number(1.0))
         .unwrap();
     assert_eq!(text(&mut r, &sum), "a1");
     assert!(
-        r.binary("<", &Value::str("10"), &Value::Number(9.0))
+        r.binary("<", &Js::str("10"), &Js::Number(9.0))
             .unwrap()
-            .strict_equal(&Value::Bool(false))
+            .strict_equals(&Js::Bool(false))
     );
     assert!(
-        r.binary(">=", &Value::Number(f64::NAN), &Value::Number(1.0))
+        r.binary(">=", &Js::Number(f64::NAN), &Js::Number(1.0))
             .unwrap()
-            .strict_equal(&Value::Bool(false))
+            .strict_equals(&Js::Bool(false))
     );
     assert!(
-        r.binary("==", &Value::Null, &Value::Undefined)
+        r.binary("==", &Js::Null, &Js::Undefined)
             .unwrap()
             .truthy()
     );
     let e = r.error("boom");
-    let s = r.to_string(&e).unwrap();
+    let s = r.to_string(&e.value).unwrap();
     assert_eq!(String::from_utf16_lossy(&s), "Error: boom");
 }
 
 #[test]
 fn number_to_string_with_radix_matches_v8() {
-    use super::builtins::radix_string;
+    
     // Values printed by Node v24.20.0 (`v.toString(r)`).
     for (v, radix, expected) in [
         (0.5, 36, "0.i"),
@@ -194,11 +195,13 @@ fn number_to_string_with_radix_matches_v8() {
         (123.456, 7, "234.312256641535441"),
         (std::f64::consts::PI, 16, "3.243f6a8885a3"),
     ] {
-        assert_eq!(radix_string(v, radix), expected, "{v}.toString({radix})");
+        let mut host = realm().0;
+        let value = host.call_method(&Js::Number(v), "toString", &[Js::Number(radix as f64)]).unwrap();
+        assert_eq!(text(&mut host, &value), expected, "{v}.toString({radix})");
     }
 }
 
-fn production_realm() -> (Realm, Rc<TestRuntime>) {
+fn production_realm() -> (Host, Rc<TestRuntime>) {
     let (realm, runtime) = realm();
     super::imports::bind(&realm);
     (realm, runtime)
@@ -257,30 +260,30 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
     let options = r.new_object();
     let store = r.new_object();
     let instance = r
-        .construct(&class, &[Value::str("hyperliquid"), options, store], None)
+        .construct(&class, &[Js::str("hyperliquid"), options, store], None)
         .unwrap();
     let emitter = r.get_str(&instance, "emitter").unwrap();
-    r.call_method(&emitter, "emit", &[Value::str("arity")])
+    r.call_method(&emitter, "emit", &[Js::str("arity")])
         .unwrap();
-    let array = r.new_array(vec![Value::Number(7.0), Value::str("eight")]);
-    r.call_method(&emitter, "emit", &[Value::str("arity"), array.clone()])
+    let array = r.new_array(vec![Js::Number(7.0), Js::str("eight")]);
+    r.call_method(&emitter, "emit", &[Js::str("arity"), array.clone()])
         .unwrap();
-    let metadata = r.object_from(vec![("code", Value::Number(42.0))]);
+    let metadata = r.object_from(vec![("code", Js::Number(42.0))]);
     r.call_method(
         &emitter,
         "emit",
-        &[Value::str("warning"), Value::str("venue warning"), metadata],
+        &[Js::str("warning"), Js::str("venue warning"), metadata],
     )
     .unwrap();
     r.call_method(
         &instance,
         "log",
-        &[Value::str("native log"), Value::str("Warning")],
+        &[Js::str("native log"), Js::str("Warning")],
     )
     .unwrap();
     let numbers = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0, 7.0, 42.0];
-    let mut args = vec![Value::str("numbers")];
-    args.extend(numbers.into_iter().map(Value::Number));
+    let mut args = vec![Js::str("numbers")];
+    args.extend(numbers.into_iter().map(Js::Number));
     r.call_method(&emitter, "emit", &args).unwrap();
     let seen = seen.borrow();
     assert_eq!(seen.len(), 5, "production emitter event count");
@@ -323,7 +326,7 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
         );
     }
 
-    r.set_str(&array, "0", Value::Number(8.0)).unwrap();
+    r.set_str(&array, "0", Js::Number(8.0)).unwrap();
     let Js::Number(number) = seen[1].1[0].get("0").unwrap() else {
         panic!("HL_REALM_ORIGINAL_ARRAY_IDENTITY native number type");
     };
@@ -351,27 +354,27 @@ fn production_import_registry_uses_real_helpers_and_rejects_unknown_names() {
     );
     let seen = r.global_binding("hasSeenFill").unwrap();
     let mark = r.global_binding("markFillSeen").unwrap();
-    let id = Value::str("authored-fill-id");
+    let id = Js::str("authored-fill-id");
     assert!(matches!(
-        r.call(&seen, &Value::Undefined, std::slice::from_ref(&id))
+        r.call(&seen, &Js::Undefined, std::slice::from_ref(&id))
             .unwrap(),
-        Value::Bool(false)
+        Js::Bool(false)
     ));
     assert!(matches!(
-        r.call(&mark, &Value::Undefined, std::slice::from_ref(&id))
+        r.call(&mark, &Js::Undefined, std::slice::from_ref(&id))
             .unwrap(),
-        Value::Undefined
+        Js::Undefined
     ));
     let factory = r.global_binding("getCrossCache").unwrap();
-    let cache = r.call(&factory, &Value::Undefined, &[]).unwrap();
+    let cache = r.call(&factory, &Js::Undefined, &[]).unwrap();
     assert!(matches!(
         r.call_method(&cache, "hasSeenFill", std::slice::from_ref(&id))
             .unwrap(),
-        Value::Bool(true)
+        Js::Bool(true)
     ));
     assert!(matches!(
-        r.call(&seen, &Value::Undefined, &[id]).unwrap(),
-        Value::Bool(true)
+        r.call(&seen, &Js::Undefined, &[id]).unwrap(),
+        Js::Bool(true)
     ));
     let predicate = r.global_binding("isFinitePositiveNumber").unwrap();
     for (number, expected) in [
@@ -384,24 +387,24 @@ fn production_import_registry_uses_real_helpers_and_rejects_unknown_names() {
         (1.25, true),
     ] {
         assert!(
-            matches!(r.call(&predicate, &Value::Undefined, &[Value::Number(number)]).unwrap(), Value::Bool(value) if value==expected)
+            matches!(r.call(&predicate, &Js::Undefined, &[Js::Number(number)]).unwrap(), Js::Bool(value) if value==expected)
         );
     }
     let object = r.new_object();
     let poison = r.native("toJSON", 0, |_, _, _| {
         panic!("strict numeric predicate must not inspect an object's toJSON")
     });
-    r.define_hidden(&object, PropKey::str("toJSON"), poison);
+    r.define_hidden(&object, Js::str("toJSON"), poison);
     for value in [
-        Value::Undefined,
-        Value::Null,
-        Value::Bool(true),
-        Value::str("1.25"),
+        Js::Undefined,
+        Js::Null,
+        Js::Bool(true),
+        Js::str("1.25"),
         object,
     ] {
         assert!(matches!(
-            r.call(&predicate, &Value::Undefined, &[value]).unwrap(),
-            Value::Bool(false)
+            r.call(&predicate, &Js::Undefined, &[value]).unwrap(),
+            Js::Bool(false)
         ));
     }
 }
@@ -410,37 +413,37 @@ fn production_import_registry_uses_real_helpers_and_rejects_unknown_names() {
 fn production_import_map_series_awaits_values_and_callbacks_and_reads_live_length() {
     let (mut r, rt) = production_realm();
     let series = r.global_binding("mapSeries").unwrap();
-    let promised = r.settled_promise(Ok(Value::Number(3.0)));
-    let input = r.new_array(vec![Value::Number(2.0), promised]);
+    let promised = r.settled_promise(Ok(Js::Number(3.0)));
+    let input = r.new_array(vec![Js::Number(2.0), promised]);
     let expected_input = input.clone();
     let receiver = r.new_object();
     let expected_receiver = receiver.clone();
     let trace = Rc::new(std::cell::RefCell::new(Vec::new()));
     let recorded = trace.clone();
     let callback = r.native("serial-callback", 3, move |r, this, args| {
-        assert!(this.strict_equal(&expected_receiver));
-        assert!(args[2].strict_equal(&expected_input));
-        let value = args[0].as_number().unwrap();
-        let index = args[1].as_number().unwrap();
+        assert!(this.strict_equals(&expected_receiver));
+        assert!(args[2].strict_equals(&expected_input));
+        let value = args[0].as_f64().unwrap();
+        let index = args[1].as_f64().unwrap();
         recorded.borrow_mut().push(("start", value));
         if index == 0.0 {
-            r.call_method(&expected_input, "push", &[Value::Number(4.0)])?;
+            r.call_method(&expected_input, "push", &[Js::Number(4.0)])?;
         }
         let sleep = r.runtime().sleep(10);
         let ended = recorded.clone();
         Ok(r.spawn_value(Box::pin(async move {
             sleep.await.unwrap();
             ended.borrow_mut().push(("end", value));
-            Ok(Value::Number(value * 10.0))
+            Ok(Js::Number(value * 10.0))
         })))
     });
     let output = r
-        .call(&series, &Value::Undefined, &[input, callback, receiver])
+        .call(&series, &Js::Undefined, &[input, callback, receiver])
         .unwrap();
     rt.drain();
-    let cell = output.promise().unwrap();
-    let result = match &cell.borrow().state {
-        PromiseState::Fulfilled(v) => v.clone(),
+    let Js::Promise(cell) = output else { panic!("expected promise") };
+    let result = match cell.result() {
+        Some(Ok(v)) => v.clone(),
         _ => panic!("serial result must fulfill"),
     };
     assert_eq!(
@@ -454,10 +457,10 @@ fn production_import_map_series_awaits_values_and_callbacks_and_reads_live_lengt
             ("end", 4.0)
         ]
     );
-    assert_eq!(r.get_str(&result, "length").unwrap().as_number(), Some(3.0));
+    assert_eq!(r.get_str(&result, "length").unwrap().as_f64(), Some(3.0));
     for (i, n) in [20.0, 30.0, 40.0].into_iter().enumerate() {
         assert_eq!(
-            r.get_str(&result, &i.to_string()).unwrap().as_number(),
+            r.get_str(&result, &i.to_string()).unwrap().as_f64(),
             Some(n)
         );
     }
@@ -473,18 +476,18 @@ fn production_import_map_series_retains_module_receiver_and_original_rejection()
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = calls.clone();
     let callback = r.native("reject", 1, move |r, this, _| {
-        assert!(r.get_str(this, "mapSeries")?.strict_equal(&expected_series));
+        assert!(r.get_str(this, "mapSeries")?.strict_equals(&expected_series));
         observed.set(observed.get() + 1);
         Ok(r.settled_promise(Err(thrown.clone())))
     });
-    let input = r.new_array(vec![Value::Number(1.0), Value::Number(2.0)]);
+    let input = r.new_array(vec![Js::Number(1.0), Js::Number(2.0)]);
     let output = r
-        .call(&series, &Value::Undefined, &[input, callback])
+        .call(&series, &Js::Undefined, &[input, callback])
         .unwrap();
     rt.drain();
-    let cell = output.promise().unwrap();
-    match &cell.borrow().state {
-        PromiseState::Rejected(error) => assert!(error.strict_equal(&original)),
+    let Js::Promise(cell) = output else { panic!("expected promise") };
+    match cell.result() {
+        Some(Err(error)) => assert!(error.value.strict_equals(&original.value)),
         _ => panic!("serial error must reject"),
     };
     assert_eq!(calls.get(), 1, "no later callback after rejection");
@@ -495,13 +498,13 @@ fn production_import_map_series_resolves_callback_call_before_awaited_item() {
     let (mut r, rt) = production_realm();
     let series = r.global_binding("mapSeries").unwrap();
     let trace = Rc::new(std::cell::RefCell::new(Vec::new()));
-    let input = r.object_from(vec![("length", Value::Number(1.0))]);
+    let input = r.object_from(vec![("length", Js::Number(1.0))]);
     let item_trace = trace.clone();
     let item = r.native("item", 0, move |r, _, _| {
         item_trace.borrow_mut().push("get item");
-        Ok(r.settled_promise(Ok(Value::Number(2.0))))
+        Ok(r.settled_promise(Ok(Js::Number(2.0))))
     });
-    r.define_getter(&input, PropKey::str("0"), item);
+    r.define_getter(&input, Js::str("0"), item);
     let callback = r.native("callback", 1, |_, _, _| {
         panic!("own call must replace direct invocation")
     });
@@ -510,33 +513,33 @@ fn production_import_map_series_resolves_callback_call_before_awaited_item() {
     let expected_receiver = receiver.clone();
     let call_trace = trace.clone();
     let own_call = r.native("own call", 4, move |_, this, args| {
-        assert!(this.strict_equal(&expected_callback));
-        assert!(args[0].strict_equal(&expected_receiver));
-        assert_eq!(args[1].as_number(), Some(2.0));
-        assert_eq!(args[2].as_number(), Some(0.0));
+        assert!(this.strict_equals(&expected_callback));
+        assert!(args[0].strict_equals(&expected_receiver));
+        assert_eq!(args[1].as_f64(), Some(2.0));
+        assert_eq!(args[2].as_f64(), Some(0.0));
         call_trace.borrow_mut().push("own call");
-        Ok(Value::Number(20.0))
+        Ok(Js::Number(20.0))
     });
     let getter_trace = trace.clone();
     let getter = r.native("get call", 0, move |_, _, _| {
         getter_trace.borrow_mut().push("get callback.call");
         Ok(own_call.clone())
     });
-    r.define_getter(&callback, PropKey::str("call"), getter);
+    r.define_getter(&callback, Js::str("call"), getter);
     let output = r
-        .call(&series, &Value::Undefined, &[input, callback, receiver])
+        .call(&series, &Js::Undefined, &[input, callback, receiver])
         .unwrap();
     rt.drain();
     assert_eq!(
         *trace.borrow(),
         ["get callback.call", "get item", "own call"]
     );
-    let cell = output.promise().unwrap();
-    let result = match &cell.borrow().state {
-        PromiseState::Fulfilled(v) => v.clone(),
+    let Js::Promise(cell) = output else { panic!("expected promise") };
+    let result = match cell.result() {
+        Some(Ok(v)) => v.clone(),
         _ => panic!("own call result must fulfill"),
     };
-    assert_eq!(r.get_str(&result, "0").unwrap().as_number(), Some(20.0));
+    assert_eq!(r.get_str(&result, "0").unwrap().as_f64(), Some(20.0));
 }
 
 #[test]
@@ -545,42 +548,42 @@ fn production_seam_history_mapper_preserves_the_throw_without_inspecting_it() {
         let (mut r, _) = production_realm();
         let reads = Rc::new(std::cell::RefCell::new(Vec::new()));
         let original = if kind == "error" {
-            r.error_of("RangeError", "authored callback throw")
+            r.error_of("RangeError", "authored callback throw").value
         } else {
             r.new_object()
         };
         let coercions = reads.clone();
         let to_string = r.native("toString", 0, move |_, _, _| {
             coercions.borrow_mut().push("toString");
-            Ok(Value::str("authored ordinary throw"))
+            Ok(Js::str("authored ordinary throw"))
         });
-        r.define_hidden(&original, PropKey::str("toString"), to_string);
+        r.define_hidden(&original, Js::str("toString"), to_string);
         for name in ["message", "code", "response"] {
             let getters = reads.clone();
             let getter = r.native("spy", 0, move |_, _, _| {
                 getters.borrow_mut().push(name);
                 Ok(if name == "message" {
-                    Value::str("authored callback throw")
+                    Js::str("authored callback throw")
                 } else {
-                    Value::Undefined
+                    Js::Undefined
                 })
             });
-            r.define_getter(&original, PropKey::str(name), getter);
+            r.define_getter(&original, Js::str(name), getter);
         }
         let thrown = original.clone();
         let calls = Rc::new(std::cell::Cell::new(0));
         let invoked = calls.clone();
         let resolver = r.native("throwing resolver", 1, move |_, _, _| {
             invoked.set(invoked.get() + 1);
-            Err(thrown.clone())
+            Err(Thrown::new(thrown.clone()))
         });
         let row=r.from_serde(&serde_json::json!({"order":{"oid":1,"coin":"BTC","timestamp":123,"side":"B","origSz":"1","sz":"0","orderType":"Limit","limitPx":"10"},"status":"filled","statusTimestamp":124}));
         let mapper = r.global_binding("mapHyperliquidHistoricalOrder").unwrap();
         let error = r
-            .call(&mapper, &Value::Undefined, &[row, resolver])
+            .call(&mapper, &Js::Undefined, &[row, resolver])
             .unwrap_err();
         assert!(
-            error.strict_equal(&original),
+            error.value.strict_equals(&original),
             "original thrown object identity: {kind}"
         );
         assert_eq!(calls.get(), 1, "the real resolver must execute");
@@ -601,17 +604,17 @@ fn production_seam_history_imports_execute_the_maintained_helpers() {
         make_row("filled", "0", 1699999999000)
     ]));
     let collapse = r.global_binding("collapseHyperliquidOrderHistory").unwrap();
-    let rows = r.call(&collapse, &Value::Undefined, &[input]).unwrap();
-    assert_eq!(r.get_str(&rows, "length").unwrap().as_number(), Some(1.0));
+    let rows = r.call(&collapse, &Js::Undefined, &[input]).unwrap();
+    assert_eq!(r.get_str(&rows, "length").unwrap().as_f64(), Some(1.0));
     let row = r.get_str(&rows, "0").unwrap();
     let resolve = r.native("resolve symbol", 1, |_, this, args| {
-        assert!(matches!(this, Value::Undefined));
-        assert!(args[0].strict_equal(&Value::str("BTC")));
-        Ok(Value::str("BTC-PERP"))
+        assert!(matches!(this, Js::Undefined));
+        assert!(args[0].strict_equals(&Js::str("BTC")));
+        Ok(Js::str("BTC-PERP"))
     });
     let mapper = r.global_binding("mapHyperliquidHistoricalOrder").unwrap();
     let mapped = r
-        .call(&mapper, &Value::Undefined, &[row, resolve.clone()])
+        .call(&mapper, &Js::Undefined, &[row, resolve.clone()])
         .unwrap();
     let order: safe_cex_types::HistoricalOrder = r.to_typed(&mapped).unwrap();
     assert_eq!(order.id, "77");
@@ -625,12 +628,12 @@ fn production_seam_history_imports_execute_the_maintained_helpers() {
     let derived = r
         .call(
             &derive,
-            &Value::Undefined,
-            &[fills, resolve, Value::str("authored-account")],
+            &Js::Undefined,
+            &[fills, resolve, Js::str("authored-account")],
         )
         .unwrap();
     assert_eq!(
-        r.get_str(&derived, "length").unwrap().as_number(),
+        r.get_str(&derived, "length").unwrap().as_f64(),
         Some(1.0)
     );
     let entry = r.get_str(&derived, "0").unwrap();
@@ -643,7 +646,7 @@ fn production_seam_history_imports_execute_the_maintained_helpers() {
         ("closedTime", 1699999999000.0),
     ] {
         assert_eq!(
-            r.get_str(&entry, key).unwrap().as_number(),
+            r.get_str(&entry, key).unwrap().as_f64(),
             Some(expected),
             "{key}"
         );
@@ -672,17 +675,17 @@ fn production_seam_history_imports_execute_the_maintained_helpers() {
         ("denied", false),
     ] {
         assert!(
-            matches!(r.call(&classifier,&Value::Undefined,&[Value::str(message)]).unwrap(),Value::Bool(v) if v==expected)
+            matches!(r.call(&classifier,&Js::Undefined,&[Js::str(message)]).unwrap(),Js::Bool(v) if v==expected)
         );
     }
     let object = r.new_object();
     let poison = r.native("toString", 0, |_, _, _| {
         panic!("terminal classifier must not coerce non-strings")
     });
-    r.define_hidden(&object, PropKey::str("toString"), poison);
+    r.define_hidden(&object, Js::str("toString"), poison);
     assert!(matches!(
-        r.call(&classifier, &Value::Undefined, &[object]).unwrap(),
-        Value::Bool(false)
+        r.call(&classifier, &Js::Undefined, &[object]).unwrap(),
+        Js::Bool(false)
     ));
 }
 
@@ -706,7 +709,7 @@ fn production_seam_timeout_leads_are_actual_class_properties() {
         ("SPOT_MARKETS_LOAD_TIMEOUT_MS", 6000.0),
     ] {
         assert_eq!(
-            r.get_str(&class, name).unwrap().as_number(),
+            r.get_str(&class, name).unwrap().as_f64(),
             Some(expected),
             "{name}"
         );
@@ -738,42 +741,42 @@ fn production_seam_browser_window_guards_refuse_before_browser_globals() {
         let output = r.spawn_value(Box::pin(async move {
             use crate::browser_approval_flows as browser;
             match mode {
-                0 => browser::agent_switch_to_correct_network(&mut host, &Value::Bool(false)).await,
+                0 => browser::agent_switch_to_correct_network(&mut host, &Js::Bool(false)).await,
                 1 => {
-                    browser::builder_switch_to_correct_network(&mut host, &Value::Bool(false)).await
+                    browser::builder_switch_to_correct_network(&mut host, &Js::Bool(false)).await
                 }
                 2 => {
                     browser::create_agent_wallet_with_browser_wallet(
                         &mut host,
-                        &Value::Undefined,
-                        &Value::Bool(false),
-                        &Value::Undefined,
+                        &Js::Undefined,
+                        &Js::Bool(false),
+                        &Js::Undefined,
                     )
                     .await
                 }
                 _ => {
                     browser::approve_builder_fee_with_browser_wallet(
                         &mut host,
-                        &Value::Undefined,
-                        &Value::Bool(false),
-                        &Value::str("0x1111111111111111111111111111111111111111"),
-                        &Value::str("0.001%"),
+                        &Js::Undefined,
+                        &Js::Bool(false),
+                        &Js::str("0x1111111111111111111111111111111111111111"),
+                        &Js::str("0.001%"),
                     )
                     .await
                 }
             }
         }));
         rt.drain();
-        let cell = output.promise().unwrap();
-        let result = match &cell.borrow().state {
-            PromiseState::Fulfilled(v) => v.clone(),
+        let Js::Promise(cell) = output else { panic!("expected promise") };
+        let result = match cell.result() {
+            Some(Ok(v)) => v.clone(),
             _ => panic!(
                 "native missing-window guard must return its explicit wallet refusal: mode{mode}"
             ),
         };
         assert!(matches!(
             r.get_str(&result, "success").unwrap(),
-            Value::Bool(false)
+            Js::Bool(false)
         ));
         let field = if mode < 2 { "error" } else { "message" };
         let message = r.get_str(&result, field).unwrap();
@@ -785,9 +788,9 @@ fn production_seam_browser_window_guards_refuse_before_browser_globals() {
 fn market_host_iterator_rejects_non_callable_collection_override() {
     use crate::market_bootstrap::MarketBootstrapHost;
     let (mut r, _) = realm();
-    let array = r.new_array(vec![Value::Number(1.0)]);
-    let key = PropKey::Symbol(r.intrinsics().symbol_iterator.clone());
-    r.define(&array, key, Value::Null).unwrap();
+    let array = r.new_array(vec![Js::Number(1.0)]);
+    let key = Js::SymbolIterator;
+    r.define(&array, key, Js::Null).unwrap();
     assert!(
         MarketBootstrapHost::iterator(&mut r, &array).is_err(),
         "actual market host must reject a disabled collection iterator"
@@ -798,19 +801,19 @@ fn market_host_iterator_rejects_non_callable_collection_override() {
 fn market_host_iterator_calls_override_even_with_builtin_function_name() {
     use crate::market_bootstrap::MarketBootstrapHost;
     let (mut r, _) = realm();
-    let array = r.new_array(vec![Value::Number(1.0)]);
-    let alternative = r.new_array(vec![Value::Number(42.0)]);
+    let array = r.new_array(vec![Js::Number(1.0)]);
+    let alternative = r.new_array(vec![Js::Number(42.0)]);
     let override_method = r.native("[Symbol.iterator]", 0, move |r, _, _| {
         r.get_iterator(&alternative)
     });
-    let key = PropKey::Symbol(r.intrinsics().symbol_iterator.clone());
+    let key = Js::SymbolIterator;
     r.define(&array, key, override_method).unwrap();
     let iterator = MarketBootstrapHost::iterator(&mut r, &array).unwrap();
     let value = MarketBootstrapHost::next(&mut r, &iterator)
         .unwrap()
         .unwrap();
     assert!(
-        value.strict_equal(&Value::Number(42.0)),
+        value.strict_equals(&Js::Number(42.0)),
         "actual market host must call the original iterator method regardless of its name"
     );
 }
@@ -820,8 +823,8 @@ fn market_host_iterator_rejects_primitive_iterator_before_first_step() {
     use crate::market_bootstrap::MarketBootstrapHost;
     let (mut r, _) = realm();
     let array = r.new_array(vec![]);
-    let override_method = r.native("custom", 0, |_, _, _| Ok(Value::Number(17.0)));
-    let key = PropKey::Symbol(r.intrinsics().symbol_iterator.clone());
+    let override_method = r.native("custom", 0, |_, _, _| Ok(Js::Number(17.0)));
+    let key = Js::SymbolIterator;
     r.define(&array, key, override_method).unwrap();
     assert!(
         MarketBootstrapHost::iterator(&mut r, &array).is_err(),
@@ -850,34 +853,34 @@ fn production_builder_import_preserves_configured_value_and_lazy_default() {
     let address = "0x1111111111111111111111111111111111111111";
     let builders = [
         r.object_from(vec![
-            ("address", Value::str(address)),
-            ("feeTenthsBps", Value::str("10")),
+            ("address", Js::str(address)),
+            ("feeTenthsBps", Js::str("10")),
         ]),
-        r.object_from(vec![("feeTenthsBps", Value::Number(7.))]),
-        Value::Bool(false),
-        Value::Number(17.),
-        Value::str("raw"),
+        r.object_from(vec![("feeTenthsBps", Js::Number(7.))]),
+        Js::Bool(false),
+        Js::Number(17.),
+        Js::str("raw"),
     ];
     for (index, builder) in builders.into_iter().enumerate() {
         let options = r.object_from(vec![
             ("hyperliquidBuilder", builder.clone()),
-            ("testnet", Value::Bool(true)),
+            ("testnet", Js::Bool(true)),
         ]);
         let reads = Rc::new(std::cell::Cell::new(0));
         let count = reads.clone();
         let getter = r.native("get testnet", 0, move |_, _, _| {
             count.set(count.get() + 1);
-            Ok(Value::Bool(true))
+            Ok(Js::Bool(true))
         });
-        r.define_getter(&options, PropKey::str("testnet"), getter);
-        let result = r.call(&imported, &Value::Undefined, &[options]).unwrap();
+        r.define_getter(&options, Js::str("testnet"), getter);
+        let result = r.call(&imported, &Js::Undefined, &[options]).unwrap();
         assert_eq!(
             reads.get(),
             0,
             "configured builder must skip the native default getter"
         );
         assert!(
-            result.strict_equal(&builder),
+            result.strict_equals(&builder),
             "configured builder identity/type case {index}"
         );
         assert_eq!(
@@ -912,23 +915,23 @@ fn production_builder_import_uses_fresh_nullish_defaults() {
     let (mut r, _) = production_realm();
     let imported = r.global_binding("resolveHyperliquidBuilder").unwrap();
     let inputs = [
-        Value::Undefined,
-        Value::Null,
+        Js::Undefined,
+        Js::Null,
         r.new_object(),
-        r.object_from(vec![("testnet", Value::Bool(true))]),
+        r.object_from(vec![("testnet", Js::Bool(true))]),
         r.object_from(vec![
-            ("testnet", Value::Bool(true)),
-            ("hyperliquidBuilder", Value::Null),
+            ("testnet", Js::Bool(true)),
+            ("hyperliquidBuilder", Js::Null),
         ]),
     ];
     for (index, options) in inputs.into_iter().enumerate() {
         let result = r
-            .call(&imported, &Value::Undefined, std::slice::from_ref(&options))
+            .call(&imported, &Js::Undefined, std::slice::from_ref(&options))
             .unwrap();
-        let second = r.call(&imported, &Value::Undefined, &[options]).unwrap();
-        assert!(!result.strict_equal(&second), "fresh default case {index}");
+        let second = r.call(&imported, &Js::Undefined, &[options]).unwrap();
+        assert!(!result.strict_equals(&second), "fresh default case {index}");
         let fee = r.get_str(&result, "feeTenthsBps").unwrap();
-        assert_eq!(fee.as_number().unwrap().to_bits(), 10f64.to_bits());
+        assert_eq!(fee.as_f64().unwrap().to_bits(), 10f64.to_bits());
         assert_eq!(r.to_serde(&result).unwrap(), source[index]["result"]);
         assert_eq!(source[index]["fresh"], true);
     }
@@ -944,17 +947,17 @@ fn production_builder_consumer_keeps_the_fee_type_in_the_action() {
     let builder = r.object_from(vec![
         (
             "address",
-            Value::str("0xABCDEF1111111111111111111111111111111111"),
+            Js::str("0xABCDEF1111111111111111111111111111111111"),
         ),
-        ("feeTenthsBps", Value::str("10")),
+        ("feeTenthsBps", Js::str("10")),
     ]);
     let options = r.object_from(vec![
-        ("applicationId", Value::str("account")),
+        ("applicationId", Js::str("account")),
         ("hyperliquidBuilder", builder),
     ]);
     let instance = r.object_from(vec![
         ("options", options),
-        ("_builderFeeApproved", Value::Bool(true)),
+        ("_builderFeeApproved", Js::Bool(true)),
     ]);
     let mut future = Box::pin(crate::order_request_leaves::get_builder_info(
         &mut r, &instance,
@@ -968,7 +971,7 @@ fn production_builder_consumer_keeps_the_fee_type_in_the_action() {
     drop(future);
     let fee = r.get_str(&info, "f").unwrap();
     assert!(
-        fee.strict_equal(&Value::str("10")),
+        fee.strict_equals(&Js::str("10")),
         "actual builder action must retain the source string fee"
     );
     let address = r.get_str(&info, "b").unwrap();
@@ -979,10 +982,10 @@ fn production_builder_consumer_keeps_the_fee_type_in_the_action() {
     let action_factory = r.global_binding("orderWiresToOrderAction").unwrap();
     let wires = r.new_array(vec![]);
     let action = r
-        .call(&action_factory, &Value::Undefined, &[wires, info.clone()])
+        .call(&action_factory, &Js::Undefined, &[wires, info.clone()])
         .unwrap();
     let actual = r.get_str(&action, "builder").unwrap();
-    assert!(actual.strict_equal(&info));
+    assert!(actual.strict_equals(&info));
     let encoded = r.to_js_json(&action).unwrap();
     let safe_cex_num::JsJsonValue::Object(fields) = encoded else {
         panic!("action object");
@@ -1026,33 +1029,33 @@ fn production_order_wire_import_keeps_native_nonfinite_fields() {
     .enumerate()
     {
         let trigger = r.object_from(vec![
-            ("isMarket", Value::Bool(true)),
-            ("triggerPx", Value::Number(number)),
-            ("tpsl", Value::str("sl")),
+            ("isMarket", Js::Bool(true)),
+            ("triggerPx", Js::Number(number)),
+            ("tpsl", Js::str("sl")),
         ]);
         let order_type = r.object_from(vec![("trigger", trigger)]);
         let order = r.object_from(vec![
-            ("is_buy", Value::Bool(true)),
-            ("limit_px", Value::Number(number)),
-            ("sz", Value::Number(number)),
-            ("reduce_only", Value::Bool(false)),
+            ("is_buy", Js::Bool(true)),
+            ("limit_px", Js::Number(number)),
+            ("sz", Js::Number(number)),
+            ("reduce_only", Js::Bool(false)),
             ("order_type", order_type),
         ]);
         let wire = r
-            .call(&imported, &Value::Undefined, &[order, Value::Number(7.)])
+            .call(&imported, &Js::Undefined, &[order, Js::Number(7.)])
             .unwrap_or_else(|error| {
                 panic!("native wire case {index}: {}", message(&mut r, &error))
             });
-        assert_eq!(r.get_str(&wire, "a").unwrap().as_number(), Some(7.));
+        assert_eq!(r.get_str(&wire, "a").unwrap().as_f64(), Some(7.));
         assert!(
             r.get_str(&wire, "b")
                 .unwrap()
-                .strict_equal(&Value::Bool(true))
+                .strict_equals(&Js::Bool(true))
         );
         assert!(
             r.get_str(&wire, "r")
                 .unwrap()
-                .strict_equal(&Value::Bool(false))
+                .strict_equals(&Js::Bool(false))
         );
         let expected = ["NaN", "Infinity", "-Infinity", "0", "60000.125", "1e+3"][index];
         for field in ["p", "s"] {
@@ -1075,29 +1078,29 @@ fn production_order_wire_import_keeps_native_nonfinite_fields() {
 fn production_order_wire_import_retains_undefined_and_limit_alias() {
     let (mut r, _) = production_realm();
     let imported = r.global_binding("orderRequestToOrderWire").unwrap();
-    let limit = r.object_from(vec![("tif", Value::str("Gtc"))]);
+    let limit = r.object_from(vec![("tif", Js::str("Gtc"))]);
     let order_type = r.object_from(vec![("limit", limit.clone())]);
     let order = r.object_from(vec![
-        ("limit_px", Value::Number(11.25)),
-        ("sz", Value::Number(3.5)),
+        ("limit_px", Js::Number(11.25)),
+        ("sz", Js::Number(3.5)),
         ("order_type", order_type),
-        ("cloid", Value::Null),
+        ("cloid", Js::Null),
     ]);
     let wire = r
-        .call(&imported, &Value::Undefined, &[order, Value::Undefined])
+        .call(&imported, &Js::Undefined, &[order, Js::Undefined])
         .unwrap();
     assert_eq!(r.own_entries(&wire).unwrap().len(), 7);
     for key in ["a", "b", "r"] {
         assert!(
-            matches!(r.get_str(&wire, key).unwrap(), Value::Undefined),
+            matches!(r.get_str(&wire, key).unwrap(), Js::Undefined),
             "native own-undefined {key}"
         );
     }
-    assert!(matches!(r.get_str(&wire, "c").unwrap(), Value::Null));
+    assert!(matches!(r.get_str(&wire, "c").unwrap(), Js::Null));
     let order_type = r.get_str(&wire, "t").unwrap();
     let retained = r.get_str(&order_type, "limit").unwrap();
-    assert!(retained.strict_equal(&limit));
-    r.set_str(&limit, "tif", Value::str("Alo")).unwrap();
+    assert!(retained.strict_equals(&limit));
+    r.set_str(&limit, "tif", Js::str("Alo")).unwrap();
     let observed = r.get_str(&retained, "tif").unwrap();
     assert_eq!(text(&mut r, &observed), "Alo");
 }

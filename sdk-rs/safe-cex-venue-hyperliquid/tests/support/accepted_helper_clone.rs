@@ -1,5 +1,6 @@
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use super::start;
-use crate::realm::{Realm, Value, promise::settle, test_runtime::TestRuntime};
+use crate::host::{ test_runtime::TestRuntime};
 use std::{
     future::Future,
     pin::Pin,
@@ -23,8 +24,9 @@ impl Wake for Wakes {
 fn helper_observer_clone_shares_pending_completion_and_original_values() {
     for rejected in [false, true] {
         let runtime = Rc::new(TestRuntime::default());
-        let mut realm = Realm::new(runtime.clone());
-        let (promise, cell) = realm.new_promise();
+        let mut realm = crate::host::test_runtime::host(runtime.clone());
+        let cell = safe_cex_exchange::js_runtime::promise::Promise::pending(&realm.runtime());
+        let promise = Js::Promise(cell.clone());
         let mut original = start(&realm, realm.await_value(promise));
         let mut cloned = original.clone();
         assert!(
@@ -45,11 +47,10 @@ fn helper_observer_clone_shares_pending_completion_and_original_values() {
                 .poll(&mut Context::from_waker(&second_waker))
                 .is_pending()
         );
-        let expected = realm.object_from(vec![("marker", Value::str("native result"))]);
-        settle(
-            &cell,
+        let expected = realm.object_from(vec![("marker", Js::str("native result"))]);
+        cell.settle(
             if rejected {
-                Err(expected.clone())
+                Err(Thrown::new(expected.clone()))
             } else {
                 Ok(expected.clone())
             },
@@ -65,13 +66,13 @@ fn helper_observer_clone_shares_pending_completion_and_original_values() {
             };
             let value = match result {
                 Ok(value) if !rejected => value,
-                Err(value) if rejected => value,
+                Err(value) if rejected => value.value,
                 _ => panic!("observer changed fulfillment/rejection identity"),
             };
-            assert!(value.strict_equal(&expected));
+            assert!(value.strict_equals(&expected));
         }
         realm
-            .set_str(&expected, "marker", Value::str("retained identity"))
+            .set_str(&expected, "marker", Js::str("retained identity"))
             .unwrap();
         let mut late_clone = cloned.clone();
         assert!(Rc::ptr_eq(&cloned.state, &late_clone.state));
@@ -82,13 +83,13 @@ fn helper_observer_clone_shares_pending_completion_and_original_values() {
         };
         let value = match result {
             Ok(value) if !rejected => value,
-            Err(value) if rejected => value,
+            Err(value) if rejected => value.value,
             _ => panic!("late Clone changed fulfillment/rejection identity"),
         };
-        assert!(value.strict_equal(&expected));
+        assert!(value.strict_equals(&expected));
         let marker = realm.get_str(&value, "marker").unwrap();
         assert_eq!(
-            marker.as_units().unwrap(),
+            marker.as_str().unwrap().as_ref(),
             "retained identity".encode_utf16().collect::<Vec<_>>()
         );
     }

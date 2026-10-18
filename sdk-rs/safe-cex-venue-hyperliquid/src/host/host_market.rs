@@ -1,6 +1,7 @@
 //! Scalar-market and fast-asset-context host primitives for the imported
 //! market helpers (price precision, volume/OI parsing, fastAssetCtxs decode).
-use super::{Realm, ccxt, value::Value};
+use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
+use super::Host;
 use crate::{
     market_helpers::{FastAssetCtxHost, MarketScalarHost, PreciseComparison},
     spot_json::JsString,
@@ -48,34 +49,34 @@ pub(crate) fn compare_decimal(a: &str, b: &str) -> Option<Ordering> {
     })
 }
 
-impl MarketScalarHost for Realm {
-    fn number_value(&self, value: &Value) -> Option<f64> {
-        value.as_number()
+impl MarketScalarHost for Host {
+    fn number_value(&self, value: &Js) -> Option<f64> {
+        value.as_f64()
     }
-    fn value_by_key(&mut self, value: &Value, key: &str) -> Result<Value, Value> {
+    fn value_by_key(&mut self, value: &Js, key: &str) -> Result<Js, Thrown> {
         let v = self.import("v")?;
-        Realm::call(
+        Host::call(
             self,
             &v,
-            &Value::Undefined,
-            &[value.clone(), Value::str(key)],
+            &Js::Undefined,
+            &[value.clone(), Js::str(key)],
         )
     }
-    fn parse_float(&mut self, text: &[u16]) -> Result<f64, Value> {
+    fn parse_float(&mut self, text: &[u16]) -> Result<f64, Thrown> {
         Ok(safe_cex_num::parse_float(&String::from_utf16_lossy(text)))
     }
-    fn lowercase(&mut self, text: &[u16]) -> Result<JsString, Value> {
+    fn lowercase(&mut self, text: &[u16]) -> Result<JsString, Thrown> {
         Ok(units(&String::from_utf16_lossy(text).to_lowercase()))
     }
-    fn number_to_string(&mut self, number: f64) -> Result<Option<JsString>, Value> {
-        Ok(Some(units(&ccxt::number_to_string(number))))
+    fn number_to_string(&mut self, number: f64) -> Result<Option<JsString>, Thrown> {
+        Ok(Some(units(&safe_cex_num::js_number_string(number))))
     }
     fn precise_compare(
         &mut self,
         kind: PreciseComparison,
         left: &[u16],
         right: &str,
-    ) -> Result<bool, Value> {
+    ) -> Result<bool, Thrown> {
         let left = String::from_utf16_lossy(left);
         let order = compare_decimal(&left, right)
             .ok_or_else(|| self.error(&format!("Precise: invalid number {left}")))?;
@@ -86,8 +87,8 @@ impl MarketScalarHost for Realm {
         })
     }
     /// ccxt parseToInt: parseInt(parseFloat(numberToString(n))).
-    fn parse_to_int(&mut self, number: f64) -> Result<f64, Value> {
-        let float = safe_cex_num::parse_float(&ccxt::number_to_string(number));
+    fn parse_to_int(&mut self, number: f64) -> Result<f64, Thrown> {
+        let float = safe_cex_num::parse_float(&safe_cex_num::js_number_string(number));
         Ok(safe_cex_num::parse_int(
             &safe_cex_num::js_number_string(float),
             None,
@@ -95,8 +96,8 @@ impl MarketScalarHost for Realm {
     }
 }
 
-impl FastAssetCtxHost for Realm {
-    fn atob(&mut self, text: &[u16]) -> Result<JsString, Value> {
+impl FastAssetCtxHost for Host {
+    fn atob(&mut self, text: &[u16]) -> Result<JsString, Thrown> {
         use base64::{
             Engine, alphabet,
             engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
@@ -119,7 +120,7 @@ impl FastAssetCtxHost for Realm {
         // atob yields a binary string: one code unit per byte.
         Ok(JsString(bytes.into_iter().map(u16::from).collect()))
     }
-    fn inflate_raw(&mut self, compressed: &[u8]) -> Result<Vec<u8>, Value> {
+    fn inflate_raw(&mut self, compressed: &[u8]) -> Result<Vec<u8>, Thrown> {
         use std::io::Read;
         let mut out = vec![];
         flate2::read::DeflateDecoder::new(compressed)
@@ -127,7 +128,7 @@ impl FastAssetCtxHost for Realm {
             .map_err(|e| self.error(&format!("invalid raw deflate data: {e}")))?;
         Ok(out)
     }
-    fn decode_text(&mut self, bytes: &[u8]) -> Result<JsString, Value> {
+    fn decode_text(&mut self, bytes: &[u8]) -> Result<JsString, Thrown> {
         let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
         Ok(units(&String::from_utf8_lossy(bytes)))
     }
