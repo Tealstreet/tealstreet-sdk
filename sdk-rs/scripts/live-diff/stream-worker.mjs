@@ -125,6 +125,8 @@ process.on('message', async (message) => {
       }
       // Include the trailing production Store throttle after the last frame.
       await new Promise((resolve) => realTimeout(resolve, 350));
+    } else if (message.method === 'cpuUsage') {
+      value = process.cpuUsage();
     } else if (message.method === 'drain') {
       observing = false;
       value = { outputs, state };

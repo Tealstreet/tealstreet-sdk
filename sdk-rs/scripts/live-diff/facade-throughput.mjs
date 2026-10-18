@@ -1,20 +1,39 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
-import {deserialize} from 'node:v8';
-const [beforePath, afterPath] = process.argv.slice(2);
-const before = JSON.parse(readFileSync(beforePath));
-const after = JSON.parse(readFileSync(afterPath));
-for (const report of [before, after]) {
-  assert.equal(report.nativeDrainVerified, true);
-  assert.equal(report.comparisonsProvisional, false);
-  assert.equal(report.capture.topics['markPriceUpdate'] > 0, true);
+import { readFileSync } from 'node:fs';
+import { deserialize } from 'node:v8';
+
+const paths = process.argv.slice(2);
+assert(
+  paths.length >= 6 && paths.length % 2 === 0,
+  'Supply interleaved control/candidate reports, at least three of each',
+);
+const reports = paths.map((path) => JSON.parse(readFileSync(path)));
+const before = reports.filter((_, i) => i % 2 === 0);
+const after = reports.filter((_, i) => i % 2 === 1);
+const runs = (group, implementation) =>
+  group.flatMap((report) => report.runs.filter((run) => run.implementation === implementation));
+const baseline = runs(before, 'rust');
+const candidate = runs(after, 'rust');
+assert.equal(baseline.length, before.length * 2);
+assert.equal(candidate.length, after.length * 2);
+for (const group of [before, after]) {
+  for (const report of group) {
+    assert.equal(report.addonSha256, group[0].addonSha256, 'Each side must use one immutable addon');
+    assert.equal(report.rustRevision, group[0].rustRevision);
+    assert.equal(report.nativeDrainVerified, true);
+    assert.equal(report.comparisonsProvisional, false);
+    assert(report.capture.topics.markPriceUpdate > 0);
+  }
 }
-const native = report => report.runs.filter(run => run.implementation === 'rust');
-const ts = report => report.runs.filter(run => run.implementation === 'ts');
-const baseline = native(before);
-const candidate = native(after);
-assert.equal(baseline.length, 2);
-assert.equal(candidate.length, 2);
+assert.notEqual(before[0].addonSha256, after[0].addonSha256, 'Control and candidate must be different artifacts');
+for (let i = 1; i < reports.length; i++) {
+  assert(
+    Date.parse(reports[i].at) >= Date.parse(reports[i - 1].at),
+    'Reports must be supplied in actual interleaved run order',
+  );
+}
+assert.equal(runs(before, 'ts').length, before.length * 2);
+assert.equal(runs(after, 'ts').length, after.length * 2);
 const expected = deserialize(readFileSync(baseline[0].fixture));
 for (const run of [...baseline, ...candidate]) {
   assert.equal(run.receipt.delivered, 570);
@@ -22,18 +41,63 @@ for (const run of [...baseline, ...candidate]) {
   assert.equal(run.receipt.inputHash, baseline[0].receipt.inputHash);
   assert.equal(run.receipt.applicationDrainVerified, true);
   assert.equal(run.receipt.nativeTransportVerified, true);
-  assert.deepStrictEqual(deserialize(readFileSync(run.fixture)), expected,
-    `${run.label} complete retained output/state must equal baseline without normalization`);
+  assert.deepStrictEqual(
+    deserialize(readFileSync(run.fixture)),
+    expected,
+    run.label + ' complete retained output/state must equal baseline without normalization',
+  );
 }
-const mean = runs => runs.reduce((sum, run) => sum + run.replayWallMs, 0) / runs.length;
-console.log(JSON.stringify({
-  identicalCompleteNativeOutput: true,
-  inputHash: baseline[0].receipt.inputHash,
-  baseline: baseline.map(run => run.replayWallMs),
-  candidate: candidate.map(run => run.replayWallMs),
-  tsBaseline: ts(before).map(run => run.replayWallMs),
-  tsCandidate: ts(after).map(run => run.replayWallMs),
-  speedup: mean(baseline) / mean(candidate),
-  candidateToTs: mean(candidate) / mean(ts(after)),
-  targetWithinTwoTimesTs: mean(candidate) <= 2 * mean(ts(after)),
-}, null, 2));
+for (const report of reports) {
+  for (const run of report.runs) {
+    assert(Number.isFinite(run.replayWallMs) && run.replayWallMs > 0);
+    for (const key of ['user', 'system', 'total']) {
+      assert(
+        Number.isFinite(run.replayCpuMs?.[key]) && run.replayCpuMs[key] >= 0,
+        run.label + ' missing or invalid process CPU delta: ' + key,
+      );
+    }
+    assert(run.replayCpuMs.total > 0);
+  }
+}
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+};
+const stats = (values) => ({
+  median: median(values),
+  min: Math.min(...values),
+  max: Math.max(...values),
+  samples: values,
+});
+const profile = (values) => ({
+  cpuMs: stats(values.map((run) => run.replayCpuMs.total)),
+  userCpuMs: stats(values.map((run) => run.replayCpuMs.user)),
+  systemCpuMs: stats(values.map((run) => run.replayCpuMs.system)),
+  wallMs: stats(values.map((run) => run.replayWallMs)),
+});
+const control = profile(baseline);
+const cache = profile(candidate);
+const tsBefore = profile(runs(before, 'ts'));
+const tsAfter = profile(runs(after, 'ts'));
+console.log(
+  JSON.stringify(
+    {
+      identicalCompleteNativeOutput: true,
+      inputHash: baseline[0].receipt.inputHash,
+      interleavedReportPaths: paths,
+      control,
+      cache,
+      tsBefore,
+      tsAfter,
+      cpuSpeedup: control.cpuMs.median / cache.cpuMs.median,
+      wallSpeedup: control.wallMs.median / cache.wallMs.median,
+      candidateToTsCpu: cache.cpuMs.median / tsAfter.cpuMs.median,
+      candidateToTsWall: cache.wallMs.median / tsAfter.wallMs.median,
+      targetCpuWithinTwoTimesTs: cache.cpuMs.median <= 2 * tsAfter.cpuMs.median,
+      targetWallWithinTwoTimesTs: cache.wallMs.median <= 2 * tsAfter.wallMs.median,
+    },
+    null,
+    2,
+  ),
+);

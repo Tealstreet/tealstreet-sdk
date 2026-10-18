@@ -6,7 +6,7 @@ The opaque native owner now contains an `Rc<Graph>` and `OnceCell<Js>`. Both
 native facade entrypoints use that capability. The cached object, its native
 resource, and its methods retain only `Graph`; the graph has no capability/cache
 back-reference. The existing graph remains the sole material Store authority.
-The balanced update helper downcasts the same capability and mutates its graph.
+The balance update helper downcasts the same capability and mutates its graph.
 
 Repeated facade access retains object/method identity and custom descriptors.
 Reset still replaces the source dictionaries and rows at the existing mutation
@@ -31,10 +31,15 @@ REST bodies, explicit source clocks, and per-dial physical/application drain.
 output/state drain RPC returns. Startup, shutdown and report comparison are
 outside this interval. Final command-barrier duration alone is not throughput.
 
-Both artifacts use the same unoptimized Node build flags, pinned toolchain,
-`CARGO_INCREMENTAL=0`, and one build job. Final paired replay is sequential with
-no local Cargo build active. Other lanes share the machine, so the measurements
-are observations under that shared load, not isolated benchmark distributions.
+The final artifacts use identical explicit release build flags, the pinned
+toolchain, `CARGO_INCREMENTAL=0`, and one build job. Control and candidate replay
+interleave A/B three times, with two TS and two native workers per report and no
+local Cargo build active. Per-worker `process.cpuUsage` deltas span the same
+feed-through-drain phase, including all native addon threads, and report user,
+system and total milliseconds. CPU time is primary under shared machine load;
+wall time is reported alongside it. Both report medians, minimum/maximum spread
+and all raw samples. Startup and shutdown CPU are excluded. These are observations
+under shared load, not isolated benchmark distributions.
 Complete retained native outputs and final states are compared without sorting,
 clock removal, tolerance, JSON conversion, or channel normalization.
 

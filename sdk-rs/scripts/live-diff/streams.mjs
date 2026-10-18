@@ -259,6 +259,7 @@ try {
   await Promise.all(replaySessions.map((s) => s.call('begin')));
   const results = await Promise.all(
     replaySessions.map(async (s) => {
+      const cpuBefore = await s.call('cpuUsage');
       const replayStarted = performance.now();
       const receipt = await s.relay.playControlled({
         advance: (at) => s.call('advance', [at]),
@@ -276,9 +277,15 @@ try {
       barrier.durationMs = performance.now() - barrierStart;
       const value = await s.call('drain');
       const replayWallMs = performance.now() - replayStarted;
+      const cpuAfter = await s.call('cpuUsage');
+      const replayCpuMs = {
+        user: (cpuAfter.user - cpuBefore.user) / 1000,
+        system: (cpuAfter.system - cpuBefore.system) / 1000,
+      };
+      replayCpuMs.total = replayCpuMs.user + replayCpuMs.system;
       await s.close();
       sessions.splice(sessions.indexOf(s), 1);
-      return { receipt, barrier, value, replayWallMs };
+      return { receipt, barrier, value, replayWallMs, replayCpuMs };
     }),
   );
   const receipts = results.map((r) => r.receipt),
@@ -300,6 +307,7 @@ try {
       receipt: receipts[i],
       startMs: s.startMs,
       replayWallMs: results[i].replayWallMs,
+      replayCpuMs: results[i].replayCpuMs,
       fixture,
       outputHash: hash(bytes),
       outputCount: values[i].outputs.length,
