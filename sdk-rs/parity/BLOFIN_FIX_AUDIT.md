@@ -18,8 +18,8 @@ dropped. This measures sibling survival, not arbitrary microtask-count parity.
 | --- | --- |
 | `BlofinExchange.fetchTickers` | ACCEPT assigned claim: `tickers`: actual SDK executes fetchTickersRaw/HTTP without polling the returned waiter; native last-price bits and one signed GET match the maintained class. #1050 owns the public eager prefix. |
 | `BlofinExchange.fetchTickersRaw` | ACCEPT assigned claim: `tickers`: the actual parent reaches this raw reader and GET; discarded waiter still completes the same request. It is awaited immediately by the already-eager SDK parent, not returned as an independently lazy public operation. |
-| `BlofinExchange.getOrFetchPositionMode` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; normal/trigger/batch read the new hedged mode after a legitimate worker acknowledgement; the old inline cache await sends net instead of long. |
-| `BlofinExchange.getOrFetchMarginType` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; TPSL and batch read the new isolated margin after a legitimate worker acknowledgement; the old inline cache await sends cross. |
+| `BlofinExchange.getOrFetchPositionMode` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; normal/trigger/batch read the new hedged mode after a legitimate worker acknowledgement; the old inline cache await sends net instead of long. |
+| `BlofinExchange.getOrFetchMarginType` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; TPSL and batch read the new isolated margin after a legitimate worker acknowledgement; the old inline cache await sends cross. |
 | `BlofinExchange.fetchLeverageForSymbol` | ACCEPT assigned claim: `leverage`: discarded SDK waiter still sends the source instId/marginMode and commits distinct buy/sell native leverage fields. Captured cached margin is cross on both sides. |
 | `BlofinExchange.fetchOrders` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
 | `BlofinExchange#fetchOrdersWithRetry` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
@@ -30,20 +30,20 @@ dropped. This measures sibling survival, not arbitrary microtask-count parity.
 | `BlofinExchange.fetchHistoricalOrders` | ACCEPT assigned claim: `history`: real SDK captures instId, begin/end and limit, performs the same signed GET and returns the same empty typed result; dropping the waiter still starts the request. |
 | `BlofinExchange.cancelOrders` | ACCEPT assigned claim: three `cancel-*` profiles: real SDK groups and runs the respective actual private helper; already-gone Store reconciliation and continuation survive waiter drop. This parent deliberately awaits family groups in source order. |
 | `BlofinExchange.setLeverage` | ACCEPT assigned claim: `set-leverage`: cached hedged/isolated reads lead to two source-ordered long/short POSTs, clamp 300 to 100, and commit the same native cache even after waiter drop. |
-| `BlofinExchange.placeOrder` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; normal, TPSL and trigger public Base capability routes send the source mode fields and IDs, including after the waiter is dropped. |
-| `BlofinExchange.placeOrders` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; mixed normal/TPSL/trigger Base capability route preserves source request order, modes and IDs after the pair of cached reads. |
+| `BlofinExchange.placeOrder` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; normal, TPSL and trigger public Base capability routes send the source mode fields and IDs, including after the waiter is dropped. |
+| `BlofinExchange.placeOrders` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; mixed normal/TPSL/trigger Base capability route preserves source request order, modes and IDs after the pair of cached reads. |
 | `BlofinExchange.changePositionMode` | FIXED #1050: actual SDK three call-prefix logs and confirmed Store mode match whole-class source. Source mapping from #1064 is preserved. |
 | `BlofinExchange.changeMarginType` | ACCEPT assigned claim: `margin`: actual SDK performs the POST then forced margin GET, with the same source confirmation and dropped-waiter continuation; the real TS producer returns void. |
-| `BlofinExchange#formatTriggerOrder` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; the trigger placement profile witnesses margin-before-position-mode suspension in the actual signed payload. |
+| `BlofinExchange#formatTriggerOrder` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; the trigger placement profile witnesses margin-before-position-mode suspension in the actual signed payload. |
 | `BlofinExchange#placeTriggerOrder` | ACCEPT assigned claim: trigger and mixed-batch cache-race profiles reach the real placement POST and t1 ID after the parent formatter resumes; dropping the public waiter does not prevent that POST. This helper is immediately awaited by the owned parent. |
-| `BlofinExchange#formatAlgoOrder` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; the TPSL placement profile witnesses position-mode-before-margin suspension in the actual signed payload. |
-| `BlofinExchange#formatNormalOrder` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; the normal placement profile witnesses margin-before-position-mode suspension in the actual signed payload. |
+| `BlofinExchange#formatAlgoOrder` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; the TPSL placement profile witnesses position-mode-before-margin suspension in the actual signed payload. |
+| `BlofinExchange#formatNormalOrder` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; the normal placement profile witnesses margin-before-position-mode suspension in the actual signed payload. |
 | `BlofinExchange#placeOrderBatch` | ACCEPT assigned claim: normal and mixed-batch cache-race profiles reach the real batch POST and n1 ID; dropping the public waiter retains the placement. Internal borrowed future is immediately awaited by the owned SDK parent. |
 | `BlofinExchange#placeAlgoOrderBatch` | ACCEPT assigned claim: TPSL and mixed-batch cache-race profiles reach the real TPSL POST and a1 ID; dropping the public waiter retains placement. Its source payload loop is sequential and immediately awaited by the owned parent. |
 | `BlofinExchange#cancelNormalOrders` | ACCEPT assigned claim: `cancel-normal`: exact signed request and already-gone n removal match source before completion; same reconciliation survives dropped waiter. |
 | `BlofinExchange#cancelAlgoOrders` | ACCEPT assigned claim: `cancel-algo`: exact signed TPSL-root request removes only a__stop_loss and survives dropped waiter; source real 1000 ms delay is retained. |
 | `BlofinExchange#cancelTriggerOrders` | ACCEPT assigned claim: `cancel-trigger`: authoritative instId/algoId provenance is checked, actual signed POST removes t, and dropped waiter retains reconciliation plus the actual 350 ms timer. |
-| `BlofinExchange#getPositionSide` | FIX: cached-reader reaction cutover (this PR). Compiled original-body CACHED-AWAIT RED → GREEN; actual normal/trigger payload changes from net to long and protective batch payload uses short after the cached mode Promise resumes. |
+| `BlofinExchange#getPositionSide` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; actual normal/trigger payload changes from net to long and protective batch payload uses short after the cached mode Promise resumes. |
 | `BlofinPositionAdapterDeps` | ACCEPT production reachability: `journal` executes the real SDK historical-position reader and its actual typed account/symbol/settle-currency closures. The source account/key/settleCurrency and base-unit closedSize=2 match despite market contractSize=1000. The producer supplies no contractSize callback; arbitrary throwing or malformed replacement callbacks are not installed by this binding. Existing generic-domain refusal remains documented, rather than widening the shared carrier. |
 | `BlofinExchange.afterMethodCalledInWorker` | ACCEPT assigned claim: all four cache-race profiles execute the actual native/source hooks for supported boolean arguments and null/void results. Whole-class changePositionMode and changeMarginType producers are asserted to return undefined; arbitrary truthy result.positionMode records are not produced by these worker calls, so their closed-enum refusal remains an unreachable typed boundary. |
 
@@ -66,3 +66,12 @@ discard the public waiter after the real Base capability prefix. Private
 helpers are reached through these actual public parents, not invoked with fake
 formatters. Existing #1068 rejection/held-response proof remains in the same
 target. No real time advances while draining Promise work.
+
+Reproduction: from the worktree root run
+`python3 sdk-rs/safe-cex-venue-blofin/tests/remaining_fix_controls.py`. It restores
+the actual pre-fix class reader bodies from committed baseline `ef5fd04477`,
+requires four named compiled CACHED-AWAIT assertion failures at exit 101, rejects
+compiler failures, restores exact production bytes (SHA256
+`7e7887e5e84afe91911cfe07d3ed89aaa8c10f90c21c287452b374567da070d0`), and requires
+all seven real binding tests GREEN. The source and native operation floors are
+independent (four placement profiles, ten remaining profiles x two lifetimes).
