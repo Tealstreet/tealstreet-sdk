@@ -5,6 +5,11 @@ import sys
 
 root = Path(__file__).resolve().parents[3]
 cases = {
+    "backpack": ("socket_events.rs", "exchange_trait", 'let last = number(&host.field_text(data, "c")?);', 'let last = number(&host.field_text(data, "v")?);'),
+    "paradex": ("public_ingress.rs", "exchange_trait", 'let bid = h.parse_float(&first(h, &raw, &["bid_price"], "0")?)?;', 'let bid = h.parse_float(&first(h, &raw, &["ask_price"], "0")?)?;'),
+    "paradex-book": ("market_data.rs", "exchange_trait", 'let bid = parsed(h, h.get(&h.get(&sorted_bids, "0")?, "price")?)?;', 'let bid = parsed(h, h.get(&h.get(&sorted_bids, "1")?, "price")?)?;'),
+    "polymarket-store": ("binding/socket.rs", "exchange_binding", 'Js::object(vec![("id", id.clone())]),', 'id.clone(),'),
+    "polymarket": ("ws_dispatch.rs", "exchange_binding", 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price));', 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price)) + 1.0;'),
     "bitunix": ("sockets.rs", "native_identity", "patch.set_number(*k, *n);", "patch.set_number(*k, if n.is_nan() { 0.0 } else { *n });"),
     "bitrue": ("public_bodies.rs", "exchange_binding", "let last = h.unary_plus(close)?;", "let _original = h.unary_plus(close)?; let last = h.number(0.0);"),
     "apexomni": ("ws_public.rs", "binding", '("p", "last"),', '("mp", "last"),'),
@@ -24,7 +29,7 @@ selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid"}.get(venue, venue)
+    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket", "paradex-book": "paradex"}.get(venue, venue)
     test = {
         "binance": "production_ticker_coercion_",
         "kucoin": "production_ticker_coercion_futures_matches_constructed_typescript",
