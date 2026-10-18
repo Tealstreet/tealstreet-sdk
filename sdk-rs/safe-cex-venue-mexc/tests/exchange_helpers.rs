@@ -46,9 +46,13 @@ fn encode_js_json(value: &JsJsonValue) -> Value {
 
 fn positions(rows: &Value) -> Vec<Position> {
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":1})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":1})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     let base = fake_positions_for_market(&market, None, None, None).remove(0);
@@ -97,7 +101,10 @@ fn mexc_exchange_helpers_live_typescript() {
                 }
                 "formatChangeLeveragePayload" => {
                     let market_raw = decoded(&case["marketRaw"]);
-                    let market = normalize_market(market_raw.as_object().unwrap())?;
+                    let market = normalize_market(
+                        &serde_json::Value::Object((market_raw.as_object().unwrap()).clone())
+                            .into(),
+                    )?;
                     let positions = positions(&args[6]);
                     let margin_type: MarginType = serde_json::from_value(args[4].clone()).unwrap();
                     encode_js_json(&format_change_leverage_payload(

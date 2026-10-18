@@ -35,7 +35,9 @@ fn run(case: &Value) -> Result<Value, JsCoercionError> {
     };
     let raw = case.get("marketRaw").filter(|v| !undefined(v));
     let market = raw
-        .map(|v| normalize_market(v.as_object().unwrap()))
+        .map(|v| {
+            normalize_market(&serde_json::Value::Object((v.as_object().unwrap()).clone()).into())
+        })
         .transpose()?;
     let name = case["name"].as_str().unwrap();
     Ok(match name {
@@ -56,10 +58,15 @@ fn run(case: &Value) -> Result<Value, JsCoercionError> {
         "normalizePositionMode" => encode(&normalize_position_mode(arg(0))?),
         "normalizeMarginType" => encode(&normalize_margin_type(arg(0))?),
         "normalizePercentage" => encode(&normalize_percentage(arg(0))?),
-        "stepFromScale" => encode(&step_from_scale(arg(0), arg(1).unwrap().as_f64().unwrap())?),
-        "normalizeMarket" => encode(&normalize_market(arg(0).unwrap().as_object().unwrap())?),
+        "stepFromScale" => encode(&step_from_scale(
+            arg(0).cloned().map(Into::into).as_ref(),
+            arg(1).unwrap().as_f64().unwrap(),
+        )?),
+        "normalizeMarket" => encode(&normalize_market(
+            &serde_json::Value::Object((arg(0).unwrap().as_object().unwrap()).clone()).into(),
+        )?),
         "isTradableMexcMarket" => encode(&is_tradable_mexc_market(
-            arg(0).unwrap().as_object().unwrap(),
+            &serde_json::Value::Object((arg(0).unwrap().as_object().unwrap()).clone()).into(),
         )?),
         "getContractSize" => encode(&get_contract_size(market.as_ref())),
         "nativeVolumeToAmount" => encode(&native_volume_to_amount(arg(0), market.as_ref())?),
@@ -142,7 +149,10 @@ fn mexc_utils_live_typescript_every_value() {
     for (index, case) in cases.iter().enumerate() {
         if case["name"] == "normalizeMarket" && case.get("error").is_none() {
             let raw = decoded(&case["args"][0]);
-            let market = normalize_market(raw.as_object().unwrap()).unwrap();
+            let market = normalize_market(
+                &serde_json::Value::Object((raw.as_object().unwrap()).clone()).into(),
+            )
+            .unwrap();
             let expected = &case["output"]["precision"];
             let expected_amount = decode_number(&expected["amount"]);
             let expected_price = decode_number(&expected["price"]);

@@ -392,3 +392,7 @@ Replacement amounts select the first non-nullish raw volume alias. Own undefined
 does not suppress quantity, while NaN, Infinity, empty text and signed zero keep
 their source branches. Six maintained-source cases drive real cancel and submit
 requests, including a numeric prefix followed by an unpaired UTF-16 unit.
+
+Market fetches retain configured response data through tradability filtering and
+normalization; raw info never takes a JSON projection. The constructed fetch/Store
+regression observes opaque UTF-16, nonfinite bits, signed zero and own Undefined.

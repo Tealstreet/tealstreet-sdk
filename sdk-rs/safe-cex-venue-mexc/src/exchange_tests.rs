@@ -1141,7 +1141,10 @@ fn mexc_fetch_order_book_matches_live_source() {
         let case = &cases[case_index];
         let store = Rc::new(DefaultStore::new());
         if case["name"] != "missing-market" {
-            let market = normalize_market(case["marketRaw"].as_object().unwrap()).unwrap();
+            let market = normalize_market(
+                &serde_json::Value::Object((case["marketRaw"].as_object().unwrap()).clone()).into(),
+            )
+            .unwrap();
             Store::update(
                 store.as_ref(),
                 StoreUpdate {
@@ -1462,7 +1465,10 @@ fn mexc_fetch_tickers_matches_live_source() {
         .unwrap()
         .iter()
         .map(|market| {
-            let mut result = normalize_market(market.as_object().unwrap()).unwrap();
+            let mut result = normalize_market(
+                &serde_json::Value::Object((market.as_object().unwrap()).clone()).into(),
+            )
+            .unwrap();
             result.id = market["id"].as_str().unwrap().to_owned();
             result.symbol = market["symbol"].as_str().unwrap().to_owned();
             result
@@ -1790,11 +1796,9 @@ fn mexc_fetch_historical_fills_matches_live_source() {
             {"tradeId":"fill-fast","symbol":"BTC_USDT","side":2,"price":55.5,"vol":7,"createTime":1700000001000_i64,"orderId":"order-33","fee":0.5,"feeCurrency":"USDC","profit":-2.75,"role":1}
         ]}}).to_string().into_bytes();
         let store = Rc::new(DefaultStore::new());
-        let market = normalize_market(
-            &json!({"symbol":"BTC_USDT","contractSize":0.1,"volUnit":3,"minVol":2,"maxVol":100000,"priceScale":5,"minLeverage":4,"maxLeverage":100})
+        let market = normalize_market(&serde_json::Value::Object((json!({"symbol":"BTC_USDT","contractSize":0.1,"volUnit":3,"minVol":2,"maxVol":100000,"priceScale":5,"minLeverage":4,"maxLeverage":100})
                 .as_object()
-                .unwrap(),
-        )
+                .unwrap()).clone()).into())
         .unwrap();
         Store::update(
             store.as_ref(),
@@ -2082,7 +2086,10 @@ fn mexc_fetch_positions_matches_live_source() {
             .unwrap()
             .iter()
             .map(|market| {
-                let mut result = normalize_market(market.as_object().unwrap()).unwrap();
+                let mut result = normalize_market(
+                    &serde_json::Value::Object((market.as_object().unwrap()).clone()).into(),
+                )
+                .unwrap();
                 result.id = market["id"].as_str().unwrap().to_owned();
                 result.symbol = market["symbol"].as_str().unwrap().to_owned();
                 result
@@ -2504,9 +2511,13 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
 
     let store = Rc::new(DefaultStore::new());
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(
@@ -2590,9 +2601,13 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
     use safe_cex_types::StoreSubscriberError;
     let throwing_store = Rc::new(DefaultStore::new());
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(
@@ -2664,9 +2679,13 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
 
     let fallback_store = Rc::new(DefaultStore::new());
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(
@@ -2733,9 +2752,13 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
 
     let failed_store = Rc::new(DefaultStore::new());
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(
@@ -2879,7 +2902,13 @@ fn mexc_fetch_orders_live_requests_and_results() {
             store.as_ref(),
             StoreUpdate {
                 markets: Some(vec![
-                    normalize_market(case["marketRaw"].as_object().unwrap()).unwrap(),
+                    normalize_market(
+                        &serde_json::Value::Object(
+                            (case["marketRaw"].as_object().unwrap()).clone(),
+                        )
+                        .into(),
+                    )
+                    .unwrap(),
                 ]),
                 ..Default::default()
             },
@@ -3481,9 +3510,13 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
     for public_only in [false, true] {
         let store = Rc::new(DefaultStore::new());
         let market = normalize_market(
-            json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
-                .as_object()
-                .unwrap(),
+            &serde_json::Value::Object(
+                (json!({"symbol":"BTC_USDT","contractSize":1,"maxLeverage":20})
+                    .as_object()
+                    .unwrap())
+                .clone(),
+            )
+            .into(),
         )
         .unwrap();
         Store::update(
@@ -3892,9 +3925,13 @@ fn mexc_history_reads_markets_per_row_and_preserves_error_precedence() {
     for (label, rows, wanted_reads) in specs {
         let store = Rc::new(ObservedStore::new());
         let market = normalize_market(
-            json!({"symbol":"BTC_USDT","contractSize":0.1})
-                .as_object()
-                .unwrap(),
+            &serde_json::Value::Object(
+                (json!({"symbol":"BTC_USDT","contractSize":0.1})
+                    .as_object()
+                    .unwrap())
+                .clone(),
+            )
+            .into(),
         )
         .unwrap();
         Store::update(
@@ -4264,9 +4301,13 @@ fn mexc_history_rejection_keeps_native_request_and_typed_origin() {
 fn mexc_history_uses_configured_local_date_conversion() {
     let store = Rc::new(DefaultStore::new());
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":0.1})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":0.1})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(
@@ -4391,9 +4432,13 @@ fn mexc_positions_reads_each_market_and_keeps_symbol_only_caller_lookup() {
     for (label, rows, expected_reads, expected_contracts) in cases {
         let store = Rc::new(ObservedStore::new());
         let market = normalize_market(
-            json!({"symbol":"BTC_USDT","contractSize":0.1,"priceScale":2})
-                .as_object()
-                .unwrap(),
+            &serde_json::Value::Object(
+                (json!({"symbol":"BTC_USDT","contractSize":0.1,"priceScale":2})
+                    .as_object()
+                    .unwrap())
+                .clone(),
+            )
+            .into(),
         )
         .unwrap();
         store
@@ -4408,9 +4453,13 @@ fn mexc_positions_reads_each_market_and_keeps_symbol_only_caller_lookup() {
         if label == "fresh-market" {
             *store.second_market.borrow_mut() = Some(
                 normalize_market(
-                    json!({"symbol":"BTC_USDT","contractSize":0.3,"priceScale":2})
-                        .as_object()
-                        .unwrap(),
+                    &serde_json::Value::Object(
+                        (json!({"symbol":"BTC_USDT","contractSize":0.3,"priceScale":2})
+                            .as_object()
+                            .unwrap())
+                        .clone(),
+                    )
+                    .into(),
                 )
                 .unwrap(),
             );

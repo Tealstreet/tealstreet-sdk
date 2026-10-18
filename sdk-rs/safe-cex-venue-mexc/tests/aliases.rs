@@ -24,7 +24,7 @@ fn mexc_mapper_owned_snapshot_vs_live_alias() {
         let name = case["name"].as_str().unwrap();
         let mut raw = case["raw"].clone();
         let map = raw.as_object().unwrap();
-        let market = normalize_market(map).unwrap();
+        let market = normalize_market(&serde_json::Value::Object((map).clone()).into()).unwrap();
         let mut currency_info = None;
         let mut info = match name {
             "normalizeMarket" => market.info.unwrap(),

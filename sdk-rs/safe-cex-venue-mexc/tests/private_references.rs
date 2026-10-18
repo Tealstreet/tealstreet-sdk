@@ -14,9 +14,13 @@ use std::{
 
 fn set_market(store: &dyn Store, size: f64) {
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":size,"maxLeverage":20})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":size,"maxLeverage":20})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(
