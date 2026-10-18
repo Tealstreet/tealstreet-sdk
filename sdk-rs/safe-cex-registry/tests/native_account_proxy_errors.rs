@@ -125,7 +125,8 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
     exchange: &'static str,
     method: &'static str,
     expected_paths: &'static [&'static str],
-    held_path: &'static str,
+    first_path: &'static str,
+    attempts: usize,
 ) {
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -137,7 +138,7 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
     let release_algo = Rc::new(Notify::new());
     let (requests, barrier, release) = (paths.clone(), received.clone(), release_algo.clone());
     tokio::task::spawn_local(async move {
-        for _ in 0..expected_paths.len() {
+        for _ in 0..expected_paths.len() * attempts {
             let (mut stream, _) = listener.accept().await.unwrap();
             let (requests, barrier, release) = (requests.clone(), barrier.clone(), release.clone());
             tokio::task::spawn_local(async move {
@@ -158,7 +159,7 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
                     .split_once("://")
                     .and_then(|(_, rest)| rest.split_once('/'))
                     .map_or(path.clone(), |(_, suffix)| format!("/{suffix}"));
-                let held = path == held_path;
+                let held = path != first_path;
                 requests.borrow_mut().push(path);
                 barrier.wait().await;
                 if held {
@@ -204,24 +205,38 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
         Rc::new(|_| {}),
     );
     // binance.exchange.ts starts each snapshot pair eagerly with Promise.all.
-    tokio::time::timeout(
-        Duration::from_secs(3),
+    let result = tokio::time::timeout(
+        Duration::from_secs(6),
         native_account_call(account.clone(), method.into(), vec![Value::Null.into()]),
     )
     .await
-    .expect("first rejection settles without waiting for the held sibling")
-    .unwrap();
+    .expect("first rejection settles without waiting for the held siblings");
+    if exchange == "backpack" {
+        assert!(
+            result.is_err(),
+            "Backpack fetchTickers rethrows its first rejection"
+        );
+    } else {
+        result.unwrap();
+    }
     assert_eq!(
         errors.borrow().len(),
-        1,
-        "only the first HTTP response was released"
+        attempts,
+        "only the first response of each attempt was released"
     );
     let mut actual_paths = paths.borrow().clone();
     actual_paths.sort();
-    assert_eq!(actual_paths, expected_paths);
-    release_algo.notify_one();
+    let mut expected: Vec<_> = expected_paths
+        .iter()
+        .copied()
+        .cycle()
+        .take(expected_paths.len() * attempts)
+        .collect();
+    expected.sort();
+    assert_eq!(actual_paths, expected);
+    release_algo.notify_waiters();
     let completed = tokio::time::timeout(Duration::from_secs(2), async {
-        while errors.borrow().len() < expected_paths.len() {
+        while errors.borrow().len() < expected_paths.len() * attempts {
             changed.notified().await;
         }
     })
@@ -235,7 +250,7 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
         "the already-started sibling must run its response interceptors after Promise.all rejects; observed {:?}",
         errors.borrow()
     );
-    assert_eq!(errors.borrow().len(), expected_paths.len());
+    assert_eq!(errors.borrow().len(), expected_paths.len() * attempts);
 }
 
 #[test]
@@ -244,7 +259,8 @@ fn rejected_order_snapshot_keeps_its_started_http_sibling_alive() {
         "binance",
         "fetchAndSetOrders",
         &["/fapi/v1/openAlgoOrders", "/fapi/v1/openOrders"],
-        "/fapi/v1/openAlgoOrders",
+        "/fapi/v1/openOrders",
+        1,
     ));
 }
 
@@ -254,7 +270,8 @@ fn rejected_position_snapshot_keeps_its_started_http_sibling_alive() {
         "binance",
         "fetchPositions",
         &["/fapi/v1/symbolConfig", "/fapi/v3/positionRisk"],
-        "/fapi/v1/symbolConfig",
+        "/fapi/v3/positionRisk",
+        1,
     ));
 }
 
@@ -268,7 +285,8 @@ fn rejected_blofin_orders_keep_started_http_siblings_alive() {
             "/api/v1/trade/orders-pending",
             "/api/v1/trade/orders-tpsl-pending",
         ],
-        "/api/v1/trade/orders-tpsl-pending",
+        "/api/v1/trade/orders-pending",
+        3,
     ));
 }
 
@@ -278,6 +296,7 @@ fn rejected_backpack_tickers_keep_started_http_sibling_alive() {
         "backpack",
         "fetchTickers",
         &["/api/v1/markPrices", "/api/v1/tickers"],
-        "/api/v1/markPrices",
+        "/api/v1/tickers",
+        1,
     ));
 }
