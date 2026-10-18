@@ -377,12 +377,10 @@ mod divergence_audit_tests;
 #[path = "../../tests/support/fix_audit_binding.rs"]
 mod fix_audit_tests;
 
-<<<<<<< HEAD
 #[cfg(test)]
 #[path = "../../tests/support/heartbeat_binding.rs"]
 mod heartbeat_binding_tests;
-=======
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "native_error_tests.rs"]
 mod native_error_tests;
->>>>>>> origin/master

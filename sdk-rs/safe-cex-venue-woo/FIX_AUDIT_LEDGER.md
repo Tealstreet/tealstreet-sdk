@@ -51,17 +51,10 @@ corpus, including native bits and alias/freeze observations, stays unchanged.
 | 14 | `WOO_V3_ACCOUNT_WRITE_PARITY` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 15 | `requirePerpetualSymbol` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 16 | `positionProvesNoExposure` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
-<<<<<<< HEAD
 | 17 | `WooPublicWebsocket.ping` | ACCEPT | Constructed socket members match maintained TS across 24 native-first profiles: disposal truthiness, lexical receiver, live sender lookup, setter/clock/send/JSON failures, signed zero and retained UTF16. The three typed core-socket facades have no production callers and are retired with their exact test/control tail. See HEARTBEAT_REVIEW.md. |
 | 18 | `WooPublicWebsocket.handlePingEvent` | ACCEPT | Constructed socket members match maintained TS across 24 native-first profiles: disposal truthiness, lexical receiver, live sender lookup, setter/clock/send/JSON failures, signed zero and retained UTF16. The three typed core-socket facades have no production callers and are retired with their exact test/control tail. See HEARTBEAT_REVIEW.md. |
-| 19 | `WOOXExchange.fetchHistoricalFills` | OPEN | Native signed NaN query repaired in #1060; retained non-string error reporting awaits #1055; parser/output choices still need separate review. |
-| 20 | `WOOXExchange#fetchHistoricalTradesInternal` | OPEN | Native signed NaN query repaired in #1060; retained non-string error reporting awaits #1055; parser/output choices still need separate review. |
-=======
-| 17 | `WooPublicWebsocket.ping` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
-| 18 | `WooPublicWebsocket.handlePingEvent` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
 | 19 | `WOOXExchange.fetchHistoricalFills` | OPEN | Native signed NaN query repaired in #1060; retained-response reporting now matches both actual TS catch blocks and BaseExchange across 26 signed HTTP profiles, with native non-string and lone-surrogate preservation. Parser/output choices still need separate review. |
 | 20 | `WOOXExchange#fetchHistoricalTradesInternal` | OPEN | Native signed NaN query repaired in #1060; retained-response reporting now matches both actual TS catch blocks and BaseExchange across 26 signed HTTP profiles, with native non-string and lone-surrogate preservation. Parser/output choices still need separate review. |
->>>>>>> origin/master
 | 21 | `WOOXExchange.mapLimitOrder` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
 | 22 | `WOO_V3_WS_CHANNELS` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 23 | `WOO_V3_WS_LIMITS` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
