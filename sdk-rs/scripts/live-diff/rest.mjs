@@ -9,7 +9,7 @@ import { driveOperation } from './rest-clock-driver.mjs';
 import { differences } from './compare.mjs';
 import { hash, makeCA, recordingProxy } from './recorder.mjs';
 import { restVenueHosts as venueHosts } from './rest-venues.mjs';
-import { publicRestPlan, resultStatus, tickerCoverage } from './rest-plan.mjs';
+import { publicRestPlan, resultStatus, tickerCoverage, qualifyUpstream } from './rest-plan.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url)),
   root = resolve(here, '../../..');
@@ -365,10 +365,19 @@ try {
       report.checks.push(check);
       console.log(`${exchange} ${spec.label}: ${check.status}`);
     }
+    report.checks = qualifyUpstream(report.checks);
     report.status = report.checks.some((c) => c.status === 'DIFF')
       ? 'DIFF'
       : report.checks.some((c) =>
-            ['TIMEOUT', 'BLOCKED', 'INPUT_DIFF', 'NONDETERMINISTIC', 'CLOCK_DIFF', 'NOT_RUN'].includes(c.status),
+            [
+              'TIMEOUT',
+              'BLOCKED',
+              'INPUT_DIFF',
+              'NONDETERMINISTIC',
+              'CLOCK_DIFF',
+              'NOT_RUN',
+              'UPSTREAM_BLOCKED',
+            ].includes(c.status),
           )
         ? 'INCOMPLETE'
         : report.checks.some((c) => c.status === 'PASS' && c.label !== 'bootstrap-markets')

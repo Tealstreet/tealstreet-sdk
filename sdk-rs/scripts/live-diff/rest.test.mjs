@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { deserialize, serialize } from 'node:v8';
-import { publicRestPlan, resultStatus, tickerCoverage } from './rest-plan.mjs';
+import { publicRestPlan, resultStatus, tickerCoverage, qualifyUpstream } from './rest-plan.mjs';
 import { readKey, isRead } from './recorder.mjs';
 import { restVenueHosts } from './rest-venues.mjs';
 
@@ -151,4 +151,17 @@ test('driven host unblocks a frozen limiter and repeats the exact clock trace', 
     return reply;
   };
   assert.deepEqual(await run(), await run());
+});
+
+test('later matching clocks cannot qualify Store snapshots after a different bootstrap budget', () => {
+  const checks = [
+    { label: 'bootstrap-markets', status: 'CLOCK_DIFF' },
+    { method: '$markets', status: 'DIFF' },
+    { method: '$tickers', status: 'PASS' },
+    { method: 'fetchOHLCV', status: 'PASS' },
+  ];
+  assert.deepEqual(
+    qualifyUpstream(checks).map((c) => c.status),
+    ['CLOCK_DIFF', 'UPSTREAM_BLOCKED', 'UPSTREAM_BLOCKED', 'PASS'],
+  );
 });

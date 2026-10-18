@@ -137,3 +137,27 @@ export function tickerCoverage(reply) {
     }),
   );
 }
+
+// Store snapshots and derived option/leverage reads inherit bootstrap timing.
+// Matching clocks at the later read do not establish the same startup state.
+export function qualifyUpstream(checks) {
+  const bootstrap = checks.find((check) => check.label === 'bootstrap-markets');
+  if (!bootstrap || bootstrap.status === 'PASS') return checks;
+  const stateful = new Set([
+    '$markets',
+    '$tickers',
+    'fetchOptionChain',
+    'fetchOptionExpiries',
+    'fetchSymbolMaxLeverage',
+  ]);
+  return checks.map((check) =>
+    stateful.has(check.method) && ['PASS', 'EMPTY', 'DIFF'].includes(check.status)
+      ? {
+          ...check,
+          unqualifiedStatus: check.status,
+          status: 'UPSTREAM_BLOCKED',
+          reason: `Bootstrap ${bootstrap.status}: Store-derived values do not establish identical startup state`,
+        }
+      : check,
+  );
+}
