@@ -624,3 +624,10 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+The public ticker handlers consume canonical native EventArray values from the
+constructed public classes. The old PublicEvent/PublicEvents JSON adapter and its
+oracle-only test/control tail are removed; they had no production caller.
+The actual native ticker census in private_classes retains source comparisons for
+all three families; its production field-routing control requires three compiled
+failures and exact-restored passes.
