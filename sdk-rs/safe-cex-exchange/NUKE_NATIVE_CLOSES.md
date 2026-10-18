@@ -37,3 +37,13 @@ master Rust bodies: small base-unit close is refused before HTTP, close precedes
 cancel, cancellation failure escapes, and the unloaded-market error differs.
 The source oracle and pending-close guard control already pass. Setup/compile
 failures from constructing the fixture are not regression evidence.
+
+On refreshed master `0dd3714c26`, all six real native tests, 18 core tests,
+seven cancellation checks and 25 venue-binding checks pass. The progress gate,
+20,022-case native-sizing differential, global parity and strict native/Wasm
+all-target Clippy also pass. The reviewed metadata-only #890 checkpoint clears
+all extractor drift; it leaves the 98 new inverse declarations pending. The
+20 inverse TS override inventory additions are separately owned by the inverse
+port and are an overseer-authorized master exception. The later #8042 merge
+changes only the workflow; these Rust bodies remain identical to the validated
+head.
