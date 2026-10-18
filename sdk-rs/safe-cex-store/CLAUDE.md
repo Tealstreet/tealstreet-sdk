@@ -221,4 +221,8 @@ owner borrows its actual state referent at each reached slot; lower layers canno
 replace it with a typed snapshot. Internal emitter and native account observers
 use it, while `subscribe` keeps its explicit typed projection semantics.
 
+`orderbook::sort_order_book` delegates directly to safe-cex-num TimSort. Its
+112-profile native/source test pins both sides and retained fields against
+CI Node 24.20.0 / V8 13.6, including inconsistent NaN-price comparisons.
+
 Socket health reads and partial merges carry canonical RetainedJsonInput. An own undefined property overwrites a previous number without deleting its insertion position; JSON serialization omits it only at the wire boundary.
