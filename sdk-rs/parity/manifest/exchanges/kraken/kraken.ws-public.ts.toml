@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/kraken/kraken.ws-public.ts"
-rust_files = [ "safe-cex-venue-kraken/src/book_listeners.rs", "safe-cex-venue-kraken/src/classes.rs", "safe-cex-venue-kraken/src/feed_stats.rs", "safe-cex-venue-kraken/src/lifecycle.rs", "safe-cex-venue-kraken/src/message_dispatch.rs", "safe-cex-venue-kraken/src/orderbooks.rs", "safe-cex-venue-kraken/src/public_subscriptions.rs", "safe-cex-venue-kraken/src/stream_adapters.rs", "safe-cex-venue-kraken/src/stream_updates.rs", "safe-cex-venue-kraken/src/ws_helpers.rs" ]
+rust_files = [ "safe-cex-venue-kraken/src/book_listeners.rs", "safe-cex-venue-kraken/src/classes.rs", "safe-cex-venue-kraken/src/feed_stats.rs", "safe-cex-venue-kraken/src/lifecycle.rs", "safe-cex-venue-kraken/src/message_dispatch.rs", "safe-cex-venue-kraken/src/orderbooks.rs", "safe-cex-venue-kraken/src/public_subscriptions.rs", "safe-cex-venue-kraken/src/binding/members.rs", "safe-cex-venue-kraken/src/stream_updates.rs", "safe-cex-venue-kraken/src/ws_helpers.rs" ]
 
 [[symbol]]
 ts = "KrakenPublicWebsocket"
@@ -54,17 +54,17 @@ note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-numeric-st
 ts = "KrakenPublicWebsocket.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-kraken/src/stream_adapters.rs::futures_listen_ohlcv"
+rs = "safe-cex-venue-kraken/src/binding/members.rs::dispatch"
 status = "ported"
-note = "Source intentionally has no Futures WS candles: returns a fresh no-op disposer per call, without reading options or calling the callback. Native ignored arguments stay opaque; repeated disposer calls complete without effects. Actual-source native witness: tests/stream_adapters.rs. REST polling is a separate pending exchange method. Rename target: `safe-cex-venue-kraken/src/stream_adapters.rs::futures_listen_ohlcv`."
+note = "Live constructed class member dispatch; the duplicate generic stream_adapters module and mock-only test were retired after repository-wide native/registry/FFI/wasm caller review. Rename target: `safe-cex-venue-kraken/src/binding/members.rs::dispatch`. This branch routes the original receiver and arguments to delegate_public (exchange book/Spot candle methods), or implements the source Futures socket candle no-ops. Production native/source witnesses: tests/exchange_binding.rs and tests/support/accepted_stream_tail.rs; compiled controls: scripts/stream-binding-controls.py. See STREAM_ADAPTER_RETIREMENT.md."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#handleOHLC"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-kraken/src/stream_adapters.rs::futures_handle_ohlc"
+rs = "safe-cex-venue-kraken/src/binding/members.rs::dispatch"
 status = "ported"
-note = "Source intentionally ignores every incoming Futures OHLC message. Opaque borrowed native input is untouched and the method completes without effects. Actual-source native completion/input witness: tests/stream_adapters.rs; no frame parser or REST poller is inferred. Rename target: `safe-cex-venue-kraken/src/stream_adapters.rs::futures_handle_ohlc`."
+note = "Live constructed class member dispatch; the duplicate generic stream_adapters module and mock-only test were retired after repository-wide native/registry/FFI/wasm caller review. Rename target: `safe-cex-venue-kraken/src/binding/members.rs::dispatch`. This branch routes the original receiver and arguments to delegate_public (exchange book/Spot candle methods), or implements the source Futures socket candle no-ops. Production native/source witnesses: tests/exchange_binding.rs and tests/support/accepted_stream_tail.rs; compiled controls: scripts/stream-binding-controls.py. See STREAM_ADAPTER_RETIREMENT.md."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#clearFeedStatsIfIdle"

@@ -8,7 +8,7 @@ fn ticker_bits(row: &Ticker) -> Value {
         "ask":format!("{:016x}",row.ask.to_bits()),
         "last":format!("{:016x}",row.last.to_bits()),
         "mark":format!("{:016x}",row.mark.to_bits()),
-        "index":format!("{:016x}",row.index.to_bits()),
+        "index":format!("{:016x}",row.index.unwrap().to_bits()),
         "percentage":format!("{:016x}",row.percentage.to_bits()),
         "volume":format!("{:016x}",row.volume.to_bits()),
         "quoteVolume":format!("{:016x}",row.quote_volume.to_bits()),

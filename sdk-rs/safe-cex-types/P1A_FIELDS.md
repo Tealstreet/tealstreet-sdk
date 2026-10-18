@@ -40,7 +40,7 @@ quote spelling and Array<T>/T[] are cosmetic. Mutable properties remain mutable.
 | `Ticker.ask` | `readonly ask: number` | `ask: number` | `readonly ask: number` | `f64` | B1, C1 |
 | `Ticker.last` | `readonly last: number` | `last: number` | `readonly last: number` | `f64` | B1, C1 |
 | `Ticker.mark` | `readonly mark: number` | `mark: number` | `readonly mark: number` | `f64` | B1, C1 |
-| `Ticker.index` | `readonly index: number` | `index: number` | `readonly index: number` | `f64` | B1, C1 |
+| `Ticker.index` | `readonly index: number` | `index: number` | `readonly index: number` | `Option<f64>` | B1, C1; live WOO runtime null retained, static declaration unchanged |
 | `Ticker.midPrice` | `readonly midPrice?: number` | `midPrice?: number` | `readonly midPrice?: number` | `Option<f64>` | B1, B2, C1 |
 | `Ticker.percentage` | `readonly percentage: number` | `percentage: number` | `readonly percentage: number` | `f64` | B1, C1 |
 | `Ticker.openInterest` | `readonly openInterest: number` | `openInterest: number` | `readonly openInterest: number` | `f64` | B1, C1 |

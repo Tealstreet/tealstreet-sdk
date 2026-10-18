@@ -201,7 +201,7 @@ where
                 ask,
                 last: bid,
                 mark: bid,
-                index: bid,
+                index: Some(bid),
                 mid_price: None,
                 percentage: 0.0,
                 open_interest: 0.0,

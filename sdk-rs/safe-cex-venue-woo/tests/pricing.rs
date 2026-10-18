@@ -42,7 +42,7 @@ fn ticker(v: &Value) -> Option<Ticker> {
         ask: read("ask"),
         last: read("last"),
         mark: read("mark"),
-        index: read("index"),
+        index: Some(read("index")),
         mid_price: v.get("midPrice").map(number),
         timestamp: v.get("timestamp").map(number),
         percentage: 0.0,

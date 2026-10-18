@@ -212,7 +212,7 @@ fn ticker(t: &Ticker) -> J {
         ("ask", n(t.ask)),
         ("last", n(t.last)),
         ("mark", n(t.mark)),
-        ("index", n(t.index)),
+        ("index", t.index.map(n).unwrap_or(J::Null)),
         ("percentage", n(t.percentage)),
         ("openInterest", n(t.open_interest)),
         ("fundingRate", n(t.funding_rate)),

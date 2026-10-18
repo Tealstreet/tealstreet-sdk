@@ -1,5 +1,11 @@
 # AsterDEX Rust venue
 
+`FIX_AUDIT_REVIEW.md` records the twelve assigned runtime rows and the shared
+factory error enhancer. Constructed native tests cover held clock settlement,
+private repair/timer teardown and source error fields; the exported browser
+ApprovalHost remains an explicit missing binding. Clock completions use the
+canonical eager driver so stopping a generation cannot strand its waiters.
+
 Cross-layer native venue/worker witnesses live in the parity tooling target
 `aster_worker_emitter`. Private facade/frame checks remain in this crate;
 AsterDEX has no dependency on the higher worker layer.

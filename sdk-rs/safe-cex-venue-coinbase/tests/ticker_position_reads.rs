@@ -273,7 +273,7 @@ fn assert_ticker(v: &ReadTicker, e: &Value, label: &str) {
         ("ask", t.ask),
         ("last", t.last),
         ("mark", t.mark),
-        ("index", t.index),
+        ("index", t.index.unwrap()),
         ("percentage", t.percentage),
         ("openInterest", t.open_interest),
         ("fundingRate", t.funding_rate),
