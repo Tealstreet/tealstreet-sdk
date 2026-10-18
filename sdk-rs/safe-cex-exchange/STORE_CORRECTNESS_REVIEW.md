@@ -60,3 +60,19 @@ The five-crate Wasm all-target check also exposed a pre-existing native-only
 Binance inherited-refusal fixture whose feature cfg enabled native transport on
 Wasm. Its target cfg now matches the native dependencies it actually uses; every
 native assertion is unchanged.
+
+## Final merged-head checks
+
+After normal inheritance of merged #1110 and master4541bd2b33, the owned
+Store/splice/library/client bodies remain byte-identical to the restored proof
+snapshot. The scoped replay passes 38 native checks, both real Store composition
+tests and the source-backed setting assertion. Strict native Clippy covers all
+features and targets of exchange, Binance, Bitget, WOO and webworker with warnings
+denied. Formatting, cancellation inventory (6 checks; the explicit exporter is
+intentionally ignored), CI wiring (376 tests), extractor check (zero drift), and
+the full parity index (7563 rows /16351 public Rust items) all pass.
+
+Reproduce the independent compiled controls from sdk-rs with
+`CARGO_INCREMENTAL=0 python3 safe-cex-exchange/scripts/store-correctness-controls.py`.
+The runner rejects compiler errors as RED evidence and restores exact source
+bytes before each GREEN replay. The PR body records the final Wasm lint receipt.
