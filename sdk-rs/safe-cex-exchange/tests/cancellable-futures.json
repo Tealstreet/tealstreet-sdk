@@ -2189,18 +2189,18 @@
       "boundaries": [
         "opaque-macro-review"
       ],
-      "producer_sha256": "0495e4257ab57bb025260c5b03721e0087fecc697d453d406de8c47a1510ae98",
+      "producer_sha256": "ba1ba922202299195e3f22cc261cb3a6665c27c1d02d8d2f9cb542553abb37e8",
       "classification": "immediate",
-      "reason": "std eprintln! writes synchronously to stderr; no future is constructed. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged."
+      "reason": "std eprintln! writes synchronously to stderr; no future is constructed. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Canonical retained JSON terminal rendering reviewed: synchronous data traversal and stderr with visible serializer errors; no await, task, timer, waiter or owned latch added."
     },
     {
       "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::report_raw_exception",
       "boundaries": [
         "opaque-macro-review"
       ],
-      "producer_sha256": "eae49202e82343549833bee08bc792c8eeb700d1e61caeff68cdefde2329e1a4",
+      "producer_sha256": "ac0dc04fb526cb1dccf943215837a1f52bd966bad1a28613cbb53c73ad7e138c",
       "classification": "immediate",
-      "reason": "std eprintln! writes synchronously to stderr; no future is constructed. Reviewed retained diagnostic host cutover: synchronous Error descriptor presentation followed by eprintln only; no future, task, timer or owned latch. console_values is the renamed rich host console capability; raw reporting no longer serializes Error values. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged."
+      "reason": "std eprintln! writes synchronously to stderr; no future is constructed. Reviewed retained diagnostic host cutover: synchronous Error descriptor presentation followed by eprintln only; no future, task, timer or owned latch. console_values is the renamed rich host console capability; raw reporting no longer serializes Error values. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Canonical retained JSON terminal rendering reviewed: synchronous data traversal and stderr with visible serializer errors; no await, task, timer, waiter or owned latch added."
     },
     {
       "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::sleep",
