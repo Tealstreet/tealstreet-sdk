@@ -1,6 +1,7 @@
 use super::{WeexUtilityInput, normalize_balance};
 use crate::market_data::{normalize_market, normalize_ticker};
 use safe_cex_num::numeric_ingress::js_from_value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::json;
 
 #[path = "source_profile.rs"]
@@ -29,7 +30,12 @@ fn market_info_mutations_keep_both_native_snapshots() {
         1.0,
         "WEEX market native initial info"
     );
-    input.value["extra"]["probe"] = json!(7);
+    *input
+        .value
+        .get_mut("extra")
+        .unwrap()
+        .get_mut("probe")
+        .unwrap() = Input::Float(7.0);
     assert_eq!(
         native
             .info
@@ -53,7 +59,15 @@ fn market_info_mutations_keep_both_native_snapshots() {
         .get_mut("probe")
         .unwrap() = safe_cex_types::retained_json::RetainedJsonInput::from(json!(11));
     assert_eq!(
-        input.value["extra"]["probe"], 7,
+        input
+            .value
+            .get("extra")
+            .unwrap()
+            .get("probe")
+            .unwrap()
+            .as_f64()
+            .unwrap(),
+        7.0,
         "WEEX market output mutation keeps input"
     );
     for observation in source_profile::observe(
@@ -104,8 +118,8 @@ fn ticker_and_book_mutations_keep_both_native_snapshots() {
         2.0,
         "WEEX book native initial info"
     );
-    ticker.value["lastPrice"] = json!(7);
-    book.value["bidPrice"] = json!(13);
+    *ticker.value.get_mut("lastPrice").unwrap() = Input::Float(7.0);
+    *book.value.get_mut("bidPrice").unwrap() = Input::Float(13.0);
     assert_eq!(
         native
             .info
@@ -151,22 +165,35 @@ fn ticker_and_book_mutations_keep_both_native_snapshots() {
         .get_mut("bidPrice")
         .unwrap() = safe_cex_types::retained_json::RetainedJsonInput::from(json!(17));
     assert_eq!(
-        ticker.value["lastPrice"], 7,
+        ticker.value.get("lastPrice").unwrap().as_f64().unwrap(),
+        7.0,
         "WEEX ticker output mutation keeps input"
     );
     assert_eq!(
-        book.value["bidPrice"], 13,
+        book.value.get("bidPrice").unwrap().as_f64().unwrap(),
+        13.0,
         "WEEX book output mutation keeps input"
     );
     let unit = r#"{"lastPrice":3,"extra":"\ud800"}"#;
-    assert!(
-        serde_json::from_str::<WeexUtilityInput>(unit).is_err(),
-        "WEEX ticker info unit serde whole input"
-    );
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<WeexUtilityInput>(unit).is_err(),
-        "WEEX ticker info unit numeric whole input"
-    );
+    for input in [
+        serde_json::from_str::<WeexUtilityInput>(unit).unwrap(),
+        safe_cex_num::numeric_ingress::js_from_str::<WeexUtilityInput>(unit).unwrap(),
+    ] {
+        let native = normalize_ticker(Some(&input), &market, None).unwrap();
+        assert_eq!(
+            native
+                .info
+                .as_ref()
+                .unwrap()
+                .get("ticker")
+                .unwrap()
+                .get("extra")
+                .unwrap()
+                .as_text()
+                .unwrap(),
+            &[0xd800]
+        );
+    }
     for observation in source_profile::observe(
         SOURCE,
         "weex-ticker-alias-unit",
@@ -209,7 +236,9 @@ fn balance_info_mutations_keep_both_native_snapshots() {
         &"3".encode_utf16().collect::<Vec<_>>(),
         "WEEX balance native initial info"
     );
-    input.value[0]["balance"] = json!("7");
+    *input.value.as_array_mut().unwrap()[0]
+        .get_mut("balance")
+        .unwrap() = json!("7").into();
     assert_eq!(
         native.info.as_ref().unwrap().as_array().unwrap()[0]
             .get("balance")
@@ -223,18 +252,29 @@ fn balance_info_mutations_keep_both_native_snapshots() {
         .get_mut("balance")
         .unwrap() = json!("11").into();
     assert_eq!(
-        input.value[0]["balance"], "7",
+        input.value.as_array().unwrap()[0]
+            .get("balance")
+            .unwrap()
+            .as_text()
+            .unwrap(),
+        &"7".encode_utf16().collect::<Vec<_>>(),
         "WEEX balance output mutation keeps input"
     );
     let unit = r#"[{"asset":"USDT","balance":"3","tag":"\ud800"}]"#;
-    assert!(
-        serde_json::from_str::<WeexUtilityInput>(unit).is_err(),
-        "WEEX balance info unit serde whole input"
-    );
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<WeexUtilityInput>(unit).is_err(),
-        "WEEX balance info unit numeric whole input"
-    );
+    for input in [
+        serde_json::from_str::<WeexUtilityInput>(unit).unwrap(),
+        safe_cex_num::numeric_ingress::js_from_str::<WeexUtilityInput>(unit).unwrap(),
+    ] {
+        let native = normalize_balance(&input).unwrap();
+        assert_eq!(
+            native.info.as_ref().unwrap().as_array().unwrap()[0]
+                .get("tag")
+                .unwrap()
+                .as_text()
+                .unwrap(),
+            &[0xd800]
+        );
+    }
     for observation in source_profile::observe(
         "../parity/evidence/okx-kraken-weex-audit/full-source-observations.mjs",
         "weex-balance-alias-unit",
