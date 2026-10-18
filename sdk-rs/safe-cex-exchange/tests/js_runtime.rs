@@ -4312,3 +4312,42 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }
+
+#[test]
+fn native_error_materialization_defines_own_stack_without_prototype_setters() {
+    let seed = safe_cex_exchange::js_runtime::value::error_object("Error", "seed");
+    let prototype = seed.prototype().unwrap();
+    let setter_called = Rc::new(std::cell::Cell::new(false));
+    let called = setter_called.clone();
+    prototype.define_accessor(
+        "stack",
+        None,
+        Some(Rc::new(move |_, _| {
+            called.set(true);
+            Ok(())
+        })),
+    );
+    let mut error = ExchangeError::new("source failure");
+    error.stack = Some("source original stack".into());
+    let value = Thrown::from(error).value;
+    prototype.delete(&utf16("stack"));
+    assert!(
+        !setter_called.get(),
+        "Error construction does not call inherited stack setters"
+    );
+    assert!(value.has_own("stack"));
+    assert!(
+        value
+            .get("stack")
+            .unwrap()
+            .strict_equals(&Js::str("source original stack"))
+    );
+    assert!(
+        !value
+            .own_entries()
+            .unwrap()
+            .iter()
+            .any(|(key, _)| key.as_ref() == utf16("stack").as_ref()),
+        "the original Error stack is non-enumerable"
+    );
+}

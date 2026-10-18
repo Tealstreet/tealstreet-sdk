@@ -141,9 +141,7 @@ impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
         if let Some(stack) = &error.stack {
-            value
-                .set("stack", Js::str(stack))
-                .expect("fresh error stack property");
+            error_data_property(&value, "stack", Js::str(stack), false);
         }
         if let Some(failure) = error.origin.as_ref().and_then(|origin| {
             origin
@@ -154,9 +152,7 @@ impl From<ExchangeError> for Thrown {
             && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
         {
             if let Some(stack) = cause.value().get("stack") {
-                value
-                    .set("stack", stack.to_js())
-                    .expect("fresh retained error stack property");
+                error_data_property(&value, "stack", stack.to_js(), false);
             }
             for (field, projected) in [("name", &error.name), ("message", &error.message)] {
                 if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
