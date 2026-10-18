@@ -1648,3 +1648,9 @@ listener arguments, including Unicode, NUL, empty strings and formatting tokens.
 `scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
 missing classifications or changed default bodies; the receiver classification
 applies only to this typed forwarding method.
+
+The shared JS Axios factory records each dispatched request in the existing
+HTTP_STATS singleton after proxy authorization, including rejected HTTP statuses.
+Its normal response interceptor preserves the source absence of recordError.
+The native runtime request-counter regression uses actual HTTP200/404 receipts;
+it fails with an unchanged total on the previous factory.
