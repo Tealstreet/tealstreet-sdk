@@ -1835,3 +1835,8 @@ properties refuse visibly until mutable intrinsic storage exists; the maintained
 source/dependency check is scripts/js-intrinsic-delete-audit.cjs. The accepted
 boundary is recorded in known-residuals.md. Tests/js_strict_delete_refusals.rs
 compares actual Node completions, original referents and primitive/array rules.
+
+Native exception reporting retains its context through the reporter capability,
+then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
+Serialization errors stay visible; `native_console_default` checks both paths
+against Node and verifies that reporting leaves the retained input unchanged.

@@ -13,10 +13,10 @@ original = path.read_bytes()
 cases = [
     ('describe_binance_response_shape', 'fn describe_binance_response_shape(', b'\n    let _ = payload;\n    String::new()\n'),
     ('describe_binance_pm_response_shape', 'fn describe_binance_pm_response_shape(', b'\n    let _ = payload;\n    String::new()\n'),
-    ('describe', 'fn describe(', b'\n    let _ = (payload, js_own_keys(std::iter::empty::<&str>()));\n    String::new()\n'),
+    ('describe', 'fn describe(', b'\n    let _ = payload;\n    String::new()\n'),
     ('require_binance_array_response', "fn require_binance_array_response<'a>(", b'\n    let _ = (endpoint,payload);\n    Err(BinanceResponseError{name:"Error",message:String::new()})\n'),
     ('require_binance_pm_array_response', "fn require_binance_pm_array_response<'a>(", b'\n    let _ = (endpoint,payload);\n    Err(BinanceResponseError{name:"Error",message:String::new()})\n'),
-    ('malformed', 'fn malformed(', b'\n    let _ = (venue,endpoint,shape,message);\n    BinanceResponseError{name:"Error",message:String::new()}\n'),
+    ('native_malformed', 'fn native_malformed(', b'\n    let _ = (venue,endpoint,shape,message);\n    Thrown::new(error_object("Error",""))\n'),
     ('BinanceResponseError', 'fn from(error: JsCoercionError)', b'\n    Self{name:"Error",message:error.message.into()}\n'),
 ]
 
@@ -33,7 +33,7 @@ native = {
     'describe_binance_response_shape': ('--test', 'accepted_response_shapes', 'futures_response_descriptor_has_source_key_order_and_cutoff'),
     'describe_binance_pm_response_shape': ('--test', 'accepted_response_shapes', 'pm_response_descriptor_has_source_key_order_and_cutoff'),
     'describe': ('--lib', 'response_shape::accepted_contract_tests::private_descriptor_preserves_source_shape'),
-    'malformed': ('--lib', 'response_shape::accepted_contract_tests::private_malformed_constructor_preserves_error_fields'),
+    'native_malformed': ('--lib', 'response_shape::accepted_contract_tests::private_malformed_constructor_preserves_error_fields'),
 }
 
 

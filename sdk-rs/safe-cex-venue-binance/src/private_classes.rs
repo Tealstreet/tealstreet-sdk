@@ -20,8 +20,7 @@ use crate::{
         handle_spot_order_events,
     },
     private_session::{
-        ConnectBindings, ConnectState, KeyFuture, MessageOp, RetryAction, SpotMessageBindings,
-        Venue,
+        ConnectBindings, ConnectState, MessageOp, RetryAction, SpotMessageBindings, Venue,
     },
     request_weight::Failure,
 };
@@ -736,12 +735,6 @@ impl ConnectBindings for PrivateState {
     }
     fn clear_timeout(&self, ticket: EventValue) -> Result<(), Failure> {
         self.timers.clear(ticket)
-    }
-    fn fetch_key(&self) -> Result<KeyFuture, Failure> {
-        let owner = self.this.upgrade().expect("live receiver");
-        Ok(Box::pin(
-            async move { owner.fetch_listen_key().await?.text() },
-        ))
     }
     fn fetch_native_key(&self) -> Result<crate::private_session::NativeKeyFuture, Failure> {
         let owner = self.this.upgrade().expect("live receiver");
