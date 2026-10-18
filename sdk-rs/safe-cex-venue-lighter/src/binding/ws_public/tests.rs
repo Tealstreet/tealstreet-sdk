@@ -33,9 +33,7 @@ use std::{
     task::{Context, Poll},
 };
 
-#[path = "../../../../test-support/virtual_time.rs"]
-mod virtual_time;
-use virtual_time::{SleepWakers, WakeSignal};
+use super::super::test_time::{SleepWakers, WakeSignal};
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
