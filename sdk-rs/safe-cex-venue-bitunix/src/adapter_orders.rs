@@ -705,7 +705,7 @@ impl BitunixVenue {
     ) -> ExchangeFuture<'static, ()> {
         let opts = opts.into();
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let positions = me.base.store.positions()?.to_vec();
             let cache: std::collections::HashMap<String, Value> = me
                 .state
@@ -740,7 +740,7 @@ impl BitunixVenue {
             venue: self.clone(),
             payloads: payloads.into_iter().map(Rc::new).collect(),
         };
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let ids = crate::order_placement::place_order_batch(&mut frame).await?;
             Ok(ids.iter().map(|id| js_text(id)).collect())
         })
@@ -754,14 +754,16 @@ impl BitunixVenue {
         let mut frame = PlaceFrame {
             venue: self.clone(),
         };
-        Box::pin(async move { crate::order_placement::place_order(&mut frame, opts).await })
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
+            crate::order_placement::place_order(&mut frame, opts).await
+        })
     }
     pub(crate) fn place_orders(
         self: &Rc<Self>,
         orders: Vec<PlaceOrderOpts>,
     ) -> ExchangeFuture<'static, Vec<String>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let orders = RefCell::new(orders);
             crate::rest_writes::place_orders(
                 || me.base.assert_caller_client_order_ids(&orders.borrow()),
@@ -795,14 +797,16 @@ impl BitunixVenue {
         let mut frame = CancelFrame {
             venue: self.clone(),
         };
-        Box::pin(async move { crate::order_cancellation::cancel_orders(&mut frame, orders).await })
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
+            crate::order_cancellation::cancel_orders(&mut frame, orders).await
+        })
     }
     pub(crate) fn cancel_symbol_orders(
         self: &Rc<Self>,
         symbol: String,
     ) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let orders = me.store_orders()?;
             crate::rest_writes::cancel_symbol_orders(
                 &symbol,
@@ -819,7 +823,7 @@ impl BitunixVenue {
         options: UpdateOrderOpts,
     ) -> ExchangeFuture<'static, Vec<String>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let order = to_input(&options.order)?;
             let update = to_input(&options.update)?;
             crate::order_models::update_order(&mut me.order_frame(), &order, &update)

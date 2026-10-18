@@ -41,7 +41,7 @@ impl BitunixVenue {
     }
     pub(crate) fn fetch_markets(self: &Rc<Self>) -> ExchangeFuture<'static, Vec<Market>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
             crate::rest_reads::fetch_markets(
                 || Ok(me.base.store.markets()?),
@@ -55,7 +55,7 @@ impl BitunixVenue {
     }
     pub(crate) fn fetch_tickers(self: &Rc<Self>) -> ExchangeFuture<'static, Vec<Ticker>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
             crate::rest_reads::fetch_tickers(
                 || Ok(me.base.store.tickers()?),
@@ -71,7 +71,7 @@ impl BitunixVenue {
         self: &Rc<Self>,
     ) -> ExchangeFuture<'static, (Balance, Vec<Position>)> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
             let mut mode = me.account_mode();
             let result = crate::rest_reads::fetch_balance(
@@ -94,7 +94,7 @@ impl BitunixVenue {
     }
     pub(crate) fn fetch_position_mode(self: &Rc<Self>) -> ExchangeFuture<'static, bool> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             crate::rest_reads::fetch_position_mode::<Fault, _>(me.reader())
                 .await
                 .map_err(|e| e.0)
@@ -102,7 +102,7 @@ impl BitunixVenue {
     }
     pub(crate) fn fetch_positions(self: &Rc<Self>) -> ExchangeFuture<'static, Vec<Position>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let read = me.reader();
             crate::position_reads::fetch_positions(
                 read,
@@ -150,7 +150,7 @@ impl BitunixVenue {
     }
     pub(crate) fn fetch_orders(self: &Rc<Self>) -> ExchangeFuture<'static, Vec<Order>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let regular = me.clone();
             let tpsl = me.clone();
             let (rows, regular_error, tpsl_error) = crate::position_reads::fetch_orders(
@@ -205,7 +205,7 @@ impl BitunixVenue {
         hedged: bool,
     ) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let contracts: Vec<f64> = me
                 .base
                 .store
@@ -231,7 +231,7 @@ impl BitunixVenue {
         symbol: Option<String>,
     ) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let xhr = me.xhr();
             let symbol = symbol.map(|s| units(&s));
             crate::rest_writes::change_margin_type(
@@ -271,7 +271,7 @@ impl BitunixVenue {
         leverage: f64,
     ) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let markets = me.base.store.markets()?.to_vec();
             let positions = me.base.store.positions()?.to_vec();
             let xhr = me.xhr();
@@ -310,7 +310,7 @@ impl BitunixVenue {
         self: &Rc<Self>,
     ) -> ExchangeFuture<'static, ValidateAccountResult> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let xhr = me.xhr();
             let balance = me.clone();
             let outcome = crate::history_rest::validate_account(
@@ -344,7 +344,7 @@ impl BitunixVenue {
     ) -> ExchangeFuture<'static, Vec<Candle>> {
         let xhr = self.xhr();
         let runtime = self.runtime.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let interval = to_value(&o.interval)?
                 .as_str()
                 .ok_or_else(|| ExchangeError::new("Timeframe must serialize as a string"))?
@@ -377,7 +377,7 @@ impl BitunixVenue {
         symbol: String,
     ) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let xhr = me.xhr();
             crate::history_rest::update_symbol_metadata(
                 &symbol,
@@ -429,7 +429,7 @@ impl BitunixVenue {
         options: safe_cex_types::ExecutionsOptions,
     ) -> ExchangeFuture<'static, Vec<Execution>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let options = crate::adapter::to_input(&options)?;
             let rows = crate::event_models::fetch_historical_fills(&mut me.fill_frame(), &options)
                 .await
@@ -444,11 +444,15 @@ impl BitunixVenue {
     }
     pub(crate) fn start(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
-        Box::pin(async move { crate::session_control::start(&mut me.session()).await })
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
+            crate::session_control::start(&mut me.session()).await
+        })
     }
     pub(crate) fn tick(self: &Rc<Self>, count: f64) -> ExchangeFuture<'static, ()> {
         let me = self.clone();
-        Box::pin(async move { crate::session_control::tick(&mut me.session(), count).await })
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
+            crate::session_control::tick(&mut me.session(), count).await
+        })
     }
     fn session(self: &Rc<Self>) -> Session {
         Session {
