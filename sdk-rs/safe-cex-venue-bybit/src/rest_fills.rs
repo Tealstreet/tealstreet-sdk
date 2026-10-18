@@ -336,5 +336,9 @@ fn admit_execution_rows(rt: &Rt, rows: Js) -> Result<Js, Thrown> {
             )?;
         }
     }
-    Ok(if has_refused { Js::array(accepted) } else { rows })
+    Ok(if has_refused {
+        Js::array(accepted)
+    } else {
+        rows
+    })
 }
