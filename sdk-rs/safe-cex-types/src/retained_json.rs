@@ -7,6 +7,7 @@ use std::fmt;
 mod codec;
 mod native;
 mod parser;
+mod payload;
 mod writer;
 pub use codec::{RETAINED_NATIVE, deserialize_native_payload};
 const RAW_TOKEN: &str = "$serde_json::private::RawValue";
