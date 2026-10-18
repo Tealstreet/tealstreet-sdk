@@ -5,9 +5,9 @@ use safe_cex_exchange::{
         promise::{JsFuture, await_js},
         value::{Thrown, error_object},
     },
+    native_store::DefaultStore,
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::store::DefaultStore;
 use serde_json::json;
 
 struct Host {

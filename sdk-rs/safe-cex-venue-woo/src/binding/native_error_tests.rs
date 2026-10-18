@@ -6,9 +6,9 @@ use safe_cex_exchange::{
         promise::JsFuture,
         value::{Js, Thrown, error_object},
     },
+    native_store::DefaultStore,
     runtime::{ExchangeError, ExchangeRuntime},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{RestAdapter, RestRequest};
 use std::{
     cell::RefCell,
