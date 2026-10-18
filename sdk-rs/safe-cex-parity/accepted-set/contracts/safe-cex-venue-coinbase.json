@@ -29021,5 +29021,806 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_coinbase::types::ListAccountsResponse": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::types::ListAccountsResponseItem",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "positive": [
+      [],
+      [
+        {
+          "uuid": "sample-1",
+          "name": "sample-2",
+          "currency": "sample-3",
+          "available_balance": {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          "default": false,
+          "active": true,
+          "created_at": "sample-7",
+          "updated_at": "sample-8",
+          "deleted_at": "sample-9",
+          "type": "sample-10",
+          "ready": false,
+          "hold": {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          "opaque": {
+            "ignored": true
+          }
+        }
+      ],
+      [
+        {
+          "uuid": "sample-1-second-🚀",
+          "name": "sample-2-second-🚀",
+          "currency": "sample-3-second-🚀",
+          "available_balance": {
+            "value": "sample-1-second",
+            "currency": "sample-2-second"
+          },
+          "default": true,
+          "active": false,
+          "created_at": "sample-7-second-🚀",
+          "updated_at": "sample-8-second-🚀",
+          "deleted_at": "sample-9-second-🚀",
+          "type": "sample-10-second-🚀",
+          "ready": true,
+          "hold": {
+            "value": "sample-1-second",
+            "currency": "sample-2-second"
+          }
+        },
+        {
+          "uuid": "sample-1",
+          "name": "sample-2",
+          "currency": "sample-3",
+          "available_balance": {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          "default": false,
+          "active": true,
+          "created_at": "sample-7",
+          "updated_at": "sample-8",
+          "deleted_at": "sample-9",
+          "type": "sample-10",
+          "ready": false,
+          "hold": {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          "opaque": {
+            "ignored": true
+          }
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      17,
+      "array",
+      [
+        null
+      ],
+      [
+        {}
+      ],
+      [
+        [
+          "sample-1",
+          "sample-2",
+          "sample-3",
+          {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          false,
+          true,
+          "sample-7",
+          "sample-8",
+          "sample-9",
+          "sample-10",
+          false,
+          {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          {
+            "ignored": true
+          }
+        ]
+      ],
+      [
+        {
+          "uuid": null,
+          "name": "sample-2",
+          "currency": "sample-3",
+          "available_balance": {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          "default": false,
+          "active": true,
+          "created_at": "sample-7",
+          "updated_at": "sample-8",
+          "deleted_at": "sample-9",
+          "type": "sample-10",
+          "ready": false,
+          "hold": {
+            "value": "sample-1",
+            "currency": "sample-2"
+          },
+          "opaque": {
+            "ignored": true
+          }
+        }
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Live exported Coinbase wire array declaration, not a runtime validator. The maintained TypeScript AST oracle supplies distinct complete row shapes; native observations decode the actual qualified public Vec alias once, inspect every scalar and nested field, row cardinality/order and exact binary64 bits before reporting. Unknown fields follow the existing typed DTO boundary. Finite UTF8 JSON coverage only; opaque native Js graphs and other aliases remain separate obligations. The canonical wire-alias-contracts.mjs runner authenticates fresh compiler artifacts, claims and complete discovery before selecting these two owners, and executes independent compiled row-loss controls with exact restoration.",
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw wire array\")) { Ok(decoded) => { let length=decoded.len(); let rows:Vec<_>=decoded.into_iter().map(|d| serde_json::json!({\"uuid\":d.uuid,\"name\":d.name,\"currency\":d.currency,\"available_balance\":serde_json::json!({\"value\":d.available_balance.value,\"currency\":d.available_balance.currency}),\"default\":d.r#default,\"active\":d.active,\"created_at\":d.created_at,\"updated_at\":d.updated_at,\"deleted_at\":d.deleted_at,\"type\":d.r#type,\"ready\":d.ready,\"hold\":serde_json::json!({\"value\":d.hold.value,\"currency\":d.hold.currency})})).collect(); serde_json::json!({\"length\":length,\"rows\":rows}) }, Err(_) => serde_json::json!({\"error\":true}) } }",
+      "cases": [
+        {
+          "input": "[]",
+          "output": {
+            "length": 0,
+            "rows": []
+          }
+        },
+        {
+          "input": "[{\"uuid\":\"sample-1\",\"name\":\"sample-2\",\"currency\":\"sample-3\",\"available_balance\":{\"value\":\"sample-1\",\"currency\":\"sample-2\"},\"default\":false,\"active\":true,\"created_at\":\"sample-7\",\"updated_at\":\"sample-8\",\"deleted_at\":\"sample-9\",\"type\":\"sample-10\",\"ready\":false,\"hold\":{\"value\":\"sample-1\",\"currency\":\"sample-2\"},\"opaque\":{\"ignored\":true}}]",
+          "output": {
+            "length": 1,
+            "rows": [
+              {
+                "uuid": "sample-1",
+                "name": "sample-2",
+                "currency": "sample-3",
+                "available_balance": {
+                  "value": "sample-1",
+                  "currency": "sample-2"
+                },
+                "default": false,
+                "active": true,
+                "created_at": "sample-7",
+                "updated_at": "sample-8",
+                "deleted_at": "sample-9",
+                "type": "sample-10",
+                "ready": false,
+                "hold": {
+                  "value": "sample-1",
+                  "currency": "sample-2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "input": "[{\"uuid\":\"sample-1-second-🚀\",\"name\":\"sample-2-second-🚀\",\"currency\":\"sample-3-second-🚀\",\"available_balance\":{\"value\":\"sample-1-second\",\"currency\":\"sample-2-second\"},\"default\":true,\"active\":false,\"created_at\":\"sample-7-second-🚀\",\"updated_at\":\"sample-8-second-🚀\",\"deleted_at\":\"sample-9-second-🚀\",\"type\":\"sample-10-second-🚀\",\"ready\":true,\"hold\":{\"value\":\"sample-1-second\",\"currency\":\"sample-2-second\"}},{\"uuid\":\"sample-1\",\"name\":\"sample-2\",\"currency\":\"sample-3\",\"available_balance\":{\"value\":\"sample-1\",\"currency\":\"sample-2\"},\"default\":false,\"active\":true,\"created_at\":\"sample-7\",\"updated_at\":\"sample-8\",\"deleted_at\":\"sample-9\",\"type\":\"sample-10\",\"ready\":false,\"hold\":{\"value\":\"sample-1\",\"currency\":\"sample-2\"},\"opaque\":{\"ignored\":true}}]",
+          "output": {
+            "length": 2,
+            "rows": [
+              {
+                "uuid": "sample-1-second-🚀",
+                "name": "sample-2-second-🚀",
+                "currency": "sample-3-second-🚀",
+                "available_balance": {
+                  "value": "sample-1-second",
+                  "currency": "sample-2-second"
+                },
+                "default": true,
+                "active": false,
+                "created_at": "sample-7-second-🚀",
+                "updated_at": "sample-8-second-🚀",
+                "deleted_at": "sample-9-second-🚀",
+                "type": "sample-10-second-🚀",
+                "ready": true,
+                "hold": {
+                  "value": "sample-1-second",
+                  "currency": "sample-2-second"
+                }
+              },
+              {
+                "uuid": "sample-1",
+                "name": "sample-2",
+                "currency": "sample-3",
+                "available_balance": {
+                  "value": "sample-1",
+                  "currency": "sample-2"
+                },
+                "default": false,
+                "active": true,
+                "created_at": "sample-7",
+                "updated_at": "sample-8",
+                "deleted_at": "sample-9",
+                "type": "sample-10",
+                "ready": false,
+                "hold": {
+                  "value": "sample-1",
+                  "currency": "sample-2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "\"array\"",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[null]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{}]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[[\"sample-1\",\"sample-2\",\"sample-3\",{\"value\":\"sample-1\",\"currency\":\"sample-2\"},false,true,\"sample-7\",\"sample-8\",\"sample-9\",\"sample-10\",false,{\"value\":\"sample-1\",\"currency\":\"sample-2\"},{\"ignored\":true}]]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{\"uuid\":null,\"name\":\"sample-2\",\"currency\":\"sample-3\",\"available_balance\":{\"value\":\"sample-1\",\"currency\":\"sample-2\"},\"default\":false,\"active\":true,\"created_at\":\"sample-7\",\"updated_at\":\"sample-8\",\"deleted_at\":\"sample-9\",\"type\":\"sample-10\",\"ready\":false,\"hold\":{\"value\":\"sample-1\",\"currency\":\"sample-2\"},\"opaque\":{\"ignored\":true}}]",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::IntxInstrumentsResponse": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::types::IntxInstrumentsResponseItem",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "positive": [
+      [],
+      [
+        {
+          "instrument_id": "sample-1",
+          "instrument_uuid": "sample-2",
+          "symbol": "sample-3",
+          "type": "sample-4",
+          "base_asset_id": "sample-5",
+          "base_asset_uuid": "sample-6",
+          "base_asset_name": "sample-7",
+          "quote_asset_id": "sample-8",
+          "quote_asset_uuid": "sample-9",
+          "quote_asset_name": "sample-10",
+          "base_increment": "sample-11",
+          "quote_increment": "sample-12",
+          "price_band_percent": 14.25,
+          "market_order_percent": 15.25,
+          "qty_24hr": "sample-15",
+          "notional_24hr": "sample-16",
+          "avg_daily_qty": "sample-17",
+          "avg_daily_notional": "sample-18",
+          "previous_day_qty": "sample-19",
+          "open_interest": "sample-20",
+          "position_limit_qty": "sample-21",
+          "position_limit_adq_pct": 23.25,
+          "replacement_cost": "sample-23",
+          "base_imf": 25.25,
+          "min_notional_value": "sample-25",
+          "funding_interval": "sample-26",
+          "trading_state": "sample-27",
+          "quote": {
+            "best_bid_price": "sample-1",
+            "best_bid_size": "sample-2",
+            "best_ask_price": "sample-3",
+            "best_ask_size": "sample-4",
+            "trade_price": "sample-5",
+            "trade_qty": "sample-6",
+            "index_price": "sample-7",
+            "mark_price": "sample-8",
+            "settlement_price": "sample-9",
+            "limit_up": "sample-10",
+            "limit_down": "sample-11",
+            "predicted_funding": "sample-12",
+            "timestamp": "sample-13"
+          },
+          "opaque": {
+            "ignored": true
+          }
+        }
+      ],
+      [
+        {
+          "instrument_id": "sample-1-second-🚀",
+          "instrument_uuid": "sample-2-second-🚀",
+          "symbol": "sample-3-second-🚀",
+          "type": "sample-4-second-🚀",
+          "base_asset_id": "sample-5-second-🚀",
+          "base_asset_uuid": "sample-6-second-🚀",
+          "base_asset_name": "sample-7-second-🚀",
+          "quote_asset_id": "sample-8-second-🚀",
+          "quote_asset_uuid": "sample-9-second-🚀",
+          "quote_asset_name": "sample-10-second-🚀",
+          "base_increment": "sample-11-second-🚀",
+          "quote_increment": "sample-12-second-🚀",
+          "price_band_percent": -0.0,
+          "market_order_percent": -0.0,
+          "qty_24hr": "sample-15-second-🚀",
+          "notional_24hr": "sample-16-second-🚀",
+          "avg_daily_qty": "sample-17-second-🚀",
+          "avg_daily_notional": "sample-18-second-🚀",
+          "previous_day_qty": "sample-19-second-🚀",
+          "open_interest": "sample-20-second-🚀",
+          "position_limit_qty": "sample-21-second-🚀",
+          "position_limit_adq_pct": -0.0,
+          "replacement_cost": "sample-23-second-🚀",
+          "base_imf": -0.0,
+          "min_notional_value": "sample-25-second-🚀",
+          "funding_interval": "sample-26-second-🚀",
+          "trading_state": "sample-27-second-🚀",
+          "quote": {
+            "best_bid_price": "sample-1-second",
+            "best_bid_size": "sample-2-second",
+            "best_ask_price": "sample-3-second",
+            "best_ask_size": "sample-4-second",
+            "trade_price": "sample-5-second",
+            "trade_qty": "sample-6-second",
+            "index_price": "sample-7-second",
+            "mark_price": "sample-8-second",
+            "settlement_price": "sample-9-second",
+            "limit_up": "sample-10-second",
+            "limit_down": "sample-11-second",
+            "predicted_funding": "sample-12-second",
+            "timestamp": "sample-13-second"
+          }
+        },
+        {
+          "instrument_id": "sample-1",
+          "instrument_uuid": "sample-2",
+          "symbol": "sample-3",
+          "type": "sample-4",
+          "base_asset_id": "sample-5",
+          "base_asset_uuid": "sample-6",
+          "base_asset_name": "sample-7",
+          "quote_asset_id": "sample-8",
+          "quote_asset_uuid": "sample-9",
+          "quote_asset_name": "sample-10",
+          "base_increment": "sample-11",
+          "quote_increment": "sample-12",
+          "price_band_percent": 14.25,
+          "market_order_percent": 15.25,
+          "qty_24hr": "sample-15",
+          "notional_24hr": "sample-16",
+          "avg_daily_qty": "sample-17",
+          "avg_daily_notional": "sample-18",
+          "previous_day_qty": "sample-19",
+          "open_interest": "sample-20",
+          "position_limit_qty": "sample-21",
+          "position_limit_adq_pct": 23.25,
+          "replacement_cost": "sample-23",
+          "base_imf": 25.25,
+          "min_notional_value": "sample-25",
+          "funding_interval": "sample-26",
+          "trading_state": "sample-27",
+          "quote": {
+            "best_bid_price": "sample-1",
+            "best_bid_size": "sample-2",
+            "best_ask_price": "sample-3",
+            "best_ask_size": "sample-4",
+            "trade_price": "sample-5",
+            "trade_qty": "sample-6",
+            "index_price": "sample-7",
+            "mark_price": "sample-8",
+            "settlement_price": "sample-9",
+            "limit_up": "sample-10",
+            "limit_down": "sample-11",
+            "predicted_funding": "sample-12",
+            "timestamp": "sample-13"
+          },
+          "opaque": {
+            "ignored": true
+          }
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      17,
+      "array",
+      [
+        null
+      ],
+      [
+        {}
+      ],
+      [
+        [
+          "sample-1",
+          "sample-2",
+          "sample-3",
+          "sample-4",
+          "sample-5",
+          "sample-6",
+          "sample-7",
+          "sample-8",
+          "sample-9",
+          "sample-10",
+          "sample-11",
+          "sample-12",
+          14.25,
+          15.25,
+          "sample-15",
+          "sample-16",
+          "sample-17",
+          "sample-18",
+          "sample-19",
+          "sample-20",
+          "sample-21",
+          23.25,
+          "sample-23",
+          25.25,
+          "sample-25",
+          "sample-26",
+          "sample-27",
+          {
+            "best_bid_price": "sample-1",
+            "best_bid_size": "sample-2",
+            "best_ask_price": "sample-3",
+            "best_ask_size": "sample-4",
+            "trade_price": "sample-5",
+            "trade_qty": "sample-6",
+            "index_price": "sample-7",
+            "mark_price": "sample-8",
+            "settlement_price": "sample-9",
+            "limit_up": "sample-10",
+            "limit_down": "sample-11",
+            "predicted_funding": "sample-12",
+            "timestamp": "sample-13"
+          },
+          {
+            "ignored": true
+          }
+        ]
+      ],
+      [
+        {
+          "instrument_id": null,
+          "instrument_uuid": "sample-2",
+          "symbol": "sample-3",
+          "type": "sample-4",
+          "base_asset_id": "sample-5",
+          "base_asset_uuid": "sample-6",
+          "base_asset_name": "sample-7",
+          "quote_asset_id": "sample-8",
+          "quote_asset_uuid": "sample-9",
+          "quote_asset_name": "sample-10",
+          "base_increment": "sample-11",
+          "quote_increment": "sample-12",
+          "price_band_percent": 14.25,
+          "market_order_percent": 15.25,
+          "qty_24hr": "sample-15",
+          "notional_24hr": "sample-16",
+          "avg_daily_qty": "sample-17",
+          "avg_daily_notional": "sample-18",
+          "previous_day_qty": "sample-19",
+          "open_interest": "sample-20",
+          "position_limit_qty": "sample-21",
+          "position_limit_adq_pct": 23.25,
+          "replacement_cost": "sample-23",
+          "base_imf": 25.25,
+          "min_notional_value": "sample-25",
+          "funding_interval": "sample-26",
+          "trading_state": "sample-27",
+          "quote": {
+            "best_bid_price": "sample-1",
+            "best_bid_size": "sample-2",
+            "best_ask_price": "sample-3",
+            "best_ask_size": "sample-4",
+            "trade_price": "sample-5",
+            "trade_qty": "sample-6",
+            "index_price": "sample-7",
+            "mark_price": "sample-8",
+            "settlement_price": "sample-9",
+            "limit_up": "sample-10",
+            "limit_down": "sample-11",
+            "predicted_funding": "sample-12",
+            "timestamp": "sample-13"
+          },
+          "opaque": {
+            "ignored": true
+          }
+        }
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Live exported Coinbase wire array declaration, not a runtime validator. The maintained TypeScript AST oracle supplies distinct complete row shapes; native observations decode the actual qualified public Vec alias once, inspect every scalar and nested field, row cardinality/order and exact binary64 bits before reporting. Unknown fields follow the existing typed DTO boundary. Finite UTF8 JSON coverage only; opaque native Js graphs and other aliases remain separate obligations. The canonical wire-alias-contracts.mjs runner authenticates fresh compiler artifacts, claims and complete discovery before selecting these two owners, and executes independent compiled row-loss controls with exact restoration.",
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw wire array\")) { Ok(decoded) => { let length=decoded.len(); let rows:Vec<_>=decoded.into_iter().map(|d| serde_json::json!({\"instrument_id\":d.instrument_id,\"instrument_uuid\":d.instrument_uuid,\"symbol\":d.symbol,\"type\":d.r#type,\"base_asset_id\":d.base_asset_id,\"base_asset_uuid\":d.base_asset_uuid,\"base_asset_name\":d.base_asset_name,\"quote_asset_id\":d.quote_asset_id,\"quote_asset_uuid\":d.quote_asset_uuid,\"quote_asset_name\":d.quote_asset_name,\"base_increment\":d.base_increment,\"quote_increment\":d.quote_increment,\"price_band_percent\":format!(\"{:016x}\",d.price_band_percent.to_bits()),\"market_order_percent\":format!(\"{:016x}\",d.market_order_percent.to_bits()),\"qty_24hr\":d.qty_24hr,\"notional_24hr\":d.notional_24hr,\"avg_daily_qty\":d.avg_daily_qty,\"avg_daily_notional\":d.avg_daily_notional,\"previous_day_qty\":d.previous_day_qty,\"open_interest\":d.open_interest,\"position_limit_qty\":d.position_limit_qty,\"position_limit_adq_pct\":format!(\"{:016x}\",d.position_limit_adq_pct.to_bits()),\"replacement_cost\":d.replacement_cost,\"base_imf\":format!(\"{:016x}\",d.base_imf.to_bits()),\"min_notional_value\":d.min_notional_value,\"funding_interval\":d.funding_interval,\"trading_state\":d.trading_state,\"quote\":serde_json::json!({\"best_bid_price\":d.quote.best_bid_price,\"best_bid_size\":d.quote.best_bid_size,\"best_ask_price\":d.quote.best_ask_price,\"best_ask_size\":d.quote.best_ask_size,\"trade_price\":d.quote.trade_price,\"trade_qty\":d.quote.trade_qty,\"index_price\":d.quote.index_price,\"mark_price\":d.quote.mark_price,\"settlement_price\":d.quote.settlement_price,\"limit_up\":d.quote.limit_up,\"limit_down\":d.quote.limit_down,\"predicted_funding\":d.quote.predicted_funding,\"timestamp\":d.quote.timestamp})})).collect(); serde_json::json!({\"length\":length,\"rows\":rows}) }, Err(_) => serde_json::json!({\"error\":true}) } }",
+      "cases": [
+        {
+          "input": "[]",
+          "output": {
+            "length": 0,
+            "rows": []
+          }
+        },
+        {
+          "input": "[{\"instrument_id\":\"sample-1\",\"instrument_uuid\":\"sample-2\",\"symbol\":\"sample-3\",\"type\":\"sample-4\",\"base_asset_id\":\"sample-5\",\"base_asset_uuid\":\"sample-6\",\"base_asset_name\":\"sample-7\",\"quote_asset_id\":\"sample-8\",\"quote_asset_uuid\":\"sample-9\",\"quote_asset_name\":\"sample-10\",\"base_increment\":\"sample-11\",\"quote_increment\":\"sample-12\",\"price_band_percent\":14.25,\"market_order_percent\":15.25,\"qty_24hr\":\"sample-15\",\"notional_24hr\":\"sample-16\",\"avg_daily_qty\":\"sample-17\",\"avg_daily_notional\":\"sample-18\",\"previous_day_qty\":\"sample-19\",\"open_interest\":\"sample-20\",\"position_limit_qty\":\"sample-21\",\"position_limit_adq_pct\":23.25,\"replacement_cost\":\"sample-23\",\"base_imf\":25.25,\"min_notional_value\":\"sample-25\",\"funding_interval\":\"sample-26\",\"trading_state\":\"sample-27\",\"quote\":{\"best_bid_price\":\"sample-1\",\"best_bid_size\":\"sample-2\",\"best_ask_price\":\"sample-3\",\"best_ask_size\":\"sample-4\",\"trade_price\":\"sample-5\",\"trade_qty\":\"sample-6\",\"index_price\":\"sample-7\",\"mark_price\":\"sample-8\",\"settlement_price\":\"sample-9\",\"limit_up\":\"sample-10\",\"limit_down\":\"sample-11\",\"predicted_funding\":\"sample-12\",\"timestamp\":\"sample-13\"},\"opaque\":{\"ignored\":true}}]",
+          "output": {
+            "length": 1,
+            "rows": [
+              {
+                "instrument_id": "sample-1",
+                "instrument_uuid": "sample-2",
+                "symbol": "sample-3",
+                "type": "sample-4",
+                "base_asset_id": "sample-5",
+                "base_asset_uuid": "sample-6",
+                "base_asset_name": "sample-7",
+                "quote_asset_id": "sample-8",
+                "quote_asset_uuid": "sample-9",
+                "quote_asset_name": "sample-10",
+                "base_increment": "sample-11",
+                "quote_increment": "sample-12",
+                "price_band_percent": "402c800000000000",
+                "market_order_percent": "402e800000000000",
+                "qty_24hr": "sample-15",
+                "notional_24hr": "sample-16",
+                "avg_daily_qty": "sample-17",
+                "avg_daily_notional": "sample-18",
+                "previous_day_qty": "sample-19",
+                "open_interest": "sample-20",
+                "position_limit_qty": "sample-21",
+                "position_limit_adq_pct": "4037400000000000",
+                "replacement_cost": "sample-23",
+                "base_imf": "4039400000000000",
+                "min_notional_value": "sample-25",
+                "funding_interval": "sample-26",
+                "trading_state": "sample-27",
+                "quote": {
+                  "best_bid_price": "sample-1",
+                  "best_bid_size": "sample-2",
+                  "best_ask_price": "sample-3",
+                  "best_ask_size": "sample-4",
+                  "trade_price": "sample-5",
+                  "trade_qty": "sample-6",
+                  "index_price": "sample-7",
+                  "mark_price": "sample-8",
+                  "settlement_price": "sample-9",
+                  "limit_up": "sample-10",
+                  "limit_down": "sample-11",
+                  "predicted_funding": "sample-12",
+                  "timestamp": "sample-13"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "input": "[{\"instrument_id\":\"sample-1-second-🚀\",\"instrument_uuid\":\"sample-2-second-🚀\",\"symbol\":\"sample-3-second-🚀\",\"type\":\"sample-4-second-🚀\",\"base_asset_id\":\"sample-5-second-🚀\",\"base_asset_uuid\":\"sample-6-second-🚀\",\"base_asset_name\":\"sample-7-second-🚀\",\"quote_asset_id\":\"sample-8-second-🚀\",\"quote_asset_uuid\":\"sample-9-second-🚀\",\"quote_asset_name\":\"sample-10-second-🚀\",\"base_increment\":\"sample-11-second-🚀\",\"quote_increment\":\"sample-12-second-🚀\",\"price_band_percent\":-0.0,\"market_order_percent\":-0.0,\"qty_24hr\":\"sample-15-second-🚀\",\"notional_24hr\":\"sample-16-second-🚀\",\"avg_daily_qty\":\"sample-17-second-🚀\",\"avg_daily_notional\":\"sample-18-second-🚀\",\"previous_day_qty\":\"sample-19-second-🚀\",\"open_interest\":\"sample-20-second-🚀\",\"position_limit_qty\":\"sample-21-second-🚀\",\"position_limit_adq_pct\":-0.0,\"replacement_cost\":\"sample-23-second-🚀\",\"base_imf\":-0.0,\"min_notional_value\":\"sample-25-second-🚀\",\"funding_interval\":\"sample-26-second-🚀\",\"trading_state\":\"sample-27-second-🚀\",\"quote\":{\"best_bid_price\":\"sample-1-second\",\"best_bid_size\":\"sample-2-second\",\"best_ask_price\":\"sample-3-second\",\"best_ask_size\":\"sample-4-second\",\"trade_price\":\"sample-5-second\",\"trade_qty\":\"sample-6-second\",\"index_price\":\"sample-7-second\",\"mark_price\":\"sample-8-second\",\"settlement_price\":\"sample-9-second\",\"limit_up\":\"sample-10-second\",\"limit_down\":\"sample-11-second\",\"predicted_funding\":\"sample-12-second\",\"timestamp\":\"sample-13-second\"}},{\"instrument_id\":\"sample-1\",\"instrument_uuid\":\"sample-2\",\"symbol\":\"sample-3\",\"type\":\"sample-4\",\"base_asset_id\":\"sample-5\",\"base_asset_uuid\":\"sample-6\",\"base_asset_name\":\"sample-7\",\"quote_asset_id\":\"sample-8\",\"quote_asset_uuid\":\"sample-9\",\"quote_asset_name\":\"sample-10\",\"base_increment\":\"sample-11\",\"quote_increment\":\"sample-12\",\"price_band_percent\":14.25,\"market_order_percent\":15.25,\"qty_24hr\":\"sample-15\",\"notional_24hr\":\"sample-16\",\"avg_daily_qty\":\"sample-17\",\"avg_daily_notional\":\"sample-18\",\"previous_day_qty\":\"sample-19\",\"open_interest\":\"sample-20\",\"position_limit_qty\":\"sample-21\",\"position_limit_adq_pct\":23.25,\"replacement_cost\":\"sample-23\",\"base_imf\":25.25,\"min_notional_value\":\"sample-25\",\"funding_interval\":\"sample-26\",\"trading_state\":\"sample-27\",\"quote\":{\"best_bid_price\":\"sample-1\",\"best_bid_size\":\"sample-2\",\"best_ask_price\":\"sample-3\",\"best_ask_size\":\"sample-4\",\"trade_price\":\"sample-5\",\"trade_qty\":\"sample-6\",\"index_price\":\"sample-7\",\"mark_price\":\"sample-8\",\"settlement_price\":\"sample-9\",\"limit_up\":\"sample-10\",\"limit_down\":\"sample-11\",\"predicted_funding\":\"sample-12\",\"timestamp\":\"sample-13\"},\"opaque\":{\"ignored\":true}}]",
+          "output": {
+            "length": 2,
+            "rows": [
+              {
+                "instrument_id": "sample-1-second-🚀",
+                "instrument_uuid": "sample-2-second-🚀",
+                "symbol": "sample-3-second-🚀",
+                "type": "sample-4-second-🚀",
+                "base_asset_id": "sample-5-second-🚀",
+                "base_asset_uuid": "sample-6-second-🚀",
+                "base_asset_name": "sample-7-second-🚀",
+                "quote_asset_id": "sample-8-second-🚀",
+                "quote_asset_uuid": "sample-9-second-🚀",
+                "quote_asset_name": "sample-10-second-🚀",
+                "base_increment": "sample-11-second-🚀",
+                "quote_increment": "sample-12-second-🚀",
+                "price_band_percent": "8000000000000000",
+                "market_order_percent": "8000000000000000",
+                "qty_24hr": "sample-15-second-🚀",
+                "notional_24hr": "sample-16-second-🚀",
+                "avg_daily_qty": "sample-17-second-🚀",
+                "avg_daily_notional": "sample-18-second-🚀",
+                "previous_day_qty": "sample-19-second-🚀",
+                "open_interest": "sample-20-second-🚀",
+                "position_limit_qty": "sample-21-second-🚀",
+                "position_limit_adq_pct": "8000000000000000",
+                "replacement_cost": "sample-23-second-🚀",
+                "base_imf": "8000000000000000",
+                "min_notional_value": "sample-25-second-🚀",
+                "funding_interval": "sample-26-second-🚀",
+                "trading_state": "sample-27-second-🚀",
+                "quote": {
+                  "best_bid_price": "sample-1-second",
+                  "best_bid_size": "sample-2-second",
+                  "best_ask_price": "sample-3-second",
+                  "best_ask_size": "sample-4-second",
+                  "trade_price": "sample-5-second",
+                  "trade_qty": "sample-6-second",
+                  "index_price": "sample-7-second",
+                  "mark_price": "sample-8-second",
+                  "settlement_price": "sample-9-second",
+                  "limit_up": "sample-10-second",
+                  "limit_down": "sample-11-second",
+                  "predicted_funding": "sample-12-second",
+                  "timestamp": "sample-13-second"
+                }
+              },
+              {
+                "instrument_id": "sample-1",
+                "instrument_uuid": "sample-2",
+                "symbol": "sample-3",
+                "type": "sample-4",
+                "base_asset_id": "sample-5",
+                "base_asset_uuid": "sample-6",
+                "base_asset_name": "sample-7",
+                "quote_asset_id": "sample-8",
+                "quote_asset_uuid": "sample-9",
+                "quote_asset_name": "sample-10",
+                "base_increment": "sample-11",
+                "quote_increment": "sample-12",
+                "price_band_percent": "402c800000000000",
+                "market_order_percent": "402e800000000000",
+                "qty_24hr": "sample-15",
+                "notional_24hr": "sample-16",
+                "avg_daily_qty": "sample-17",
+                "avg_daily_notional": "sample-18",
+                "previous_day_qty": "sample-19",
+                "open_interest": "sample-20",
+                "position_limit_qty": "sample-21",
+                "position_limit_adq_pct": "4037400000000000",
+                "replacement_cost": "sample-23",
+                "base_imf": "4039400000000000",
+                "min_notional_value": "sample-25",
+                "funding_interval": "sample-26",
+                "trading_state": "sample-27",
+                "quote": {
+                  "best_bid_price": "sample-1",
+                  "best_bid_size": "sample-2",
+                  "best_ask_price": "sample-3",
+                  "best_ask_size": "sample-4",
+                  "trade_price": "sample-5",
+                  "trade_qty": "sample-6",
+                  "index_price": "sample-7",
+                  "mark_price": "sample-8",
+                  "settlement_price": "sample-9",
+                  "limit_up": "sample-10",
+                  "limit_down": "sample-11",
+                  "predicted_funding": "sample-12",
+                  "timestamp": "sample-13"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "\"array\"",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[null]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{}]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[[\"sample-1\",\"sample-2\",\"sample-3\",\"sample-4\",\"sample-5\",\"sample-6\",\"sample-7\",\"sample-8\",\"sample-9\",\"sample-10\",\"sample-11\",\"sample-12\",14.25,15.25,\"sample-15\",\"sample-16\",\"sample-17\",\"sample-18\",\"sample-19\",\"sample-20\",\"sample-21\",23.25,\"sample-23\",25.25,\"sample-25\",\"sample-26\",\"sample-27\",{\"best_bid_price\":\"sample-1\",\"best_bid_size\":\"sample-2\",\"best_ask_price\":\"sample-3\",\"best_ask_size\":\"sample-4\",\"trade_price\":\"sample-5\",\"trade_qty\":\"sample-6\",\"index_price\":\"sample-7\",\"mark_price\":\"sample-8\",\"settlement_price\":\"sample-9\",\"limit_up\":\"sample-10\",\"limit_down\":\"sample-11\",\"predicted_funding\":\"sample-12\",\"timestamp\":\"sample-13\"},{\"ignored\":true}]]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{\"instrument_id\":null,\"instrument_uuid\":\"sample-2\",\"symbol\":\"sample-3\",\"type\":\"sample-4\",\"base_asset_id\":\"sample-5\",\"base_asset_uuid\":\"sample-6\",\"base_asset_name\":\"sample-7\",\"quote_asset_id\":\"sample-8\",\"quote_asset_uuid\":\"sample-9\",\"quote_asset_name\":\"sample-10\",\"base_increment\":\"sample-11\",\"quote_increment\":\"sample-12\",\"price_band_percent\":14.25,\"market_order_percent\":15.25,\"qty_24hr\":\"sample-15\",\"notional_24hr\":\"sample-16\",\"avg_daily_qty\":\"sample-17\",\"avg_daily_notional\":\"sample-18\",\"previous_day_qty\":\"sample-19\",\"open_interest\":\"sample-20\",\"position_limit_qty\":\"sample-21\",\"position_limit_adq_pct\":23.25,\"replacement_cost\":\"sample-23\",\"base_imf\":25.25,\"min_notional_value\":\"sample-25\",\"funding_interval\":\"sample-26\",\"trading_state\":\"sample-27\",\"quote\":{\"best_bid_price\":\"sample-1\",\"best_bid_size\":\"sample-2\",\"best_ask_price\":\"sample-3\",\"best_ask_size\":\"sample-4\",\"trade_price\":\"sample-5\",\"trade_qty\":\"sample-6\",\"index_price\":\"sample-7\",\"mark_price\":\"sample-8\",\"settlement_price\":\"sample-9\",\"limit_up\":\"sample-10\",\"limit_down\":\"sample-11\",\"predicted_funding\":\"sample-12\",\"timestamp\":\"sample-13\"},\"opaque\":{\"ignored\":true}}]",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
   }
+
 }
