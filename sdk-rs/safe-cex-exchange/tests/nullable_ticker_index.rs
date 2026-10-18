@@ -35,14 +35,19 @@ fn store_null_index_survives_patches_and_aliases() {
     patch.set_number("index", 17.0);
     store.update_ticker("SOLV", &patch).unwrap();
     assert_eq!(store.tickers_by_id().unwrap()["SOLV"].index, Some(17.0));
-    assert_eq!(store.tickers_by_symbol().unwrap()["SOLVUSDT"].index, Some(17.0));
+    assert_eq!(
+        store.tickers_by_symbol().unwrap()["SOLVUSDT"].index,
+        Some(17.0)
+    );
     assert_eq!(store.tickers_by_id().unwrap()["SOLV"].mark, 4.0);
     for index in [None, Some(-0.0_f64), Some(23.5)] {
         let mut patch = ModelPatch::default();
         patch.set_native("index", index);
         store.update_ticker("SOLV", &patch).unwrap();
         assert_eq!(
-            store.tickers_by_id().unwrap()["SOLV"].index.map(f64::to_bits),
+            store.tickers_by_id().unwrap()["SOLV"]
+                .index
+                .map(f64::to_bits),
             index.map(f64::to_bits)
         );
         let packed = pack_ticker_deltas(&[(0.0, patch)]).unwrap();
