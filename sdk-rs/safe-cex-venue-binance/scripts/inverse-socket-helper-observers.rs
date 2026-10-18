@@ -72,11 +72,13 @@ pub fn property(case: &str, optional: bool, f: impl Fn(&Js, &str) -> Result<Js, 
         }
         "throws" => {
             let e = error.clone();
-            owner.define_accessor(
-                "slot",
-                Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
-                None,
-            );
+            owner
+                .define_accessor(
+                    "slot",
+                    Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
+                    None,
+                )
+                .expect("fresh native receipt accessor target");
         }
         _ => {
             owner.define("slot", raw(case, &sentinel)).unwrap();
@@ -92,11 +94,13 @@ pub fn flag(case: &str, private: bool, f: impl Fn(&Rt, &str) -> Result<bool, Thr
     let sentinel = Js::object(vec![]);
     if case == "throws" {
         let e = error.clone();
-        rt.this.define_accessor(
-            "probe",
-            Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
-            None,
-        );
+        rt.this
+            .define_accessor(
+                "probe",
+                Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
+                None,
+            )
+            .expect("fresh native receipt accessor target");
     } else if case != "missing" {
         rt.this.define("probe", raw(case, &sentinel)).unwrap();
     }
@@ -110,11 +114,13 @@ pub fn call(case: &str, f: impl Fn(&Js, &str, Vec<Js>) -> Result<Js, Thrown>) ->
     let count = calls.clone();
     if case == "getter-throws" {
         let e = error.clone();
-        owner.define_accessor(
-            "method",
-            Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
-            None,
-        );
+        owner
+            .define_accessor(
+                "method",
+                Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
+                None,
+            )
+            .expect("fresh native receipt accessor target");
     } else if case == "not-callable" {
         owner.define("method", Js::Number(1.)).unwrap();
     } else if case != "missing" {

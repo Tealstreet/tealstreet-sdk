@@ -43,7 +43,7 @@ fn thenable(trace: Rc<RefCell<Vec<Value>>>, value: Js, label: &str, token: Js) -
             args[0].call(Js::Undefined, vec![value.clone()])?;
             Ok(Js::Undefined)
         }))
-    })), None);
+    })), None).expect("test accessor target permits definition");
     object
 }
 
@@ -117,18 +117,20 @@ async fn observe(shared: &Rc<ScopeShared<()>>, method: &str, label: &str) -> Val
             let events = trace.clone();
             let error = token.clone();
             let throws = label == "value-throws";
-            object.define_accessor(
-                "0",
-                Some(Rc::new(move |_| {
-                    events.borrow_mut().push(json!("value"));
-                    if throws {
-                        Err(Thrown::new(error.clone()))
-                    } else {
-                        Ok(Js::Number(7.0))
-                    }
-                })),
-                None,
-            );
+            object
+                .define_accessor(
+                    "0",
+                    Some(Rc::new(move |_| {
+                        events.borrow_mut().push(json!("value"));
+                        if throws {
+                            Err(Thrown::new(error.clone()))
+                        } else {
+                            Ok(Js::Number(7.0))
+                        }
+                    })),
+                    None,
+                )
+                .expect("test accessor target permits definition");
             object
         }
         "string" => Js::str("ab"),
@@ -181,18 +183,20 @@ async fn observe(shared: &Rc<ScopeShared<()>>, method: &str, label: &str) -> Val
     let events = trace.clone();
     let error = token.clone();
     let throws = label == "call-throws";
-    callback.define_accessor(
-        "call",
-        Some(Rc::new(move |_| {
-            events.borrow_mut().push(json!("getCall"));
-            if throws {
-                Err(Thrown::new(error.clone()))
-            } else {
-                Ok(call.clone())
-            }
-        })),
-        None,
-    );
+    callback
+        .define_accessor(
+            "call",
+            Some(Rc::new(move |_| {
+                events.borrow_mut().push(json!("getCall"));
+                if throws {
+                    Err(Thrown::new(error.clone()))
+                } else {
+                    Ok(call.clone())
+                }
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     let receiver = match label {
         "this-object" => explicit,
         "this-false" => Js::Bool(false),

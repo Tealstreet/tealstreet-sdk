@@ -278,11 +278,13 @@ mod accepted_control_flow {
         let error = Js::object(vec![]);
         let e = error.clone();
         let parent = Js::object(vec![]);
-        parent.define_accessor(
-            "field",
-            Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
-            None,
-        );
+        parent
+            .define_accessor(
+                "field",
+                Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         match optional(&ops, parent, "field") {
             Err(e) => assert!(
                 e.value.same_reference(&error),
