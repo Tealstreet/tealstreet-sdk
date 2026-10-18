@@ -1204,7 +1204,7 @@ fn divergence_pem_failure_reaches_real_ws_and_rest_bindings() {
                 "failed signer cannot dispatch placement"
             );
             assert!(
-                h.store.orders().is_empty(),
+                h.store.orders().unwrap().is_empty(),
                 "failed signer creates no optimistic order"
             );
             h.venue().dispose().unwrap();
@@ -1271,9 +1271,9 @@ fn divergence_starbase_intent_loss_is_outside_live_placement() {
             calls[0].data.get("method").is_none(),
             "no Starbase RPC request"
         );
-        assert_eq!(h.store.orders()[0].id, "audit-legacy");
+        assert_eq!(h.store.orders().unwrap()[0].id, "audit-legacy");
         assert_eq!(
-            h.store.orders()[0].parent_id.as_deref(),
+            h.store.orders().unwrap()[0].parent_id.as_deref(),
             Some("synthetic-caller-id")
         );
         assert!(
