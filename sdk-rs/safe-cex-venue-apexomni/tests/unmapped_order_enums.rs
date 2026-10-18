@@ -40,7 +40,7 @@ fn fixture_with_tick_interval(tick_interval: Option<f64>) -> Harness {
         http.ok("POST", "/v3/delete-open-orders", json!({}));
     });
     Store::update(h.store.as_ref(), serde_json::from_value(json!({"markets":[{"id":"BTC-USDC","symbol":"BTCUSDC","base":"BTC","quote":"USDC","active":true,"precision":{"amount":0.001,"price":0.01},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":50}},"info":contract()}]})).unwrap(), false).unwrap();
-    h.store.update_zk_link_config(Some(json!({"id":"16909060","l2Key":"fixture-l2","contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"},"contractConfig":{"perpetualContract":[contract()]}}))).unwrap();
+    h.store.update_zk_link_config(Some(json!({"id":"16909060","l2Key":"fixture-l2","contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"},"contractConfig":{"perpetualContract":[contract()]}}).into())).unwrap();
     h
 }
 
@@ -61,7 +61,15 @@ fn check_native_field(order: &Order, field: &str) {
         native.get(field).unwrap(),
         safe_cex_exchange::js_runtime::value::Js::Undefined
     ));
-    assert_eq!(order.info.value().unwrap()[field], "UNMAPPED_NATIVE");
+    assert!(
+        order
+            .info
+            .value()
+            .unwrap()
+            .get(field)
+            .unwrap()
+            .text_equals("UNMAPPED_NATIVE")
+    );
 }
 fn unmapped_case(field: &str) {
     let h = fixture();
@@ -154,8 +162,8 @@ fn unmapped_order_side_keeps_rest_and_private_batches() {
 
 fn malformed_reduce_only_case(private_frame: bool) {
     for (bad, displayed) in [
-        (json!(17), "Number(17.0)"),
-        (json!("true"), "String(\"true\")"),
+        (json!(17), "Float(17.0)"),
+        (json!("true"), "\"true\""),
         (json!({}), "Object([])"),
         (json!([]), "Array([])"),
     ] {

@@ -32,9 +32,13 @@ fn config(v: &Value) -> Option<MexcSymbolConfig> {
 }
 fn positions(rows: &Value) -> Vec<Position> {
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":1})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":1})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     let base = fake_positions_for_market(&market, None, None, None).remove(0);
@@ -60,7 +64,7 @@ fn positions(rows: &Value) -> Vec<Position> {
                 .get("marginType")
                 .map(|v| serde_json::from_value(v.clone()).unwrap()))
             .into();
-            p.info = (r.get("info").map(decode_json)).into();
+            p.info = (r.get("info").map(decode_json).map(Into::into)).into();
             p
         })
         .collect()

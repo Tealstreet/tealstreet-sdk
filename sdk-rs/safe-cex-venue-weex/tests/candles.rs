@@ -1,5 +1,7 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+#[path = "support/retained_input.rs"]
+mod retained_input;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_venue_weex::utils::{WeexUtilityInput, normalize_candle};
 use serde_json::Value;
@@ -144,14 +146,34 @@ fn candles_match_actual_typescript() {
     for (index, case) in corpus["refusals"].as_array().unwrap().iter().enumerate() {
         let raw = case["raw"].as_str().unwrap();
         assert_eq!(raw, refusal_inputs[index], "candle::refusal_identity");
-        assert!(
-            serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
-            "candle_refusal_direct"
-        );
-        assert!(
-            js_from_str::<WeexUtilityInput>(raw).is_err(),
-            "candle_refusal_numeric"
-        );
+        if index == 0 {
+            let native = retained_input::admit_utf16(raw);
+            let candle = normalize_candle(Some(&native), |value| value)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                [
+                    candle.timestamp,
+                    candle.open,
+                    candle.high,
+                    candle.low,
+                    candle.close,
+                    candle.volume
+                ]
+                .map(f64::to_bits),
+                [0.0f64.to_bits(); 6],
+                "source zero candle fields survive UTF16 input"
+            );
+        } else {
+            assert!(
+                serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
+                "candle depth direct refusal"
+            );
+            assert!(
+                js_from_str::<WeexUtilityInput>(raw).is_err(),
+                "candle depth numeric refusal"
+            );
+        }
     }
     let mut deep = serde_json::json!("7");
     for _ in 0..150 {

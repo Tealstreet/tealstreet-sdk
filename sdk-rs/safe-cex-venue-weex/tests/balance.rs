@@ -1,5 +1,7 @@
 #[path = "support/input_identity.rs"]
 mod input_identity;
+#[path = "support/retained_input.rs"]
+mod retained_input;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_venue_weex::utils::{WeexUtilityInput, normalize_balance};
 use serde_json::{Value, json};
@@ -15,19 +17,24 @@ fn bits(n: f64) -> String {
     )
 }
 // Inspect the retained native tree directly; never serialize a Balance to witness it.
-fn capture(value: &Value) -> Value {
-    match value {
-        Value::Number(_) => {
-            json!({"type":"number","bits":bits(safe_cex_num::js_number(Some(value)).unwrap())})
+fn capture(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let value = safe_cex_num::numeric_ingress::js_capture_output(value).unwrap();
+    match &value {
+        Input::Float(_) | Input::Lexeme(_) => {
+            json!({"type":"number","bits":bits(value.as_f64().unwrap())})
         }
-        Value::Array(values) => Value::Array(values.iter().map(capture).collect()),
-        Value::Object(values) => Value::Array(
+        Input::Array(values) => Value::Array(values.iter().map(capture).collect()),
+        Input::Object(values) => Value::Array(
             values
                 .iter()
-                .map(|(key, value)| json!([key, capture(value)]))
+                .map(|(key, value)| json!([String::from_utf16(key).unwrap(), capture(value)]))
                 .collect(),
         ),
-        value => value.clone(),
+        Input::Undefined => json!({"undefined":true}),
+        Input::Null => Value::Null,
+        Input::Bool(value) => json!(value),
+        Input::Text(value) => json!(String::from_utf16(value).unwrap()),
     }
 }
 #[test]
@@ -125,7 +132,11 @@ fn balances_match_actual_typescript() {
                         lengths[index],
                         "{label}::native_info_count"
                     );
-                    assert_eq!(info, input.as_value(), "{label}::retained_info_identity");
+                    assert_eq!(
+                        info,
+                        &input.as_value().clone(),
+                        "{label}::retained_info_identity"
+                    );
                     assert_eq!(capture(info), case["info"], "{label}::native_info");
                     assert!(
                         value.currencies.is_none() && value.coins.is_none(),
@@ -154,10 +165,19 @@ fn balances_match_actual_typescript() {
     for (index, case) in refusals.iter().enumerate() {
         assert_eq!(case["raw"], expected[index], "balance::refusal_identity");
         assert_eq!(case["source"], 0, "balance::source_refusal_acceptance");
-        assert!(
-            js_from_str::<WeexUtilityInput>(&expected[index]).is_err(),
-            "balance::retained_refusal"
-        );
+        if index == 0 {
+            let native = retained_input::admit_utf16(&expected[index]);
+            assert_eq!(
+                normalize_balance(&native).unwrap().total.to_bits(),
+                0.0f64.to_bits(),
+                "source admits unused UTF16 metadata"
+            );
+        } else {
+            assert!(
+                js_from_str::<WeexUtilityInput>(&expected[index]).is_err(),
+                "balance::depth_refusal"
+            );
+        }
     }
     assert_eq!(
         corpus["callable"]["bits"], "401d000000000000",

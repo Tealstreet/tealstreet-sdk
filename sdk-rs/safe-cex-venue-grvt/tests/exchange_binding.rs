@@ -192,7 +192,15 @@ fn fetch_markets_uses_public_gateway_and_keeps_signing_metadata() {
     assert_eq!(market.id, "BTC_USDT_Perp");
     assert_eq!(market.symbol, SYMBOL);
     assert_eq!(market.precision.amount, 0.001);
-    assert_eq!(market.info.as_ref().unwrap()["ih"], "0x030501");
+    assert!(
+        market
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("0x030501")
+    );
     assert_eq!(
         h.http.calls("/lite/v1/all_instruments")[0].base_url,
         "https://market-data.grvt.io"
@@ -228,9 +236,15 @@ fn refresh_markets_replaces_metadata_when_instrument_ids_are_unchanged() {
     );
     assert_eq!(market.limits.amount.max, 77.0);
     let info = market.info.as_ref().unwrap();
-    assert_eq!(info["ih"], "0x030502");
-    assert_eq!(info["bd"].as_f64().unwrap().to_bits(), 4.0_f64.to_bits());
-    assert_eq!(info["qd"].as_f64().unwrap().to_bits(), 5.0_f64.to_bits());
+    assert!(info.get("ih").unwrap().text_equals("0x030502"));
+    assert_eq!(
+        info.get("bd").unwrap().as_f64().unwrap().to_bits(),
+        4.0_f64.to_bits()
+    );
+    assert_eq!(
+        info.get("qd").unwrap().as_f64().unwrap().to_bits(),
+        5.0_f64.to_bits()
+    );
     assert_eq!(h.http.calls("/lite/v1/all_instruments").len(), 2);
 }
 #[test]
@@ -251,10 +265,26 @@ fn refresh_markets_returns_added_and_removed_instruments_through_trait() {
     let changes = h.drive(h.venue().refresh_markets()).unwrap();
     assert_eq!(changes.added.len(), 1);
     assert_eq!(changes.added[0].id, "ETH_USDT_Perp");
-    assert_eq!(changes.added[0].info.as_ref().unwrap()["ih"], "0x030503");
+    assert!(
+        changes.added[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("0x030503")
+    );
     assert_eq!(changes.removed.len(), 1);
     assert_eq!(changes.removed[0].id, "BTC_USDT_Perp");
-    assert_eq!(changes.removed[0].info.as_ref().unwrap()["ih"], "0x030501");
+    assert!(
+        changes.removed[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("0x030501")
+    );
     assert_eq!(h.store.markets().as_ref(), changes.added.as_slice());
 }
 #[test]
@@ -1265,5 +1295,79 @@ fn production_ticker_coercion_matches_constructed_typescript() {
             cleanup().unwrap();
         }
         h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn market_info_preserves_source_own_keys_and_native_metadata() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    for metadata in [
+        None,
+        Some((
+            Js::utf16(&[0xd800, 65, 0xdc00]),
+            Js::Number(f64::INFINITY),
+            Js::Number(-0.0),
+        )),
+        Some((Js::Undefined, Js::Number(f64::NAN), Js::Undefined)),
+    ] {
+        let h = setup();
+        let raw = from_json(&instrument());
+        for key in ["ih", "bd", "qd"] {
+            raw.delete(&key.encode_utf16().collect::<Vec<_>>());
+        }
+        if let Some((ih, bd, qd)) = metadata.clone() {
+            raw.define("ih", ih).unwrap();
+            raw.define("bd", bd).unwrap();
+            raw.define("qd", qd).unwrap();
+        }
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/lite/v1/all_instruments");
+        h.http.route_native(
+            "POST",
+            "/lite/v1/all_instruments",
+            200.,
+            Js::object(vec![("r", Js::array(vec![raw]))]),
+        );
+        loaded(&h);
+        let markets = h.store.markets();
+        assert_eq!(markets.len(), 1, "real market fetch admits opaque metadata");
+        let info = markets[0].info.as_ref().unwrap();
+        assert_eq!(
+            info.as_object().unwrap().len(),
+            3,
+            "source creates three own keys"
+        );
+        for key in ["ih", "bd", "qd"] {
+            assert!(info.get(key).is_some(), "own {key}");
+        }
+        match metadata {
+            None => {
+                for key in ["ih", "bd", "qd"] {
+                    assert!(matches!(info.get(key), Some(Input::Undefined)));
+                }
+            }
+            Some((Js::Undefined, _, _)) => {
+                assert!(matches!(info.get("ih"), Some(Input::Undefined)));
+                assert!(info.get("bd").unwrap().as_f64().unwrap().is_nan());
+                assert!(matches!(info.get("qd"), Some(Input::Undefined)));
+            }
+            Some(_) => {
+                assert_eq!(
+                    info.get("ih").unwrap().as_text().unwrap(),
+                    &[0xd800, 65, 0xdc00]
+                );
+                assert_eq!(
+                    info.get("bd").unwrap().as_f64().unwrap().to_bits(),
+                    f64::INFINITY.to_bits()
+                );
+                assert_eq!(
+                    info.get("qd").unwrap().as_f64().unwrap().to_bits(),
+                    (-0.0f64).to_bits()
+                );
+            }
+        }
     }
 }

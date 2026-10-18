@@ -4,6 +4,7 @@ use safe_cex_venue_coinbase::{order_create::*, starbase_auth::CoinbaseStarbasePr
 #[path = "support/microtasks.rs"]
 mod microtasks;
 use microtasks::{Microtasks, completed};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{cell::RefCell, process::Command, rc::Rc, sync::OnceLock};
@@ -400,7 +401,17 @@ fn assert_optimistic(a: &CoinbaseOptimisticOrder, e: &Value, label: &str) {
         e["info"].as_object().unwrap().len()
     );
     for (k, v) in e["info"].as_object().unwrap() {
-        assert_json(Some(&a.info.fields.borrow()[k].borrow()), v, label);
+        assert_json(
+            Some(
+                &a.info.fields.borrow()[&k.encode_utf16().collect::<Vec<_>>()]
+                    .borrow()
+                    .clone()
+                    .into_value()
+                    .unwrap(),
+            ),
+            v,
+            label,
+        );
     }
 }
 fn trace(actual: &[Event], expected: &Value, label: &str) {
@@ -722,36 +733,63 @@ fn native_optimistic_info_retains_shallow_aliases_and_primitive_copies() {
         .unwrap();
     for key in ["object", "array"] {
         assert!(
-            Rc::ptr_eq(&a.info.fields.borrow()[key], &response.fields.borrow()[key]),
+            Rc::ptr_eq(
+                &a.info.fields.borrow()[&key.encode_utf16().collect::<Vec<_>>()],
+                &response.fields.borrow()[&key.encode_utf16().collect::<Vec<_>>()]
+            ),
             "native optimistic info object alias"
         );
     }
     assert!(
         !Rc::ptr_eq(
-            &a.info.fields.borrow()["primitive"],
-            &response.fields.borrow()["primitive"]
+            &a.info.fields.borrow()[&"primitive".encode_utf16().collect::<Vec<_>>()],
+            &response.fields.borrow()[&"primitive".encode_utf16().collect::<Vec<_>>()]
         ),
         "native optimistic info primitive copy"
     );
-    response.fields.borrow()["object"].borrow_mut()["x"] = json!(19);
-    response.fields.borrow()["array"]
+    *response.fields.borrow()[&"object".encode_utf16().collect::<Vec<_>>()]
         .borrow_mut()
-        .as_array_mut()
-        .unwrap()
-        .push(json!(23));
-    assert_eq!(a.info.fields.borrow()["object"].borrow()["x"], 19);
-    assert_eq!(a.info.fields.borrow()["array"].borrow()[1], 23);
-    response
-        .fields
-        .borrow_mut()
-        .insert("object".into(), Rc::new(RefCell::new(json!({"x":29}))));
-    response
-        .fields
-        .borrow_mut()
-        .insert("primitive".into(), Rc::new(RefCell::new(json!(31))));
+        .get_mut("x")
+        .unwrap() = json!(19).into();
+    if let Input::Array(values) =
+        &mut *response.fields.borrow()[&"array".encode_utf16().collect::<Vec<_>>()].borrow_mut()
+    {
+        values.push(json!(23).into());
+    } else {
+        panic!("native retained array");
+    }
     assert_eq!(
-        a.info.fields.borrow()["object"].borrow()["x"],
-        19,
+        a.info.fields.borrow()[&"object".encode_utf16().collect::<Vec<_>>()]
+            .borrow()
+            .get("x")
+            .and_then(Input::as_f64)
+            .unwrap(),
+        19.0
+    );
+    assert_eq!(
+        a.info.fields.borrow()[&"array".encode_utf16().collect::<Vec<_>>()]
+            .borrow()
+            .as_array()
+            .unwrap()[1]
+            .as_f64()
+            .unwrap(),
+        23.0
+    );
+    response.fields.borrow_mut().insert(
+        "object".encode_utf16().collect(),
+        Rc::new(RefCell::new(json!({"x":29}).into())),
+    );
+    response.fields.borrow_mut().insert(
+        "primitive".encode_utf16().collect(),
+        Rc::new(RefCell::new(json!(31).into())),
+    );
+    assert_eq!(
+        a.info.fields.borrow()[&"object".encode_utf16().collect::<Vec<_>>()]
+            .borrow()
+            .get("x")
+            .and_then(Input::as_f64)
+            .unwrap(),
+        19.0,
         "native shallow alias survives parent property replacement"
     );
     let source = &oracle()["alias"];
@@ -769,19 +807,34 @@ fn native_optimistic_info_retains_shallow_aliases_and_primitive_copies() {
     );
     for (k, v) in source["info"].as_object().unwrap() {
         assert_json(
-            Some(&a.info.fields.borrow()[k].borrow()),
+            Some(
+                &a.info.fields.borrow()[&k.encode_utf16().collect::<Vec<_>>()]
+                    .borrow()
+                    .clone()
+                    .into_value()
+                    .unwrap(),
+            ),
             v,
             "live shallow info alias probe",
         );
     }
-    assert_eq!(*a.info.fields.borrow()["primitive"].borrow(), 3);
     assert_eq!(
-        *a.info.fields.borrow()["optimisticFromCreateOrder"].borrow(),
-        true
+        *a.info.fields.borrow()[&"primitive".encode_utf16().collect::<Vec<_>>()].borrow(),
+        Input::from(json!(3))
     );
     assert_eq!(
-        *response.fields.borrow()["optimisticFromCreateOrder"].borrow(),
-        false
+        *a.info.fields.borrow()[&"optimisticFromCreateOrder"
+            .encode_utf16()
+            .collect::<Vec<_>>()]
+            .borrow(),
+        Input::Bool(true)
+    );
+    assert_eq!(
+        *response.fields.borrow()[&"optimisticFromCreateOrder"
+            .encode_utf16()
+            .collect::<Vec<_>>()]
+            .borrow(),
+        Input::Bool(false)
     );
 }
 

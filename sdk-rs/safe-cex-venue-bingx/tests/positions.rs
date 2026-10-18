@@ -1,3 +1,5 @@
+#[path = "support/retained_observe.rs"]
+mod retained_observe;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -101,7 +103,7 @@ fn position(v: &Position) -> Value {
         out["marginSize"] = number(s);
     }
     if let Some(s) = v.info.as_ref() {
-        out["info"] = observe(s);
+        out["info"] = retained_observe::observe(s);
     }
     assert!(
         v.extra.is_none() && v.realized_pnl.is_none() && v.last_update.is_none(),

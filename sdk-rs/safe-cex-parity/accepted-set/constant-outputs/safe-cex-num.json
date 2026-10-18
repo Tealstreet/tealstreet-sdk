@@ -71,14 +71,14 @@
     "source": {
       "file": "safe-cex-num/src/numeric_ingress/output.rs",
       "begin": [
-        138,
+        147,
         5
       ],
       "end": [
-        140,
+        149,
         6
       ],
-      "sha256": "70daa4e874515d8b8a81e72f337ffd67e4501dd005b061a151f0173ac8d1b2c6"
+      "sha256": "3a449325f93c10209890c9d51b7614b669e3342535e9068af9e6c4e403335650"
     },
     "call": "{ use serde::Serializer as _; let (name, len) = if $value == &serde_json::json!(\"First\") { (\"First\", 0) } else { (\"Second\", 7) }; let native = $type.serialize_tuple_struct(name, len).expect(\"infallible tuple capture\"); serde_json::json!({\"values\":native.values.len(), \"variant\":native.variant}) }",
     "cases": [

@@ -53,11 +53,13 @@ fn mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals() {
             let raw = raw.as_object().unwrap();
             let (native_symbol, discriminator) = match name {
                 "normalizeMarket" => {
-                    let v = normalize_market(raw).unwrap();
+                    let v =
+                        normalize_market(&serde_json::Value::Object((raw).clone()).into()).unwrap();
                     (v.symbol, v.contract_size.unwrap())
                 }
                 "normalizeTicker" => {
-                    let market = normalize_market(raw).unwrap();
+                    let market =
+                        normalize_market(&serde_json::Value::Object((raw).clone()).into()).unwrap();
                     market_children += 1;
                     let v = normalize_ticker(raw, &market, &|ms| ms).unwrap();
                     (v.symbol, v.volume)

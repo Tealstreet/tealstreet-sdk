@@ -18,6 +18,7 @@ pub type Str = Rc<[u16]>;
 pub type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
 pub type Getter = Rc<dyn Fn(&Js) -> Result<Js, Thrown>>;
 pub type Setter = Rc<dyn Fn(&Js, Js) -> Result<(), Thrown>>;
+pub type WriteObserver = Rc<dyn Fn(&Js, &[u16], &Js) -> Result<(), Thrown>>;
 
 /// The `i`th call argument, `undefined` when absent.
 pub fn arg(args: &[Js], i: usize) -> Js {
@@ -54,12 +55,14 @@ fn same_optional_value(left: &Option<Js>, right: &Option<Js>) -> bool {
 }
 
 pub struct ObjectData {
+    write_observer: RefCell<Option<WriteObserver>>,
     resource: Option<Rc<dyn Any>>,
     extensible: Cell<bool>,
     pub class: &'static str,
     pub(crate) iterator_next: RefCell<Option<NativeFn>>,
     pub(crate) symbol_iterator: RefCell<Option<Prop>>,
     pub props: RefCell<IndexMap<Str, Prop>>,
+    /// None is an explicit null prototype; ordinary allocations store their realm parent.
     pub proto: RefCell<Option<Js>>,
 }
 
@@ -434,6 +437,7 @@ impl Js {
         resource: Option<Rc<dyn Any>>,
     ) -> Js {
         Js::Object(Rc::new(ObjectData {
+            write_observer: RefCell::new(None),
             resource,
             extensible: Cell::new(true),
             class,
@@ -445,7 +449,10 @@ impl Js {
                     .map(|(k, v)| (utf16(k), Prop::Data(v)))
                     .collect(),
             ),
-            proto: RefCell::new(None),
+            proto: RefCell::new(Some(Js::Builtin(
+                safe_cex_num::PrototypeRealm::current()
+                    .reference(safe_cex_num::ProtoMember::Prototype),
+            ))),
         }))
     }
     pub fn function(name: &str, call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
@@ -694,21 +701,7 @@ impl Js {
     }
     pub(super) fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
         for name in names {
-            let declared = self.has_property(&utf16(name));
-            // None is the value model's implicit stock prototype. An
-            // explicit null prototype contributes no inherited methods.
-            let method = if !declared && self.string_prototype_is_null() {
-                Js::Undefined
-            } else {
-                self.get(name)?
-            };
-            if name == "toString"
-                && !declared
-                && method.is_undefined()
-                && self.has_implicit_string_prototype()
-            {
-                return self.intrinsic_string().map(Js::String);
-            }
+            let method = self.get(name)?;
             if !method.is_callable() {
                 continue;
             }
@@ -758,33 +751,6 @@ impl Js {
         Err(Thrown::type_error(
             "Cannot convert object to primitive value",
         ))
-    }
-    fn has_implicit_string_prototype(&self) -> bool {
-        match self {
-            Js::Object(object) => object
-                .proto
-                .borrow()
-                .as_ref()
-                .is_none_or(Js::has_implicit_string_prototype),
-            Js::Function(_) => false,
-            _ => false,
-        }
-    }
-    fn string_prototype_is_null(&self) -> bool {
-        match self {
-            Js::Object(object) => object
-                .proto
-                .borrow()
-                .as_ref()
-                .is_some_and(Js::string_prototype_is_null),
-            Js::Function(function) => function
-                .proto
-                .borrow()
-                .as_ref()
-                .is_none_or(Js::string_prototype_is_null),
-            Js::Null => true,
-            _ => false,
-        }
     }
     /// Stock intrinsic conversion after primitive coercion dispatch.
     fn intrinsic_string(&self) -> Result<Str, Thrown> {
@@ -898,6 +864,54 @@ impl Js {
         }
     }
 
+    /// Ordinary [[SetPrototypeOf]], shared by the legacy setter and Object facade.
+    /// The target's own properties and opaque native resource remain untouched.
+    pub(super) fn set_prototype(&self, value: Js) -> Result<Js, Thrown> {
+        if self.is_nullish() {
+            return Err(Thrown::type_error(
+                "Cannot convert undefined or null to object",
+            ));
+        }
+        if !value.is_object() && !matches!(value, Js::Null) {
+            return Err(Thrown::type_error(
+                "Object prototype may only be an Object or null",
+            ));
+        }
+        if !self.is_object() {
+            return Ok(self.clone());
+        }
+        let parent = (!matches!(value, Js::Null)).then_some(value);
+        let target = match self {
+            Js::Object(object) => &object.proto,
+            Js::Function(function) => &function.proto,
+            Js::Builtin(_) if same_optional_value(&self.prototype(), &parent) => {
+                return Ok(self.clone());
+            }
+            _ => {
+                return Err(Thrown::type_error(
+                    "Prototype mutation requires an ordinary object or function",
+                ));
+            }
+        };
+        if same_optional_value(&target.borrow(), &parent) {
+            return Ok(self.clone());
+        }
+        if !self.is_extensible()? {
+            return Err(Thrown::type_error(
+                "Cannot change prototype of a non-extensible object",
+            ));
+        }
+        let mut candidate = parent.clone();
+        while let Some(ancestor) = candidate {
+            if ancestor.same_reference(self) {
+                return Err(Thrown::type_error("Cyclic __proto__ value"));
+            }
+            candidate = ancestor.prototype();
+        }
+        *target.borrow_mut() = parent;
+        Ok(self.clone())
+    }
+
     /// [[Get]] including array/string length and index, accessors and prototype.
     pub fn get(&self, key: &str) -> Result<Js, Thrown> {
         self.get_key(&utf16(key))
@@ -1009,7 +1023,28 @@ impl Js {
     pub fn set(&self, key: &str, value: Js) -> Result<(), Thrown> {
         self.set_key(&utf16(key), value)
     }
+    pub fn set_write_observer(&self, observer: Option<WriteObserver>) -> Result<(), Thrown> {
+        let Js::Object(object) = self else {
+            return Err(Thrown::type_error(
+                "Write observers require an ordinary object",
+            ));
+        };
+        let previous = object.write_observer.replace(observer);
+        drop(previous);
+        Ok(())
+    }
     pub fn set_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
+        self.set_property(key, value.clone())?;
+        let observer = match self {
+            Js::Object(object) => object.write_observer.borrow().clone(),
+            _ => None,
+        };
+        if let Some(observer) = observer {
+            observer(self, key, &value)?;
+        }
+        Ok(())
+    }
+    fn set_property(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
         if let Js::Builtin(reference) = self {
             let key = String::from_utf16(key).map_err(|_| {
                 Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary")
@@ -1105,26 +1140,7 @@ impl Js {
                         if !value.is_object() && !matches!(value, Js::Null) {
                             return Ok(());
                         }
-                        let mut candidate = Some(value.clone());
-                        while let Some(parent) = candidate {
-                            if parent.same_reference(self) {
-                                return Err(Thrown::type_error("Cyclic __proto__ value"));
-                            }
-                            candidate = parent.prototype();
-                        }
-                        let target = match self {
-                            Js::Object(object) => &object.proto,
-                            Js::Function(function) => &function.proto,
-                            _ => unreachable!(),
-                        };
-                        let parent = (!matches!(value, Js::Null)).then_some(value);
-                        if !self.is_extensible()? && !same_optional_value(&target.borrow(), &parent)
-                        {
-                            return Err(Thrown::type_error(
-                                "Cannot change prototype of a non-extensible object",
-                            ));
-                        }
-                        *target.borrow_mut() = parent;
+                        self.set_prototype(value)?;
                         return Ok(());
                     }
                 }
@@ -1447,7 +1463,7 @@ impl Js {
         props.borrow_mut().insert(key.into(), next);
         Ok(())
     }
-    fn has_property(&self, key: &[u16]) -> bool {
+    pub(super) fn has_property(&self, key: &[u16]) -> bool {
         if self
             .own_props()
             .is_some_and(|p| p.borrow().contains_key(key))
@@ -1455,6 +1471,11 @@ impl Js {
             return true;
         }
         match self {
+            Js::Array(items) => {
+                key == utf16("length").as_ref()
+                    || array_index(key)
+                        .is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_))))
+            }
             Js::Function(_) if key == utf16("name").as_ref() => true,
             Js::Builtin(reference) => String::from_utf16(key).is_ok_and(|key| {
                 reference.own_fields().contains_key(&key)

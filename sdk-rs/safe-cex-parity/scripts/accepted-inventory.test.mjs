@@ -215,3 +215,25 @@ test('compiler receiver item pins survive unrelated edits and refuse changes ins
     fs.rmSync(directory, { recursive: true });
   }
 });
+
+test('compiled retained input consumers and producers remain decoder inventory owners', {timeout: 300000}, async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const {spawnSync} = await import('node:child_process');
+  const root = new URL('../../', import.meta.url);
+  const cargo = args => {
+    const result = spawnSync('cargo', args, {cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+      env: {...process.env, CARGO_BUILD_JOBS: '1', RUSTC_BOOTSTRAP: '1'}});
+    assert.equal(result.status, 0, `actual retained consumer compilation: ${result.stderr}`);
+    return result.stdout;
+  };
+  const metadata = JSON.parse(cargo(['metadata', '--locked', '--no-deps', '--format-version=1']));
+  cargo(['rustdoc', '--locked', '-p', 'safe-cex-num', '--lib', '--jobs', '1', '--',
+    '-Z', 'unstable-options', '--output-format=json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all']);
+  const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'doc/safe_cex_num.json')));
+  const names = ['safe_cex_num::coercion::js_retained_number', 'safe_cex_num::numeric_ingress::js_capture_output'];
+  const found = inventory(doc, {onlyOwners: names});
+  assert.deepEqual(found.types.map(row => row.name).sort(), [...names].sort(), 'canonical retained consumer and producer owners');
+  assert.equal(found.types.find(row => row.name.endsWith('js_capture_output')).decodedOutput, true,
+    'canonical retained output remains an admitted decoder output');
+});

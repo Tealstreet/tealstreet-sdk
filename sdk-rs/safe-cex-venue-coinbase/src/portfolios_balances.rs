@@ -2,8 +2,9 @@
 //! Full exchange construction and HTTP binding remain separate. Hosts drive hot promises.
 use crate::starbase_auth::{CoinbaseStarbasePromise, CoinbaseStarbasePromiseSpawner};
 use indexmap::IndexMap;
-use safe_cex_num::{js_number, js_string, js_truthy, parse_float};
+use safe_cex_num::{js_number, js_truthy, parse_float};
 use safe_cex_types::object_map::JsObjectMap;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -15,12 +16,57 @@ pub type SupportedTypes = Rc<RefCell<Vec<String>>>;
 /// Mutable selection state, projected at the HTTP boundary to the two fields the
 /// source reads. Unobserved metadata is retained without applying the wire DTO's
 /// declaration-time requirements to a runtime response.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PortfolioState {
     pub uuid: String,
     pub r#type: String,
-    #[serde(flatten)]
-    pub metadata: serde_json::Map<String, Value>,
+    pub metadata: IndexMap<Vec<u16>, Input>,
+}
+impl<'de> serde::Deserialize<'de> for PortfolioState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let input = Input::deserialize(deserializer)?;
+        let Input::Object(fields) = input else {
+            return Err(D::Error::custom("Coinbase portfolio must be an object"));
+        };
+        let mut metadata: IndexMap<_, _> = fields.into_iter().collect();
+        let mut text = |key: &str| {
+            let value = metadata.shift_remove(&key.encode_utf16().collect::<Vec<_>>());
+            match value {
+                Some(Input::Text(units)) => String::from_utf16(&units).map_err(D::Error::custom),
+                _ => Err(D::Error::custom(format!(
+                    "Coinbase portfolio {key} must be a string"
+                ))),
+            }
+        };
+        let uuid = text("uuid")?;
+        let r#type = text("type")?;
+        Ok(Self {
+            uuid,
+            r#type,
+            metadata,
+        })
+    }
+}
+impl serde::Serialize for PortfolioState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut fields = vec![
+            (
+                "uuid".encode_utf16().collect(),
+                Input::Text(self.uuid.encode_utf16().collect()),
+            ),
+            (
+                "type".encode_utf16().collect(),
+                Input::Text(self.r#type.encode_utf16().collect()),
+            ),
+        ];
+        fields.extend(
+            self.metadata
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        Input::Object(fields).serialize(serializer)
+    }
 }
 pub type Portfolio = Rc<RefCell<PortfolioState>>;
 pub type Portfolios = Rc<RefCell<Vec<Portfolio>>>;
@@ -117,7 +163,7 @@ impl std::error::Error for PortfolioThrown {
 /// HTTP data is a plain, inert JSON record. Portfolio arrays additionally retain identity.
 #[derive(Clone)]
 pub struct PortfolioReply {
-    pub data: Value,
+    pub data: Input,
     pub portfolios: Option<Portfolios>,
 }
 pub type Balance = Rc<RefCell<PortfolioBalance>>;
@@ -132,7 +178,7 @@ pub struct PortfolioBalance {
     pub currencies: Option<Currencies>,
     /// Distinguishes an absent property from an own property containing undefined.
     pub has_currencies: bool,
-    pub extra: IndexMap<String, Rc<RefCell<Value>>>,
+    pub extra: IndexMap<String, Rc<RefCell<Input>>>,
     /// Imported typed Store snapshot, before JSON projection of optional model
     /// fields. Source scalar/currency edits still live in the fields above.
     pub native_snapshot: Option<Rc<safe_cex_types::CurrencyBalance>>,
@@ -203,9 +249,9 @@ fn emit<H: PortfolioHost>(r: &PortfolioReceiver<H>, message: &str) -> Result<(),
     r.host
         .emit_and_log_error(&[Some(Value::String(message.into()))])
 }
-fn prop<'a>(v: Option<&'a Value>, key: &str) -> Result<Option<&'a Value>, PortfolioFailure> {
+fn prop<'a>(v: Option<&'a Input>, key: &str) -> Result<Option<&'a Input>, PortfolioFailure> {
     match v {
-        None | Some(Value::Null) => Err(error(
+        None | Some(Input::Null | Input::Undefined) => Err(error(
             "TypeError",
             &format!(
                 "Cannot read properties of {} (reading '{key}')",
@@ -215,9 +261,9 @@ fn prop<'a>(v: Option<&'a Value>, key: &str) -> Result<Option<&'a Value>, Portfo
         Some(v) => Ok(v.get(key)),
     }
 }
-fn amount(data: &Value, group: &str, field: &str) -> Result<f64, PortfolioFailure> {
+fn amount(data: &Input, group: &str, field: &str) -> Result<f64, PortfolioFailure> {
     let v = prop(prop(prop(Some(data), group)?, field)?, "value")?;
-    safe_cex_num::js_string(v)
+    safe_cex_num::js_retained_string(v)
         .map(|v| parse_float(&v))
         .map_err(|e| error(&e.name, &e.message))
 }
@@ -359,7 +405,11 @@ pub fn find_selected_portfolio<H: PortfolioHost + 'static>(
             let is_intx = portfolio.borrow().r#type == "INTX";
             if !is_intx {
                 if let Ok(reply) = r.host.get(CFM, None).await {
-                    if js_truthy(reply.data.get("balance_summary")) {
+                    if reply
+                        .data
+                        .get("balance_summary")
+                        .is_some_and(Input::is_truthy)
+                    {
                         portfolio.borrow_mut().r#type = "CFM".into();
                     }
                 }
@@ -550,7 +600,7 @@ pub fn fetch_spot_currencies<H: PortfolioHost + 'static>(
                 let positions_value = prop(breakdown, "spot_positions")?;
                 // Evaluate the .reduce property access before checking callability.
                 prop(positions_value, "reduce")?;
-                let positions = positions_value.and_then(Value::as_array).ok_or_else(|| {
+                let positions = positions_value.and_then(Input::as_array).ok_or_else(|| {
                     error(
                         "TypeError",
                         "data.breakdown.spot_positions.reduce is not a function",
@@ -560,11 +610,13 @@ pub fn fetch_spot_currencies<H: PortfolioHost + 'static>(
                 for p in positions {
                     // TS subtracts and keys by these wire fields with JS coercion, never throwing.
                     let coerce = |e: safe_cex_num::JsCoercionError| error(&e.name, &e.message);
-                    let free = js_number(p.get("available_to_trade_crypto")).map_err(coerce)?;
-                    let total = js_number(p.get("total_balance_crypto")).map_err(coerce)?;
+                    let free = safe_cex_num::js_retained_number(p.get("available_to_trade_crypto"))
+                        .map_err(coerce)?;
+                    let total = safe_cex_num::js_retained_number(p.get("total_balance_crypto"))
+                        .map_err(coerce)?;
                     let balance = scalar_balance(free, free, 0.0);
                     balance.borrow_mut().used = total - free;
-                    let asset = js_string(p.get("asset")).map_err(coerce)?;
+                    let asset = safe_cex_num::js_retained_string(p.get("asset")).map_err(coerce)?;
                     let asset = asset.as_str();
                     if asset == "__proto__" {
                         currencies.prototype = Some(balance);

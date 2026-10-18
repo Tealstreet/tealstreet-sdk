@@ -112,7 +112,7 @@ fn historical_fills_native() {
                 .insert("/v3/history-orders", ExchangeError::new("history down"));
         }
         venue
-            .record_ws_execution(&native::input(&row["cached"]))
+            .record_ws_execution(&native::capture(&native::input(&row["cached"])))
             .unwrap();
         host.operations.borrow_mut().clear();
         let opts = native::input(&row["options"]);

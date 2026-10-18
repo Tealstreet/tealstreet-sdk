@@ -7150,30 +7150,8 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::map::Map",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "resolved_path": {
-                                "path": "alloc::string::String",
-                                "args": null
-                              }
-                            }
-                          },
-                          {
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        ],
-                        "constraints": []
-                      }
-                    }
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
                   }
                 }
               }
@@ -7231,7 +7209,7 @@
     },
     "category": "decoder",
     "evidence": "Reviewed source getGrvtTriggerMetadata nullish metadata/trigger/tpsl selectors, exact trigger-kind and trigger-by unions, Number coercion and finite filter, boolean-only optional close/split fields. Native enum identities, option presence and price bits are observed; no serialization roundtrip claim. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
-    "call": "{match $type($value.as_object().unwrap()){Ok(None)=>serde_json::json!({\"present\":false}),Ok(Some(d))=>serde_json::json!({\"present\":true,\"kind\":match d.r#type{crate::types::GrvtTriggerKind::StopLoss=>\"stop\",crate::types::GrvtTriggerKind::TakeProfit=>\"take\"},\"price\":d.trigger_price.map(|v|format!(\"{:016x}\",v.to_bits())),\"by\":d.trigger_type.map(|v|match v{safe_cex_types::OrderStopTriggerType::LastPrice=>\"last\",safe_cex_types::OrderStopTriggerType::MarkPrice=>\"mark\",safe_cex_types::OrderStopTriggerType::IndexPrice=>\"index\"}),\"close\":d.close,\"split\":d.is_split_position}),Err(e)=>serde_json::json!({\"error\":e.message})}}",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value.clone());match $type(&retained){Ok(None)=>serde_json::json!({\"present\":false}),Ok(Some(d))=>serde_json::json!({\"present\":true,\"kind\":match d.r#type{crate::types::GrvtTriggerKind::StopLoss=>\"stop\",crate::types::GrvtTriggerKind::TakeProfit=>\"take\"},\"price\":d.trigger_price.map(|v|format!(\"{:016x}\",v.to_bits())),\"by\":d.trigger_type.map(|v|match v{safe_cex_types::OrderStopTriggerType::LastPrice=>\"last\",safe_cex_types::OrderStopTriggerType::MarkPrice=>\"mark\",safe_cex_types::OrderStopTriggerType::IndexPrice=>\"index\"}),\"close\":d.close,\"split\":d.is_split_position}),Err(e)=>serde_json::json!({\"error\":e.message})}}",
     "cases": [
       {
         "input": {},
@@ -7429,8 +7407,8 @@
         "output": "a_PERP_Perp"
       },
       {
-        "input": "💠_perp",
-        "output": "💠_Perp"
+        "input": "\ud83d\udca0_perp",
+        "output": "\ud83d\udca0_Perp"
       },
       {
         "input": "",
@@ -7681,11 +7659,11 @@
                       {
                         "type": {
                           "borrowed_ref": {
-                            "lifetime": "'a",
+                            "lifetime": null,
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -7710,12 +7688,9 @@
                     "type": {
                       "tuple": [
                         {
-                          "borrowed_ref": {
-                            "lifetime": "'a",
-                            "is_mutable": false,
-                            "type": {
-                              "primitive": "str"
-                            }
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
                           }
                         },
                         {
@@ -7744,22 +7719,13 @@
         "is_c_variadic": false
       },
       "generics": {
-        "params": [
-          {
-            "name": "'a",
-            "kind": {
-              "lifetime": {
-                "outlives": []
-              }
-            }
-          }
-        ],
+        "params": [],
         "where_predicates": []
       }
     },
     "category": "decoder",
-    "evidence": "Reviewed source signing metadata validation: lowercase 0x prefix with 1..64 hexadecimal digits and binary64 safe integer exponents, retaining signed zero/negative values. Raw JSON text preserves lexical negative zero; native borrowed hash pointer and exponent bits are observed before serialization. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
-    "call": "{let info:serde_json::Value=serde_json::from_str($value.as_str().unwrap()).unwrap();match $type(\"BTC\",Some(&info)){Ok((hash,base,quote))=>serde_json::json!({\"hash\":hash,\"base\":format!(\"{:016x}\",base.to_bits()),\"quote\":format!(\"{:016x}\",quote.to_bits()),\"borrowed\":std::ptr::eq(hash.as_ptr(),info[\"ih\"].as_str().unwrap().as_ptr())}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "evidence": "Reviewed source signing metadata validation: lowercase 0x prefix with 1..64 hexadecimal digits and native binary64 safe integer exponents. Canonical retained JSON text preserves original UTF-16 and lexical negative zero. Input now stores UTF-16 units; this validated ASCII hash is returned as an owned UTF-8 String at the existing signer API, so the retained ownership observation is explicitly non-borrowed. Exponent bits and original hash value remain independently checked before presentation encoding. Actual placement binding tests retain hash-length refusal and signed payload observations. No metadata JSON view or lossy UTF-16 conversion.",
+    "call": "{let info=safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap();match $type(\"BTC\",Some(&info)){Ok((hash,base,quote))=>serde_json::json!({\"hash\":hash,\"base\":format!(\"{:016x}\",base.to_bits()),\"quote\":format!(\"{:016x}\",quote.to_bits()),\"borrowed\":std::ptr::eq(hash.as_ptr(),info.get(\"ih\").unwrap().as_text().unwrap().as_ptr().cast::<u8>())}),Err(e)=>serde_json::json!({\"error\":e})}}",
     "cases": [
       {
         "input": "{\"ih\":\"0xF\",\"bd\":-0.0,\"qd\":-2}",
@@ -7767,7 +7733,7 @@
           "hash": "0xF",
           "base": "8000000000000000",
           "quote": "c000000000000000",
-          "borrowed": true
+          "borrowed": false
         }
       },
       {
@@ -7776,7 +7742,7 @@
           "hash": "0x1234",
           "base": "433fffffffffffff",
           "quote": "0000000000000000",
-          "borrowed": true
+          "borrowed": false
         }
       },
       {
@@ -7827,7 +7793,7 @@
           "hash": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
           "base": "4008000000000000",
           "quote": "4008000000000000",
-          "borrowed": true
+          "borrowed": false
         }
       },
       {
@@ -7987,11 +7953,11 @@
       },
       {
         "input": {
-          "address": "0xABCÄ",
+          "address": "0xABC\u00c4",
           "fee": "0.00005"
         },
         "output": {
-          "builder": "0xabcä",
+          "builder": "0xabc\u00e4",
           "fee": "0.00005",
           "raw_bits": "3ff0000000000000"
         }
@@ -14575,7 +14541,7 @@
         }
       },
       {
-        "input": "1 ",
+        "input": "1\u2028",
         "output": {
           "valid": false
         }
@@ -14629,19 +14595,19 @@
         }
       },
       {
-        "input": "١",
+        "input": "\u0661",
         "output": {
           "valid": false
         }
       },
       {
-        "input": "１",
+        "input": "\uff11",
         "output": {
           "valid": false
         }
       },
       {
-        "input": "1٢",
+        "input": "1\u0662",
         "output": {
           "valid": false
         }
@@ -14706,7 +14672,7 @@
         },
         "input": "observed",
         "reason": "Execute the actual native member lookup, compare Some/None and Rc pointer identity, mutate the returned cell and inspect the stored cell and unrelated native state.",
-        "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtExchange {base:Rc::new(Cell::new(41i64)),fields,nonce_to_order_id:Rc::new(RefCell::new(indexmap::IndexMap::new())),nonce_creation_times:Rc::new(RefCell::new(indexmap::IndexMap::new())),client_order_id_rule:Rc::new(super::ClientOrderIdRule),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"ids\":owner.nonce_to_order_id.borrow().len(),\"times\":owner.nonce_creation_times.borrow().len()}) }",
+        "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"caf\u00e9\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtExchange {base:Rc::new(Cell::new(41i64)),fields,nonce_to_order_id:Rc::new(RefCell::new(indexmap::IndexMap::new())),nonce_creation_times:Rc::new(RefCell::new(indexmap::IndexMap::new())),client_order_id_rule:Rc::new(super::ClientOrderIdRule),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"ids\":owner.nonce_to_order_id.borrow().len(),\"times\":owner.nonce_creation_times.borrow().len()}) }",
         "cases": [
           {
             "input": "zero",
@@ -14724,7 +14690,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14748,7 +14714,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14772,7 +14738,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14781,7 +14747,7 @@
             }
           },
           {
-            "input": "café",
+            "input": "caf\u00e9",
             "output": {
               "value": 9,
               "after": 10,
@@ -14796,7 +14762,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14820,7 +14786,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14844,7 +14810,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14868,7 +14834,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14892,7 +14858,7 @@
                 "zero",
                 "negative",
                 "positive",
-                "café"
+                "caf\u00e9"
               ],
               "base": 41,
               "field": 11,
@@ -14985,7 +14951,7 @@
         },
         "input": "observed",
         "reason": "Run the actual composition wrapper over retained native cache Rc handles; inspect earliest positive finite time bits, unknown time, real-ID sentinel handling and paired 200-entry eviction. Native field observations precede projection.",
-        "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\n let owner:$type=super::GrvtExchange {base:Rc::new(Cell::new(41i64)),fields,nonce_to_order_id:Rc::new(RefCell::new(indexmap::IndexMap::new())),nonce_creation_times:Rc::new(RefCell::new(indexmap::IndexMap::new())),client_order_id_rule:Rc::new(super::ClientOrderIdRule),methods};\n\nlet ids_alias=owner.nonce_to_order_id.clone();let times_alias=owner.nonce_creation_times.clone();\nfor operation in $value[\"operations\"].as_array().expect(\"nonce operations\") {\n let time=operation[\"time\"].as_str().map(|text|text.parse::<f64>().expect(\"fixed native time\"));\n owner.record_nonce(operation[\"nonce\"].as_str().unwrap(),operation[\"real\"].as_str(),time);\n}\nfor index in 0..$value[\"fill\"].as_u64().unwrap_or(0) {owner.record_nonce(&format!(\"n{index}\"),Some(&format!(\"id{index}\")),Some(1000.0+index as f64));}\nlet times=times_alias.borrow();let ids=ids_alias.borrow();\nserde_json::json!({\"times\":times.iter().take(3).map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})).collect::<Vec<_>>(),\"ids\":ids.iter().take(3).map(|(k,v)|[k.clone(),v.clone()]).collect::<Vec<_>>(),\"time_count\":times.len(),\"id_count\":ids.len(),\"last_time\":times.last().map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})),\"last_id\":ids.last().map(|(k,v)|[k.clone(),v.clone()]),\"retained_first_two\":[times.contains_key(\"n0\"),times.contains_key(\"n1\"),ids.contains_key(\"n0\"),ids.contains_key(\"n1\")],\"ids_alias\":Rc::ptr_eq(&ids_alias,&owner.nonce_to_order_id),\"times_alias\":Rc::ptr_eq(&times_alias,&owner.nonce_creation_times),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>()}) }",
+        "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"caf\u00e9\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\n let owner:$type=super::GrvtExchange {base:Rc::new(Cell::new(41i64)),fields,nonce_to_order_id:Rc::new(RefCell::new(indexmap::IndexMap::new())),nonce_creation_times:Rc::new(RefCell::new(indexmap::IndexMap::new())),client_order_id_rule:Rc::new(super::ClientOrderIdRule),methods};\n\nlet ids_alias=owner.nonce_to_order_id.clone();let times_alias=owner.nonce_creation_times.clone();\nfor operation in $value[\"operations\"].as_array().expect(\"nonce operations\") {\n let time=operation[\"time\"].as_str().map(|text|text.parse::<f64>().expect(\"fixed native time\"));\n owner.record_nonce(operation[\"nonce\"].as_str().unwrap(),operation[\"real\"].as_str(),time);\n}\nfor index in 0..$value[\"fill\"].as_u64().unwrap_or(0) {owner.record_nonce(&format!(\"n{index}\"),Some(&format!(\"id{index}\")),Some(1000.0+index as f64));}\nlet times=times_alias.borrow();let ids=ids_alias.borrow();\nserde_json::json!({\"times\":times.iter().take(3).map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})).collect::<Vec<_>>(),\"ids\":ids.iter().take(3).map(|(k,v)|[k.clone(),v.clone()]).collect::<Vec<_>>(),\"time_count\":times.len(),\"id_count\":ids.len(),\"last_time\":times.last().map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})),\"last_id\":ids.last().map(|(k,v)|[k.clone(),v.clone()]),\"retained_first_two\":[times.contains_key(\"n0\"),times.contains_key(\"n1\"),ids.contains_key(\"n0\"),ids.contains_key(\"n1\")],\"ids_alias\":Rc::ptr_eq(&ids_alias,&owner.nonce_to_order_id),\"times_alias\":Rc::ptr_eq(&times_alias,&owner.nonce_creation_times),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>()}) }",
         "cases": [
           {
             "input": {
@@ -15312,7 +15278,7 @@
         "reason": "Execute the actual native member lookup, compare Some/None and Rc pointer identity, mutate the returned cell and inspect the stored cell and unrelated native state."
       }
     ],
-    "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtPublicWebSocket {base:Rc::new(Cell::new(41i64)),parent:Rc::new(Cell::new(73i64)),fields,state:Rc::new(crate::public_subscriptions::PublicSubscriptions::<u32>::default()),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"parent\":owner.parent.get(),\"request_id_bits\":owner.state.request_id.get().to_bits().to_string()}) }",
+    "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"caf\u00e9\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtPublicWebSocket {base:Rc::new(Cell::new(41i64)),parent:Rc::new(Cell::new(73i64)),fields,state:Rc::new(crate::public_subscriptions::PublicSubscriptions::<u32>::default()),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"parent\":owner.parent.get(),\"request_id_bits\":owner.state.request_id.get().to_bits().to_string()}) }",
     "cases": [
       {
         "input": "zero",
@@ -15330,7 +15296,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15354,7 +15320,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15378,7 +15344,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15387,7 +15353,7 @@
         }
       },
       {
-        "input": "café",
+        "input": "caf\u00e9",
         "output": {
           "value": 9,
           "after": 10,
@@ -15402,7 +15368,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15426,7 +15392,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15450,7 +15416,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15474,7 +15440,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15498,7 +15464,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15568,7 +15534,7 @@
         "reason": "Execute the actual native member lookup, compare Some/None and Rc pointer identity, mutate the returned cell and inspect the stored cell and unrelated native state."
       }
     ],
-    "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtPrivateWebSocket {base:Rc::new(Cell::new(41i64)),parent:Rc::new(Cell::new(73i64)),fields,state:Rc::new(crate::private_commands::PrivateCommands::<u32,String>::default()),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"parent\":owner.parent.get(),\"request_id_bits\":owner.state.request_id.get().to_bits().to_string(),\"disposed\":owner.state.is_disposed.get()}) }",
+    "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"caf\u00e9\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtPrivateWebSocket {base:Rc::new(Cell::new(41i64)),parent:Rc::new(Cell::new(73i64)),fields,state:Rc::new(crate::private_commands::PrivateCommands::<u32,String>::default()),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"parent\":owner.parent.get(),\"request_id_bits\":owner.state.request_id.get().to_bits().to_string(),\"disposed\":owner.state.is_disposed.get()}) }",
     "cases": [
       {
         "input": "zero",
@@ -15586,7 +15552,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15611,7 +15577,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15636,7 +15602,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15646,7 +15612,7 @@
         }
       },
       {
-        "input": "café",
+        "input": "caf\u00e9",
         "output": {
           "value": 9,
           "after": 10,
@@ -15661,7 +15627,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15686,7 +15652,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15711,7 +15677,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15736,7 +15702,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -15761,7 +15727,7 @@
             "zero",
             "negative",
             "positive",
-            "café"
+            "caf\u00e9"
           ],
           "base": 41,
           "field": 11,
@@ -16194,22 +16160,22 @@
       },
       {
         "input": {
-          "value": "﻿ -0rest",
+          "value": "\ufeff -0rest",
           "fallback": "17.25tail"
         },
         "output": {
           "ok": true,
-          "text": "﻿ -0rest"
+          "text": "\ufeff -0rest"
         }
       },
       {
         "input": {
-          "value": "​1",
+          "value": "\u200b1",
           "fallback": "17.25tail"
         },
         "output": {
           "ok": true,
-          "text": "​1"
+          "text": "\u200b1"
         }
       },
       {
@@ -16673,7 +16639,7 @@
       },
       {
         "input": {
-          "value": "﻿ -0rest",
+          "value": "\ufeff -0rest",
           "fallback": "17.25tail"
         },
         "output": {
@@ -16683,7 +16649,7 @@
       },
       {
         "input": {
-          "value": "​1",
+          "value": "\u200b1",
           "fallback": "17.25tail"
         },
         "output": {
@@ -17152,7 +17118,7 @@
       },
       {
         "input": {
-          "value": "﻿ -0rest",
+          "value": "\ufeff -0rest",
           "fallback": "17.25tail"
         },
         "output": {
@@ -17162,7 +17128,7 @@
       },
       {
         "input": {
-          "value": "​1",
+          "value": "\u200b1",
           "fallback": "17.25tail"
         },
         "output": {
@@ -17643,7 +17609,7 @@
       },
       {
         "input": {
-          "value": "﻿ -0rest",
+          "value": "\ufeff -0rest",
           "fallback": "17.25tail"
         },
         "output": {
@@ -17653,7 +17619,7 @@
       },
       {
         "input": {
-          "value": "​1",
+          "value": "\u200b1",
           "fallback": "17.25tail"
         },
         "output": {
@@ -17724,7 +17690,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -17784,8 +17750,8 @@
       }
     },
     "category": "decoder",
-    "evidence": "Individually reviewed actual scalar-coercion body and its GRVT response consumers (grvt.exchange.ts parseFloat/Number sites). Independently authored 38-case JSON-data/absent carrier covers native text, binary64 bits and original coercion errors before any wire projection. Raw finite JSON carriers preserve -0.0/underflow and Number rounding beyond2^53; String inputs cover overflow. NaN outputs are canonicalized only. The chosen JSON input excludes native nonfinite input values, own undefined slots and executable coercion hooks per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; Rust strings use #shared-utf8-string-boundary. This is not an arbitrary JS-object or protocol-record claim.",
-    "call": "{ let payload:Option<serde_json::Value>=if $value[\"absent\"].as_bool()==Some(true){None}else if let Some(raw)=$value[\"raw\"].as_str(){Some(serde_json::from_str(raw).expect(\"fixed finite JSON carrier\"))}else{Some($value[\"value\"].clone())}; match $type(payload.as_ref(), $value[\"fallback\"].as_str().unwrap()) { Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":if number.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",number.to_bits())}}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"response\":error.response,\"code\":error.code,\"origin\":error.origin.is_some()}) } }",
+    "evidence": "Individually reviewed actual scalar-coercion body and its GRVT response consumers (grvt.exchange.ts parseFloat/Number sites). Independently authored 38-case JSON-data/absent carrier covers native text, binary64 bits and original coercion errors before any wire projection. Raw finite JSON carriers preserve -0.0/underflow and Number rounding beyond2^53; String inputs cover overflow. NaN outputs are canonicalized only. The chosen JSON input excludes native nonfinite input values, own undefined slots and executable coercion hooks per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; Rust strings use #shared-utf8-string-boundary. This is not an arbitrary JS-object or protocol-record claim. Retained source rows and transformed responses reach this function directly; native info is observed recursively as original UTF16 key/value units, numeric bits and own undefined. Existing fields, errors and ordered effects remain observed.",
+    "call": "{ let payload:Option<safe_cex_types::retained_json::RetainedJsonInput>=if $value[\"absent\"].as_bool()==Some(true){None}else if let Some(raw)=$value[\"raw\"].as_str(){Some(safe_cex_types::retained_json::RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).expect(\"native source JSON input\"))}else{Some(safe_cex_types::retained_json::RetainedJsonInput::from($value[\"value\"].clone()))}; match $type(payload.as_ref(), $value[\"fallback\"].as_str().unwrap()) { Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":if number.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",number.to_bits())}}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"response\":error.response,\"code\":({assert!(error.code.is_none(),\"coercion error has no code\");serde_json::Value::Null}),\"origin\":error.origin.is_some()}) } }",
     "cases": [
       {
         "input": {
@@ -18134,7 +18100,7 @@
       },
       {
         "input": {
-          "value": "﻿ -0rest",
+          "value": "\ufeff -0rest",
           "fallback": "17.25tail"
         },
         "output": {
@@ -18144,7 +18110,7 @@
       },
       {
         "input": {
-          "value": "​1",
+          "value": "\u200b1",
           "fallback": "17.25tail"
         },
         "output": {
@@ -20289,11 +20255,11 @@
       },
       {
         "input": {
-          "v": "caféß"
+          "v": "caf\u00e9\u00df"
         },
         "output": {
           "ok": true,
-          "value": "CAFÉSS"
+          "value": "CAF\u00c9SS"
         }
       },
       {
@@ -20460,8 +20426,8 @@
             ""
           ],
           [
-            "café",
-            "💠"
+            "caf\u00e9",
+            "\ud83d\udca0"
           ]
         ],
         "output": [
@@ -20478,8 +20444,8 @@
             "type": ""
           },
           {
-            "name": "café",
-            "type": "💠"
+            "name": "caf\u00e9",
+            "type": "\ud83d\udca0"
           }
         ]
       }
@@ -20672,9 +20638,9 @@
       },
       {
         "input": {
-          "mapped": "💠"
+          "mapped": "\ud83d\udca0"
         },
-        "output": "💠"
+        "output": "\ud83d\udca0"
       },
       {
         "input": {
@@ -21260,9 +21226,44 @@
             "taker": null,
             "maker": null,
             "info": {
-              "ih": "0x11",
-              "bd": 3,
-              "qd": 6
+              "kind": "object",
+              "fields": [
+                [
+                  [
+                    105,
+                    104
+                  ],
+                  {
+                    "kind": "text",
+                    "units": [
+                      48,
+                      120,
+                      49,
+                      49
+                    ]
+                  }
+                ],
+                [
+                  [
+                    98,
+                    100
+                  ],
+                  {
+                    "kind": "number",
+                    "bits": "4008000000000000"
+                  }
+                ],
+                [
+                  [
+                    113,
+                    100
+                  ],
+                  {
+                    "kind": "number",
+                    "bits": "4018000000000000"
+                  }
+                ]
+              ]
             }
           },
           "caller_base": "caller mutation"
@@ -23152,7 +23153,10 @@
                 ],
                 "mid": null,
                 "timestamp": null,
-                "info": {}
+                "info": {
+                  "kind": "object",
+                  "fields": []
+                }
               }
             ]
           },
@@ -23215,7 +23219,10 @@
                 ],
                 "mid": null,
                 "timestamp": null,
-                "info": {}
+                "info": {
+                  "kind": "object",
+                  "fields": []
+                }
               },
               {
                 "id": "id1",
@@ -23235,7 +23242,10 @@
                 ],
                 "mid": null,
                 "timestamp": null,
-                "info": {}
+                "info": {
+                  "kind": "object",
+                  "fields": []
+                }
               }
             ]
           },
@@ -24078,7 +24088,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -24144,8 +24154,8 @@
       }
     },
     "category": "decoder",
-    "evidence": "Reviewed actual fetchMarkets row mapping: native identity, base/quote, strict false active flag, spot/perpetual options, all precision/limit bits and opaque info presence. Signed zero, generated NaN/Infinity and fallback precedence remain visible. The native nested Result keeps source evaluation failure separate from the existing closed typed Market output refusal; this is not raw executable-object admission. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage.",
-    "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} match $type(&$value){Ok(Ok(market))=>serde_json::json!({\"phase\":\"market\",\"market\":fixture::view_market(&market)}),Ok(Err(error))=>serde_json::json!({\"phase\":\"representation\",\"error\":fixture::view_error(&error)}),Err(error)=>serde_json::json!({\"phase\":\"source\",\"error\":fixture::view_error(&error)})} }",
+    "evidence": "Reviewed actual fetchMarkets row mapping: native identity, base/quote, strict false active flag, spot/perpetual options, all precision/limit bits and opaque info presence. Signed zero, generated NaN/Infinity and fallback precedence remain visible. The native nested Result keeps source evaluation failure separate from the existing closed typed Market output refusal; this is not raw executable-object admission. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage. Retained source rows and transformed responses reach this function directly; native info is observed recursively as original UTF16 key/value units, numeric bits and own undefined. Existing fields, errors and ordered effects remain observed.",
+    "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} match $type(&safe_cex_types::retained_json::RetainedJsonInput::from($value.clone())){Ok(Ok(market))=>serde_json::json!({\"phase\":\"market\",\"market\":fixture::view_market(&market)}),Ok(Err(error))=>serde_json::json!({\"phase\":\"representation\",\"error\":fixture::view_error(&error)}),Err(error)=>serde_json::json!({\"phase\":\"source\",\"error\":fixture::view_error(&error)})} }",
     "cases": [
       {
         "input": {
@@ -24194,9 +24204,44 @@
             "taker": null,
             "maker": null,
             "info": {
-              "ih": "0x11",
-              "bd": 3,
-              "qd": 6
+              "kind": "object",
+              "fields": [
+                [
+                  [
+                    105,
+                    104
+                  ],
+                  {
+                    "kind": "text",
+                    "units": [
+                      48,
+                      120,
+                      49,
+                      49
+                    ]
+                  }
+                ],
+                [
+                  [
+                    98,
+                    100
+                  ],
+                  {
+                    "kind": "number",
+                    "bits": "4008000000000000"
+                  }
+                ],
+                [
+                  [
+                    113,
+                    100
+                  ],
+                  {
+                    "kind": "number",
+                    "bits": "4018000000000000"
+                  }
+                ]
+              ]
             }
           }
         }
@@ -24248,7 +24293,36 @@
             "taker": null,
             "maker": null,
             "info": {
-              "ih": null
+              "kind": "object",
+              "fields": [
+                [
+                  [
+                    105,
+                    104
+                  ],
+                  {
+                    "kind": "null"
+                  }
+                ],
+                [
+                  [
+                    98,
+                    100
+                  ],
+                  {
+                    "kind": "undefined"
+                  }
+                ],
+                [
+                  [
+                    113,
+                    100
+                  ],
+                  {
+                    "kind": "undefined"
+                  }
+                ]
+              ]
             }
           }
         }
@@ -24299,8 +24373,37 @@
             "taker": null,
             "maker": null,
             "info": {
-              "bd": null,
-              "qd": false
+              "kind": "object",
+              "fields": [
+                [
+                  [
+                    105,
+                    104
+                  ],
+                  {
+                    "kind": "undefined"
+                  }
+                ],
+                [
+                  [
+                    98,
+                    100
+                  ],
+                  {
+                    "kind": "null"
+                  }
+                ],
+                [
+                  [
+                    113,
+                    100
+                  ],
+                  {
+                    "kind": "boolean",
+                    "value": false
+                  }
+                ]
+              ]
             }
           }
         }
@@ -24647,7 +24750,7 @@
                                               {
                                                 "type": {
                                                   "resolved_path": {
-                                                    "path": "serde_json::value::Value",
+                                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                                     "args": null
                                                   }
                                                 }
@@ -24798,8 +24901,8 @@
       }
     },
     "category": "decoder",
-    "evidence": "Reviewed complete maintained fetchMarkets:744-795 over configured transformed response.data. Post is eager; rows map before fetched logging and source catch. An earlier native representation refusal cannot hide a later null-row source error, while an isolated representation refusal now reports the exact row/asset values at Warning after successful fetched logging and omits that row only. This is the expressly approved strict-field/per-row divergence from TS, which retains malformed base/quote. Native fields/Number bits, response and logger origin identity and every effect phase are independently observed. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage.",
-    "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} let events=fixture::events();let remote=fixture::error(\"RemoteError\",\"request failed\");let logger=fixture::error(\"LogError\",\"log failed\");let remote_origin=remote.origin.clone();let logger_origin=logger.origin.clone();let data=$value[\"data\"].clone();let failed=$value[\"fail\"].as_bool().unwrap();let post_events=events.clone();let future=$type(move |url,body|{fixture::push(&post_events,serde_json::json!([\"post\",url,body]));async move{fixture::push(&post_events,serde_json::json!([\"response\"]));if failed{Err(remote)}else{Ok(data)}}},fixture::log_with(events.clone(),if $value[\"log_fail\"].as_bool().unwrap(){Some(1)}else{None},logger));let before=fixture::observed(&events);let result=match fixture::ready(future){Ok(rows)=>serde_json::json!({\"ok\":true,\"markets\":rows.iter().map(fixture::view_market).collect::<Vec<_>>()}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":fixture::view_error(&error),\"same_remote\":error.origin.is_some()&&error.origin==remote_origin,\"same_logger\":error.origin.is_some()&&error.origin==logger_origin})};serde_json::json!({\"before\":before,\"events\":fixture::observed(&events),\"result\":result}) }",
+    "evidence": "Reviewed complete maintained fetchMarkets:744-795 over configured transformed response.data. Post is eager; rows map before fetched logging and source catch. An earlier native representation refusal cannot hide a later null-row source error, while an isolated representation refusal now reports the exact row/asset values at Warning after successful fetched logging and omits that row only. This is the expressly approved strict-field/per-row divergence from TS, which retains malformed base/quote. Native fields/Number bits, response and logger origin identity and every effect phase are independently observed. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage. Retained source rows and transformed responses reach this function directly; native info is observed recursively as original UTF16 key/value units, numeric bits and own undefined. Existing fields, errors and ordered effects remain observed.",
+    "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} let events=fixture::events();let remote=fixture::error(\"RemoteError\",\"request failed\");let logger=fixture::error(\"LogError\",\"log failed\");let remote_origin=remote.origin.clone();let logger_origin=logger.origin.clone();let data=safe_cex_types::retained_json::RetainedJsonInput::from($value[\"data\"].clone());let failed=$value[\"fail\"].as_bool().unwrap();let post_events=events.clone();let future=$type(move |url,body|{fixture::push(&post_events,serde_json::json!([\"post\",url,body]));async move{fixture::push(&post_events,serde_json::json!([\"response\"]));if failed{Err(remote)}else{Ok(data)}}},fixture::log_with(events.clone(),if $value[\"log_fail\"].as_bool().unwrap(){Some(1)}else{None},logger));let before=fixture::observed(&events);let result=match fixture::ready(future){Ok(rows)=>serde_json::json!({\"ok\":true,\"markets\":rows.iter().map(fixture::view_market).collect::<Vec<_>>()}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":fixture::view_error(&error),\"same_remote\":error.origin.is_some()&&error.origin==remote_origin,\"same_logger\":error.origin.is_some()&&error.origin==logger_origin})};serde_json::json!({\"before\":before,\"events\":fixture::observed(&events),\"result\":result}) }",
     "cases": [
       {
         "input": {
@@ -24892,9 +24995,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               },
               {
@@ -24929,7 +25067,36 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": null
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "null"
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "undefined"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "undefined"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -25481,9 +25648,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               },
               {
@@ -25518,7 +25720,36 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": null
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "null"
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "undefined"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "undefined"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -34839,7 +35070,7 @@
     },
     "category": "decoder",
     "evidence": "Reviewed maintained refreshMarkets and its owning typed Store protocol. Snapshot occurs before eager fetch callback, metadata-only refresh replaces all native fields without a membership event, and Store notification precedes change emission/logging. Reentrant replacement during fetch cannot alter the captured old set. Fetch, subscriber, emitter and logger failures independently preserve native origin/metadata and expose committed state; unrelated leverage cache remains intact. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage.",
-    "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} let mode=$value[\"mode\"].as_str().unwrap();let store=fixture::store(vec![fixture::market(\"btc_perp\",\"BTC_USDT_PERP\")]);let events=fixture::events();let fetch_error=fixture::error(\"FetchError\",\"fetch failed\");let notify_error=fixture::error(\"NotifyError\",\"notify failed\");let emit_error=fixture::error(\"EmitError\",\"emit failed\");let log_error=fixture::error(\"LogError\",\"log failed\");let origins=[(\"fetch\",fetch_error.origin.clone()),(\"notify\",notify_error.origin.clone()),(\"emit\",emit_error.origin.clone()),(\"log\",log_error.origin.clone())];let notify_events=events.clone();let notify_failed=mode==\"notify-fail\";let remove=safe_cex_store::Store::subscribe(store.as_ref(),Box::new(move |data,worker|{fixture::push(&notify_events,serde_json::json!([\"notify\",data.markets.iter().map(fixture::view_market).collect::<Vec<_>>(),worker]));if notify_failed{Err(safe_cex_types::StoreSubscriberError::new(\"notify failed\").with_cause(std::rc::Rc::new(notify_error.clone())))}else{Ok(())}}));let mut updated=fixture::market(\"btc_perp\",\"BTC_USDT_PERP\");updated.limits.leverage.max=50.0;updated.info=Some(serde_json::json!({\"ih\":\"0x22\",\"bd\":4,\"qd\":6}));let mut eth=fixture::market(\"eth_perp\",\"ETH_USDT_PERP\");eth.base=\"ETH\".into();let incoming=if mode==\"metadata\"||mode==\"reenter\"{vec![updated]}else if mode==\"clear\"{vec![]}else{vec![eth]};let fetch_store=store.clone();let fetch_events=events.clone();let emit_store=store.clone();let emit_events=events.clone();let future=$type(store.as_ref(),move ||{fixture::push(&fetch_events,serde_json::json!([\"fetch\"]));if mode==\"reenter\"{safe_cex_store::Store::update(fetch_store.as_ref(),safe_cex_store::StoreUpdate{markets:Some(vec![fixture::market(\"transient\",\"TMP\")]),..Default::default()},false).unwrap();}async move{fixture::push(&fetch_events,serde_json::json!([\"response\"]));if mode==\"fetch-fail\"{Err(fetch_error)}else{Ok(incoming)}}},move |name,changes|{fixture::push(&emit_events,serde_json::json!([\"emit\",name,changes.added.iter().map(fixture::view_market).collect::<Vec<_>>(),changes.removed.iter().map(fixture::view_market).collect::<Vec<_>>(),emit_store.markets().iter().map(|v|v.id.clone()).collect::<Vec<_>>() ]));if mode==\"emit-fail\"{Err(emit_error.clone())}else{Ok(())}},fixture::log_with(events.clone(),if mode==\"log-fail\"{Some(1)}else{None},log_error));let before=fixture::observed(&events);let result=match fixture::ready(future){Ok(changes)=>serde_json::json!({\"ok\":true,\"added\":changes.added.iter().map(fixture::view_market).collect::<Vec<_>>(),\"removed\":changes.removed.iter().map(fixture::view_market).collect::<Vec<_>>()}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":fixture::view_error(&error),\"origin\":origins.iter().find(|(_,origin)|error.origin.is_some()&&error.origin==*origin).map(|(name,_)|*name).unwrap_or(\"none\")})};let actual=serde_json::json!({\"before\":before,\"events\":fixture::observed(&events),\"result\":result,\"stored\":fixture::view_markets(store.as_ref()),\"cache\":fixture::view_cache(store.as_ref())});remove();actual }",
+    "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} let mode=$value[\"mode\"].as_str().unwrap();let store=fixture::store(vec![fixture::market(\"btc_perp\",\"BTC_USDT_PERP\")]);let events=fixture::events();let fetch_error=fixture::error(\"FetchError\",\"fetch failed\");let notify_error=fixture::error(\"NotifyError\",\"notify failed\");let emit_error=fixture::error(\"EmitError\",\"emit failed\");let log_error=fixture::error(\"LogError\",\"log failed\");let origins=[(\"fetch\",fetch_error.origin.clone()),(\"notify\",notify_error.origin.clone()),(\"emit\",emit_error.origin.clone()),(\"log\",log_error.origin.clone())];let notify_events=events.clone();let notify_failed=mode==\"notify-fail\";let remove=safe_cex_store::Store::subscribe(store.as_ref(),Box::new(move |data,worker|{fixture::push(&notify_events,serde_json::json!([\"notify\",data.markets.iter().map(fixture::view_market).collect::<Vec<_>>(),worker]));if notify_failed{Err(safe_cex_types::StoreSubscriberError::new(\"notify failed\").with_cause(std::rc::Rc::new(notify_error.clone())))}else{Ok(())}}));let mut updated=fixture::market(\"btc_perp\",\"BTC_USDT_PERP\");updated.limits.leverage.max=50.0;updated.info=safe_cex_types::retained_json::RetainedJsonInput::from(serde_json::json!({\"ih\":\"0x22\",\"bd\":4,\"qd\":6})).into();let mut eth=fixture::market(\"eth_perp\",\"ETH_USDT_PERP\");eth.base=\"ETH\".into();let incoming=if mode==\"metadata\"||mode==\"reenter\"{vec![updated]}else if mode==\"clear\"{vec![]}else{vec![eth]};let fetch_store=store.clone();let fetch_events=events.clone();let emit_store=store.clone();let emit_events=events.clone();let future=$type(store.as_ref(),move ||{fixture::push(&fetch_events,serde_json::json!([\"fetch\"]));if mode==\"reenter\"{safe_cex_store::Store::update(fetch_store.as_ref(),safe_cex_store::StoreUpdate{markets:Some(vec![fixture::market(\"transient\",\"TMP\")]),..Default::default()},false).unwrap();}async move{fixture::push(&fetch_events,serde_json::json!([\"response\"]));if mode==\"fetch-fail\"{Err(fetch_error)}else{Ok(incoming)}}},move |name,changes|{fixture::push(&emit_events,serde_json::json!([\"emit\",name,changes.added.iter().map(fixture::view_market).collect::<Vec<_>>(),changes.removed.iter().map(fixture::view_market).collect::<Vec<_>>(),emit_store.markets().iter().map(|v|v.id.clone()).collect::<Vec<_>>() ]));if mode==\"emit-fail\"{Err(emit_error.clone())}else{Ok(())}},fixture::log_with(events.clone(),if mode==\"log-fail\"{Some(1)}else{None},log_error));let before=fixture::observed(&events);let result=match fixture::ready(future){Ok(changes)=>serde_json::json!({\"ok\":true,\"added\":changes.added.iter().map(fixture::view_market).collect::<Vec<_>>(),\"removed\":changes.removed.iter().map(fixture::view_market).collect::<Vec<_>>()}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":fixture::view_error(&error),\"origin\":origins.iter().find(|(_,origin)|error.origin.is_some()&&error.origin==*origin).map(|(name,_)|*name).unwrap_or(\"none\")})};let actual=serde_json::json!({\"before\":before,\"events\":fixture::observed(&events),\"result\":result,\"stored\":fixture::view_markets(store.as_ref()),\"cache\":fixture::view_cache(store.as_ref())});remove();actual }",
     "cases": [
       {
         "input": {
@@ -34893,9 +35124,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x22",
-                    "bd": 4,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            50,
+                            50
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4010000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -34940,9 +35206,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x22",
-                "bd": 4,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        50,
+                        50
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4010000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ],
@@ -35012,9 +35313,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35056,9 +35392,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35095,9 +35466,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35146,9 +35552,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ],
@@ -35185,9 +35626,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -35225,9 +35701,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ],
@@ -35304,9 +35815,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35354,9 +35900,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -35420,9 +36001,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35468,9 +36084,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35514,9 +36165,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x22",
-                    "bd": 4,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            50,
+                            50
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4010000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35561,9 +36247,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x22",
-                "bd": 4,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        50,
+                        50
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4010000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ],
@@ -35648,9 +36369,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ],
@@ -35720,9 +36476,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35778,9 +36569,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ],
@@ -35850,9 +36676,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35894,9 +36755,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35933,9 +36829,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -35993,9 +36924,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ],
@@ -36065,9 +37031,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -36109,9 +37110,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -36148,9 +37184,44 @@
                   "taker": null,
                   "maker": null,
                   "info": {
-                    "ih": "0x11",
-                    "bd": 3,
-                    "qd": 6
+                    "kind": "object",
+                    "fields": [
+                      [
+                        [
+                          105,
+                          104
+                        ],
+                        {
+                          "kind": "text",
+                          "units": [
+                            48,
+                            120,
+                            49,
+                            49
+                          ]
+                        }
+                      ],
+                      [
+                        [
+                          98,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4008000000000000"
+                        }
+                      ],
+                      [
+                        [
+                          113,
+                          100
+                        ],
+                        {
+                          "kind": "number",
+                          "bits": "4018000000000000"
+                        }
+                      ]
+                    ]
                   }
                 }
               ],
@@ -36213,9 +37284,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ],
@@ -36940,9 +38046,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -36980,9 +38121,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37077,9 +38253,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -37117,9 +38328,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37209,9 +38455,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -37249,9 +38530,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37314,9 +38630,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -37354,9 +38705,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37437,9 +38823,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -37477,9 +38898,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37564,9 +39020,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -37604,9 +39095,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37701,9 +39227,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -37741,9 +39302,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37850,9 +39446,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -37952,9 +39583,44 @@
                 "taker": null,
                 "maker": null,
                 "info": {
-                  "ih": "0x11",
-                  "bd": 3,
-                  "qd": 6
+                  "kind": "object",
+                  "fields": [
+                    [
+                      [
+                        105,
+                        104
+                      ],
+                      {
+                        "kind": "text",
+                        "units": [
+                          48,
+                          120,
+                          49,
+                          49
+                        ]
+                      }
+                    ],
+                    [
+                      [
+                        98,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4008000000000000"
+                      }
+                    ],
+                    [
+                      [
+                        113,
+                        100
+                      ],
+                      {
+                        "kind": "number",
+                        "bits": "4018000000000000"
+                      }
+                    ]
+                  ]
                 }
               }
             ]
@@ -37992,9 +39658,44 @@
               "taker": null,
               "maker": null,
               "info": {
-                "ih": "0x11",
-                "bd": 3,
-                "qd": 6
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      105,
+                      104
+                    ],
+                    {
+                      "kind": "text",
+                      "units": [
+                        48,
+                        120,
+                        49,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      98,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4008000000000000"
+                    }
+                  ],
+                  [
+                    [
+                      113,
+                      100
+                    ],
+                    {
+                      "kind": "number",
+                      "bits": "4018000000000000"
+                    }
+                  ]
+                ]
               }
             }
           ]
@@ -41749,6 +43450,217 @@
               "401c000000000000"
             ]
           ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::markets::text": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Final closed shared Market base/quote String admission inspects only the selected retained leaf; unrelated info remains native. Ordinary text admits and nontext remains the existing explicit per-row refusal.",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value.clone());serde_json::json!($type(Some(&retained)))}",
+    "cases": [
+      {
+        "input": "BTC",
+        "output": "BTC"
+      },
+      {
+        "input": "USD",
+        "output": "USD"
+      },
+      {
+        "input": false,
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_semantics::retained_alias": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "retained_alias",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "full",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "lite",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Module-scope original nullish selector shared by trigger metadata. This helper borrows the exact retained full/lite source field and preserves false/zero rather than truthy fallback; null and undefined use the alternate. Actual constructed trigger/provenance regressions remain separate production-path evidence.",
+    "call": "{use safe_cex_types::retained_json::RetainedJsonInput as I;let row=I::from($value.clone());let out=$type(Some(&row),\"full\",\"lite\");serde_json::json!({\"present\":out.is_some(),\"full\":out.is_some_and(|v|std::ptr::eq(v,row.get(\"full\").unwrap())),\"numberBits\":out.and_then(I::as_f64).map(|n|format!(\"{:016x}\",n.to_bits()))})}",
+    "cases": [
+      {
+        "input": {
+          "full": 0,
+          "lite": 7
+        },
+        "output": {
+          "present": true,
+          "full": true,
+          "numberBits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "full": null,
+          "lite": 7
+        },
+        "output": {
+          "present": true,
+          "full": false,
+          "numberBits": "401c000000000000"
         }
       }
     ]

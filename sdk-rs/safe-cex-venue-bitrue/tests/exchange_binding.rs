@@ -1039,7 +1039,14 @@ fn malformed_balance_upnl_refuses_only_its_account_row() {
             (200., 150., 50., 7.)
         );
         assert_eq!(
-            balance.info.as_ref().unwrap()["data"]["account"]
+            balance
+                .info
+                .as_ref()
+                .unwrap()
+                .get("data")
+                .unwrap()
+                .get("account")
+                .unwrap()
                 .as_array()
                 .unwrap()
                 .len(),

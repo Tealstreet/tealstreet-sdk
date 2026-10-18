@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::numeric_ingress::js_from_value;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
@@ -10,7 +12,6 @@ use safe_cex_venue_blofin::{
     order_formatters::OrderPayload,
     order_rest::*,
     order_services::{ServiceError, ServiceHost},
-    utility::UtilityInput,
 };
 use serde_json::{Value, json};
 use std::{
@@ -163,16 +164,21 @@ impl Capture<'_> {
     fn event(&self, event: Value) {
         self.trace.borrow_mut().push(event);
     }
-    fn opts(&self, kind: &str, opts: &PlaceOrderOpts, source: Option<&UtilityInput>) {
+    fn opts(
+        &self,
+        kind: &str,
+        opts: &PlaceOrderOpts,
+        source: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+    ) {
         let expected = self.next();
         assert_eq!(expected[0], kind, "native callback order");
         native_opts(opts, &expected[1]);
         if kind == "trigger" {
-            assert_eq!(
-                source.map(UtilityInput::json),
-                expected.get(2).filter(|v| !v.is_null()),
-                "native trigger provenance"
-            );
+            match (source, expected.get(2).filter(|v| !v.is_null())) {
+                (Some(a), Some(e)) => retained_assert::assert_value(a, e),
+                (None, None) => (),
+                _ => panic!("native trigger provenance presence"),
+            }
         }
         // Only record a source trace AFTER all native argument assertions.
         self.event(expected);

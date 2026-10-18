@@ -88,7 +88,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/utils.rs::normalize_market"
 status = "divergent"
-note = "MIXED: Actual normalizeMarket returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-21. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript info retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source."
+note = "MIXED: Actual normalizeMarket returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-21. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript info retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source. Retained-info repair: market normalization and tradability consume canonical Input, coercing only accessed leaves. Raw info remains a native snapshot with unpaired UTF-16, nonfinite bits and own Undefined. Actual configured fetchMarkets/Store control compiled RED on the old response projection and GREEN after the direct cutover. The unchanged 595-case utility source corpus passes."
 
 [[symbol]]
 ts = "isTradableMexcMarket"
@@ -96,7 +96,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/utils.rs::is_tradable_mexc_market"
 status = "ported"
-note = ""
+note = " Retained-info repair: market normalization and tradability consume canonical Input, coercing only accessed leaves. Raw info remains a native snapshot with unpaired UTF-16, nonfinite bits and own Undefined. Actual configured fetchMarkets/Store control compiled RED on the old response projection and GREEN after the direct cutover. The unchanged 595-case utility source corpus passes."
 
 [[symbol]]
 ts = "normalizePercentage"
@@ -174,9 +174,9 @@ note = ""
 ts = "normalizeMarginType"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-mexc/src/utils.rs::normalize_margin_type"
+rs = [ "safe-cex-venue-mexc/src/utils.rs::normalize_margin_type", "safe-cex-venue-mexc/src/utils.rs::normalize_retained_margin_type" ]
 status = "ported"
-note = ""
+note = "Rename: normalizeMarginType -> safe-cex-venue-mexc/src/utils.rs::normalize_retained_margin_type. One retained-data implementation serves info readers and the existing finite JSON wire adapter. Native String lowercase/includes preserve UTF-16, including unrelated unpaired surrogates; isolated/isolate matching remains exact. The constructed leverage regression compares ten actual-source cases, native own-undefined and Number bits before any wire projection."
 
 [[symbol]]
 ts = "normalizePosition"

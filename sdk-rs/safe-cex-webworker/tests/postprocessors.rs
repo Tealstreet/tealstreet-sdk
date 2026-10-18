@@ -261,7 +261,7 @@ fn chaser_enrichment_retains_optional_field_identity() {
             );
             assert_eq!(
                 actual.info.as_ref(),
-                source.get("info"),
+                source.get("info").cloned().map(Into::into).as_ref(),
                 "ENRICHMENT-OPTIONAL native info"
             );
             native_enum!(actual.status, source, "status", OrderStatus; Open=>"open", Closed=>"closed", Canceled=>"canceled", Creating=>"creating", Updating=>"updating", Canceling=>"canceling");

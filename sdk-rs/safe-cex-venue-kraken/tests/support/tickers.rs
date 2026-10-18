@@ -57,7 +57,7 @@ fn fallback(tag: &str, n: f64) -> Ticker {
         quote_volume: n + 11.0,
         mid_price: None,
         timestamp: None,
-        info: Some(json!({"tag":tag})),
+        info: Some(json!({"tag":tag}).into()),
     }
 }
 fn old() -> Vec<Ticker> {

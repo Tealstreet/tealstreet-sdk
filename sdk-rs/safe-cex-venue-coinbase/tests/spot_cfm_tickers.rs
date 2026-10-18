@@ -61,7 +61,7 @@ fn spot_cfm_tickers_preserve_field_identity_and_cardinality() {
             "source result count {case}"
         );
 
-        let actual = format_spot_cfm_tickers(input).unwrap();
+        let actual = format_spot_cfm_tickers(&input.clone().into()).unwrap();
         assert_eq!(
             actual.len(),
             expected_count as usize,

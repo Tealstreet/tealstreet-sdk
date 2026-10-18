@@ -3,6 +3,6 @@
     "traits": [
       "core::clone::Clone"
     ],
-    "reason": "Reviewed utils.rs::WeexUtilityInput: derived Clone copies the already captured owned JSON Value, preserving its numeric passthrough representation. as_value borrows the capture and pick_retained copies a selected retained value; cloning runs neither ingress parsing nor a new enum normalization and carries no consumed validation authority See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
+    "reason": "Reviewed derived Clone copies the canonical owned RetainedJsonInput directly, preserving number bits, own Undefined and UTF-16 units. as_value borrows that tree; pick_retained snapshots a selected field. Clone performs neither parsing nor validation and grants no consumed validation authority. Real binding and source/snapshot observations remain separate contracts."
   }
 }

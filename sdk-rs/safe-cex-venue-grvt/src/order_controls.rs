@@ -302,19 +302,17 @@ fn replacement(opts: &UpdateOrderOpts) -> Result<PreparedOrderOpts, ExchangeErro
     ) {
         let info = match order.info.as_ref() {
             None => return Err(trigger_info_error("undefined")),
-            Some(Value::Null) => return Err(trigger_info_error("null")),
+            Some(safe_cex_types::retained_json::RetainedJsonInput::Null) => {
+                return Err(trigger_info_error("null"));
+            }
             Some(info) => info,
         };
-        let trigger = info
-            .as_object()
-            .map(get_grvt_trigger_metadata)
-            .transpose()
+        let trigger = get_grvt_trigger_metadata(info)
             .map_err(|cause| {
                 let mut error = ExchangeError::new(cause.message);
                 error.name = cause.name.into();
                 error
             })?
-            .flatten()
             .filter(|trigger| {
                 trigger.r#type
                     == if order.r#type == OrderType::StopLoss {
