@@ -439,3 +439,8 @@ construction policy records only Clone; it adds no decoder or receiver exemption
 The native adapter witness checks both Rc counts, shared retry state, primary
 identity and real GET/write routing after the original handle is dropped. A
 compiled swapped-owner Clone control must fail that witness before exact restore.
+
+Production derived types in `batch_orders` and `adapter_runtime` use explicit
+imports so the accepted-set scanner can authenticate their attribute scope.
+Keep the scanner guard active; source-oracle batch tests and constructed native
+exchange tests continue to exercise the unchanged request and runtime bodies.
