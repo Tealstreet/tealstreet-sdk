@@ -844,10 +844,10 @@ fn poison_unread_helper_fields(value: &Js) {
         for child in values {
             poison_unread_helper_fields(&child);
         }
-    } else {
-        for (_, child) in value.own_entries().unwrap() {
-            poison_unread_helper_fields(&child);
-        }
+        return;
+    }
+    for (_, child) in value.own_entries().unwrap() {
+        poison_unread_helper_fields(&child);
     }
     value
         .define_accessor(
