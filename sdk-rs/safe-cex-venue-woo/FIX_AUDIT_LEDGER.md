@@ -31,6 +31,12 @@ woo.v3.request.ts. Their unused Rust bodies and exact facade cases are retired;
 WooV3RequestInput stays for the remaining inert builders. The full ticker/quote
 corpus, including native bits and alias/freeze observations, stays unchanged.
 
+The strict V3 account-info decoder and account-balance mapper have no production
+TS or Rust caller. Their DTO, private enum/helper and exact facade tail are removed.
+The remaining asset/futures/helper/pagination corpus is preserved, while the real
+legacy validateAccount/fetchBalance signed HTTP path still runs. The similarly named
+v3_contracts::WooV3AccountInfo declaration is separate and stays unchanged.
+
 ## Exact assignment
 
 | ID | Source identity | Outcome | Native evidence / remaining work |
@@ -42,7 +48,7 @@ corpus, including native bits and alias/freeze observations, stays unchanged.
 | 5 | `ORDER_TRIGGER_TYPE` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
 | 6 | `validateTarget` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 7 | `decimalToNumber` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
-| 8 | `mapWooV3AccountBalance` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
+| 8 | `mapWooV3AccountBalance` | ACCEPT | No production caller/registration; strict account decoder, balance mapper, DTOs and orphan enum/helper/facade tail retired. Native/source boundary probes and actual legacy balance HTTP plus all-target compiler verify the removal. |
 | 9 | `WooV3CancelAllAfterResponse` | ACCEPT | No production caller/registration; descriptor/response module and exact facade tail retired; native/source inherited scheduleCancel rejection agrees and signed cancelAllOrders still works. |
 | 10 | `WooV3OrderBookRecoveryCoordinator.pushUpdate` | ACCEPT | No production caller or runtime registration; isolated recovery port and facade tail retired; real legacy orderbook probe retained. |
 | 11 | `WooPrivateWebscoket.ping` | ACCEPT | Constructed socket members match maintained TS across 24 native-first profiles: disposal truthiness, lexical receiver, live sender lookup, setter/clock/send/JSON failures, signed zero and retained UTF16. The three typed core-socket facades have no production callers and are retired with their exact test/control tail. See HEARTBEAT_REVIEW.md. |
@@ -86,7 +92,7 @@ corpus, including native bits and alias/freeze observations, stays unchanged.
 | 49 | `WooPublicWebsocket.handleTickersStreamEvents` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
 | 50 | `WooPublicWebsocket.handleBBOStreamEvents` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
 | 51 | `WooPublicWebsocket.handleMarkPricesStreamEvents` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
-| 52 | `WooV3AccountInfo` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
+| 52 | `WooV3AccountInfo` | ACCEPT | No production caller/registration; strict account decoder, balance mapper, DTOs and orphan enum/helper/facade tail retired. Native/source boundary probes and actual legacy balance HTTP plus all-target compiler verify the removal. |
 | 53 | `decodeMeta` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 54 | `WooV3WsBlocker` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 55 | `WooV3AlgoOrder` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
@@ -106,7 +112,6 @@ corpus, including native bits and alias/freeze observations, stays unchanged.
 - All-target compiler checking covers the remaining WOO consumers; the full parity
   index checks that no removed Rust target or obsolete exemption is left behind.
 
-The recovery, cancel-all-after, request-preparer, heartbeat and candle-mapper
-batches accept 9 of 60 assigned rows; the remaining 51 stay OPEN. Of those, 41
-are other inactive V3
-rows whose Rust caller closures still need retirement.
+The recovery, cancel-all-after, request-preparer, account-read, heartbeat and
+candle-mapper batches accept 11 of 60 assigned rows; the remaining 49 stay OPEN.
+Of those, 39 are other inactive V3 rows whose Rust caller closures still need retirement.

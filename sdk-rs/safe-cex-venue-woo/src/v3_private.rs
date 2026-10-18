@@ -1,38 +1,8 @@
-//! Strict inert account, balance and futures-position V3 reads. No transport or store mutation.
+//! Strict inert asset and futures-position V3 reads. No transport or store mutation.
 use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_types::{PositionMode, PositionSide, object_map::JsObjectMap};
 use serde::{Deserialize, Serialize};
 type Record = JsObjectMap<JsNumberInput>;
-// ts: WooV3AccountMode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum WooV3AccountMode {
-    #[serde(rename = "MARGIN")]
-    Margin,
-    #[serde(rename = "SPOT")]
-    Spot,
-}
-
-#[derive(Deserialize)]
-#[serde(remote = "WooV3AccountMode")]
-enum AcceptedWooV3AccountModeWire {
-    #[serde(rename = "MARGIN")]
-    Margin,
-    #[serde(rename = "SPOT")]
-    Spot,
-}
-impl<'de> Deserialize<'de> for WooV3AccountMode {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        AcceptedWooV3AccountModeWire::deserialize(
-            serde::de::value::StringDeserializer::<D::Error>::new(value),
-        )
-    }
-}
-impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountMode {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self,enum{Margin,Spot});
-    }
-}
 // ts: WooV3AccountPositionMode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AccountPositionMode {
@@ -97,14 +67,6 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3PositionSide {
         safe_cex_num::js_number_output!(self,enum{Both,Long,Short});
     }
 }
-fn account_type<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    let s = String::deserialize(d)?;
-    if matches!(s.as_str(), "Main" | "Sub") {
-        Ok(s)
-    } else {
-        Err(serde::de::Error::custom("unsupported account type"))
-    }
-}
 // ts: WooV3PageMeta
 #[derive(Debug, Clone)]
 pub struct WooV3PageMeta {
@@ -139,96 +101,6 @@ impl<'de> Deserialize<'de> for WooV3PageMeta {
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3PageMeta {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,struct{total,records_per_page,current_page});
-    }
-}
-// ts: WooV3AccountInfo
-#[derive(Debug, Clone)]
-pub struct WooV3AccountInfo {
-    pub application_id: String,
-    pub account: String,
-    pub alias: String,
-    pub otpauth: bool,
-    pub account_mode: WooV3AccountMode,
-    pub position_mode: WooV3AccountPositionMode,
-    pub leverage: f64,
-    pub margin_ratio: String,
-    pub open_margin_ratio: String,
-    pub initial_margin_ratio: String,
-    pub maintenance_margin_ratio: String,
-    pub total_collateral: String,
-    pub free_collateral: String,
-    pub total_account_value: String,
-    pub total_trading_value: String,
-    pub total_vault_value: String,
-    pub total_staking_value: String,
-    pub total_earn_value: String,
-    pub total_launchpad_value: String,
-    pub referrer_id: String,
-    pub account_type: String,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "WooV3AccountInfo")]
-struct WooV3AccountInfoFields {
-    #[serde(rename = "applicationId")]
-    application_id: String,
-    #[serde(rename = "account")]
-    account: String,
-    #[serde(rename = "alias")]
-    alias: String,
-    #[serde(rename = "otpauth")]
-    otpauth: bool,
-    #[serde(rename = "accountMode")]
-    account_mode: WooV3AccountMode,
-    #[serde(rename = "positionMode")]
-    position_mode: WooV3AccountPositionMode,
-    #[serde(rename = "leverage")]
-    leverage: f64,
-    #[serde(rename = "marginRatio")]
-    margin_ratio: String,
-    #[serde(rename = "openMarginRatio")]
-    open_margin_ratio: String,
-    #[serde(rename = "initialMarginRatio")]
-    initial_margin_ratio: String,
-    #[serde(rename = "maintenanceMarginRatio")]
-    maintenance_margin_ratio: String,
-    #[serde(rename = "totalCollateral")]
-    total_collateral: String,
-    #[serde(rename = "freeCollateral")]
-    free_collateral: String,
-    #[serde(rename = "totalAccountValue")]
-    total_account_value: String,
-    #[serde(rename = "totalTradingValue")]
-    total_trading_value: String,
-    #[serde(rename = "totalVaultValue")]
-    total_vault_value: String,
-    #[serde(rename = "totalStakingValue")]
-    total_staking_value: String,
-    #[serde(rename = "totalEarnValue")]
-    total_earn_value: String,
-    #[serde(rename = "totalLaunchpadValue")]
-    total_launchpad_value: String,
-    #[serde(rename = "referrerID")]
-    referrer_id: String,
-    #[serde(rename = "accountType", deserialize_with = "account_type")]
-    account_type: String,
-}
-impl Serialize for WooV3AccountInfo {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        WooV3AccountInfoFields::serialize(self, s)
-    }
-}
-impl<'de> Deserialize<'de> for WooV3AccountInfo {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        JsNumberInput::deserialize(d)?
-            .decode_with(|d| {
-                WooV3AccountInfoFields::deserialize(safe_cex_types::strict_decode::object(d))
-            })
-            .map_err(serde::de::Error::custom)
-    }
-}
-impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountInfo {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self,struct{application_id,account,alias,otpauth,account_mode,position_mode,leverage,margin_ratio,open_margin_ratio,initial_margin_ratio,maintenance_margin_ratio,total_collateral,free_collateral,total_account_value,total_trading_value,total_vault_value,total_staking_value,total_earn_value,total_launchpad_value,referrer_id,account_type});
     }
 }
 // ts: WooV3AssetBalance
@@ -762,141 +634,6 @@ pub fn assert_position_side_matches_mode(
         ));
     }
     Ok(())
-}
-// ts: decodeWooV3AccountInfo
-pub fn decode_woo_v3_account_info(
-    input: Option<&JsNumberInput>,
-) -> Result<WooV3AccountInfo, String> {
-    let data = decode_envelope(input, "account info")?;
-    let path = "WOO V3 account info.data";
-    Ok(WooV3AccountInfo {
-        application_id: require_string(
-            data.get("applicationId"),
-            &format!("{path}.applicationId"),
-            false,
-        )?,
-        account: require_string(data.get("account"), &format!("{path}.account"), false)?,
-        alias: require_string(data.get("alias"), &format!("{path}.alias"), false)?,
-        otpauth: require_boolean(data.get("otpauth"), &format!("{path}.otpauth"))?,
-        account_mode: match require_enum(
-            data.get("accountMode"),
-            &["MARGIN", "SPOT"],
-            &format!("{path}.accountMode"),
-        )?
-        .as_str()
-        {
-            "MARGIN" => WooV3AccountMode::Margin,
-            "SPOT" => WooV3AccountMode::Spot,
-            _ => unreachable!(),
-        },
-        position_mode: match require_enum(
-            data.get("positionMode"),
-            &["ONE_WAY", "HEDGE_MODE"],
-            &format!("{path}.positionMode"),
-        )?
-        .as_str()
-        {
-            "ONE_WAY" => WooV3AccountPositionMode::OneWay,
-            "HEDGE_MODE" => WooV3AccountPositionMode::HedgeMode,
-            _ => unreachable!(),
-        },
-        leverage: require_integer(data.get("leverage"), &format!("{path}.leverage"), 1.0)?,
-        margin_ratio: require_decimal_string(
-            data.get("marginRatio"),
-            &format!("{path}.marginRatio"),
-        )?,
-        open_margin_ratio: require_decimal_string(
-            data.get("openMarginRatio"),
-            &format!("{path}.openMarginRatio"),
-        )?,
-        initial_margin_ratio: require_decimal_string(
-            data.get("initialMarginRatio"),
-            &format!("{path}.initialMarginRatio"),
-        )?,
-        maintenance_margin_ratio: require_decimal_string(
-            data.get("maintenanceMarginRatio"),
-            &format!("{path}.maintenanceMarginRatio"),
-        )?,
-        total_collateral: require_decimal_string(
-            data.get("totalCollateral"),
-            &format!("{path}.totalCollateral"),
-        )?,
-        free_collateral: require_decimal_string(
-            data.get("freeCollateral"),
-            &format!("{path}.freeCollateral"),
-        )?,
-        total_account_value: require_decimal_string(
-            data.get("totalAccountValue"),
-            &format!("{path}.totalAccountValue"),
-        )?,
-        total_trading_value: require_decimal_string(
-            data.get("totalTradingValue"),
-            &format!("{path}.totalTradingValue"),
-        )?,
-        total_vault_value: require_decimal_string(
-            data.get("totalVaultValue"),
-            &format!("{path}.totalVaultValue"),
-        )?,
-        total_staking_value: require_decimal_string(
-            data.get("totalStakingValue"),
-            &format!("{path}.totalStakingValue"),
-        )?,
-        total_earn_value: require_decimal_string(
-            data.get("totalEarnValue"),
-            &format!("{path}.totalEarnValue"),
-        )?,
-        total_launchpad_value: require_decimal_string(
-            data.get("totalLaunchpadValue"),
-            &format!("{path}.totalLaunchpadValue"),
-        )?,
-        referrer_id: require_string(data.get("referrerID"), &format!("{path}.referrerID"), false)?,
-        account_type: require_enum(
-            data.get("accountType"),
-            &["Main", "Sub"],
-            &format!("{path}.accountType"),
-        )?,
-    })
-}
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WooV3AccountBalance {
-    pub free: f64,
-    pub used: f64,
-    pub total: f64,
-    pub upnl: f64,
-    pub info: WooV3AccountInfo,
-}
-impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountBalance {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self,struct{free,used,total,upnl,info});
-    }
-}
-// ts: mapWooV3AccountBalance
-pub fn map_woo_v3_account_balance(
-    info: &WooV3AccountInfo,
-    previous_upnl: f64,
-) -> Result<WooV3AccountBalance, String> {
-    if info.account_mode != WooV3AccountMode::Margin {
-        return Err("WOO V3 account mode SPOT is not futures-capable".into());
-    }
-    if !previous_upnl.is_finite() {
-        return Err("WOO V3 previous uPnL must be finite".into());
-    }
-    let total_collateral =
-        decimal_to_number(&info.total_collateral, "WOO V3 totalCollateral", None)?;
-    let free = decimal_to_number(&info.free_collateral, "WOO V3 freeCollateral", None)?;
-    let total = decimal_to_number(&info.total_account_value, "WOO V3 totalAccountValue", None)?;
-    let used = total_collateral - free;
-    if used < 0.0 {
-        return Err("WOO V3 freeCollateral must not exceed totalCollateral".into());
-    }
-    Ok(WooV3AccountBalance {
-        free,
-        used,
-        total,
-        upnl: previous_upnl,
-        info: info.clone(),
-    })
 }
 // ts: decodeWooV3AssetBalances
 pub fn decode_woo_v3_asset_balances(
