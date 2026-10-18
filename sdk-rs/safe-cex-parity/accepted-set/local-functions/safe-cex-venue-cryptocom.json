@@ -1,7 +1,7 @@
 {
   "safe-cex-venue-cryptocom/src/binding/globals.rs::LOCAL_FUNCTION:open_window": {
     "category": "non-decoder",
-    "reason": "Inside throttle construction: schedules the existing callback, tracks the open/pending/last state and recursively starts the next timer window. It forwards native callback arguments/results without a raw-data decoder or model projection.",
-    "sourceSha256": "537cae25332bfa4f3f0c23c9b6f939d60cd8a2cfaa821442b261fd6ca2905a7c"
+    "reason": "Inside throttle construction: schedules the existing callback, tracks the open/pending/last state and recursively starts the next timer window. It forwards native callback arguments/results without a raw-data decoder or model projection. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",
+    "sourceSha256": "e36cb243d52db309f5887ffc1cc5ca829a5254e4493d8ef424cc1fc4451720ad"
   }
 }

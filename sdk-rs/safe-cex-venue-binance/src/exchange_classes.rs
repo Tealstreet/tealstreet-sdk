@@ -436,7 +436,7 @@ impl ExchangeState {
     pub(crate) fn emit(&self, message: EventValue) -> Result<(), Failure> {
         self.base
             .emit_and_log_error(
-                safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(message.text()?),
+                safe_cex_exchange::error_reporting::ExchangeErrorInput::Raw(message),
                 None,
                 None,
             )

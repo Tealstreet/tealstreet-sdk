@@ -1,4 +1,5 @@
-use safe_cex_num::{JsCoercionError, js_own_keys};
+use safe_cex_exchange::js_runtime::value::{Js, Str, Thrown, error_object, from_json};
+use safe_cex_num::JsCoercionError;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,22 +32,63 @@ pub fn describe_binance_pm_response_shape(payload: Option<&Value>) -> String {
 }
 
 fn describe(payload: Option<&Value>) -> String {
-    match payload {
-        Some(Value::Array(items)) => format!("array({})", items.len()),
-        Some(Value::Null) => "null".into(),
-        Some(Value::Object(record)) => {
-            let keys = js_own_keys(record.keys().map(String::as_str));
-            if keys.is_empty() {
-                "object".into()
-            } else {
-                format!("object({})", keys[..keys.len().min(6)].join(","))
-            }
-        }
-        Some(Value::String(_)) => "string".into(),
-        Some(Value::Bool(_)) => "boolean".into(),
-        Some(Value::Number(_)) => "number".into(),
-        None => "undefined".into(),
+    let payload = payload.map(from_json).unwrap_or(Js::Undefined);
+    String::from_utf16(&native_shape(&payload)).expect("UTF8 input produces UTF8 shape")
+}
+
+pub(crate) fn native_shape(payload: &Js) -> Str {
+    if let Js::Array(rows) = payload {
+        return format!("array({})", rows.borrow().len())
+            .encode_utf16()
+            .collect::<Vec<_>>()
+            .into();
     }
+    if matches!(payload, Js::Null) {
+        return "null".encode_utf16().collect::<Vec<_>>().into();
+    }
+    if payload.type_of() != "object" {
+        return payload.type_of().encode_utf16().collect::<Vec<_>>().into();
+    }
+    let keys = payload.own_keys();
+    if keys.is_empty() {
+        return "object".encode_utf16().collect::<Vec<_>>().into();
+    }
+    let mut text: Vec<_> = "object(".encode_utf16().collect();
+    for (index, key) in keys.iter().take(6).enumerate() {
+        if index > 0 {
+            text.push(u16::from(b','));
+        }
+        text.extend_from_slice(key);
+    }
+    text.push(u16::from(b')'));
+    text.into()
+}
+
+pub(crate) fn native_array_guard(venue: &str, endpoint: &str, payload: &Js) -> Result<(), Thrown> {
+    if matches!(payload, Js::Array(_)) {
+        return Ok(());
+    }
+    let shape = native_shape(payload);
+    let message = crate::response_message::native_response_message(payload)?;
+    Err(native_malformed(venue, endpoint, &shape, &message))
+}
+
+fn native_malformed(venue: &str, endpoint: &str, shape: &[u16], message: &[u16]) -> Thrown {
+    let mut text: Vec<_> =
+        format!("{venue} {endpoint} response malformed: expected array, received ")
+            .encode_utf16()
+            .collect();
+    text.extend_from_slice(shape);
+    if !message.is_empty() {
+        text.extend(" (".encode_utf16());
+        text.extend_from_slice(message);
+        text.push(u16::from(b')'));
+    }
+    let error = error_object("Error", "");
+    error
+        .set("message", Js::utf16(&text))
+        .expect("fresh error message");
+    Thrown::new(error)
 }
 
 // ts: requireBinanceArrayResponse
@@ -54,37 +96,38 @@ pub fn require_binance_array_response<'a>(
     endpoint: &str,
     payload: Option<&'a Value>,
 ) -> Result<&'a [Value], BinanceResponseError> {
-    if let Some(Value::Array(items)) = payload {
-        return Ok(items);
-    }
-    let shape = describe_binance_response_shape(payload);
-    let message = crate::response_message::get_binance_response_message(payload)?;
-    Err(malformed("Binance", endpoint, shape, message))
+    let native = payload.map(from_json).unwrap_or(Js::Undefined);
+    native_array_guard("Binance", endpoint, &native).map_err(|error| {
+        let error = error.to_exchange_error();
+        BinanceResponseError {
+            name: if error.name == "TypeError" {
+                "TypeError"
+            } else {
+                "Error"
+            },
+            message: error.message,
+        }
+    })?;
+    Ok(payload.and_then(Value::as_array).expect("validated array"))
 }
 // ts: requireBinancePMArrayResponse
 pub fn require_binance_pm_array_response<'a>(
     endpoint: &str,
     payload: Option<&'a Value>,
 ) -> Result<&'a [Value], BinanceResponseError> {
-    if let Some(Value::Array(items)) = payload {
-        return Ok(items);
-    }
-    let shape = describe_binance_pm_response_shape(payload);
-    let message = crate::response_message::get_binance_pm_response_message(payload)?;
-    Err(malformed("Binance PM", endpoint, shape, message))
-}
-fn malformed(venue: &str, endpoint: &str, shape: String, message: String) -> BinanceResponseError {
-    let suffix = if message.is_empty() {
-        String::new()
-    } else {
-        format!(" ({message})")
-    };
-    BinanceResponseError {
-        name: "Error",
-        message: format!(
-            "{venue} {endpoint} response malformed: expected array, received {shape}{suffix}"
-        ),
-    }
+    let native = payload.map(from_json).unwrap_or(Js::Undefined);
+    native_array_guard("Binance PM", endpoint, &native).map_err(|error| {
+        let error = error.to_exchange_error();
+        BinanceResponseError {
+            name: if error.name == "TypeError" {
+                "TypeError"
+            } else {
+                "Error"
+            },
+            message: error.message,
+        }
+    })?;
+    Ok(payload.and_then(Value::as_array).expect("validated array"))
 }
 
 #[cfg(test)]
@@ -141,7 +184,13 @@ mod accepted_contract_tests {
                 "Binance  response malformed: expected array, received undefined ( )",
             ),
         ] {
-            let error = malformed(venue, endpoint, shape.into(), message.into());
+            let error = native_malformed(
+                venue,
+                endpoint,
+                &shape.encode_utf16().collect::<Vec<_>>(),
+                &message.encode_utf16().collect::<Vec<_>>(),
+            )
+            .to_exchange_error();
             assert_eq!(error.name, "Error");
             assert_eq!(error.message, expected);
             assert_eq!(error.to_string(), expected);
