@@ -233,15 +233,14 @@ impl NativeRuntimeHost for ProductionHost {
         };
         let owner = self.clone();
         let callback = Rc::new(move || owner.owned(next()));
+        let pending = safe_cex_exchange::loop_util::loop_once(
+            callback,
+            &"() => this.tick()".encode_utf16().collect::<Vec<_>>(),
+            delay,
+            &host,
+        );
         parent.base.start_owned_operation(async move {
-            if let Err(error) = safe_cex_exchange::loop_util::loop_once(
-                callback,
-                &"() => this.tick()".encode_utf16().collect::<Vec<_>>(),
-                delay,
-                &host,
-            )
-            .await
-            {
+            if let Err(error) = pending.await {
                 runtime.report_exception(
                     &error,
                     &json!({"venue":"breakoutprop","source":"poll loop"}).into(),

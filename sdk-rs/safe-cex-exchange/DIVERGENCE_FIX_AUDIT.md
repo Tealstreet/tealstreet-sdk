@@ -17,7 +17,12 @@ The native cutover requires the owning runtime in LoopHost and uses canonical
 Tests cover waiter-drop continuation, callback queue identity/count, hidden and
 visible documents, fallback, rejection and positive infinity. Existing warning
 key deduplication and closed-position assertions remain intact. This is the
-mapped utility/host boundary, not a claim of new venue or browser assembly.
+mapped utility/host boundary. Its existing Breakout production adapter now
+passes the owning runtime, invokes the helper before queuing its error observer
+and reports the original ExchangeError. The real binding test advances the
+virtual clock halfway before any task poll, then requires the callback at the
+original deadline; merely repairing the ABI compiled but failed this assertion.
+This does not add browser assembly or arbitrary callback semantics.
 
 The explicit host ABI still supplies function-source text, infallible callbacks
 and warnings, and String-valued sleep/scheduling failures. These are visible
