@@ -4,6 +4,7 @@ use crate::{api_factory as api, native_value::Value as Native};
 use safe_cex_exchange::{exchange::BaseExchange, http::HttpClient, runtime::ExchangeError};
 use safe_cex_num::JsJsonValue;
 use safe_cex_transport::{RestBody, RestRequest, RestResponseBody};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -101,16 +102,14 @@ impl Client {
             match response {
                 Ok(response) => {
                     let data = match response.body {
-                        RestResponseBody::Encoded(bytes) => serde_json::from_slice(&bytes)
-                            .unwrap_or_else(|_| {
-                                Value::String(String::from_utf8_lossy(&bytes).into_owned())
-                            }),
-                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v
-                            .into_value()
-                            .map_err(|error| ExchangeError::new(error.to_string()))?,
+                        RestResponseBody::Transformed(data) => data,
+                        body => body
+                            .transform_axios_response()
+                            .map_err(|error| ExchangeError::new(error.to_string()))?
+                            .into_data(),
                     };
                     let response = Rc::new(api::Response {
-                        data: data.into(),
+                        data,
                         config: Some(config),
                         status: Some(f64::from(response.status)),
                     });
@@ -173,7 +172,11 @@ impl Client {
             extra: vec![],
         });
         let response = self.execute(config);
-        Box::pin(async move { Ok(Native::from_prepared(response.await?.data.clone())) })
+        Box::pin(async move {
+            Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+                response.await?.data.clone(),
+            ))
+        })
     }
 }
 #[derive(Clone)]
@@ -335,8 +338,8 @@ impl api::Host for Factory {
     fn error_text(&mut self, e: &ExchangeError) -> Result<String, ExchangeError> {
         Ok(e.js_error_string())
     }
-    fn error_message(&mut self, e: &ExchangeError) -> Result<JsJsonValue, ExchangeError> {
-        Ok(JsJsonValue::String(e.message.clone()))
+    fn error_message(&mut self, e: &ExchangeError) -> Result<Input, ExchangeError> {
+        Ok(Input::Text(e.message.encode_utf16().collect()))
     }
     fn response(&mut self, e: &ExchangeError) -> Result<Option<Rc<api::Response>>, ExchangeError> {
         Ok(e.metadata.response.as_ref().map(|v| {
@@ -390,11 +393,7 @@ impl api::Host for Factory {
         message: String,
         response: Rc<api::Response>,
     ) -> Result<String, ExchangeError> {
-        let config = response
-            .config
-            .as_ref()
-            .map(|c| json!({"url":c.url,"method":c.method}));
-        let value = json!({"data":wire(&response.data)?,"status":response.status,"config":config});
+        let value = json!({"status":response.status});
         Ok(safe_cex_exchange::error_reporting::append_http_failure(
             Some(&Value::String(message)),
             &value,

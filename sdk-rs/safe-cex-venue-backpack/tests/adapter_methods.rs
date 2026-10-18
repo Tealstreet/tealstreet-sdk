@@ -558,8 +558,11 @@ impl api::Host for Api {
     fn error_text(&mut self, e: &ExchangeError) -> Result<String, ExchangeError> {
         Ok(e.js_error_string())
     }
-    fn error_message(&mut self, e: &ExchangeError) -> Result<J, ExchangeError> {
-        Ok(J::String(e.message.clone()))
+    fn error_message(
+        &mut self,
+        e: &ExchangeError,
+    ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
+        Ok(serde_json::Value::String(e.message.clone()).into())
     }
     fn response(&mut self, _: &ExchangeError) -> Result<Option<Rc<api::Response>>, ExchangeError> {
         Ok(self.response.clone())
@@ -687,7 +690,7 @@ fn api_factory_native_configuration_and_hooks() {
         let result = match i {
             0 => {
                 let response = Rc::new(api::Response {
-                    data: J::Object(vec![("okay".into(), J::Number(1.0))]),
+                    data: json!({"okay":1}).into(),
                     config: None,
                     status: None,
                 });

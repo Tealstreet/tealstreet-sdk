@@ -389,3 +389,11 @@ real-client tests. A single initial Future poll is not a completion guarantee.
 The API/signing corpus captures lone-surrogate prepared values through canonical
 retained numeric ingress and compares native UTF-16 units. Legacy UTF-8 prepared
 helper/output limits are separate from that capture; their existing source cases remain.
+
+Successful native HTTP responses retain canonical `RetainedJsonInput` through the
+response interceptor and native callback. Encoded bodies use the shared Axios
+transform once; already transformed data is forwarded directly. Unread UTF-16
+keys/values, own undefined and nonfinite numeric metadata reach model `info`
+without a JSON projection. Request/signing prepared inputs retain their existing
+typed policy. The two native routing regressions fail on the old response bridge
+and compare the maintained source interceptor/market method before native checks.
