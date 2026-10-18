@@ -8,18 +8,14 @@ pub trait PublicEventArray {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn event(&self, index: usize) -> EventValue;
+    fn event(&self, index: usize) -> Result<EventValue, Failure>;
 }
 impl PublicEventArray for crate::private_event_value::EventArray {
     fn len(&self) -> usize {
-        self.borrow().len()
+        self.as_ref().len()
     }
-    fn event(&self, index: usize) -> EventValue {
-        self.borrow()
-            .get(index)
-            .cloned()
-            .flatten()
-            .unwrap_or(EventValue::Undefined)
+    fn event(&self, index: usize) -> Result<EventValue, Failure> {
+        Ok(EventValue::Array(self.clone()).get(&index.to_string())?)
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +73,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;
@@ -110,7 +106,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;
@@ -143,7 +139,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;
@@ -174,7 +170,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;
@@ -207,7 +203,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;
@@ -240,7 +236,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;

@@ -129,7 +129,7 @@ fn placement(scope: &OkxScope, name: &'static str, algo: bool) {
     async_member(scope, name, move |s, a| {
         Box::pin(async move {
             let payloads: Vec<JsJsonValue> = arg(&a, 0)
-                .array_values()
+                .array_values()?
                 .unwrap_or_default()
                 .iter()
                 .map(to_js_json)
@@ -266,7 +266,7 @@ fn market_shape(scope: &OkxScope, variant: Variant) {
             .this
             .get("store")?
             .get("markets")?
-            .array_values()
+            .array_values()?
             .unwrap_or_default();
         let markets = js_markets
             .iter()

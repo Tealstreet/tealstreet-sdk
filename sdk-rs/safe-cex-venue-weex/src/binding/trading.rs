@@ -128,7 +128,7 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
             f.call(
                 array.clone(),
                 values
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?,
             )?;
             Ok(())
@@ -171,11 +171,11 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
         },
         concat: |_, first, second| {
             let mut values = first
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
             values.extend(
                 second
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?,
             );
             Ok(Js::array(values))

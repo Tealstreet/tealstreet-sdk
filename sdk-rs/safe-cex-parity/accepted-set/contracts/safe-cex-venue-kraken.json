@@ -8874,5 +8874,1038 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_kraken::stream_updates::NumericChanges": {
+    "category": "decoder",
+    "shape": "borrowed-sequence",
+    "evidence": "Actual Vec<(&'static str,f64)> Deserialize borrows static keys. Four separately executed routes inspect tuple order, duplicate keys, signed-zero/subnormal bits, borrowed pointers and owned-input refusal. Constructed Futures/Spot sockets publish every live patch field into the actual Store. No DeserializeOwned or generic borrowed permission is claimed.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "primitive": "f64"
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "primitive": "f64"
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "borrowedRoutes": [
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "8000000000000000"
+            ],
+            [
+              "ask",
+              "4033400000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            16
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "last",
+              "4031800000000000"
+            ],
+            [
+              "last",
+              "c009000000000000"
+            ],
+            [
+              "fundingRate",
+              "3f6999999999999a"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            17,
+            33
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [],
+          "key_offsets": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "",
+              "0000000000000001"
+            ],
+            [
+              "💱",
+              "c006000000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            15
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "8000000000000000"
+            ],
+            [
+              "ask",
+              "4033400000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            16
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "last",
+              "4031800000000000"
+            ],
+            [
+              "last",
+              "c009000000000000"
+            ],
+            [
+              "fundingRate",
+              "3f6999999999999a"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            17,
+            33
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [],
+          "key_offsets": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "",
+              "0000000000000001"
+            ],
+            [
+              "💱",
+              "c006000000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            15
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "8000000000000000"
+            ],
+            [
+              "ask",
+              "4033400000000000"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "last",
+              "4031800000000000"
+            ],
+            [
+              "last",
+              "c009000000000000"
+            ],
+            [
+              "fundingRate",
+              "3f6999999999999a"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "4029000000000000"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "",
+              "0000000000000001"
+            ],
+            [
+              "💱",
+              "c006000000000000"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      }
+    ]
   }
 }

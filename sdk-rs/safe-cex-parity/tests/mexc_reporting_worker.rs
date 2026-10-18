@@ -342,6 +342,7 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                         let value = payload
                             .data
                             .array_values()
+                            .expect("fixture array property reads")
                             .expect("worker posts emitted args once");
                         if worker {
                             captured_reports

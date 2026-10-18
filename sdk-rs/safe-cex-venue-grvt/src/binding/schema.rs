@@ -102,7 +102,7 @@ pub(super) fn map(input: &Js, schema: &str, to_lite: bool) -> Result<Js, Thrown>
     if input.is_nullish() || !input.is_object() || input.is_callable() {
         return Ok(input.clone());
     }
-    if let Some(items) = input.array_values() {
+    if let Some(items) = input.array_values()? {
         return Ok(Js::array(
             items
                 .iter()
@@ -171,7 +171,10 @@ mod tests {
                 }
             }
             Value::Array(values) => {
-                let actual = actual.array_values().expect("array");
+                let actual = actual
+                    .array_values()
+                    .expect("fixture property reads")
+                    .expect("array");
                 assert_eq!(actual.len(), values.len(), "{label} array count");
                 for (index, (actual, value)) in actual.iter().zip(values).enumerate() {
                     compare(actual, value, &format!("{label}[{index}]"));

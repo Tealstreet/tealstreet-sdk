@@ -1009,7 +1009,12 @@ mod js_sockets {
             panic!("Blob.arrayBuffer returns a Promise")
         };
         let buffer = buffer.result().unwrap().unwrap();
-        let bytes = buffer.get("bytes").unwrap().array_values().unwrap();
+        let bytes = buffer
+            .get("bytes")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(
             bytes
                 .iter()
@@ -1021,6 +1026,7 @@ mod js_sockets {
         let Js::Promise(text) = received[0].call_method("text", vec![]).unwrap() else {
             panic!("Blob.text returns a Promise")
         };
+        assert_eq!(bytes.len(), 4);
         assert_eq!(
             text.result().unwrap().unwrap().to_display(),
             "\0��A",

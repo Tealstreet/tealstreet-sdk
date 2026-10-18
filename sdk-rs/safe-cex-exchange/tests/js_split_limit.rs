@@ -143,6 +143,7 @@ fn split_limit_matches_node_uint32_coercion_utf16_and_regex_captures() {
                 Ok(value) => {
                     let rows: Vec<Value> = value
                         .array_items()
+                        .expect("fixture array property reads")
                         .unwrap()
                         .into_iter()
                         .map(|v| {

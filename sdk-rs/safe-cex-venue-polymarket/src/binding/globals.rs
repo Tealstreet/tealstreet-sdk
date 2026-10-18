@@ -85,7 +85,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                     || method == "head"
                     || (method == "post"
                         && posted
-                            .array_values()
+                            .array_values()?
                             .unwrap_or_default()
                             .iter()
                             .any(|p| p.strict_equals(&c.get("url").unwrap_or(Js::Undefined))));

@@ -326,3 +326,15 @@ owners. `node --test safe-cex-parity/scripts/accepted-string-key-observer-native
 (from `sdk-rs`) runs the canonical compiler inventory and generated production
 probe, including nested Unicode/NUL/empty keys and a compiled wrong-key output
 control. No classification receipt can replace the executed conversion witness.
+
+Kraken's exact `stream_updates::NumericChanges = Vec<(&'static str, f64)>`
+uses the separate reviewed `borrowed-sequence` route policy in
+`scripts/accepted-kraken-numeric-changes.mjs`. It authenticates the source span,
+raw/expanded compiler AST, sysroot Vec artifact and invariant native type.
+Its complete four-route matrix observes native f64 bits and borrowed key pointers
+or offsets, including duplicate keys, escaped text refusal and owned nonempty
+Value refusal. The general borrowed-alias refusal and DeserializeOwned bound
+stay intact; a control bypassing the exact native routes must explicitly select
+that unchanged borrowed guard and produce its compiled runtime refusal. Do not extend this permission to another owner or shape by copying its
+contract. Registered native identity/member-order/dispatch controls must fail by
+runtime receipt and pass after exact restoration.

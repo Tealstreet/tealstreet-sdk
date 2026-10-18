@@ -433,6 +433,14 @@ and execute production native HTTP factory/install and Date.parse callbacks.
 The finite instantiations do not claim every generic argument or JavaScript
 scheduler behavior.
 
+The REST Host's associated Array is the canonical native Js owner in the assembled
+adapter. Checked length/element/Set operations replace the former mutable Vec
+alias; callbacks and repair writes retain the original array identity. Terminal
+source fixtures may use their own scripted representation, but the native adapter
+never copies a live array into a second mutable collection. NativeValue::array
+returns the original Js and owned/prepared snapshots propagate property failures.
+
+
 The five-row divergence audit in [DIVERGENCE_FIX_AUDIT.md](DIVERGENCE_FIX_AUDIT.md)
 supersedes the earlier production Future/caught-error exclusions for getAccount,
 fetchBalance and private order/balance reconciliation. All 23 owned async Task

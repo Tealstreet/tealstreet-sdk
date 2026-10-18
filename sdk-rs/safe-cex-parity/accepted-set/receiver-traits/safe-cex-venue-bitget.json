@@ -9,7 +9,7 @@
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed cancellation::CancellationHost::post: Encodes the already typed CancelArgument variants into an outgoing object, invokes unlimitedXHR.post and discards its settled result. It admits no cancellation response schema. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "03ad33307c85f38a2887b7a9b783a68c89650e7c877741bdf8dfc8913cb49b51"
+    "itemSha256": "df0956f32ffb85c093dd7a1b9215f92a472154c31fd4cfe21df9a5dab9cdd1a2"
   },
   "safe_cex_venue_bitget::stream_timers::StreamTimerHost::string_literal for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
@@ -21,37 +21,37 @@
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
     "reason": "Individually reviewed private_topics::PrivateTopicsHost::property: Forwards existing private-topic VM handles through shared property lookup. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods. Reviewed current complete compiler impl: inherited Set construction now invokes construct(values,None), matching new Set(values); this method body and its existing forwarding role are unchanged. Original iterator/weak-host native controls remain independent.",
-    "itemSha256": "47eb4c77d7b9392cb8c21a6e95ed5c8c9486b2d4ce09ddd3c28418652af4ac51"
+    "itemSha256": "bec7088fb0b627275e5dc07e209ee08ec99fab76518d858da25696290b715730"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
     "reason": "Individually reviewed private_topics::PrivateTopicsHost::receiver: Selects the existing private-topic receiver path by internal name. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods. Reviewed current complete compiler impl: inherited Set construction now invokes construct(values,None), matching new Set(values); this method body and its existing forwarding role are unchanged. Original iterator/weak-host native controls remain independent.",
-    "itemSha256": "47eb4c77d7b9392cb8c21a6e95ed5c8c9486b2d4ce09ddd3c28418652af4ac51"
+    "itemSha256": "bec7088fb0b627275e5dc07e209ee08ec99fab76518d858da25696290b715730"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
     "reason": "Individually reviewed private_topics::PrivateTopicsHost::set_receiver: Updates the selected private-topic receiver field with an already carried VM handle. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods. Reviewed current complete compiler impl: inherited Set construction now invokes construct(values,None), matching new Set(values); this method body and its existing forwarding role are unchanged. Original iterator/weak-host native controls remain independent.",
-    "itemSha256": "47eb4c77d7b9392cb8c21a6e95ed5c8c9486b2d4ce09ddd3c28418652af4ac51"
+    "itemSha256": "bec7088fb0b627275e5dc07e209ee08ec99fab76518d858da25696290b715730"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::call for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
     "reason": "Individually reviewed private_topics::PrivateTopicsHost::call: Invokes the named existing topic/runtime capability with original arguments. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods. Reviewed current complete compiler impl: inherited Set construction now invokes construct(values,None), matching new Set(values); this method body and its existing forwarding role are unchanged. Original iterator/weak-host native controls remain independent.",
-    "itemSha256": "47eb4c77d7b9392cb8c21a6e95ed5c8c9486b2d4ce09ddd3c28418652af4ac51"
+    "itemSha256": "bec7088fb0b627275e5dc07e209ee08ec99fab76518d858da25696290b715730"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
     "reason": "Individually reviewed private_topics::PrivateTopicsHost::object: Constructs an outgoing private-topic object from existing VM field values. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods. Reviewed current complete compiler impl: inherited Set construction now invokes construct(values,None), matching new Set(values); this method body and its existing forwarding role are unchanged. Original iterator/weak-host native controls remain independent.",
-    "itemSha256": "47eb4c77d7b9392cb8c21a6e95ed5c8c9486b2d4ce09ddd3c28418652af4ac51"
+    "itemSha256": "bec7088fb0b627275e5dc07e209ee08ec99fab76518d858da25696290b715730"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
     "reason": "Individually reviewed private_topics::PrivateTopicsHost::define: Defines an own property on an existing private-topic object without data normalization. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods. Reviewed current complete compiler impl: inherited Set construction now invokes construct(values,None), matching new Set(values); this method body and its existing forwarding role are unchanged. Original iterator/weak-host native controls remain independent.",
-    "itemSha256": "47eb4c77d7b9392cb8c21a6e95ed5c8c9486b2d4ce09ddd3c28418652af4ac51"
+    "itemSha256": "bec7088fb0b627275e5dc07e209ee08ec99fab76518d858da25696290b715730"
   },
   "safe_cex_venue_bitget::public_data::PublicDataHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
@@ -237,120 +237,120 @@
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::receiver: Selects an existing REST-action receiver path by its internal name. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::set_receiver: Assigns an already carried value handle at the selected REST-action path. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::capture for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::capture: Captures owner/member from the existing scope path and uses bind_callable to retain its original receiver. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::capture_member for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::capture_member: Captures an existing member, including the reviewed Promise.finally wrapper when absent, without invoking a payload decoder. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::property: Forwards lookup on an existing REST-action VM value using a typed field selector. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::has for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::has: Delegates Boolean prototype-aware membership recognition to the separately reviewed has_property operation; no data owner is constructed. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::assign for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::assign: Performs ordinary VM assignment of the supplied value handle. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::define: Performs own-property definition of the supplied value handle. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::object: Constructs an outgoing REST-action VM object from existing named handles. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::rest_actions::RestActionsHost::operation for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "delegated",
     "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
     "reason": "Individually reviewed rest_actions::RestActionsHost::operation: Delegates the internal selector and original values to binding::hosts::actions::operation, whose actual numeric coercion branches have separate executed native receipts. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime. Reviewed strict Delete: the same RestActionsHost impl now propagates the canonical property-removal failure from its delete method; these ten classified method bodies and their existing roles remain byte-unchanged.",
-    "itemSha256": "066ee9dd7e487ddfd481a47adf46d508c0998bdfa66145ed8b363c2fdb93431a"
+    "itemSha256": "3c9e168c7c7a7546251ea94ddc518b2c04ebd0b1e0606a4d397ca5cf992b034f"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::receiver: Delegates internal named receiver-path selection to the existing scope. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::set_receiver: Assigns an existing value handle to a selected receiver path; this is state mutation, not data admission. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::property: Reads an existing VM property by typed selector and forwards the handle unchanged. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::object: Builds an outgoing object from supplied field/value handles. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::assign for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::assign: Delegates ordinary VM assignment of an existing field handle. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::define: Delegates own-property definition using the already carried name/value. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::call for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::call: Forwards an internal executable path and existing arguments through the separately reviewed call_now capability. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::call_sync for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::call_sync: Invokes the existing named executable and discards success; no raw owner construction occurs. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::read for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::read: Builds outgoing client.get params using the compiled endpoint, awaits the existing response and forwards its data handle; wire response decoding stays shared-client owned. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   },
   "safe_cex_venue_bitget::order_reads::OrderReadsHost::error_message for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
     "reason": "Individually reviewed order_reads::OrderReadsHost::error_message: Invokes the separately supplied getBitgetApiErrorMessage executable with the original value handle and typed fallback; no independent codec is introduced. Re-reviewed the #955 owning-runtime await migration in this impl. This method retains its existing source role and receiver/argument/result forwarding; the explicit await now uses the owning Scope runtime.",
-    "itemSha256": "fea31c2d10d11d79afc0ad92061f530f14137e47633e6b96231727a1ca7a4463"
+    "itemSha256": "ed78083689f72fad73c399bda17a77d42d52e8860c61e2a94cd9f0c8d04a605a"
   }
 }

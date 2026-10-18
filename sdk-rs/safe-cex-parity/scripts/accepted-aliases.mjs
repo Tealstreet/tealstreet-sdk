@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { genericAliasProbe } from './accepted-callable-alias.mjs';
 import { grvtFieldsContract } from './accepted-grvt-fields.mjs';
+import { krakenNumericChangesContract } from './accepted-kraken-numeric-changes.mjs';
 
 export const aliasAlternates = ['FromStr', 'From<String>', 'From<&str>', 'TryFrom<Value>', 'TryFrom<Map>', 'TryFrom<String>', 'TryFrom<&str>'];
 
@@ -64,7 +65,7 @@ export function aliasContract(alias, contracts, context) {
   }
   if (entries.length) assert.ok(contract.nativeProjection?.includes('$decoded') && !/serde_json::(?:to_(?:value|string|vec)|from_)/.test(contract.nativeProjection), `${label}: alias alternate projection must inspect the actual decoded value`);
   assert.deepEqual(contract.target, alias.target, `${label}: alias compiler target changed`);
-  const borrowed = grvtFieldsContract(alias, contract, context, identity);
+  const borrowed = grvtFieldsContract(alias, contract, context, identity) ?? krakenNumericChangesContract(alias, contract, context);
   if (borrowed) return borrowed;
   assert.equal(contract.borrowedRoutes, undefined, `${label}: borrowed routes require the exact reviewed alias`);
   if (contract.category === 'non-decoder') {
