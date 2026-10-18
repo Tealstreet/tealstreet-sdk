@@ -573,3 +573,81 @@ fn native_bulk_placement_retains_post_result_until_signed_http_settles() {
     assert_eq!(http.count("/fapi/v1/order"), 1);
     owner.dispose().unwrap();
 }
+
+#[test]
+fn native_cancel_symbol_reports_retained_messages_like_constructed_typescript() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/cancel-message-source.cjs"
+        ))
+        .output()
+        .expect("constructed source cancel message profile");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 2);
+    for (index, raw) in [
+        (1, r#"{"msg":"ordinary failure"}"#),
+        (0, r#"{"msg":"\ud800raw\udfff"}"#),
+    ] {
+        let runtime = Rc::new(Runtime::default());
+        let http = Arc::new(Http::default());
+        http.response("/fapi/v1/allOpenOrders", 200, json!({}));
+        http.routes
+            .lock()
+            .unwrap()
+            .insert("/fapi/v1/algoOpenOrders".into(), (400, raw.into()));
+        let owner = owner(http.clone(), runtime.clone());
+        let errors = events(&owner, "error");
+        let error = run(
+            &runtime,
+            owner.invoke(Method::CancelSymbol, vec![string("BTCUSDT")]),
+        )
+        .unwrap_err();
+        assert_eq!(http.count("/fapi/v1/allOpenOrders"), 1);
+        assert_eq!(http.count("/fapi/v1/algoOpenOrders"), 1);
+        for request in http.requests.lock().unwrap().iter() {
+            assert!(request.method.eq_ignore_ascii_case("DELETE"));
+            assert!(request.url.contains("symbol=BTCUSDT"));
+            assert!(request.url.contains("signature="));
+        }
+        let observed: Vec<Vec<u16>> = errors
+            .borrow()
+            .iter()
+            .enumerate()
+            .map(|(event, args)| {
+                assert_eq!(
+                    args.len(),
+                    source[index]["arity"][event].as_u64().unwrap() as usize
+                );
+                args[0].as_str().expect("native emitted String").to_vec()
+            })
+            .collect();
+        let expected: Vec<Vec<u16>> =
+            serde_json::from_value(source[index]["emitted"].clone()).unwrap();
+        assert_eq!(
+            observed, expected,
+            "Binance cancel retained message UTF16 case {index}"
+        );
+        assert!(error.origin.is_some(), "case {index}: {error:?}");
+        let origin = error
+            .origin
+            .as_ref()
+            .expect("original transport authority")
+            .error();
+        let failure = origin
+            .downcast_ref::<safe_cex_transport::RestFailure>()
+            .expect("original RestFailure");
+        let response = failure.response.as_ref().expect("original HTTP response");
+        assert_eq!(response.status, 400);
+        assert!(
+            matches!(&response.body, RestResponseBody::Encoded(bytes) if bytes == raw.as_bytes()),
+            "Binance original encoded response retained"
+        );
+        owner.dispose().unwrap();
+    }
+}
