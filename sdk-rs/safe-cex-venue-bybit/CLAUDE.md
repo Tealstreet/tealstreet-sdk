@@ -969,3 +969,8 @@ Protective-side inference preserves the get-key primitive TypeError without
 embedding the class name in its message. The 242-case maintained-source test
 checks both the constructed native receiver and the typed helper; primitive
 diagnostics are compared directly rather than normalized to a custom string.
+
+The SDK invoke/invoke_unit and get_account wrappers call their installed member
+before returning a waiter and await the same canonical Promise. Preserve this
+boundary when changing the typed facade; do not add a second Promise driver.
+DIVERGENCE_FIX_AUDIT.md records the seven audited rows and the remaining 30.

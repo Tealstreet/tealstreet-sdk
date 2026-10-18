@@ -24,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::reinit_on_throw"
 status = "divergent"
-note = "CHOSEN: generic Rust Future and caller-owned Cell flag replace JS Promise identity and microtask scheduling. Rejection is observed only on future resolution and forwards the original native error/value without cloning; success leaves the flag unchanged. Explicit host polling is the chosen async ABI. Constructor/request composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::reinit_on_throw."
+note = "The production receiver installed in binding/receiver.rs starts the canonical source Promise immediately and retains the rejection continuation after its waiter is dropped. Native constructed primary/inverse/spot owners cover both initial flag states and both outcomes without premature mutation; the original success/error value is forwarded. ACCEPT for the historical poll/drop claim: the generic Rust helper does not describe the installed receiver. See DIVERGENCE_FIX_AUDIT.md and binding/receiver_tests.rs::divergence_audit_reinit_continuations_survive_dropped_waits. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::reinit_on_throw."
 
 [[symbol]]
 ts = "BybitSpotExchange.get accountType"
@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::fetch_balance"
 status = "divergent"
-note = "CHOSEN: native generic future and lazy disposal/store/formatter callbacks replace JavaScript receiver access and Promise scheduling; Rust begins execution when polled. Reads occur after the raw request resolves, formatter is skipped when disposed, and raw/stored/formatted values plus rejection identity are forwarded unchanged. Native assertions compare retained Rc values before callback observations. Lifecycle composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::fetch_balance."
+note = "The installed binding/members/account.rs member invokes fetchRawBalance immediately, retains native raw/formatted identity, reads disposal only after the response and returns the current stored balance when disposed. The common typed binding/exchange.rs invocation helper now captures the actual member result before boxing its waiter, then awaits the existing source Promise without another spawn. Constructed native receiver and SDK-helper probes cover pending responses, dropped waits, UTF-16, signed zero and disposal; maintained source profiles agree. The generic helper retains explicit dependencies. See DIVERGENCE_FIX_AUDIT.md. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::fetch_balance."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchRawBalance"
