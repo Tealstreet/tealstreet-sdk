@@ -5,7 +5,7 @@ use crate::{
     exchange::Exchange,
     http::{HttpFuture, HttpHost},
     owned_tasks::OwnedTasks,
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask, RuntimeTaskKind},
     waiters::Waiters,
     websocket::{
         FrameDrainReceipt, UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket,
@@ -75,6 +75,7 @@ impl ExchangeTask for LocalTask {
 struct HostTask {
     future: Pin<Box<dyn Future<Output = ()>>>,
     runtime: Weak<NativeRuntime>,
+    registration: Option<crate::task_receipts::Registration>,
 }
 impl Future for HostTask {
     type Output = ();
@@ -82,7 +83,23 @@ impl Future for HostTask {
         if let Some(runtime) = self.runtime.upgrade() {
             crate::js_runtime::jobs::checkpoint(runtime);
         }
-        let result = self.future.as_mut().poll(cx);
+        let result = if let Some(registration) = &self.registration {
+            let (entered, waker, version) = registration.enter(cx.waker());
+            let result = self
+                .future
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(&waker));
+            if result.is_pending() {
+                self.registration
+                    .as_ref()
+                    .expect("observed task")
+                    .pending(version);
+            }
+            drop(entered);
+            result
+        } else {
+            self.future.as_mut().poll(cx)
+        };
         if let Some(runtime) = self.runtime.upgrade() {
             crate::js_runtime::jobs::checkpoint(runtime);
         }
@@ -93,6 +110,7 @@ impl Future for HostTask {
 /// `ExchangeRuntime` + `WsRuntime` on the current tokio `LocalSet`.
 pub struct NativeRuntime {
     pub replay_clock: Option<Rc<crate::replay_clock::ReplayClock>>,
+    raw_tasks: Rc<RefCell<crate::task_receipts::Tasks>>,
     parser_receipts: RefCell<Vec<Rc<RefCell<Vec<FrameDrainReceipt>>>>>,
     frame_counts: Rc<
         RefCell<
@@ -130,6 +148,11 @@ pub fn replay_checkpoint(runtime: &Rc<NativeRuntime>) {
 }
 pub fn replay_pending_jobs(runtime: &Rc<NativeRuntime>) -> usize {
     crate::js_runtime::jobs::pending_non_timer(runtime.clone())
+}
+/// Raw ExchangeRuntime work, including unclassified legacy spawn_local calls.
+/// Promise drivers delegate to pendingJobs; unknown/ready/finite work blocks.
+pub fn replay_raw_tasks(runtime: &NativeRuntime) -> Value {
+    crate::task_receipts::receipt(&runtime.raw_tasks)
 }
 pub fn native_frame_receipts(runtime: &NativeRuntime) -> Vec<Value> {
     runtime
@@ -178,6 +201,7 @@ fn runtime_over(
     let random = random_unit();
     Rc::new_cyclic(|owner| NativeRuntime {
         replay_clock,
+        raw_tasks: Rc::default(),
         parser_receipts: RefCell::default(),
         frame_counts: Rc::default(),
         origin: Instant::now(),
@@ -290,6 +314,24 @@ impl RestAdapter for UnavailableTunnel {
 fn random_unit() -> f64 {
     (u64::from_le_bytes(random_bytes::<8>()) >> 11) as f64 / (1u64 << 53) as f64
 }
+impl NativeRuntime {
+    fn spawn_observed(
+        &self,
+        kind: Option<RuntimeTaskKind>,
+        origin: Option<&'static std::panic::Location<'static>>,
+        future: Pin<Box<dyn Future<Output = ()>>>,
+    ) -> Box<dyn ExchangeTask> {
+        let registration = self
+            .replay_clock
+            .as_ref()
+            .map(|_| crate::task_receipts::register(&self.raw_tasks, kind, origin));
+        Box::new(LocalTask(spawn_local_task(Box::pin(HostTask {
+            future,
+            runtime: self.owner.clone(),
+            registration,
+        }))))
+    }
+}
 impl ExchangeRuntime for NativeRuntime {
     fn monotonic_now_ms(&self) -> f64 {
         self.replay_clock.as_ref().map_or_else(
@@ -306,25 +348,50 @@ impl ExchangeRuntime for NativeRuntime {
         )
     }
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()> {
-        if let Some(clock) = &self.replay_clock {
-            if delay_ms > 0 {
-                return crate::replay_clock::sleep(clock, delay_ms);
-            }
+        let clock = self.replay_clock.clone();
+        let deadline = self.monotonic_now_ms() + delay_ms as f64;
+        let mut sleep = if let Some(clock) = &clock
+            && delay_ms > 0
+        {
+            crate::replay_clock::sleep(clock, delay_ms)
+        } else {
+            Box::pin(async move {
+                if delay_ms == 0 {
+                    tokio::task::yield_now().await;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+                Ok(())
+            }) as ExchangeFuture<'static, ()>
+        };
+        if clock.is_none() {
+            return sleep;
         }
-        Box::pin(async move {
-            if delay_ms == 0 {
-                tokio::task::yield_now().await;
-            } else {
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        let origin = self.origin;
+        Box::pin(std::future::poll_fn(move |cx| {
+            let result = sleep.as_mut().poll(cx);
+            let now = clock.as_ref().map_or_else(
+                || origin.elapsed().as_secs_f64() * 1000.0,
+                |clock| crate::replay_clock::elapsed(clock),
+            );
+            if result.is_pending() && delay_ms > 0 && now < deadline {
+                crate::task_receipts::waiting(RuntimeTaskKind::Timer);
             }
-            Ok(())
-        })
+            result
+        }))
     }
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        Box::new(LocalTask(spawn_local_task(Box::pin(HostTask {
-            future,
-            runtime: self.owner.clone(),
-        }))))
+        self.spawn_observed(None, Some(std::panic::Location::caller()), future)
+    }
+    fn spawn_classified(
+        &self,
+        kind: RuntimeTaskKind,
+        future: Pin<Box<dyn Future<Output = ()>>>,
+    ) -> Box<dyn ExchangeTask> {
+        self.spawn_observed(Some(kind), None, future)
+    }
+    fn task_work_started(&self) {
+        crate::task_receipts::work_started();
     }
     fn console_values(&self, severity: &str, message: &[crate::js_runtime::value::Js]) {
         let rendered = crate::runtime::console_text(message);
@@ -558,7 +625,14 @@ impl WsSocket for NativeWsSocket {
                     return std::task::Poll::Ready(None);
                 }
                 registration.update(cx.waker());
-                receiving.as_mut().poll(cx).map(Some)
+                let result = receiving.as_mut().poll(cx);
+                if result.is_pending() {
+                    // Only the physical receive wait is exempt. CONNECTING
+                    // still has finite handshake work and must block drain.
+                    // The observer is a no-op outside a tracked replay task.
+                    crate::task_receipts::waiting(RuntimeTaskKind::SocketReader);
+                }
+                result.map(Some)
             })
             .await;
             drop(receiving);

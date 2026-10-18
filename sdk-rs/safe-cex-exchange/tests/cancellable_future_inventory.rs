@@ -68,7 +68,7 @@ impl<'ast> Visit<'ast> for Boundaries {
         }
         if matches!(
             node.method.to_string().as_str(),
-            "spawn_local" | "spawn_owned" | "spawn_detached"
+            "spawn_local" | "spawn_classified" | "spawn_owned" | "spawn_detached"
         ) {
             self.0.push("owned-or-host-spawn".into());
         }
@@ -107,6 +107,7 @@ impl<'ast> Visit<'ast> for Boundaries {
                     "async"
                         | "await"
                         | "spawn_local"
+                        | "spawn_classified"
                         | "spawn_owned"
                         | "poll_fn"
                         | "Future"
@@ -371,14 +372,18 @@ fn discovery_sees_creators_poll_futures_and_excludes_test_only_code() {
         fn creator() { let guard = pre_pin(); spawn_local(async move { guard.finish(); }); }
         fn polling() -> impl Future<Output=()> { poll_fn(|_| Poll::Pending) }
         async fn awaited() { fetch().await; }
+        fn classified_forwarder(runtime: &dyn Runtime, body: Body) {
+            runtime.spawn_classified(Kind::Finite, body);
+        }
         #[cfg(test)] mod tests { async fn fixture() { pending().await; } }
     "#;
     let rows = discover("fixture.rs", source);
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 4);
     assert!(rows[0].producer_tokens.contains("pre_pin"));
     assert!(rows[0].boundaries.contains(&"async-block".into()));
     assert!(rows[1].boundaries.contains(&"poll-fn".into()));
     assert!(rows[2].boundaries.contains(&"async-function".into()));
+    assert_eq!(rows[3].boundaries, ["owned-or-host-spawn"]);
 }
 
 fn production_discovery() -> Vec<Discovered> {

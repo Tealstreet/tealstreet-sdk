@@ -5,7 +5,7 @@ use crate::binding::{
     client::JsRestAdapter,
     ops,
     rt::{Rt, Shared},
-    value::{Js, Thrown, arg, from_json, from_typed, to_json, to_typed},
+    value::{Js, Thrown, arg, from_json, from_typed, to_json},
 };
 use crate::{
     historical_fills, history_fetch, legacy_fills, legacy_fills::WooLegacyFillsQuery,
@@ -78,6 +78,44 @@ fn history_query(opts: &Js) -> Result<WooLegacyFillsQuery, Thrown> {
         to_milliseconds: number_option(&opts.get("toMilliseconds")?)?,
         limit: opts.get("limit")?.to_number()?,
         page: number_option(&opts.get("page")?)?,
+    })
+}
+
+fn historical_options(rt: &Rt, opts: &Js) -> Result<safe_cex_types::ExecutionsOptions, Thrown> {
+    let symbol = opts.get("symbol")?;
+    let order = opts.get("orderId")?;
+    let from = opts.get("from")?;
+    let to = opts.get("to")?;
+    let limit = opts.get("limit")?;
+    let symbol = rt
+        .this
+        .call_method("normalizeRequestedSymbol", vec![symbol])?;
+    let symbol = text_option(&symbol)?;
+    let order_id = if order.truthy() {
+        text_option(&order)?
+    } else {
+        None
+    };
+    let bound = |value: Js| -> Result<Option<f64>, Thrown> {
+        if value.is_nullish() || value.strict_equals(&Js::str("")) {
+            Ok(None)
+        } else {
+            Ok(Some(value.to_number()?))
+        }
+    };
+    let from = bound(from)?;
+    let to = bound(to)?;
+    let limit = if limit.is_undefined() {
+        None
+    } else {
+        Some(limit.to_number()?)
+    };
+    Ok(safe_cex_types::ExecutionsOptions {
+        symbol,
+        order_id,
+        from,
+        to,
+        limit,
     })
 }
 
@@ -279,11 +317,17 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
             Box::pin(async move {
                 let opts = arg(&a, 0);
                 // ts: `opts: ExecutionsOptions = {}`
-                let opts = to_typed(&if opts.is_undefined() {
-                    Js::object(vec![])
-                } else {
-                    opts
-                })?;
+                if rt.this.get("isPublicDataOnly")?.truthy() {
+                    return Ok(Js::array(vec![]));
+                }
+                let opts = historical_options(
+                    &rt,
+                    &if opts.is_undefined() {
+                        Js::object(vec![])
+                    } else {
+                        opts
+                    },
+                )?;
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 let venue = venue(&rt)?;
                 let fills =
@@ -296,7 +340,20 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         // ts: WOOXExchange#fetchHistoricalTradesInternal
         "fetchHistoricalTradesInternal" => asynchronous(name, rt, |rt, a| {
             Box::pin(async move {
-                let opts = to_typed(&arg(&a, 0))?;
+                let raw = arg(&a, 0);
+                if rt.this.get("isPublicDataOnly")?.truthy() || !raw.get("symbol")?.truthy() {
+                    return Ok(Js::array(vec![]));
+                }
+                let opts = historical_options(&rt, &raw)?;
+                let opts = safe_cex_types::HistoricalTradeOptions {
+                    symbol: opts.symbol.unwrap_or_default(),
+                    order_id: opts.order_id,
+                    from: opts.from,
+                    to: opts.to,
+                    limit: opts.limit,
+                    from_id: None,
+                    account_name: None,
+                };
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 let venue = venue(&rt)?;
                 let trades = historical_fills::fetch_historical_trades_internal(

@@ -1,8 +1,12 @@
-//! Shared span-based income paging over typed records and caller-owned I/O.
-use crate::runtime::ExchangeFuture;
+//! Shared span-based income paging with runtime-owned continuation.
+use crate::{
+    eager::start_eager,
+    runtime::{ExchangeFuture, ExchangeRuntime},
+};
 use indexmap::IndexMap;
 use safe_cex_num::js_number_string;
 use safe_cex_types::{IncomeCategory, IncomeRecord};
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct IncomePageParams {
@@ -92,33 +96,22 @@ pub fn page_direction(page: &[IncomeRecord], range_start: f64, range_end: f64) -
     }
 }
 
-pub fn paginate_income_range<'a: 'b, 'b>(
-    fetch_page: &'b mut IncomePageFetcher<'a>,
+pub fn paginate_income_range(
+    runtime: Rc<dyn ExchangeRuntime>,
+    mut fetch_page: Box<IncomePageFetcher<'static>>,
     opts: IncomeRangeOptions,
-    delay: &'b mut dyn FnMut(f64) -> ExchangeFuture<'a, ()>,
-) -> ExchangeFuture<'b, IncomeRangeResult> {
-    let IncomeRangeOptions {
-        start_time,
-        end_time,
-        chunk_ms,
-        page_limit,
-        ..
-    } = opts;
-    let max_pages = opts.max_pages_per_chunk.unwrap_or(50.0);
-    let mut first_page = if end_time > start_time
-        && chunk_ms > 0.0
-        && page_limit > 0.0
-        && (max_pages > 0.0 || max_pages.is_nan())
-    {
-        Some(fetch_page(IncomePageParams {
+    mut delay: Box<dyn FnMut(f64) -> ExchangeFuture<'static, ()>>,
+) -> ExchangeFuture<'static, IncomeRangeResult> {
+    let body_runtime = runtime.clone();
+    start_eager(&runtime, async move {
+        let IncomeRangeOptions {
             start_time,
-            end_time: safe_cex_num::math_min(start_time + chunk_ms, end_time),
-            limit: page_limit,
-        }))
-    } else {
-        None
-    };
-    Box::pin(async move {
+            end_time,
+            chunk_ms,
+            page_limit,
+            ..
+        } = opts;
+        let max_pages = opts.max_pages_per_chunk.unwrap_or(50.0);
         let mut by_id = IndexMap::new();
         let mut result = IncomeRangeResult {
             records: vec![],
@@ -136,7 +129,7 @@ pub fn paginate_income_range<'a: 'b, 'b>(
             if !first_chunk
                 && let Some(ms) = opts.chunk_delay_ms.filter(|ms| *ms != 0.0 && !ms.is_nan())
             {
-                delay(ms).await?;
+                start_eager(&body_runtime, delay(ms)).await?;
             }
             first_chunk = false;
             let mut pending = vec![(chunk_start, chunk_end)];
@@ -156,14 +149,12 @@ pub fn paginate_income_range<'a: 'b, 'b>(
                 }
                 result.requests += 1.0;
                 // Source catch abandons a failed branch and reports incomplete coverage.
-                let request = first_page.take().unwrap_or_else(|| {
-                    fetch_page(IncomePageParams {
-                        start_time: from,
-                        end_time: to,
-                        limit: page_limit,
-                    })
+                let request = fetch_page(IncomePageParams {
+                    start_time: from,
+                    end_time: to,
+                    limit: page_limit,
                 });
-                let page = match request.await {
+                let page = match start_eager(&body_runtime, request).await {
                     Ok(page) => page,
                     Err(_) => {
                         incomplete = true;

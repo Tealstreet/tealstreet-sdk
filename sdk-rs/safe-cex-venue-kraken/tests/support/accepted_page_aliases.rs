@@ -173,7 +173,7 @@ fn income_range_uses_page_callback_with_source_window_and_page_limit() {
     let result = settle(
         &h,
         Box::pin(private_accounts::income_range(
-            rt,
+            Rc::new(rt.clone()),
             start,
             end,
             Rc::new(Js::Undefined),

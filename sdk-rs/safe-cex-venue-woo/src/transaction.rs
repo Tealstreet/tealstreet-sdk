@@ -1,9 +1,6 @@
 //! Legacy transaction rows, retaining native numeric observations before projection.
 use crate::utils::{map_woo_hedge_transaction_side, normalize_symbol};
-use safe_cex_num::{
-    js_retained_number as js_number, js_retained_string as js_string,
-    js_retained_truthy as js_truthy,
-};
+use safe_cex_num::{js_retained_number as js_number, js_retained_truthy as js_truthy};
 use safe_cex_types::{
     BothPositionSide, ExecutionPositionSide, OrderSide, PositionSide,
     retained_json::RetainedJsonInput as Input,
@@ -54,7 +51,10 @@ fn number(value: Option<&Input>) -> Result<f64, String> {
     js_number(value).map_err(|e| e.message.to_owned())
 }
 fn text(value: Option<&Input>) -> Result<String, String> {
-    js_string(value).map_err(|e| e.message.to_owned())
+    let units =
+        safe_cex_types::js_coercion::js_retained_string_utf16(value.unwrap_or(&Input::Undefined))
+            .map_err(|e| e.message.to_owned())?;
+    Ok(String::from_utf16_lossy(&units))
 }
 fn id(value: Option<&Input>) -> Result<Option<String>, String> {
     if value.is_none_or(Input::is_nullish) || value.is_some_and(|v| v.text_equals("")) {
@@ -89,11 +89,7 @@ pub fn parse_transaction_history_row(row: &Input) -> Result<Option<ParsedWooTran
     else {
         return Ok(None);
     };
-    let symbol = normalize_symbol(
-        &String::from_utf16(units)
-            .map_err(|_| "Cannot represent JavaScript UTF-16 string as UTF-8")?
-            .replace('/', "_"),
-    );
+    let symbol = normalize_symbol(&String::from_utf16_lossy(units).replace('/', "_"));
     if symbol.is_empty() {
         return Ok(None);
     }

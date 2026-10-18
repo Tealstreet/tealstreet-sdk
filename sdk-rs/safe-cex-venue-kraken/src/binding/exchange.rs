@@ -6,6 +6,9 @@ mod accepted_additional_receivers;
 #[path = "../../tests/support/accepted_api_receivers.rs"]
 mod accepted_api_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_book_value_aliases.rs"]
+mod accepted_book_value_aliases;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_boundary_observers.rs"]
 mod accepted_boundary_observers;
 #[cfg(test)]

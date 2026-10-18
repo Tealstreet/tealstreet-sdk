@@ -21,6 +21,23 @@ The shared boundary eagerly polls the typed body to its first real suspension. I
 
 - AsterDEX: `tests/eager_sdk_binding.rs` executes NativeRuntime, the constructed venue, production HTTP host, signing and reqwest against a local HTTP server. The whole maintained TS class proves validation logs before caller polling and discarded getAccount/changePositionMode promises complete their HTTP and Store work. Both native assertions fail on the frozen deferred wrapper. The repaired common invoke/unit helpers call the existing JS member immediately and await that same Promise; no extra spawn is introduced. This measures the SDK boundary, not every deeper socket/error claim.
 
+- Bybit: common `invoke` / `invoke_unit` and the specialized `get_account` path
+  now capture the actual installed member result before boxing its waiter and
+  await the same canonical Promise. Native SDK value/unit/account prefix checks
+  compile RED on the deferred wrapper. A public discarded orders waiter still
+  completes both real signed settle-coin reads after a held first response.
+  Constructed primary/demo/inverse/spot balance probes retain native raw
+  identity and the source disposal guard; existing installed reinit continuations
+  already survive waiter drop. See `safe-cex-venue-bybit/DIVERGENCE_FIX_AUDIT.md`.
+
+- Polymarket: `binding/exchange::eager_tests` drives the actual constructed SDK
+  and live API on NativeRuntime. Both shared invoke helpers originally compiled
+  RED before observer polling (missing Gamma xhr call / leverage warning). They
+  now call the actual member before boxing and await its existing Promise. A held
+  xhr response completes token maps and preserves the metadata alias after the
+  SDK waiter drops. The obsolete typed timestamp helper was deleted; its original
+  20/512 source cases now exercise the live API, with eager and identity checks.
+
 ## All production implementations at the frozen baseline
 
 Counts are implementation counts: seven typed-async implementations, sixteen deferred-JS implementations, two deferred-Realm implementations, three eager-JS implementations, three distinct mixed implementations, and one synchronous refusal. BloFin and WEEX are included in their original baseline categories, with fixes described above. “Eager JS invocation” describes only the common call boundary and is not a blanket ACCEPT for every method.

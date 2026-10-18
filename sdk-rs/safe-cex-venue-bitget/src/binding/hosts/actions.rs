@@ -850,7 +850,7 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
             max_pages_per_chunk: optional("maxPagesPerChunk")?,
         };
         let page_runtime = rt.exchange_runtime();
-        let mut page = move |p: IncomePageParams| -> safe_cex_exchange::runtime::ExchangeFuture<
+        let page = move |p: IncomePageParams| -> safe_cex_exchange::runtime::ExchangeFuture<
             'static,
             Vec<safe_cex_types::IncomeRecord>,
         > {
@@ -870,17 +870,22 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
             })
         };
         let runtime = rt.exchange_runtime();
-        let mut delay = move |ms: f64| {
+        let pager_runtime = runtime.clone();
+        let delay = move |ms: f64| {
             runtime.sleep(if ms.is_finite() && ms > 0.0 {
                 ms as u64
             } else {
                 0
             })
         };
-        let result =
-            safe_cex_exchange::income_paging::paginate_income_range(&mut page, options, &mut delay)
-                .await
-                .map_err(exchange_error)?;
+        let result = safe_cex_exchange::income_paging::paginate_income_range(
+            pager_runtime,
+            Box::new(page),
+            options,
+            Box::new(delay),
+        )
+        .await
+        .map_err(exchange_error)?;
         Ok(Js::object(vec![
             ("records", from_typed(&result.records)?),
             ("truncated", Js::Bool(result.truncated)),

@@ -917,11 +917,14 @@ actual-source scheduling and returned-array witnesses.
 
 ## Shared income range paging
 
-`income_paging::paginate_income_range` owns no executor or transport. Its awaited
-fetch callback returns the shared typed ledger; its awaited delay operation
-receives the original f64, leaving host timer conversion explicit. Only fetch
-failures are caught: the branch becomes incomplete, while delay failures escape.
-Caller drop cancels its owned pending callback future.
+`income_paging::paginate_income_range` requires its owning runtime and owned
+fetch/delay callbacks. Canonical start_eager starts the first fetch at invocation
+and retains the walk after waiter drop; each fetch and delay uses the same
+Promise await boundary. The delay receives the original f64, leaving host timer
+conversion explicit. Fetch failures mark the branch incomplete; delay failures
+escape with their original metadata. tests/income_paging compares the maintained
+source with NativeRuntime after dropping an unpolled waiter, and retains the
+existing request, deduplication, output-bit and delay-error corpus.
 
 The pending-window stack is LIFO. Direction reads use the original global range,
 not the current subwindow; page length includes unusable rows. Identity retains
@@ -929,8 +932,10 @@ both PnL and commission from the same bill, keeps the first duplicate, and stabl
 newest-first sorting preserves insertion order on timestamp ties. No termination
 guard repairs source floating-point nonprogress for non-advancing chunks.
 
-Typed `IncomeRecord` excludes nullish/coercible/open source records and UTF-16
-lone surrogates. Returned records and options are owned rather than live aliases.
+Typed `IncomeRecord` excludes nullish/coercible/open source records. The canonical
+native String decoder replaces isolated UTF-16 units at the approved typed
+boundary; direct Serde JSON input remains a separate decoder. Returned records
+and options are owned rather than live aliases.
 These are declared choices, not source-equivalence claims for arbitrary objects.
 The six existing income-paging manifest rows own the shared implementation;
 binance, bitget, kraken and weex each have one separate wrapper call to adopt.
@@ -2015,3 +2020,16 @@ leaves, and waiter drop leaves the continuation alive. Positive infinity disable
 all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
+
+Native replay receipts include raw ExchangeRuntime tasks as well as canonical
+Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
+awakened tasks block drain. Reviewed timer/socket reader tasks qualify as waiting
+only at their actual pending sleep/receive leaves; pending handler HTTP/auth work
+still blocks. Waking invalidates the waiting observation before repoll. The sole
+Promise driver delegates to the separately counted canonical queue (including
+checkpoint callbacks). Completion and cancellation release records without
+retaining account/task bodies. This instrumentation runs only on explicit replay
+hosts; it does not cover arbitrary external Tokio tasks or transport internals.
+The public probe requires the versioned raw receipt and refuses older addons.
+Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
+the private wake-race witness checks the pre-repoll fence.
