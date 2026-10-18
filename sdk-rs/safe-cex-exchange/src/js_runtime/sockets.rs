@@ -626,7 +626,11 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
     let def = |name: &str, f: Js| {
         let _ = socket.define(name, f);
     };
-    let accessor = |name: &str, g: Getter| socket.define_accessor(name, Some(g), None);
+    let accessor = |name: &str, g: Getter| {
+        socket
+            .define_accessor(name, Some(g), None)
+            .expect("accessor target is a fresh extensible host object")
+    };
     {
         let parent = parent.clone();
         accessor(
@@ -652,21 +656,23 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
     let _ = socket.define("ws", Js::Undefined);
     {
         let (reader, writer) = (core.clone(), core.clone());
-        socket.define_accessor(
-            "pingAt",
-            Some(Rc::new(move |_| Ok(reader.ping_at.borrow().clone()))),
-            Some(Rc::new(move |_, value: Js| {
-                // ts: handlePongEvent reads `if (this.pingAt)`, so a falsy value is no ping.
-                let at = if value.truthy() {
-                    value.to_number()?
-                } else {
-                    0.0
-                };
-                writer.base()?.set_ping_at(at);
-                *writer.ping_at.borrow_mut() = value;
-                Ok(())
-            })),
-        );
+        socket
+            .define_accessor(
+                "pingAt",
+                Some(Rc::new(move |_| Ok(reader.ping_at.borrow().clone()))),
+                Some(Rc::new(move |_, value: Js| {
+                    // ts: handlePongEvent reads `if (this.pingAt)`, so a falsy value is no ping.
+                    let at = if value.truthy() {
+                        value.to_number()?
+                    } else {
+                        0.0
+                    };
+                    writer.base()?.set_ping_at(at);
+                    *writer.ping_at.borrow_mut() = value;
+                    Ok(())
+                })),
+            )
+            .expect("accessor target is a fresh extensible host object");
     }
     for (field, timer) in [
         ("pingTimeoutId", SocketTimeout::Ping),
@@ -674,35 +680,39 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         ("lastReceivedTimer", SocketTimeout::Receive),
     ] {
         let (reader, writer) = (core.clone(), core.clone());
-        socket.define_accessor(
-            field,
-            Some(Rc::new(move |_| Ok(reader.timeout_handle(timer)))),
-            Some(Rc::new(move |_, value| {
-                writer.set_timeout_handle(timer, value);
-                Ok(())
-            })),
-        );
+        socket
+            .define_accessor(
+                field,
+                Some(Rc::new(move |_| Ok(reader.timeout_handle(timer)))),
+                Some(Rc::new(move |_, value| {
+                    writer.set_timeout_handle(timer, value);
+                    Ok(())
+                })),
+            )
+            .expect("accessor target is a fresh extensible host object");
     }
     let _ = socket.define("messageHandlers", Js::object(vec![]));
     {
         let (reader, writer) = (core.clone(), core.clone());
-        socket.define_accessor(
-            "lastReceived",
-            Some(Rc::new(move |_| {
-                Ok(Js::Number(reader.base.get().map_or_else(
-                    || reader.last_received.get(),
-                    |base| base.last_received(),
-                )))
-            })),
-            Some(Rc::new(move |_, value: Js| {
-                let value = value.to_number()?;
-                writer.last_received.set(value);
-                if let Some(base) = writer.base.get() {
-                    base.set_last_received(value);
-                }
-                Ok(())
-            })),
-        );
+        socket
+            .define_accessor(
+                "lastReceived",
+                Some(Rc::new(move |_| {
+                    Ok(Js::Number(reader.base.get().map_or_else(
+                        || reader.last_received.get(),
+                        |base| base.last_received(),
+                    )))
+                })),
+                Some(Rc::new(move |_, value: Js| {
+                    let value = value.to_number()?;
+                    writer.last_received.set(value);
+                    if let Some(base) = writer.base.get() {
+                        base.set_last_received(value);
+                    }
+                    Ok(())
+                })),
+            )
+            .expect("accessor target is a fresh extensible host object");
     }
     // Source field initializers without a native state accessor.
     for (field, value) in [
@@ -992,7 +1002,8 @@ fn ws_handle(core: &Rc<SocketCore>) -> Js {
                 ))
             })),
             None,
-        );
+        )
+        .expect("accessor target is a fresh extensible host object");
     }
     ws
 }

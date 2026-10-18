@@ -7,6 +7,9 @@ mod delegated_native_routes;
 #[path = "support/lifecycle_aliases.rs"]
 mod lifecycle_aliases;
 #[cfg(feature = "native")]
+#[path = "support/private_order_aliases.rs"]
+mod private_order_aliases;
+#[cfg(feature = "native")]
 #[path = "support/public_frame_guard.rs"]
 mod public_frame_guard;
 #[cfg(feature = "native")]

@@ -123,24 +123,28 @@ pub fn post_worker_error_getter_data(post: js_sys::Function) -> Result<u32, JsVa
         .map(|(index, name)| {
             let error = Thrown::error(name, "getter must stay unread").value;
             let count = reads.clone();
-            error.define_accessor(
-                "code",
-                Some(Rc::new(move |_| {
-                    count.set(count.get() + 1);
-                    Err(Thrown::type_error("custom Error getter was read"))
-                })),
-                None,
-            );
-            if index == 1 {
-                let count = reads.clone();
-                error.define_accessor(
-                    "cause",
+            error
+                .define_accessor(
+                    "code",
                     Some(Rc::new(move |_| {
                         count.set(count.get() + 1);
-                        Err(Thrown::type_error("accessor Error cause was read"))
+                        Err(Thrown::type_error("custom Error getter was read"))
                     })),
                     None,
-                );
+                )
+                .expect("test accessor target permits definition");
+            if index == 1 {
+                let count = reads.clone();
+                error
+                    .define_accessor(
+                        "cause",
+                        Some(Rc::new(move |_| {
+                            count.set(count.get() + 1);
+                            Err(Thrown::type_error("accessor Error cause was read"))
+                        })),
+                        None,
+                    )
+                    .expect("test accessor target permits definition");
             } else if index == 2 {
                 error
                     .define(

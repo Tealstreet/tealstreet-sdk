@@ -84,88 +84,94 @@ fn thenable(
     let value = Js::object(vec![]);
     let runtime = scope.exchange_runtime();
     let constructor = scope.global("Promise").unwrap();
-    value.define_accessor(
-        "then",
-        Some(Rc::new(move |owner| {
-            trace.borrow_mut().push(format!("get:{label}"));
-            if mode == "getter-throw" {
-                return Err(Thrown::new(token.clone()));
-            }
-            if mode == "noncallable" {
-                return Ok(Js::Number(7.));
-            }
-            // Capture the actual accessor receiver, never a test replacement Promise.
-            let owner = owner.clone();
-            let trace = trace.clone();
-            let token = token.clone();
-            let runtime = runtime.clone();
-            let constructor = constructor.clone();
-            let inner = if mode == "nested" {
-                let nested = Js::object(vec![]);
-                let seen = trace.clone();
-                nested.define_accessor(
-                    "then",
-                    Some(Rc::new(move |owner| {
-                        seen.borrow_mut().push("get:inner".into());
-                        let owner = owner.clone();
-                        let seen = seen.clone();
-                        Ok(Js::function("innerThen", move |this, args| {
-                            seen.borrow_mut()
-                                .push(format!("call:inner:{}", this.same_reference(&owner)));
-                            arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
-                            Ok(Js::Undefined)
-                        }))
-                    })),
-                    None,
-                );
-                nested
-            } else {
-                Js::Undefined
-            };
-            Ok(Js::function("then", move |this, args| {
-                trace
-                    .borrow_mut()
-                    .push(format!("call:{label}:{}", this.same_reference(&owner)));
-                let resolve = arg(&args, 0);
-                let reject = arg(&args, 1);
-                match mode {
-                    "reject" | "reject-then-resolve" => {
-                        reject.call(Js::Undefined, vec![token.clone()])?;
-                        if mode == "reject-then-resolve" {
-                            resolve.call(Js::Undefined, vec![Js::Number(-0.)])?;
-                        }
-                    }
-                    "call-throw" => return Err(Thrown::new(token.clone())),
-                    "nested" => {
-                        resolve.call(Js::Undefined, vec![inner.clone()])?;
-                    }
-                    "pending-first" => {
-                        let pending = Promise::pending(&runtime);
-                        resolve.call(Js::Undefined, vec![Js::Promise(pending.clone())])?;
-                        reject.call(Js::Undefined, vec![token.clone()])?;
-                        constructor.call_method("resolve", vec![])?.call_method(
-                            "then",
-                            vec![Js::function("settle", move |_, _| {
-                                pending.settle(Ok(Js::Number(-0.)));
-                                Ok(Js::Undefined)
-                            })],
-                        )?;
-                    }
-                    _ => {
-                        resolve.call(
-                            Js::Undefined,
-                            vec![Js::Number(if mode == "nan" { f64::NAN } else { -0. })],
-                        )?;
-                        if mode == "resolve-then-throw" {
-                            return Err(Thrown::new(token.clone()));
-                        }
-                    }
+    value
+        .define_accessor(
+            "then",
+            Some(Rc::new(move |owner| {
+                trace.borrow_mut().push(format!("get:{label}"));
+                if mode == "getter-throw" {
+                    return Err(Thrown::new(token.clone()));
                 }
-                Ok(Js::Undefined)
-            }))
-        })),
-        None,
-    );
+                if mode == "noncallable" {
+                    return Ok(Js::Number(7.));
+                }
+                // Capture the actual accessor receiver, never a test replacement Promise.
+                let owner = owner.clone();
+                let trace = trace.clone();
+                let token = token.clone();
+                let runtime = runtime.clone();
+                let constructor = constructor.clone();
+                let inner = if mode == "nested" {
+                    let nested = Js::object(vec![]);
+                    let seen = trace.clone();
+                    nested
+                        .define_accessor(
+                            "then",
+                            Some(Rc::new(move |owner| {
+                                seen.borrow_mut().push("get:inner".into());
+                                let owner = owner.clone();
+                                let seen = seen.clone();
+                                Ok(Js::function("innerThen", move |this, args| {
+                                    seen.borrow_mut().push(format!(
+                                        "call:inner:{}",
+                                        this.same_reference(&owner)
+                                    ));
+                                    arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
+                                    Ok(Js::Undefined)
+                                }))
+                            })),
+                            None,
+                        )
+                        .expect("test accessor target permits definition");
+                    nested
+                } else {
+                    Js::Undefined
+                };
+                Ok(Js::function("then", move |this, args| {
+                    trace
+                        .borrow_mut()
+                        .push(format!("call:{label}:{}", this.same_reference(&owner)));
+                    let resolve = arg(&args, 0);
+                    let reject = arg(&args, 1);
+                    match mode {
+                        "reject" | "reject-then-resolve" => {
+                            reject.call(Js::Undefined, vec![token.clone()])?;
+                            if mode == "reject-then-resolve" {
+                                resolve.call(Js::Undefined, vec![Js::Number(-0.)])?;
+                            }
+                        }
+                        "call-throw" => return Err(Thrown::new(token.clone())),
+                        "nested" => {
+                            resolve.call(Js::Undefined, vec![inner.clone()])?;
+                        }
+                        "pending-first" => {
+                            let pending = Promise::pending(&runtime);
+                            resolve.call(Js::Undefined, vec![Js::Promise(pending.clone())])?;
+                            reject.call(Js::Undefined, vec![token.clone()])?;
+                            constructor.call_method("resolve", vec![])?.call_method(
+                                "then",
+                                vec![Js::function("settle", move |_, _| {
+                                    pending.settle(Ok(Js::Number(-0.)));
+                                    Ok(Js::Undefined)
+                                })],
+                            )?;
+                        }
+                        _ => {
+                            resolve.call(
+                                Js::Undefined,
+                                vec![Js::Number(if mode == "nan" { f64::NAN } else { -0. })],
+                            )?;
+                            if mode == "resolve-then-throw" {
+                                return Err(Thrown::new(token.clone()));
+                            }
+                        }
+                    }
+                    Ok(Js::Undefined)
+                }))
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     value
 }
 // Observe native identity, number bits and UTF16 units BEFORE any JSON projection.
@@ -332,23 +338,25 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                             let value = Js::object(vec![]);
                             let calls = seen.clone();
                             let thrown = error.clone();
-                            value.define_accessor(
-                                "then",
-                                Some(Rc::new(move |_| {
-                                    calls.borrow_mut().push(format!("get:{i}"));
-                                    if i == 0 && abrupt == "then" {
-                                        return Err(Thrown::new(thrown.clone()));
-                                    }
-                                    let calls = calls.clone();
-                                    Ok(Js::function("then", move |_, args| {
-                                        calls.borrow_mut().push(format!("call:{i}"));
-                                        arg(&args, 0)
-                                            .call(Js::Undefined, vec![Js::Number(i as f64)])?;
-                                        Ok(Js::Undefined)
-                                    }))
-                                })),
-                                None,
-                            );
+                            value
+                                .define_accessor(
+                                    "then",
+                                    Some(Rc::new(move |_| {
+                                        calls.borrow_mut().push(format!("get:{i}"));
+                                        if i == 0 && abrupt == "then" {
+                                            return Err(Thrown::new(thrown.clone()));
+                                        }
+                                        let calls = calls.clone();
+                                        Ok(Js::function("then", move |_, args| {
+                                            calls.borrow_mut().push(format!("call:{i}"));
+                                            arg(&args, 0)
+                                                .call(Js::Undefined, vec![Js::Number(i as f64)])?;
+                                            Ok(Js::Undefined)
+                                        }))
+                                    })),
+                                    None,
+                                )
+                                .expect("test accessor target permits definition");
                             let row = Js::object(vec![("done", Js::Bool(false)), ("value", value)]);
                             if i == 1 && matches!(abrupt, "done" | "value") {
                                 let seen = seen.clone();
@@ -360,7 +368,8 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                                         Err(Thrown::new(error.clone()))
                                     })),
                                     None,
-                                );
+                                )
+                                .expect("test accessor target permits definition");
                             }
                             Ok(row)
                         }),
@@ -465,19 +474,21 @@ fn await_and_async_return_preserve_engine_job_turns() {
                     _ => {
                         let value = Js::object(vec![]);
                         let seen = trace.clone();
-                        value.define_accessor(
-                            "then",
-                            Some(Rc::new(move |_| {
-                                seen.borrow_mut().push("get".into());
-                                let seen = seen.clone();
-                                Ok(Js::function("then", move |_, args| {
-                                    seen.borrow_mut().push("call".into());
-                                    arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
-                                    Ok(Js::Undefined)
-                                }))
-                            })),
-                            None,
-                        );
+                        value
+                            .define_accessor(
+                                "then",
+                                Some(Rc::new(move |_| {
+                                    seen.borrow_mut().push("get".into());
+                                    let seen = seen.clone();
+                                    Ok(Js::function("then", move |_, args| {
+                                        seen.borrow_mut().push("call".into());
+                                        arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
+                                        Ok(Js::Undefined)
+                                    }))
+                                })),
+                                None,
+                            )
+                            .expect("test accessor target permits definition");
                         value
                     }
                 };

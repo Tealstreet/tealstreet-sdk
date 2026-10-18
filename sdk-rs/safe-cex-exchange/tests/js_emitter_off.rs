@@ -158,32 +158,34 @@ fn native_emitter_case(row: &serde_json::Value) -> serde_json::Value {
         let action = emitter.clone();
         let behavior = kind.clone();
         let seen = trace.clone();
-        first.define_accessor(
-            "_",
-            Some(Rc::new(move |_| {
-                if behavior == "alias-throws" {
-                    return Err(Thrown::new(cause.clone()));
-                }
-                if behavior.starts_with("alias-clears") {
-                    action.call_method("off", vec![Js::str("fill")])?;
-                }
-                if behavior == "alias-adds" {
-                    let seen = seen.clone();
-                    action.call_method(
-                        "on",
-                        vec![
-                            Js::str("fill"),
-                            Js::function("late", move |_, _| {
-                                seen.borrow_mut().push("late".into());
-                                Ok(Js::Undefined)
-                            }),
-                        ],
-                    )?;
-                }
-                Ok(Js::Undefined)
-            })),
-            None,
-        );
+        first
+            .define_accessor(
+                "_",
+                Some(Rc::new(move |_| {
+                    if behavior == "alias-throws" {
+                        return Err(Thrown::new(cause.clone()));
+                    }
+                    if behavior.starts_with("alias-clears") {
+                        action.call_method("off", vec![Js::str("fill")])?;
+                    }
+                    if behavior == "alias-adds" {
+                        let seen = seen.clone();
+                        action.call_method(
+                            "on",
+                            vec![
+                                Js::str("fill"),
+                                Js::function("late", move |_, _| {
+                                    seen.borrow_mut().push("late".into());
+                                    Ok(Js::Undefined)
+                                }),
+                            ],
+                        )?;
+                    }
+                    Ok(Js::Undefined)
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
     }
     let mut args = vec![Js::str(if kind == "missing" { "absent" } else { "fill" })];
     if kind != "omitted" {

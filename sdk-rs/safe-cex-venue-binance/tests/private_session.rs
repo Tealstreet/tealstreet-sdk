@@ -580,7 +580,7 @@ impl ConnectBindings for Conn {
         *self.state.retry_timer.borrow_mut() = EventValue::Undefined;
         Ok(())
     }
-    fn fetch_key(&self) -> Result<KeyFuture, Failure> {
+    fn fetch_native_key(&self) -> Result<NativeKeyFuture, Failure> {
         self.trace("key");
         assert!(
             self.state.connecting.get(),
@@ -593,7 +593,7 @@ impl ConnectBindings for Conn {
         let r = if self.key_fails() {
             Err(self.err.clone())
         } else {
-            Ok("k é/?&".into())
+            Ok(string("k é/?&"))
         };
         Ok(Box::pin(std::future::poll_fn(move |_| {
             if ready.get() {

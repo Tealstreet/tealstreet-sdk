@@ -88,7 +88,9 @@ fn legacy_prototype_setter_preserves_receiver_null_shadow_and_resource() {
         let value = allocation(index);
         value.set("label", Js::str("visible")).unwrap();
         let prototype = Js::object(vec![]);
-        prototype.define_accessor("inherited", Some(Rc::new(|this| this.get("label"))), None);
+        prototype
+            .define_accessor("inherited", Some(Rc::new(|this| this.get("label"))), None)
+            .expect("test accessor target permits definition");
         value.set("__proto__", prototype.clone()).unwrap();
         let child = Js::object(vec![("label", Js::str("child"))]);
         child.set("__proto__", value.clone()).unwrap();
@@ -144,16 +146,18 @@ fn legacy_prototype_setter_preserves_receiver_null_shadow_and_resource() {
     let trace = Rc::new(RefCell::new(vec![]));
     let events = trace.clone();
     let prototype = Js::object(vec![]);
-    prototype.define_accessor(
-        "__proto__",
-        None,
-        Some(Rc::new(move |this, value| {
-            events
-                .borrow_mut()
-                .push(json!([this.get("label")?.to_display(), value.to_display()]));
-            Ok(())
-        })),
-    );
+    prototype
+        .define_accessor(
+            "__proto__",
+            None,
+            Some(Rc::new(move |this, value| {
+                events
+                    .borrow_mut()
+                    .push(json!([this.get("label")?.to_display(), value.to_display()]));
+                Ok(())
+            })),
+        )
+        .expect("test accessor target permits definition");
     let receiver = Js::object(vec![("label", Js::str("receiver"))]);
     receiver.set("__proto__", prototype).unwrap();
     receiver.set("__proto__", Js::Number(23.)).unwrap();
@@ -172,14 +176,16 @@ fn object_set_prototype_of_binding_preserves_order_identity_and_refusals() {
     let calls = Rc::new(Cell::new(0));
     let counter = calls.clone();
     let target = Js::object(vec![]);
-    target.define_accessor(
-        "__proto__",
-        None,
-        Some(Rc::new(move |_, _| {
-            counter.set(counter.get() + 1);
-            Ok(())
-        })),
-    );
+    target
+        .define_accessor(
+            "__proto__",
+            None,
+            Some(Rc::new(move |_, _| {
+                counter.set(counter.get() + 1);
+                Ok(())
+            })),
+        )
+        .expect("test accessor target permits definition");
     let prototype = Js::object(vec![("marker", Js::str("static"))]);
     let result = set(target.clone(), prototype).expect("OBJECT_PROTOTYPE setPrototypeOf is bound");
     let function = Js::function("fn", |_, _| Ok(Js::Undefined));

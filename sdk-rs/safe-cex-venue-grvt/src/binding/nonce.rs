@@ -17,11 +17,13 @@ fn view<T: Clone + 'static>(
 ) -> Js {
     let object = Js::object_with_class("Map", vec![]);
     let read = map.clone();
-    object.define_accessor(
-        "size",
-        Some(Rc::new(move |_| Ok(Js::Number(read.borrow().len() as f64)))),
-        None,
-    );
+    object
+        .define_accessor(
+            "size",
+            Some(Rc::new(move |_| Ok(Js::Number(read.borrow().len() as f64)))),
+            None,
+        )
+        .expect("fresh extensible accessor target");
     let read = map.clone();
     let enc = encode.clone();
     object

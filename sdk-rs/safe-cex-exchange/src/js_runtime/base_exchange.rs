@@ -162,7 +162,7 @@ pub fn create(
                 setter.set_disposed_flag(value.truthy());
                 Ok(())
             })),
-        );
+        )?;
     }
     {
         // Dispatches through the venue's privacy hook, as the source getter does.
@@ -174,7 +174,7 @@ pub fn create(
                 .ok_or_else(|| Thrown::error("Error", "exchange is not assembled"))?;
             Ok(Js::Bool(venue.is_public_data_only()))
         });
-        this.define_accessor("isPublicDataOnly", Some(getter), None);
+        this.define_accessor("isPublicDataOnly", Some(getter), None)?;
     }
     {
         let base = base.clone();
@@ -401,7 +401,7 @@ pub fn create(
                 Ok(object)
             })),
             None,
-        );
+        )?;
     }
     {
         let base = base.clone();
@@ -474,7 +474,7 @@ pub fn create(
                 Ok(Js::Bool(base.needs_account_market_overlay(&*venue)))
             })),
             None,
-        );
+        )?;
     }
     {
         let base = base.clone();

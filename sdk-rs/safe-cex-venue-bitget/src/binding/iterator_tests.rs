@@ -199,15 +199,17 @@ fn private_host_iterator_retains_next_and_propagates_abrupt_steps() {
     let thrown = Js::object(vec![("tag", Js::str("done-getter"))]);
     let original = thrown.clone();
     let result = Js::object(vec![]);
-    result.define_accessor(
-        "done",
-        Some(Rc::new(move |_| {
-            Err(safe_cex_exchange::js_runtime::value::Thrown::new(
-                thrown.clone(),
-            ))
-        })),
-        None,
-    );
+    result
+        .define_accessor(
+            "done",
+            Some(Rc::new(move |_| {
+                Err(safe_cex_exchange::js_runtime::value::Thrown::new(
+                    thrown.clone(),
+                ))
+            })),
+            None,
+        )
+        .expect("fresh test accessor target");
     abrupt
         .define(
             "next",
@@ -250,11 +252,13 @@ fn private_host_body_throw_closes_iterator_and_keeps_original_failure() {
     let original = Js::object(vec![("tag", Js::str("position-id"))]);
     let thrown = original.clone();
     let position = Js::object(vec![]);
-    position.define_accessor(
-        "id",
-        Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
-        None,
-    );
+    position
+        .define_accessor(
+            "id",
+            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+            None,
+        )
+        .expect("fresh test accessor target");
     let values = Js::array(vec![position]).iterator().unwrap();
     let closed = Rc::new(Cell::new(0));
     let count = closed.clone();
