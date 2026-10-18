@@ -592,7 +592,7 @@ fn remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter() {
                 finite_json(case["requests"].clone()),
                 "real signed HTTP {kind} dropped={dropped}"
             );
-            for (symbol, row) in store.fetched_leverage().iter() {
+            for (symbol, row) in store.fetched_leverage().unwrap().iter() {
                 for (native, key) in [
                     (row.buy_leverage, "buyLeverage"),
                     (row.sell_leverage, "sellLeverage"),
@@ -605,7 +605,7 @@ fn remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter() {
                 }
             }
             assert_eq!(
-                finite_json(json!(store.fetched_leverage().clone())),
+                finite_json(json!(store.fetched_leverage().unwrap())),
                 finite_json(case["leverage"].clone()),
                 "native Store after completion {kind} dropped={dropped}"
             );
@@ -613,6 +613,7 @@ fn remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter() {
                 json!(
                     store
                         .orders()
+                        .unwrap()
                         .iter()
                         .map(|o| o.id.clone())
                         .collect::<Vec<_>>()

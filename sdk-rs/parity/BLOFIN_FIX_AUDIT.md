@@ -21,8 +21,8 @@ dropped. This measures sibling survival, not arbitrary microtask-count parity.
 | `BlofinExchange.getOrFetchPositionMode` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; normal/trigger/batch read the new hedged mode after a legitimate worker acknowledgement; the old inline cache await sends net instead of long. |
 | `BlofinExchange.getOrFetchMarginType` | FIX: cached-reader reaction cutover (#1086). Compiled original-body CACHED-AWAIT RED → GREEN; TPSL and batch read the new isolated margin after a legitimate worker acknowledgement; the old inline cache await sends cross. |
 | `BlofinExchange.fetchLeverageForSymbol` | ACCEPT assigned claim: `leverage`: discarded SDK waiter still sends the source instId/marginMode and commits distinct buy/sell native leverage fields. Captured cached margin is cross on both sides. |
-| `BlofinExchange.fetchOrders` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
-| `BlofinExchange#fetchOrdersWithRetry` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
+| `BlofinExchange.fetchOrders` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. The remaining helper timing claims are classified individually below. |
+| `BlofinExchange#fetchOrdersWithRetry` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. The remaining helper timing claims are classified individually below. |
 | `BlofinExchange#fetchPaginatedOrderRows` | ACCEPT assigned claim: `active-orders`: each of normal/TPSL/trigger sends its initial GET and exact cursor follow-up, then stops on the empty page after the public waiter is dropped. #1068 separately proves sibling survival after rejection. |
 | `BlofinExchange.fetchNormalOrders` | ACCEPT assigned claim: `active-orders`: normal first page and npage cursor GET occur with awaited and dropped waiters; mapped output remains empty for the deliberately unknown instrument. |
 | `BlofinExchange.fetchAlgoOrders` | ACCEPT assigned claim: `active-orders`: TPSL first page and apage cursor GET occur with awaited and dropped waiters; #1068 additionally retains its pagination after a different family rejects. |
@@ -71,7 +71,29 @@ Reproduction: from the worktree root run
 `python3 sdk-rs/safe-cex-venue-blofin/tests/remaining_fix_controls.py`. It restores
 the actual pre-fix class reader bodies from committed baseline `ef5fd04477`,
 requires four named compiled CACHED-AWAIT assertion failures at exit 101, rejects
-compiler failures, restores exact production bytes (SHA256
+compiler failures, restores exact production bytes (original measured SHA256
 `7e7887e5e84afe91911cfe07d3ed89aaa8c10f90c21c287452b374567da070d0`), and requires
 all seven real binding tests GREEN. The source and native operation floors are
 independent (four placement profiles, ten remaining profiles x two lifetimes).
+
+
+## Post-Store master refresh
+
+Normally merged master `b464dce751`, including #1017, #1096 and #1116.
+Three audit Store reads now unwrap their expected successful Results; all
+existing HTTP, native scalar, mode, reconciliation and dropped-waiter assertions
+remain intact. Production scheduling bodies were retained through the merge.
+
+Fresh scoped replay: 46 tests PASS across `divergence_timing_binding`, `complete`,
+`exchange_trait`, `modes`, `order_rest`, `order_services` and `position_adapter`.
+The original-reader control again produces four named compiled CACHED-AWAIT
+failures, then exact restoration passes all seven binding tests. The refreshed
+production SHA256 is
+`d5f41e50c216fcb9ef873a8debb59033b690c44532b9bb8e375ec2b72c921196`.
+Full parity index: 7563 rows / 16672 public Rust items; extractor: zero drift.
+Required all-features cancellation inventory: 6 PASS / 1 intentional discovery
+export ignore. Workspace fmt and strict native/Wasm all-target BloFin Clippy PASS.
+Every Cargo invocation uses `CARGO_INCREMENTAL=0` and jobs 1 from `sdk-rs`.
+The #1017 hold has ended; #1086 is ready for auto-merge with MERGE.
+Refresh logs: `/tmp/port-txflow-blofin-refresh-{tests,controls,index,extract,
+cancellation,fmt,native-clippy,wasm-clippy}.log`.
