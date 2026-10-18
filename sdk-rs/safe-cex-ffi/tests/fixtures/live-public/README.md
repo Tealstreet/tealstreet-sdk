@@ -20,3 +20,17 @@ already emits fees; the canonical shared Market runtime model preserves them.
 The live body defaults both fee values to zero; distinct negative maker and
 positive taker values have separate native shared-model and numeric-ingress
 coverage. No live credentials or upstream request is needed for this regression.
+
+`binance-delivery-prefix.json.gz` contains the exact first 12 WebSocket frames
+and all six original HTTP responses from the 2026-10-18 Binance public capture.
+Its `sourceBundleSha256` pins the complete 570-frame capture:
+`df9a504272da029f0c871cb9c44bb2777ff092c34ea966a68d3c126269218d5f`.
+The JSON envelope stores HTTP response bytes in base64; frame payloads and
+timestamps are unchanged. `native-account-delivery-order.test.mjs` reconstructs
+the replay bundle and drives the real TS worker and production addon four times,
+with two fresh accounts per side each time. It requires processed-frame drain
+receipts, exact ticker/book/candle values, and identical combined native output
+across all eight accounts, including every Store field. Existing cross-language
+metadata differences remain separate; the test does not claim full Store parity
+or a new 60-second capture. Run with `LIVE_DIFF_ADDON=/absolute/addon.node` to
+check an immutable compiled artifact.
