@@ -15,7 +15,7 @@ struct Held {
 }
 impl RestAdapter for Held {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
-        self.requests.lock().unwrap().push(request);
+        self.requests.lock().unwrap().push(request.clone());
         let release = self.release.clone();
         let body = if self.rejected {
             Input::from_value(json!({"code":-123,"msg":"native listen-key refusal"})).unwrap()
@@ -39,7 +39,19 @@ impl RestAdapter for Held {
             if !release.load(Ordering::SeqCst) {
                 return Poll::Pending;
             }
-            Poll::Ready(Ok(response.take().expect("one real HTTP completion")))
+            let response = response.take().expect("one real HTTP completion");
+            Poll::Ready(if response.status == 200 {
+                Ok(response)
+            } else {
+                Err(safe_cex_transport::RestFailure {
+                    code: Some("ERR_BAD_REQUEST".into()),
+                    message: "Request failed with status code 400".into(),
+                    transport_error: None,
+                    response: Some(Box::new(response)),
+                    request: Box::new(request.clone()),
+                    context: None,
+                })
+            })
         }))
     }
 }
