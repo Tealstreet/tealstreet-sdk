@@ -43,6 +43,8 @@ try:
     ]:
         text = original.decode()
         a, b, _ = segment(text, name)
+        if name == "book":
+            a, _, _ = segment(text, "book_side")
         _, _, body = segment(old, name)
         file.write_text(text[:a] + body + text[b:])
         try:
