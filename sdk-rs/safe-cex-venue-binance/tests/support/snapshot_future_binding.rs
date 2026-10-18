@@ -15,7 +15,7 @@ struct Held {
 impl RestAdapter for Held {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let conditional = request.url.contains("/conditional/");
-        self.requests.lock().unwrap().push(request);
+        self.requests.lock().unwrap().push(request.clone());
         let release = self.release[usize::from(conditional)].clone();
         let rejected = conditional && self.reject_conditional;
         let mut response = Some(RestResponse {
@@ -48,7 +48,19 @@ impl RestAdapter for Held {
             if !release.load(Ordering::SeqCst) {
                 return Poll::Pending;
             }
-            Poll::Ready(Ok(response.take().expect("one terminal HTTP settlement")))
+            let response = response.take().expect("one terminal HTTP settlement");
+            Poll::Ready(if response.status == 200 {
+                Ok(response)
+            } else {
+                Err(safe_cex_transport::RestFailure {
+                    code: Some("ERR_BAD_REQUEST".into()),
+                    message: "Request failed with status code 400".into(),
+                    transport_error: None,
+                    response: Some(Box::new(response)),
+                    request: Box::new(request.clone()),
+                    context: None,
+                })
+            })
         }))
     }
 }
