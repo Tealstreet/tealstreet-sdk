@@ -675,7 +675,10 @@ fn compare(family: &str) {
             .zip(c["candles"].as_array().unwrap())
         {
             assert_eq!(
-                actual.timestamp.as_ref().and_then(Value::as_f64),
+                actual.timestamp.as_ref().map(|value| match value {
+                    safe_cex_exchange::js_runtime::value::Js::Number(value) => *value,
+                    _ => panic!("native source timestamp must remain numeric"),
+                }),
                 e.get("timestamp").and_then(Value::as_f64),
                 "{name} native candle timestamp"
             );

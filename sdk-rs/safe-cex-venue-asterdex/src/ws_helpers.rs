@@ -38,10 +38,10 @@ pub fn public_depth_snapshot(data: &Js) -> Option<safe_cex_types::OrderBook> {
     use safe_cex_types::{OrderBook, OrderBookOrders};
 
     fn parse_levels(levels: &Js) -> Option<Vec<OrderBookOrders>> {
-        let levels = levels.array_values()?;
+        let levels = levels.array_values().ok()??;
         let mut parsed = Vec::with_capacity(levels.len());
         for level in levels {
-            let pair = level.array_values()?;
+            let pair = level.array_values().ok()??;
             if pair.len() != 2 {
                 return None;
             }

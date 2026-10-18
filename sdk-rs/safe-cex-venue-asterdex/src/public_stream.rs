@@ -209,35 +209,32 @@ impl PublicStream {
                 match stream.as_str() {
                     "!markPrice@arr@1s" | "!markPrice@arr" => {
                         if let Js::Array(items) = &data {
-                            let length = items.borrow().len();
-                            for index in 0..length {
-                                let item = items.borrow().get(index).cloned().flatten();
-                                if let Some(item) = item {
-                                    self.handle_mark_price_update(&item)?;
-                                }
+                            let mut index = 0;
+                            while index < items.len() {
+                                let item = data.get(&index.to_string())?;
+                                self.handle_mark_price_update(&item)?;
+                                index += 1;
                             }
                         }
                     }
                     "!ticker@arr" => {
                         if let Js::Array(items) = &data {
-                            let length = items.borrow().len();
-                            for index in 0..length {
-                                let item = items.borrow().get(index).cloned().flatten();
-                                if let Some(item) = item {
-                                    self.handle_ticker_update(&item)?;
-                                }
+                            let mut index = 0;
+                            while index < items.len() {
+                                let item = data.get(&index.to_string())?;
+                                self.handle_ticker_update(&item)?;
+                                index += 1;
                             }
                         }
                     }
                     _ => self.stream_data(&stream, &data)?,
                 }
             } else if let Js::Array(items) = &json {
-                let length = items.borrow().len();
-                for index in 0..length {
-                    let item = items.borrow().get(index).cloned().flatten();
-                    if let Some(item) = item {
-                        self.event_data(&item)?;
-                    }
+                let mut index = 0;
+                while index < items.len() {
+                    let item = json.get(&index.to_string())?;
+                    self.event_data(&item)?;
+                    index += 1;
                 }
             } else if json.get("e")?.truthy() {
                 self.event_data(&json)?;
