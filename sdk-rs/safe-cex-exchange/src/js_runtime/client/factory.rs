@@ -2,7 +2,7 @@
 use super::{Host, effective_config, rest_request, spawn};
 use crate::{
     exchange::BaseExchange,
-    http::{is_tealstreet_proxy_auth_failure_body, stringify_response_body},
+    http::{HTTP_STATS, is_tealstreet_proxy_auth_failure_body, stringify_response_body},
     js_runtime::{
         base_exchange::exchange_options,
         value::{Js, Thrown, arg, to_json},
@@ -55,6 +55,23 @@ pub fn create(
     )?;
     let client = super::create(host.clone(), defaults);
     install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied)?;
+    let stats_runtime = host.runtime();
+    let stats_exchange = serde_json::to_value(owner.name())
+        .expect("exchange name")
+        .as_str()
+        .expect("exchange name string")
+        .to_owned();
+    let record_request = Js::function("recordRequestStats", move |_, args| {
+        HTTP_STATS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record_request(&stats_exchange, stats_runtime.now_ms());
+        Ok(arg(&args, 0))
+    });
+    client
+        .get("interceptors")?
+        .get("request")?
+        .call_method("use", vec![record_request])?;
     if transport.proxied
         && let Some(authorize) = transport.authorize
     {
