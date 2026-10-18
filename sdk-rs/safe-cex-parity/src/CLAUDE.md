@@ -122,7 +122,8 @@ keyword or `item` fragment; each invocation's arguments get the same check. Macr
 reject local shadowing of trusted expression/derive/attribute names and
 namespaces. The compiler builtin `#[track_caller]` accepts only its bare,
 unqualified form (including inside an otherwise accepted `cfg_attr`). Argument
-lists, assigned values, qualified lookalikes and uncertain imports remain refused;
+lists, assigned values, qualified lookalikes and uncertain imports remain refused,
+including attributes renamed from known procedural-macro crates;
 the annotated body still receives every local-declaration and macro-effect check.
 The bounded local-macro recipe grammar is unchanged.
 A target-wide token proof permits module-level `core` declarations only when

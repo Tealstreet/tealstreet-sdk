@@ -1212,17 +1212,28 @@ impl<'ast> Visit<'ast> for LocalTypes {
                 end.column,
             ));
         }
-        fn attribute_binding(tree: &syn::UseTree) -> bool {
-            match tree {
-                syn::UseTree::Name(name) => attribute_macro_name(&name.ident.to_string()),
-                syn::UseTree::Rename(name) => attribute_macro_name(&name.rename.to_string()),
-                syn::UseTree::Group(group) => group.items.iter().any(attribute_binding),
-                syn::UseTree::Path(path) => attribute_binding(&path.tree),
-                syn::UseTree::Glob(_) => true,
-            }
+        fn attribute_binding(tree: &syn::UseTree, builtin_only: bool) -> bool {
+            let name = match tree {
+                syn::UseTree::Name(name) => name.ident.to_string(),
+                syn::UseTree::Rename(name) => name.rename.to_string(),
+                syn::UseTree::Group(group) => {
+                    return group
+                        .items
+                        .iter()
+                        .any(|tree| attribute_binding(tree, builtin_only));
+                }
+                syn::UseTree::Path(path) => return attribute_binding(&path.tree, builtin_only),
+                syn::UseTree::Glob(_) => return !builtin_only,
+            };
+            attribute_macro_name(&name)
+                && (!builtin_only || name.trim_start_matches("r#") == "track_caller")
         }
         let attribute_origin = matches!(&item.tree, syn::UseTree::Path(path) if matches!(path.ident.to_string().as_str(), "std" | "core" | "serde" | "ts_rs" | "wasm_bindgen" | "napi_derive"));
-        if !attribute_origin && attribute_binding(&item.tree) {
+        // A renamed binding is never the compiler builtin, even from a known
+        // procedural-macro crate. Preserve the ordinary import rules separately.
+        if attribute_binding(&item.tree, true)
+            || !attribute_origin && attribute_binding(&item.tree, false)
+        {
             self.untrusted_attribute_import = true;
         }
         fn ambiguous(tree: &syn::UseTree) -> bool {
@@ -2197,6 +2208,8 @@ mod tests {
             "use forged::track_caller; #[track_caller] fn f() {}",
             "use forged::r#track_caller; #[track_caller] fn f() {}",
             "use forged::attribute as track_caller; #[track_caller] fn f() {}",
+            "use wasm_bindgen::prelude::wasm_bindgen as track_caller; #[track_caller] fn f() {}",
+            "use wasm_bindgen::prelude::wasm_bindgen as r#track_caller; #[track_caller] fn f() {}",
             "#[track_caller] fn f() {} use forged::*;",
         ] {
             let mut visitor = verified_test_visitor();

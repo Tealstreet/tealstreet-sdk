@@ -2,52 +2,52 @@
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:has_path": {
     "category": "non-decoder",
     "reason": "Examines parsed attribute tokens for a path identifier; no wire deserialization.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:file": {
     "category": "non-decoder",
     "reason": "Walks and validates Rust source modules for doc cfg guards; this is the discovery guard itself, not a wire/domain decoder.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:modules": {
     "category": "non-decoder",
     "reason": "Walks parsed Rust module declarations; no value decoding.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:namespace_alias": {
     "category": "non-decoder",
     "reason": "Inspects parsed use-tree namespace bindings.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:attribute_binding": {
     "category": "non-decoder",
     "reason": "Inspects parsed use-tree attribute bindings.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:ambiguous": {
     "category": "non-decoder",
     "reason": "Inspects parsed use-tree macro bindings.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_TRAIT_IMPL:Visit:Names": {
     "category": "non-decoder",
     "reason": "syn AST visitor collects nominal declaration names and unsupported expansion markers; not a wire decoder.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:collect": {
     "category": "non-decoder",
     "reason": "Traverses parsed Rust module items to collect public alias namespace names and original declaration-end spans; the scope string is a Rust namespace prefix, not exchange wire input.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:renamed_macro": {
     "category": "non-decoder",
     "reason": "Inspects parsed Rust use-tree destinations to reject renamed imports resembling accepted expression macros; it neither executes macros nor admits exchange wire values.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:glob": {
     "category": "non-decoder",
     "reason": "Walks an already parsed syn UseTree to detect any glob import, including path and group nodes. It never parses wire input or grants macro-origin permission.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/bin/accepted-source.rs::LOCAL_FUNCTION:source": {
     "category": "decoder-helper",
@@ -63,32 +63,32 @@
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:fields": {
     "category": "non-decoder",
     "reason": "Parses the identifier list inside an already tokenized js_number_output! registration from a syn ParseStream, rejecting duplicates. It reads Rust source tokens, never wire input, and grants no macro-origin permission.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:foreign_leaves": {
     "category": "non-decoder",
     "reason": "Walks an already parsed syn UseTree and records leaf names imported from roots other than crate/self/super, so a module recipe of the same name is not trusted. It never parses wire input or grants permission.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:number_output_bindings": {
     "category": "non-decoder",
     "reason": "Walks an already parsed syn UseTree to find bindings named js_number_output, separating the direct safe_cex_num import from any other binding that revokes it. It never parses wire input.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_TRAIT_IMPL:Visit:Collector": {
     "category": "non-decoder",
     "reason": "syn Visit implementation collecting module-scope macro_rules! definitions and their transcribers from already parsed source files for the recipe pre-pass. It never parses wire input; acceptance is decided by expression_recipe.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:substitute": {
     "category": "non-decoder",
     "reason": "Recursively substitutes already-tokenized local macro captures, retaining group delimiters, spans and expression precedence. Unknown captures refuse; this transforms syntax tokens and never admits wire/domain values.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:resolve": {
     "category": "non-decoder",
     "reason": "Constructs an explicit syn UseTree from the authenticated compiler public-export names, validating identifier spelling and retaining unresolved globs when proof is absent. This is import-scope synthesis over parsed syntax, not wire/domain decoding.",
-    "sourceSha256": "5f7ed66de733414921d2fe576c3b39751048e64982164456eebe9a208d58205b"
+    "sourceSha256": "175ccdab79ba9fe12c1e8dfc673de9733710f247e3aa38af4690ee255736efe9"
   },
   "safe-cex-parity/src/bin/accepted-source.rs::LOCAL_FUNCTION:name": {
     "category": "non-decoder",
