@@ -199,7 +199,7 @@ uses the existing Store read_blob helper with its byte-to-character projection.
 
 `tests/exchange_binding.rs` covers all sixteen methods, caller-ID fail-closed
 behavior before any single/batch write, private listen-key failure without a
-private dial/subscription, and the native Blob/plain-JSON public frame path. The compiled FFI regression
+private dial/subscription, and the native gzip Blob/ordinary jsonParse public frame path. The compiled FFI regression
 `native-bitrue-gzip.test.mjs` replays the exact first recorded gzip frame
 through real TLS sockets, comparing all 779 market/ticker rows with maintained TS.
 `scripts/binding-controls.py` sequentially breaks each trait dispatch and requires
