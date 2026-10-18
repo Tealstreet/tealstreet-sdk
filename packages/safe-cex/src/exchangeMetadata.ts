@@ -507,6 +507,22 @@ const BinanceMetadata: ExchangeMetadata = {
   },
 };
 
+const BinanceInverseMetadata: ExchangeMetadata = {
+  ...BinanceMetadata,
+  exchangeName: 'binanceinverse' as ExchangeName,
+  prettyName: 'Binance Inverse',
+  defaultQuote: 'USD',
+  // Keep COIN-M hidden until credentialed livenet/testnet validation covers
+  // private state, order placement, and inverse sizing end-to-end.
+  enabled: false,
+  enabledInDev: true,
+  enableInPreview: false,
+  supportedOnMobile: false,
+  latencyDomain: 'dapi.binance.com',
+  supportsTestnet: false,
+  requiresTickersForMarketsLoaded: true,
+};
+
 const BinancePMMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
@@ -2266,6 +2282,7 @@ export const exchangeMetadata: {
   bybitspot: BybitSpotMetadata,
   bybitinverse: BybitInverseMetadata,
   binance: BinanceMetadata,
+  binanceinverse: BinanceInverseMetadata,
   binancepm: BinancePMMetadata,
   binancespot: BinanceSpotMetadata,
   bitget: BitgetMetadata,
