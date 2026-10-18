@@ -1486,7 +1486,11 @@ fn to_js_json_keeps_undefined_and_bigint_and_ordered_fields() {
 #[test]
 fn ws_direct_fallback_moves_to_the_next_host_after_silent_connects() {
     let g = library();
-    let fallback = run(&g, "WsDirectFallback", vec![Js::Number(1.0)]);
+    let fallback = g
+        .get("WsDirectFallback")
+        .unwrap()
+        .construct(vec![Js::Number(1.0)], None)
+        .unwrap();
     let resolve = |f: &Js| {
         let url = f
             .call_method(
@@ -2082,20 +2086,26 @@ fn array_from_reads_iterables_and_array_likes() {
     let chars = from(vec![text]).unwrap();
     assert_eq!(chars.get("length").unwrap().as_f64(), Some(3.0));
     assert_eq!(json_of(&g, chars), "[\"a\",\"\u{1F600}\",\"b\"]");
-    let map = run(
-        &g,
-        "Map",
-        vec![Js::array(vec![Js::array(vec![
-            Js::str("k"),
-            Js::Number(1.0),
-        ])])],
-    );
+    let map = g
+        .get("Map")
+        .unwrap()
+        .construct(
+            vec![Js::array(vec![Js::array(vec![
+                Js::str("k"),
+                Js::Number(1.0),
+            ])])],
+            None,
+        )
+        .unwrap();
     assert_eq!(json_of(&g, from(vec![map]).unwrap()), r#"[["k",1]]"#);
-    let set = run(
-        &g,
-        "Set",
-        vec![Js::array(vec![Js::str("x"), Js::str("x"), Js::str("y")])],
-    );
+    let set = g
+        .get("Set")
+        .unwrap()
+        .construct(
+            vec![Js::array(vec![Js::str("x"), Js::str("x"), Js::str("y")])],
+            None,
+        )
+        .unwrap();
     assert_eq!(json_of(&g, from(vec![set]).unwrap()), r#"["x","y"]"#);
     let like = Js::object(vec![("length", Js::str("2.9")), ("0", Js::str("x"))]);
     let like = from(vec![like]).unwrap();

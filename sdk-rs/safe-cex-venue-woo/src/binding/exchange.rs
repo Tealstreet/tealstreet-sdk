@@ -89,13 +89,13 @@ impl WooExchange {
                 .map_err(err)?;
         let _ = shared.globals.define("WOOXExchange", class.clone());
         let receiver = class
-            .call(
-                Js::Undefined,
+            .construct(
                 vec![
                     from_typed(&name).map_err(err)?,
                     from_typed(&options).map_err(err)?,
                     store::facade(store.clone()),
                 ],
+                None,
             )
             .map_err(err)?;
         *shared.exchange.borrow_mut() = receiver.clone();

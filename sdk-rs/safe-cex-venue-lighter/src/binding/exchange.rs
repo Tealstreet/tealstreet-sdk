@@ -165,13 +165,13 @@ impl LighterNativeExchange {
         let dyn_venue: Rc<dyn Exchange> = venue.clone();
         *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
         let this = to_js(&class)
-            .call(
-                Js::Undefined,
+            .construct(
                 vec![
                     from_typed(&name).map_err(err)?,
                     from_typed(&options).map_err(err)?,
                     store::facade(store),
                 ],
+                None,
             )
             .map_err(err)?;
         *shared.exchange.borrow_mut() = this.clone();

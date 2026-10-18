@@ -1656,3 +1656,8 @@ listener arguments, including Unicode, NUL, empty strings and formatting tokens.
 `scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
 missing classifications or changed default bodies; the receiver classification
 applies only to this typed forwarding method.
+
+Source `new` operations use `Js::construct`, including top-level native venue
+factories and host-selected collection constructors. Ordinary host calls remain
+separate. Lighter SDK's captured URLSearchParams uses `ClientHost::construct` for
+both transaction submission paths; JSON stringify remains an ordinary call.
