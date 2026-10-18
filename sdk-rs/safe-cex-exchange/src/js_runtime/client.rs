@@ -767,7 +767,9 @@ impl RestAdapter for JsRestAdapter {
                                             }
                                             let captured = if ["paramsSerializer", "axios-retry"]
                                                 .iter()
-                                                .any(|key| name.iter().copied().eq(key.encode_utf16()))
+                                                .any(|key| {
+                                                    name.iter().copied().eq(key.encode_utf16())
+                                                })
                                                 && cell.is_object()
                                             {
                                                 let mut options = vec![];
