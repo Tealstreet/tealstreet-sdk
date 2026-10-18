@@ -475,7 +475,7 @@ impl ReadHost for Rt {
     fn trace(&self, error: &Thrown) -> ReadResult<Self, ()> {
         self.shared
             .runtime
-            .console("trace", &error.value.to_display());
+            .console_values("trace", &[error.value.clone()]);
         Ok(())
     }
     // ts: `err?.message || fallback`.

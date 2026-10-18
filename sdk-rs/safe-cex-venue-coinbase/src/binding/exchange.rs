@@ -45,10 +45,15 @@ pub struct CoinbaseExchange {
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/generic_alias_native.rs"]
 mod generic_alias_native;
+
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/portfolio_alias_native.rs"]
 mod portfolio_alias_native;
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/public_stream_alias_native.rs"]
+mod public_stream_alias_native;
 
 fn result<'a, T: Clone + 'static>(
     promise: Result<Promise<Result<T, PortfolioFailure>>, PortfolioFailure>,
