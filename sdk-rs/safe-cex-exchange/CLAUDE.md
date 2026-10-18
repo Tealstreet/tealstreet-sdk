@@ -1928,3 +1928,10 @@ ready and pending I/O phases.
 materialization follows that source chain and the canonical retained response.
 Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
 signed requests before JSON. Original JS object identity remains an owned-tree residual.
+
+`js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
+and the Vec<Market> info boundary. Its optional recorded-payload probe measures
+parse and typed decode separately; `tests/large_payload_source.mjs` captures
+maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Native observation files encode UTF-16, own undefined and f64 bits explicitly so
+before/after byte comparisons do not hide lossy JSON projections.

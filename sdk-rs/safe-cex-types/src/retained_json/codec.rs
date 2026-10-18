@@ -59,9 +59,9 @@ pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Inp
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
                 ),
                 "Text" => Input::Text(units(
-                    seq.next_element::<Vec<f64>>()?
+                    seq.next_element::<Vec<Unit>>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
-                )?),
+                )),
                 "Lexeme" => Input::Lexeme(
                     seq.next_element::<String>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
@@ -78,11 +78,11 @@ pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Inp
                         .collect(),
                 ),
                 "Object" => Input::Object(
-                    seq.next_element::<Vec<(Vec<f64>, Payload)>>()?
+                    seq.next_element::<Vec<(Vec<Unit>, Payload)>>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?
                         .into_iter()
-                        .map(|(key, value)| Ok((units(key)?, value.0)))
-                        .collect::<Result<_, A::Error>>()?,
+                        .map(|(key, value)| (units(key), value.0))
+                        .collect(),
                 ),
                 _ => return Err(de::Error::custom("invalid retained tag")),
             };
@@ -94,17 +94,38 @@ pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Inp
     }
     d.deserialize_seq(PayloadVisitor)
 }
-fn units<E: de::Error>(values: Vec<f64>) -> Result<Vec<u16>, E> {
-    values
-        .into_iter()
-        .map(|value| {
-            if value.is_finite() && value.fract() == 0.0 && (0.0..=65535.0).contains(&value) {
-                Ok(value as u16)
-            } else {
-                Err(de::Error::custom("invalid retained UTF-16 unit"))
+struct Unit(u16);
+impl<'de> serde::Deserialize<'de> for Unit {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct UnitVisitor;
+        impl Visitor<'_> for UnitVisitor {
+            type Value = Unit;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a UTF-16 code unit")
             }
-        })
-        .collect()
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Unit, E> {
+                u16::try_from(value)
+                    .map(Unit)
+                    .map_err(|_| E::custom("invalid retained UTF-16 unit"))
+            }
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Unit, E> {
+                u16::try_from(value)
+                    .map(Unit)
+                    .map_err(|_| E::custom("invalid retained UTF-16 unit"))
+            }
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Unit, E> {
+                if value.is_finite() && value.fract() == 0.0 && (0.0..=65535.0).contains(&value) {
+                    Ok(Unit(value as u16))
+                } else {
+                    Err(E::custom("invalid retained UTF-16 unit"))
+                }
+            }
+        }
+        d.deserialize_f64(UnitVisitor)
+    }
+}
+fn units(values: Vec<Unit>) -> Vec<u16> {
+    values.into_iter().map(|unit| unit.0).collect()
 }
 
 struct NativePayload<'a>(&'a Input);
@@ -165,45 +186,7 @@ impl Serialize for Input {
 }
 
 impl Input {
-    pub fn into_native_payload(self) -> Self {
-        let (tag, value) = match self {
-            Self::Undefined => ("Undefined", Self::Null),
-            Self::Null => ("Null", Self::Null),
-            Self::Bool(value) => ("Bool", Self::Bool(value)),
-            Self::Text(value) => (
-                "Text",
-                Self::Array(
-                    value
-                        .into_iter()
-                        .map(|unit| Self::Float(f64::from(unit)))
-                        .collect(),
-                ),
-            ),
-            Self::Lexeme(value) => ("Lexeme", Self::Text(value.encode_utf16().collect())),
-            Self::Float(value) => ("Float", Self::Float(value)),
-            Self::Array(values) => (
-                "Array",
-                Self::Array(values.into_iter().map(Self::into_native_payload).collect()),
-            ),
-            Self::Object(values) => (
-                "Object",
-                Self::Array(
-                    values
-                        .into_iter()
-                        .map(|(key, value)| {
-                            Self::Array(vec![
-                                Self::Array(
-                                    key.into_iter()
-                                        .map(|unit| Self::Float(f64::from(unit)))
-                                        .collect(),
-                                ),
-                                value.into_native_payload(),
-                            ])
-                        })
-                        .collect(),
-                ),
-            ),
-        };
-        Self::Array(vec![Self::Text(tag.encode_utf16().collect()), value])
+    pub fn into_native_payload<'de>(self) -> impl Deserializer<'de, Error = serde_json::Error> {
+        super::payload::Payload::Node(self)
     }
 }

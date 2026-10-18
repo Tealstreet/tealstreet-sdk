@@ -422,9 +422,57 @@ fn native_market_info_decode_does_not_expand_each_utf16_unit_into_a_value() {
             text.len()
         );
         assert!(
-            allocated < text.len() * 24,
+            allocated < text.len() * 12,
             "retained info expanded into per-unit value nodes: {allocated} allocated bytes for {} input bytes",
             text.len()
+        );
+    });
+}
+
+#[cfg(unix)]
+#[path = "support/large_payload_decode.rs"]
+mod large_payload_decode;
+
+#[test]
+#[ignore = "requires the recorded Bybit, Paradex and OKX fixture manifest"]
+#[cfg(unix)]
+fn recorded_large_payload_parse_and_market_decode() {
+    large_payload_decode::recorded();
+}
+
+#[test]
+fn native_json_string_parser_avoids_geometric_buffer_growth() {
+    let content = "unescaped market metadata ".repeat(8000);
+    let text = Js::str(&format!("\"{content}\""));
+    run(async {
+        let runtime = native_runtime();
+        let http = client::rest_http_host(
+            runtime.clone(),
+            Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+        );
+        let shared = Rc::new(ScopeShared::new(
+            runtime,
+            http,
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+            Js::object(vec![]),
+            (),
+        ));
+        globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+        let json = shared.globals.get("JSON").unwrap();
+        let (parsed, allocated) =
+            allocation_profile::measure(|| json.call_method("parse", vec![text]));
+        assert_eq!(
+            parsed.unwrap().to_js_string().unwrap().as_ref(),
+            content.encode_utf16().collect::<Vec<_>>()
+        );
+        eprintln!(
+            "json_string_parse input_bytes={} allocated_bytes={allocated}",
+            content.len()
+        );
+        assert!(
+            allocated < content.len() * 5,
+            "parser geometrically reallocates unescaped text: {allocated} allocated bytes for {} ASCII bytes",
+            content.len()
         );
     });
 }

@@ -259,3 +259,9 @@ number object through the same flattened Market boundary. MarketFees requires an
 object with both numeric fields; absence remains absent for other venues. The
 static generated TS Market declaration is unchanged. The recorded public-market
 addon regression compares all 66 Paradex markets against actual maintained TS.
+
+Native retained payloads stream through the single `into_native_payload` Serde
+adapter. UTF-16 units decode into validated u16 storage without an intermediate
+Float-node tree or f64 vector. The tagged payload schema and malformed-unit
+refusals are unchanged. JSON string parsing copies unescaped spans together;
+escape/control validation and duplicate-property order keep their existing rules.

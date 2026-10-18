@@ -7459,7 +7459,7 @@ reason = "Closed native codec payload decoder shared by the typed ingress and ou
 
 [[exempt]]
 rs = "safe-cex-types/src/retained_json/codec.rs::Input::into_native_payload"
-reason = "Closed native codec encoder for the canonical retained data tree; the ordinary JSON writer remains a separate explicit boundary. No new TypeScript behavior or duplicate carrier."
+reason = "Streaming Serde adapter for the canonical retained native payload schema, without an expanded tagged value tree; the ordinary JSON writer remains a separate explicit boundary. No new TypeScript behavior or duplicate carrier."
 
 [[exempt]]
 rs = "safe-cex-types/src/retained_json/writer.rs::RetainedJsonInput::json_stringify"
