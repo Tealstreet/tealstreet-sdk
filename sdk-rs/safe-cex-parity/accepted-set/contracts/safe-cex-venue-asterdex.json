@@ -20294,7 +20294,6 @@
     },
     "evidence": "Reviewed public_depth_snapshot and its live caller AsterDEXPublicWebsocket.handleDepthSnapshot: raw JSON levels enter the actual production function. Native observations inspect each price/amount/cumulative-amount total as binary64 bits before owner serialization, with unsorted/fractional/hex positives and malformed, empty, crossed, zero, nonfinite and non-string refusal cases. Expectations are independently authored from source arithmetic, not captured production output. tests/live_ws_helpers.rs::public_depth_snapshot_matches_typescript supplies the maintained-source counterpart. No host, transport, or callback is stubbed by this contract."
   },
-<<<<<<< HEAD
   "safe_cex_venue_asterdex::exchange_helpers::is_raw_algo_order": {
     "category": "decoder",
     "api": {
@@ -22902,7 +22901,7 @@
       }
     ],
     "evidence": "Reviewed fetchOpenInterestMap against real production async helper with a RestAdapter backend fixture: bulk success prevents fallback; failure logs once; sequential nonempty symbols use timeout2000; per-symbol rejection remains silent; retained prefix prevents fallback after coercion error. Fixture supplies raw HTTP replies only and records actual outgoing requests. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
-=======
+  },
   "safe_cex_venue_asterdex::types::AsterDEXPlaceOrderOptsWire": {
     "shape": "union",
     "entrypoints": [],
@@ -40502,6 +40501,5 @@
         }
       ]
     }
->>>>>>> origin/master
   }
 }
