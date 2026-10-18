@@ -150,4 +150,32 @@ for(const value of [-0,NaN,Infinity,-Infinity]){
  assert.equal(oldMap.t,oldRow);assert.equal(f.store.tickers[0].bid,99);
  reentry.push({case:'assignment-base-before-id-getter',oldBid:oldRow.bid,stateBid:f.store.tickers[0].bid,idMapUsesNewRow:true,symbolMapUsesOldRow:true});
 }
-process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry}));
+const balances=[];
+{
+ const store=new DefaultStore(),captured=store.balance;
+ // A captured native referent is read lazily, without a Store-wide borrow.
+ captured.total=7;
+ assert.equal(store.balance,captured);assert.equal(captured.total,7);
+ store.update({balance:{used:1,free:2,total:3,upnl:4}});
+ assert.notEqual(store.balance,captured);assert.equal(captured.total,7);
+ const replaced=store.balance;
+ store.reset();assert.notEqual(store.balance,replaced);assert.equal(replaced.total,3);
+ balances.push({case:'captured-generation',granular:7,replaced:3,reset:store.balance.total});
+}
+{
+ let store=new DefaultStore();const captured=store.balance,cause={code:'opaque\uD800'};
+ Object.defineProperty(captured,'total',{enumerable:true,configurable:true,get(){throw cause}});
+ // Retaining the reference does not read its fields. Each later projection
+ // reaches the same getter, even after the Store has replaced its balance.
+ assert.equal(store.balance,captured);
+ for(let pass=0;pass<2;pass++){
+  let thrown;try{({...captured})}catch(error){thrown=error}
+  assert.equal(thrown,cause);
+  if(pass===0)store.reset();
+ }
+ store=null;
+ let thrown;try{captured.total}catch(error){thrown=error}
+ assert.equal(thrown,cause);
+ balances.push({case:'getter-cause-after-owner-drop',sameCause:true});
+}
+process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances}));
