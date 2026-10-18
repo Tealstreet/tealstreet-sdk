@@ -35,7 +35,7 @@ pub fn create(
             config: &request,
         })
         .map_err(|error| Thrown::error("Error", &error.to_string()))?;
-    host.configure_exchange(exchange)?;
+    host.configure_exchange(exchange.clone())?;
     let defaults = config.spread_object()?;
     defaults.define("timeout", Js::Number(20_000.0))?;
     let headers = super::axios_headers()?;
@@ -56,7 +56,7 @@ pub fn create(
     let client = super::create(host.clone(), defaults);
     install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied)?;
     let stats_runtime = host.runtime();
-    let stats_exchange = serde_json::to_value(owner.name())
+    let stats_exchange = serde_json::to_value(&exchange)
         .expect("exchange name")
         .as_str()
         .expect("exchange name string")
