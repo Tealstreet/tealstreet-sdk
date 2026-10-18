@@ -393,11 +393,11 @@ impl BlofinExchangeHost for NativeHost {
         let sleep = self.runtime.sleep(delay.max(0.0) as u64);
         Box::pin(async move { sleep.await.map_err(ServiceError::Host) })
     }
-    fn start_order_read(
+    fn start_async<T: 'static>(
         &self,
         base: &NativeBase,
-        body: crate::rest_lifecycle::LifecycleFuture<'static, Vec<Order>, ExchangeError>,
-    ) -> crate::rest_lifecycle::LifecycleFuture<'static, Vec<Order>, ExchangeError> {
+        body: crate::rest_lifecycle::LifecycleFuture<'static, T, ExchangeError>,
+    ) -> crate::rest_lifecycle::LifecycleFuture<'static, T, ExchangeError> {
         // Keep the complete native Result as T: no error projection or cloning.
         let waiter =
             safe_cex_exchange::eager::start_eager(

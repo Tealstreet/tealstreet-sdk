@@ -1943,8 +1943,30 @@ See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomi
 consumer boundaries and independent native/Node/compiled controls. The browser
 DATA bridge caches identity before walking enumerable indexed and named fields.
 
+Internal update listeners subscribe to the canonical Store's native state referent.
+They do not project StoreData or visit unrelated getters before emitter fanout.
+Typed subscribers remain explicit projection boundaries at their reached slots;
+native and typed slots share live order, unsubscription and first-error behavior.
+StoreUpdateThrottle accepts a retained argument type while its existing StoreFrame
+constructor remains available. Native account delivery retains the Js argument
+through bursts and projects only when leading/trailing delivery actually runs.
+See [the delivery review](NATIVE_STORE_DELIVERY_REVIEW.md) for compiled controls,
+receipt-qualified replay results, and the separate Bybit options decode timeout.
+
+`native_final_drop(base, venue_cleanup)` is the single native final-handle teardown
+entrypoint. It marks disposed before venue cleanup and always performs shared
+cleanup afterward, silencing Result errors at destruction. The callback must
+finish cancelling venue-owned tasks/state even if an earlier cleanup returns an
+error. Stored timer callbacks must use weak venue ownership so they cannot keep
+the final external handle alive; held venues must still service them normally.
+This accepted lifetime policy has one core override classification and no source
+super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
+`tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
+cleanup, while Backpack/BingX binding probes cover actual sockets/timers.
+
 `REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
 `JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
 materialization follows that source chain and the canonical retained response.
 Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
 signed requests before JSON. Original JS object identity remains an owned-tree residual.
+

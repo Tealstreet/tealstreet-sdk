@@ -7780,3 +7780,15 @@ reason = "C3: reads the nearest retained response origin deterministically, usin
 [[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::response_json_view"
 reason = "C3: explicit computed decision-5 Rust model/report boundary over retained_response_input. Reuses the existing lossy JSON projection without storing its result or mutating the original response. No standalone TypeScript declaration; raw consumers use retained_response_input."
+
+[[exempt]]
+rs = "safe-cex-store/src/contract.rs::NativeStoreSubscriber"
+reason = "Native ABI: lower Store protocol borrows the canonical state through Any so exchange/registry callbacks retain the actual Js referent without a store-to-exchange dependency or per-notification typed copy. The compiled internal emitter getter/identity and native account burst witnesses exercise this capability."
+
+[[exempt]]
+rs = "safe-cex-store/src/contract.rs::Store::subscribe_native"
+reason = "Native ABI for the existing TS Store.subscribe data argument: required direct native-state subscription shares the canonical ordered listener registry; typed subscribe remains an explicit projection boundary. There is no fallback graph or snapshot. Base emitter getter/throw-order tests and account delivery replay exercise it."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::new_with_argument"
+reason = "Native host capability: the one shared lodash throttle retains its argument generically, allowing account delivery to carry the actual Js state until invocation. Existing StoreFrame new delegates to the same constructor/algorithm. The native argument burst test verifies one leading read, no intermediate reads, latest-state trailing delivery and cancellation."

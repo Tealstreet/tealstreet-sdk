@@ -130,57 +130,67 @@ impl BackpackExchange {
         }))
     }
     pub fn fetch_markets(self: &Rc<Self>) -> reads::Task<Vec<reads::Market<Value>>, ExchangeError> {
-        reads::fetch_markets(self.frame())
+        let future = reads::fetch_markets(self.frame());
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_tickers(
         self: &Rc<Self>,
     ) -> reads::Task<Vec<Option<reads::Ticker<Value>>>, ExchangeError> {
-        reads::fetch_tickers(self.frame())
+        let future = reads::fetch_tickers(self.frame());
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_ohlcv(
         self: &Rc<Self>,
         opts: reads::OHLCVOptions,
     ) -> reads::Task<Vec<Option<reads::Candle>>, ExchangeError> {
-        reads::fetch_ohlcv(self.frame(), opts)
+        let future = reads::fetch_ohlcv(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_order_book(
         self: &Rc<Self>,
         symbol: JsString,
     ) -> reads::Task<reads::OrderBook, ExchangeError> {
-        reads::fetch_order_book(self.frame(), symbol)
+        let future = reads::fetch_order_book(self.frame(), symbol);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_historical_fills(
         self: &Rc<Self>,
         opts: reads::ExecutionsOptions,
     ) -> reads::Task<Vec<reads::Execution>, ExchangeError> {
-        reads::fetch_historical_fills(self.frame(), opts)
+        let future = reads::fetch_historical_fills(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_orders(
         self: &Rc<Self>,
         symbols: Option<Vec<JsString>>,
     ) -> reads::Task<Vec<Option<Order>>, ExchangeError> {
-        reads::fetch_orders(self.frame(), symbols)
+        let future = reads::fetch_orders(self.frame(), symbols);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_positions(self: &Rc<Self>) -> reads::Task<Vec<reads::Position>, ExchangeError> {
-        reads::fetch_positions(self.frame())
+        let future = reads::fetch_positions(self.frame());
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fix_trigger_orders_without_trigger_by(
         self: &Rc<Self>,
         orders: Value,
     ) -> reads::Task<(), ExchangeError> {
-        reads::fix_trigger_orders_without_trigger_by(self.frame(), orders)
+        let future = reads::fix_trigger_orders_without_trigger_by(self.frame(), orders);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn place_order(
         self: &Rc<Self>,
         opts: actions::Options,
     ) -> actions::Task<Vec<JsString>, ExchangeError> {
-        actions::place_order(self.frame(), opts)
+        let future = actions::place_order(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn update_order(
         self: &Rc<Self>,
         opts: actions::Update,
     ) -> actions::Task<Vec<JsString>, ExchangeError> {
-        actions::update_order(self.frame(), opts)
+        let future = actions::update_order(self.frame(), opts);
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn get_position_mode(&self) -> ExchangeFuture<'static, PositionMode> {
         crate::account_reads::get_position_mode()
@@ -673,7 +683,7 @@ impl BackpackExchange {
         let owner = self.clone();
         let log = owner.clone();
         let xhr = self.xhr.clone();
-        crate::account_reads::cancel_order(
+        let future = crate::account_reads::cancel_order(
             &order.symbol,
             &order.id,
             move |symbol| {
@@ -697,7 +707,8 @@ impl BackpackExchange {
                 }))
             },
             move |m, s| log.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn cancel_symbol_orders(
         self: &Rc<Self>,
@@ -706,7 +717,7 @@ impl BackpackExchange {
         let owner = self.clone();
         let log = owner.clone();
         let xhr = self.xhr.clone();
-        crate::account_reads::cancel_symbol_orders(
+        let future = crate::account_reads::cancel_symbol_orders(
             &symbol,
             move |s| {
                 Ok(owner
@@ -729,12 +740,13 @@ impl BackpackExchange {
                 }))
             },
             move |m, s| log.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_balance(self: &Rc<Self>) -> actions::Task<safe_cex_types::Balance, ExchangeError> {
         let xhr = self.xhr.clone();
         let owner = self.clone();
-        crate::account_reads::fetch_balance(
+        let future = crate::account_reads::fetch_balance(
             move |endpoint| {
                 let response = xhr.request(
                     "GET",
@@ -745,14 +757,15 @@ impl BackpackExchange {
                 Ok(Box::pin(async move { response.await?.prepared() }))
             },
             move |m, s| owner.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn get_account(
         self: &Rc<Self>,
     ) -> actions::Task<crate::account_reads::AccountIdentity, ExchangeError> {
         let xhr = self.xhr.clone();
         let owner = self.clone();
-        crate::account_reads::get_account(
+        let future = crate::account_reads::get_account(
             move |endpoint| {
                 let response = xhr.request(
                     "GET",
@@ -763,7 +776,8 @@ impl BackpackExchange {
                 Box::pin(async move { response.await?.prepared() })
             },
             move |m, s| owner.base.log(m, s),
-        )
+        );
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn fetch_account_info(self: &Rc<Self>) -> actions::Task<(), ExchangeError> {
         let response = self.xhr.request(
@@ -774,14 +788,15 @@ impl BackpackExchange {
         );
         let owner = self.clone();
         let log = owner.clone();
-        Box::pin(async move {
+        let future = Box::pin(async move {
             crate::account_reads::fetch_account_info(
                 &owner.account_leverage_limit,
                 |_| async move { response.await?.prepared() },
                 move |m, s| log.base.log(m, s),
             )
             .await
-        })
+        });
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn listen_ohlcv(
         self: &Rc<Self>,
@@ -845,5 +860,32 @@ impl BackpackExchange {
             owner: self.clone(),
         }
         .reference(tp, explicit)
+    }
+}
+
+// Native lifetime ruling: an unobserved final handle must not leave live socket
+// callbacks referring to a dead weak parent. Explicit source disposal remains
+// independently ordered; final destruction additionally closes native resources.
+impl Drop for BackpackExchange {
+    fn drop(&mut self) {
+        safe_cex_exchange::native_final_drop(&self.base, || {
+            if let Some(public) = self.public_websocket.get() {
+                public.ticker_handler.cancel();
+                let _ = public.dispose();
+                for task in public.tasks.borrow_mut().drain(..) {
+                    task.cancel();
+                }
+            }
+            if let Some(private) = self.private_websocket.get() {
+                let _ = private.dispose();
+                for task in private.tasks.borrow_mut().drain(..) {
+                    task.cancel();
+                }
+            }
+            for task in self.tasks.borrow_mut().drain(..) {
+                task.cancel();
+            }
+            Ok(())
+        });
     }
 }

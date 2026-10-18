@@ -559,3 +559,9 @@ by two constructed Spot clients, signed AddOrder requests and entropy refusal;
 `scripts/client-id-alias-controls.py` requires named compiled semantic failures
 and exact restored passes. `scripts/client-id-alias-contracts.mjs` uses fresh
 compiler-authenticated identity/Serde/conversion probes for this one alias.
+
+`LOOP_SOCKET_ALIAS_REVIEW.md` covers the concrete socket event and periodic tick
+callback capabilities. `loop-socket-alias-contracts.mjs` runs authenticated native
+alias probes; `accepted_loop_socket_aliases` drives the actual socket/Store and
+signed timer/HTTP paths. Three named compiled consumer faults and exact restored
+passes are required by `loop-socket-alias-controls.py`.

@@ -509,3 +509,114 @@ fn store_notification_conversion_retains_subscriber_identity_on_both_paths() {
         "non-notification errors invent no subscriber identity"
     );
 }
+
+#[test]
+fn internal_update_delivery_retains_graph_without_reading_unrelated_getters() {
+    use safe_cex_exchange::js_runtime::{store, value::Js};
+    let (base, native) = fixture();
+    let facade = store::facade(native.clone()).unwrap();
+    let balance = facade.get("balance").unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    balance
+        .define_accessor(
+            "used",
+            Some(Rc::new(move |_| {
+                count.set(count.get() + 1);
+                Err(safe_cex_exchange::js_runtime::value::Thrown::type_error(
+                    "unrelated row read",
+                ))
+            })),
+            None,
+        )
+        .unwrap();
+    let deliveries = Rc::new(RefCell::new(Vec::new()));
+    let seen = deliveries.clone();
+    let expected = balance.clone();
+    base.on(
+        "update",
+        Rc::new(move |_, data| {
+            assert!(
+                data.get("balance").unwrap().strict_equals(&expected),
+                "deliver the canonical graph referent"
+            );
+            seen.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    native
+        .set_setting("isHedged", true)
+        .expect("internal emitter must not project unrelated fields");
+    native.set_setting("isHedged", false).unwrap();
+    assert_eq!(reads.get(), 0);
+    assert_eq!(deliveries.borrow().len(), 2);
+    assert!(
+        deliveries.borrow()[0]
+            .get("options")
+            .unwrap()
+            .get("isHedged")
+            .unwrap()
+            .strict_equals(&Js::Bool(false)),
+        "retained event observes later granular writes"
+    );
+}
+
+#[test]
+fn native_update_listener_throw_stops_typed_projection_and_retains_original_cause() {
+    use safe_cex_exchange::js_runtime::{
+        store,
+        value::{Js, Thrown},
+    };
+    let (base, native) = fixture();
+    let facade = store::facade(native.clone()).unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    facade
+        .get("balance")
+        .unwrap()
+        .define_accessor(
+            "used",
+            Some(Rc::new(move |_| {
+                count.set(count.get() + 1);
+                Err(Thrown::type_error("must not project before listener"))
+            })),
+            None,
+        )
+        .unwrap();
+    let marker = Js::object(vec![("sentinel", Js::Bool(true))]);
+    let mut original = failure("native update listener sentinel");
+    original.code = Some(marker.clone());
+    base.on("update", Rc::new(move |_, _| Err(original.clone())));
+    let later = Rc::new(Cell::new(false));
+    let reached = later.clone();
+    let _unsubscribe = Store::subscribe(
+        native.as_ref(),
+        Box::new(move |_, _| {
+            reached.set(true);
+            Ok(())
+        }),
+    );
+    let error = ExchangeError::from(native.set_setting("isHedged", true).unwrap_err());
+    assert!(error.code.as_ref().unwrap().strict_equals(&marker));
+    assert_eq!(error.message, "native update listener sentinel");
+    assert_eq!(reads.get(), 0);
+    assert!(!later.get());
+    assert!(native.options().unwrap().is_hedged);
+}
+
+#[test]
+#[ignore = "mandatory core include-ignored CI installs frozen TinyEmitter and TypeScript"]
+fn native_graph_emitter_matches_maintained_store_subscription() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/native_store_emitter_source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "maintained Store/emitter source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

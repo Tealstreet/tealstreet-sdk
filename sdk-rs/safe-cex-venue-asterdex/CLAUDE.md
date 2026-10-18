@@ -208,3 +208,12 @@ whole TS class with NativeRuntime and signed reqwest loopback requests: missing
 credentials log before polling; discarded getAccount/changePositionMode waiters
 retain their held HTTP continuation and Store effect. This family proof does
 not resolve the separate socket or validateAccount error-envelope findings.
+
+Public socket ingress uses canonical retained capture, then derives the existing
+typed Value callback argument. String fields and keys use the canonical typed
+decoder's U+FFFD view; numeric scalars keep the retained projection, including
+overflow and signed zero. It does not stringify/reparse the frame or use the
+request-params parser. `exchange_trait` compares twelve actual constructed TS
+and Rust socket cases (twenty frames), including whole batches with lone units
+in an unused nested value/key, ordinary siblings and native numeric bits. The
+private stream's Value callback/info seam remains a separate migration.

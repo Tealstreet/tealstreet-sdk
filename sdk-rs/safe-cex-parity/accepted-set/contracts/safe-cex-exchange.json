@@ -30821,7 +30821,7 @@
   },
   "safe_cex_exchange::store_delivery::StoreUpdateThrottle": {
     "shape": "typed",
-    "evidence": "The relocated constructor accepts an existing typed timer host, binary64 wait and store-frame callback; it stores these capabilities and initializes throttle bookkeeping without parsing raw data. Timing/cancellation behavior stays covered by the existing worker runtime tests.",
+    "evidence": "Both constructors receive an existing timer host, binary64 wait and typed callback. new retains its StoreFrame ABI and delegates to the generic native-argument constructor; neither parses raw input. The constructed native Store argument witness executes leading/trailing delivery, getter read timing, reference identity and cancellation; worker runtime tests retain the original StoreFrame timing coverage.",
     "entrypoints": [
       {
         "api": {
@@ -30945,6 +30945,126 @@
         },
         "input": "typed",
         "reason": "Typed host/callback construction and numeric wait normalization; no raw text/JSON or untyped callback result enters the constructor."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new_with_argument",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "wait",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "generic": "A"
+                                            }
+                                          ],
+                                          "output": {
+                                            "resolved_path": {
+                                              "path": "core::result::Result",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "tuple": []
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed host and callback construction with an owned argument type; payload projection belongs to the callback invocation, never to throttle construction or retention. The actual Js burst witness records one leading getter read and one latest-state trailing read."
       }
     ]
   },
