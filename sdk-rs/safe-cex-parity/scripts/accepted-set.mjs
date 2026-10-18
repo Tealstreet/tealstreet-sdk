@@ -14,6 +14,7 @@ import { verifiedMacroOrigins } from './accepted-macro-origins.mjs';
 import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutputDefinitionCovers } from './accepted-number-output.mjs';
 import { genericAliasProbe } from './accepted-callable-alias.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
+import { dependencyExportProvider, publicRootExportNames } from './accepted-glob-exports.mjs';
 import { measurementScope, scopedMeasurements } from './accepted-measure-scope.mjs';
 import { featurePlan, requireFeatureReceipts } from './accepted-feature-contracts.mjs';
 import { contractFor } from './accepted-contracts.mjs';
@@ -47,6 +48,7 @@ const members = workspaceMembers.filter(pkg => !selected || pkg.name === selecte
 assert.ok(members.length, `accepted-set: no workspace packages matched ${selected ?? 'workspace'}`);
 const scanner = buildScanner(jobs);
 const found = [];
+const dependencyExports = new Map();
 const featureKey = (id, features) => JSON.stringify([id, [...features].sort()]);
 const queued = new Set(members.map(pkg => featureKey(pkg.id, pkg.probeFeatures)));
 const compiled = new Set();
@@ -130,7 +132,37 @@ for (const pkg of members) {
     assert.ok(construction[owner.name]?.reason?.trim(), `${owner.name}: accepted-set assertion: private-construction Clone/Copy must be classified`);
     assert.deepEqual(owner.traits, construction[owner.name].traits, `${owner.name}: accepted-set assertion: private-construction duplication traits changed`);
   }
-  const local = spawnSync(scanner, ['--macro-origins-json', JSON.stringify(macroOrigins), ...[...new Set([target.src_path, ...result.sources.map(file => path.resolve(root, file))])].filter(file => !path.relative(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'), file).startsWith('..'))], { encoding: 'utf8' });
+  const localSources = [...new Set([target.src_path, ...result.sources.map(file => path.resolve(root, file))])].filter(file => !path.relative(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'), file).startsWith('..'));
+  const requestedGlobs = spawnSync(scanner, ['--dependency-globs-json', ...localSources], { encoding: 'utf8' });
+  assert.equal(requestedGlobs.status, 0, `accepted-set: dependency glob discovery failed: ${requestedGlobs.stderr}`);
+  const globExports = {};
+  const globProviders = new Set();
+  for (const name of JSON.parse(requestedGlobs.stdout)) {
+    const provider = dependencyExportProvider(name, { consumer: pkg, doc, metadata, artifacts });
+    if (!provider) continue;
+    const { pkg: dependency, library, features } = provider;
+    const key = JSON.stringify([dependency.id, configuration.target, features]);
+    if (!dependencyExports.has(key)) {
+      const guarded = spawnSync(scanner, ['--guarded-sources-json', library.src_path], { encoding: 'utf8' });
+      assert.equal(guarded.status, 0, `accepted-set: dependency export module discovery assertion: ${guarded.stderr}`);
+      cargo(['rustdoc', '--locked', '-p', dependency.name, '--jobs', jobs, '--lib', ...targetArgs,
+        '--no-default-features', ...(features.length ? ['--features', features.join(',')] : []),
+        '--', '-Z', 'unstable-options', '--output-format', 'json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], { env: { RUSTC_BOOTSTRAP: '1' } });
+      const dependencyDoc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, ...(configuration.target === 'native' ? [] : [configuration.target]), 'doc', `${library.name.replaceAll('-', '_')}.json`), 'utf8'));
+      const providerArtifacts = cargo(['check', '--locked', '-p', dependency.name, '--jobs', jobs, '--lib', ...targetArgs,
+        '--no-default-features', ...(features.length ? ['--features', features.join(',')] : []), '--message-format=json'])
+        .trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(item => item.reason === 'compiler-artifact');
+      const current = providerArtifacts.filter(item => item.package_id === dependency.id && item.target.name === library.name && item.target.kind.includes('lib'));
+      assert.equal(current.length, 1, `accepted-set: dependency export artifact missing ${dependency.name}`);
+      assert.deepEqual(current[0].features.slice().sort(), features, `accepted-set: dependency export features changed ${dependency.name}`);
+      dependencyExports.set(key, { names: publicRootExportNames(dependencyDoc, { workspace: root, library }),
+        sources: JSON.parse(guarded.stdout), macroOrigins: verifiedMacroOrigins(dependencyDoc, dependency, metadata, providerArtifacts, compilerSysroot),
+        types: inventory(dependencyDoc, { defaultTraits, receiverTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) }).types });
+    }
+    globExports[name] = dependencyExports.get(key).names;
+    globProviders.add(dependencyExports.get(key));
+  }
+  const local = spawnSync(scanner, ['--macro-origins-json', JSON.stringify(macroOrigins), '--glob-exports-json', JSON.stringify(globExports), ...localSources], { encoding: 'utf8' });
   assert.equal(local.status, 0, `accepted-set: local type scope scan failed: ${local.stderr}`);
   const localFunctionContracts = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('local-functions');
   const localTypeHelpers = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('local-type-helpers');
@@ -174,6 +206,18 @@ for (const pkg of members) {
     }
     return { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
   }).filter(Boolean);
+  for (const provider of globProviders) {
+    if (provider.effectsChecked) continue;
+    const effects = spawnSync(scanner, ['--macro-origins-json', JSON.stringify(provider.macroOrigins), ...provider.sources], { encoding: 'utf8' });
+    assert.equal(effects.status, 0, `accepted-set: dependency export source scan failed: ${effects.stderr}`);
+    for (const line of effects.stdout.trim().split('\n').filter(Boolean)) {
+      const [file, ident, row, column] = line.split('\t');
+      const helper = { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
+      if (reviewedGenericDecoderHelper(helper, localTypeHelpers, fs.readFileSync(file), provider.types, allContracts)) continue;
+      assert.ok(!ident.startsWith('UNSUPPORTED_'), `${file}::${ident}: accepted-set assertion: dependency export source effect is unverified`);
+    }
+    provider.effectsChecked = true;
+  }
   // Same-name block-local types in different bodies are distinct declarations;
   // their declaration position names them. Identical positions still fail closed.
   const spellings = locals.reduce((counts, item) => counts.set(item.label, (counts.get(item.label) ?? 0) + 1), new Map());

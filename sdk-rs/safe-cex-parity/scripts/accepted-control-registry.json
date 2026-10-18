@@ -1,5 +1,10 @@
 {
   "tests": {
+    "accepted-glob-exports.test.mjs": [
+      "dependency glob providers require the active binding compiler artifact and feature set",
+      "dependency glob names include public reexports and macros and refuse incomplete inventories",
+      "Bitrue dependency glob executes a real exported macro and refuses its hidden origin"
+    ],
     "accepted-aliases.test.mjs": [
       "public alias claims require exact mapped declarations or explicit exemptions",
       "native tooling alias exceptions cannot replace SDK mappings",
@@ -273,6 +278,8 @@
     ]
   },
   "mutations": [
+    "workspace dependency glob macro shadow",
+    "workspace dependency glob hidden provider expansion",
     "doc-hidden production enum",
     "doc-hidden production module",
     "doc-dependent attribute",
