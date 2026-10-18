@@ -124,7 +124,9 @@ impl ExchangeRuntime for Runtime {
         0.375
     }
     fn report_raw_exception(&self, value: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
-        self.errors.borrow_mut().push(safe_cex_exchange::runtime::exception_text(value));
+        self.errors
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(value));
     }
     fn report_exception(&self, e: &ExchangeError, _: &Value) {
         self.errors.borrow_mut().push(e.message.clone());

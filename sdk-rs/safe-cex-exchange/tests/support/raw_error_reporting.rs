@@ -436,11 +436,22 @@ fn raw_reporter_console_and_sink_receive_original_native_errors() {
         .arg(root.join("tests/raw-error-source.cjs"))
         .arg("--console-profile")
         .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
-        .output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let expected: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
-    let actual: Vec<String> = assembled.runtime.consoled.borrow().iter()
-        .filter(|(severity, _)| severity == "error").map(|(_, text)| text.clone()).collect();
+    let actual: Vec<String> = assembled
+        .runtime
+        .consoled
+        .borrow()
+        .iter()
+        .filter(|(severity, _)| severity == "error")
+        .map(|(_, text)| text.clone())
+        .collect();
     assert_eq!(actual, expected, "maintained TS console first lines");
     let reports = assembled.runtime.raw_exceptions.borrow();
     assert!(reports[0].same_reference(&reports[1]));

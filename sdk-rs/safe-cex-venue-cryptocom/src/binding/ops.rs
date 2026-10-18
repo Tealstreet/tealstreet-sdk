@@ -286,7 +286,12 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             _: &serde_json::Value,
         ) {
         }
-        fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &serde_json::Value) {}
+        fn report_raw_exception(
+            &self,
+            _: &safe_cex_exchange::js_runtime::value::Js,
+            _: &serde_json::Value,
+        ) {
+        }
         fn execute_worker_request(
             &self,
             _: serde_json::Value,

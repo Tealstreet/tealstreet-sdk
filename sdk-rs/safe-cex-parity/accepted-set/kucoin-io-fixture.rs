@@ -183,7 +183,11 @@ impl safe_cex_exchange::runtime::ExchangeRuntime for ConnectedRuntime {
     fn random(&self) -> f64 {
         self.inner.random()
     }
-    fn report_raw_exception(&self, value: &safe_cex_exchange::js_runtime::value::Js, context: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        value: &safe_cex_exchange::js_runtime::value::Js,
+        context: &serde_json::Value,
+    ) {
         self.inner.report_raw_exception(value, context);
     }
     fn report_exception(

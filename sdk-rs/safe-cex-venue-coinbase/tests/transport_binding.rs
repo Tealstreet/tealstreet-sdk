@@ -53,7 +53,11 @@ impl ExchangeRuntime for Runtime {
     fn report_exception(&self, error: &ExchangeError, context: &Value) {
         self.inner.report_exception(error, context);
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, context: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        context: &Value,
+    ) {
         self.inner.report_raw_exception(error, context);
     }
     fn execute_worker_request(&self, request: Value) -> ExchangeFuture<'static, Value> {

@@ -139,8 +139,14 @@ impl ExchangeRuntime for TestRuntime {
     fn report_exception(&self, error: &ExchangeError, _: &serde_json::Value) {
         self.reports.borrow_mut().push(error.message.clone());
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &serde_json::Value) {
-        self.reports.borrow_mut().push(safe_cex_exchange::runtime::exception_text(error));
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
+        self.reports
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn execute_worker_request(
         &self,

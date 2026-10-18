@@ -300,7 +300,9 @@ impl ExchangeRuntime for Host {
             .push(format!("{} {context}", error.message));
     }
     fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
-        self.reports.borrow_mut().push(safe_cex_exchange::runtime::exception_text(error));
+        self.reports
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Err(ExchangeError::new("no worker in tests")) })

@@ -1047,7 +1047,10 @@ impl BaseExchange {
         if self.is_disposed() {
             self.runtime.console_values(
                 "warning",
-                &[Js::str("exchange error (disposed, suppressing)"), source.clone()],
+                &[
+                    Js::str("exchange error (disposed, suppressing)"),
+                    source.clone(),
+                ],
             );
             return Ok(());
         }

@@ -50,7 +50,8 @@ impl ExchangeRuntime for ReportingRuntime {
         0.5
     }
     fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, data: &Value) {
-        let error = safe_cex_exchange::js_runtime::value::to_json(error).expect("explicit JSON fixture observation");
+        let error = safe_cex_exchange::js_runtime::value::to_json(error)
+            .expect("explicit JSON fixture observation");
         self.trace.borrow_mut().push("report".into());
         self.reports
             .borrow_mut()

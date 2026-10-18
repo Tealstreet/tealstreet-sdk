@@ -136,7 +136,9 @@ impl ExchangeRuntime for Runtime {
         self.reports.borrow_mut().push(error.message.clone());
     }
     fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
-        self.reports.borrow_mut().push(safe_cex_exchange::runtime::exception_text(error));
+        self.reports
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })

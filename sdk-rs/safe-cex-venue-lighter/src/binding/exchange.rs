@@ -464,7 +464,12 @@ mod tests {
             panic!("runtime used while installing globals")
         }
         fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
-        fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &serde_json::Value) {}
+        fn report_raw_exception(
+            &self,
+            _: &safe_cex_exchange::js_runtime::value::Js,
+            _: &serde_json::Value,
+        ) {
+        }
         fn execute_worker_request(
             &self,
             _: serde_json::Value,
