@@ -1171,3 +1171,52 @@ fn native_http_callable_aliases_execute_the_production_factory() {
     assert_eq!(wire.requests.lock().unwrap().len(), 1);
     assert_eq!(wire.requests.lock().unwrap()[0].timeout_ms, Some(20_000));
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn routed_client_clone_retains_both_configured_native_owners() {
+    use safe_cex_num::JsJsonValue;
+    use safe_cex_venue_backpack::native_http::RoutedClient;
+    let (primary_owner, primary_runtime, _, primary_wire) = support::fixture();
+    let (reader_owner, reader_runtime, _, reader_wire) = support::fixture();
+    let primary = Rc::clone(&primary_owner.xhr);
+    let reader = Rc::clone(&reader_owner.xhr);
+    assert!(!Rc::ptr_eq(&primary, &reader));
+    let original = RoutedClient::new(primary.clone(), reader.clone());
+    let primary_count = Rc::strong_count(&primary);
+    let reader_count = Rc::strong_count(&reader);
+    let clone = original.clone();
+    assert_eq!(Rc::strong_count(&primary), primary_count + 1);
+    assert_eq!(Rc::strong_count(&reader), reader_count + 1);
+    assert!(Rc::ptr_eq(&clone, &primary));
+    original.retries.set(3);
+    assert_eq!(clone.retries.get(), 3);
+    drop(original);
+    assert_eq!(Rc::strong_count(&primary), primary_count);
+    assert_eq!(Rc::strong_count(&reader), reader_count);
+    for (method, runtime, expected_primary, expected_reader) in [
+        ("GET", &reader_runtime, 0, 1),
+        ("POST", &primary_runtime, 1, 1),
+        ("get", &primary_runtime, 2, 1),
+    ] {
+        let result = ready(
+            runtime,
+            clone.request(
+                method,
+                "/api/v1/time",
+                JsJsonValue::Undefined,
+                JsJsonValue::Undefined,
+            ),
+        )
+        .unwrap();
+        assert_eq!(result.field("id").unwrap().utf8().unwrap(), "native-id");
+        assert_eq!(
+            primary_wire.requests.lock().unwrap().len(),
+            expected_primary
+        );
+        assert_eq!(reader_wire.requests.lock().unwrap().len(), expected_reader);
+    }
+    assert_eq!(primary_wire.requests.lock().unwrap()[0].method, "POST");
+    assert_eq!(primary_wire.requests.lock().unwrap()[1].method, "get");
+    assert_eq!(reader_wire.requests.lock().unwrap()[0].method, "GET");
+}

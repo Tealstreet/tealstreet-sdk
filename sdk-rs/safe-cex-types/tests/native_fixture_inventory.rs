@@ -208,7 +208,18 @@ fn parse_native_test_fixtures_and_bit_comparison_functions() {
             }
         }
     }
+    // The canonical Store owner moved to exchange-core. Follow its existing
+    // fixtures rather than lowering the reviewed observation bucket counts.
     for relative in [
+        "../safe-cex-exchange/tests/store_bucket_witnesses.rs",
+        "../safe-cex-exchange/tests/store_clone_construction.rs",
+        "../safe-cex-exchange/tests/store_contract_runtime.rs",
+        "../safe-cex-exchange/tests/store_notification.rs",
+        "../safe-cex-exchange/tests/store_p4_store.rs",
+        "../safe-cex-exchange/tests/store_patch_info.rs",
+        "../safe-cex-exchange/tests/store_ticker_timestamp.rs",
+        "../safe-cex-exchange/src/js_runtime/native_store/legacy_owner_tests.rs",
+        "../safe-cex-exchange/src/js_runtime/native_store/legacy_request_tests.rs",
         "../safe-cex/tests/native_store_patches.rs",
         "../safe-cex/tests/risk_recovery.rs",
         "../safe-cex/tests/dictionary_write.rs",
