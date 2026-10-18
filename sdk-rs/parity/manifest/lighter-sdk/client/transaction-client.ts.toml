@@ -266,7 +266,6 @@ rs = [ "safe-cex-venue-lighter/src/transaction_signing.rs::build_create_order_tr
 status = "ported"
 note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary. Rename target: `safe-cex-venue-lighter/src/transaction_signing.rs::build_create_order_transaction`. Split member `safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::create_order`. Shared synchronous post-nonce build/sign phase."
 
-
 [[symbol]]
 ts = "TransactionClient.getCreateOrderTransactions"
 kind = "method"
@@ -282,7 +281,6 @@ layer = "adapted"
 rs = [ "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_create_grouped_orders_transaction", "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_create_grouped_orders_with_side_comparison", "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::grouped_orders" ]
 status = "divergent"
 note = "CHOSEN: the native client deliberately owns parameter records and batch vectors, giving callers predictable Rust ownership. TypeScript retains mutable caller aliases across awaits; mutations after invocation (and dynamic batch edits) can change built/sent DTOs there while native inputs are snapshots. This applies transitively to submit wrappers too. Native microtask promises preserve eager lock reservation, FIFO await continuations, detached execution, finally release, opaque host errors, mutable DTO/array fulfillment identity and readonly primitive fulfillment. The live source oracle records the caller-mutation survivor at getCreateOrderTransaction (source price99 versus native2401). The production JS constructor additionally retains live parameters until nonce settlement and binds all fourteen get/submit methods; 28 held-nonce source/native observations preserve getter timing and nonce-rejection precedence, and 28 successful observed/dropped-handle executions cover signing, submission and live batch growth. See TRANSACTION_TIMING_AUDIT.md. The typed owned-input snapshot is accepted under decision 2; arbitrary builder getter rereads and prototype replacement remain outside this finite proof. Split member `safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_create_grouped_orders_with_side_comparison`. Retains the JS strict-side comparator across nonce allocation before the common grouped build/sign body. Split member `safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::grouped_orders`. Shared synchronous post-nonce build/sign phase."
-
 
 [[symbol]]
 ts = "TransactionClient.getCancelOrderTransaction"
