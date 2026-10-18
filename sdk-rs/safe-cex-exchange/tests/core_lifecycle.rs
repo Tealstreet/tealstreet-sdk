@@ -808,15 +808,25 @@ fn signer_listener_throw_keeps_source_settled_but_unresolved_state() {
 fn initial_signer_status_failure_returns_before_registration() {
     let runtime = Rc::new(Runtime::default());
     let signer = Signer::new(false);
-    let mut base = base(runtime);
+    let mut base = base(runtime.clone());
     base.signers.remote_signer = Some(signer.clone());
     base.on(
         "remoteSignerStatus",
         Rc::new(|_, _| Err(ExchangeError::new("disconnected listener failed"))),
     );
-    assert_eq!(
-        ready(base.wait_for_remote_signer()).unwrap_err().message,
-        "disconnected listener failed"
+    let mut waiter = Box::pin(base.wait_for_remote_signer());
+    assert!(
+        poll(waiter.as_mut()).is_pending(),
+        "rejection preserves source await fence"
+    );
+    runtime.driver.advance(0);
+    let Poll::Ready(Err(error)) = poll(waiter.as_mut()) else {
+        panic!("expected signer rejection");
+    };
+    assert_eq!(error.message, "disconnected listener failed");
+    assert!(
+        runtime.exceptions.borrow().is_empty(),
+        "observed rejection is handled"
     );
     assert!(
         signer.callbacks.borrow().is_empty(),
@@ -1059,4 +1069,60 @@ fn signer_runtime_shutdown_releases_pending_subscription() {
     assert_eq!(signer.unsubscribed.get(), 1);
     base.dispose().unwrap();
     assert_eq!(signer.unsubscribed.get(), 1);
+}
+
+#[test]
+fn discarded_signer_status_rejection_reaches_host_with_original_cause() {
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown, error_object};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/listener-oracle.cjs"
+        ))
+        .arg("--signer-rejection")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut actual = vec![];
+    for fail in ["disconnected", "connected"] {
+        let runtime = Rc::new(Runtime::default());
+        let signer = Signer::new(false);
+        let mut base = base(runtime.clone());
+        base.signers.remote_signer = Some(signer.clone());
+        let original = error_object("TypeError", &format!("{fail} listener failed"));
+        let error = Thrown::new(original.clone()).to_exchange_error();
+        let observed = signer.clone();
+        base.on(
+            "remoteSignerStatus",
+            Rc::new(move |_, status| {
+                observed.available.set(true);
+                if status.strict_equals(&Js::str(fail)) {
+                    Err(error.clone())
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+        drop(base.wait_for_remote_signer());
+        runtime.driver.advance(0);
+        let failures = runtime.exceptions.borrow();
+        assert_eq!(
+            failures.len(),
+            1,
+            "SIGNER_REJECTION discarded rejection reaches host"
+        );
+        assert!(
+            Thrown::from(failures[0].clone())
+                .value
+                .same_reference(&original)
+        );
+        assert!(signer.callbacks.borrow().is_empty());
+        actual.push(json!({"fail":fail,"name":failures[0].name,"message":failures[0].message,"registrations":0}));
+    }
+    assert_eq!(Value::Array(actual), source);
 }

@@ -868,13 +868,14 @@
         "await",
         "poll-fn"
       ],
-      "producer_sha256": "93781e57f29372a6ed74e7579d15f006b34b36c478ca9fe05b733e4a6957d3ad",
+      "producer_sha256": "2d069fe388361d83f6aa953ee4128da2b652565b00bb8f0616f9b6ec16dc2b77",
       "classification": "guarded",
-      "reason": "Availability checks, status emission and subscription registration stay eager and source-ordered. The pending body now delegates to canonical eager::start_eager, whose runtime owns SignerWaitGuard independently of the returned waiter. Availability/disposal unsubscribe once; runtime shutdown still drops the guard. The lifecycle guard/finish/Drop bodies are byte-unchanged. Actual source, NativeRuntime and deterministic multi-waiter tests prove retained subscription, completion, capture release and the original connected-listener throw profile.",
+      "reason": "Availability checks, status emission and subscription registration stay eager and source-ordered. The pending body now delegates to canonical eager::start_eager, whose runtime owns SignerWaitGuard independently of the returned waiter. Availability/disposal unsubscribe once; runtime shutdown still drops the guard. The lifecycle guard/finish/Drop bodies are byte-unchanged. Actual source, NativeRuntime and deterministic multi-waiter tests prove retained subscription, completion, capture release and the original connected-listener throw profile. Both status-listener prefix rejection branches also delegate to the same driver; discarded failures reach the host unhandled-rejection checkpoint with their original error referent, while observed failures remain handled.",
       "witnesses": [
         "tests/core_lifecycle.rs::discarded_signer_waiter_keeps_source_subscription_until_completion",
         "tests/core_lifecycle.rs::discarded_signer_waits_remain_independent_and_release_on_disposal",
-        "tests/core_lifecycle.rs::signer_wait_starts_before_first_poll_and_unpolled_drop_keeps_subscription"
+        "tests/core_lifecycle.rs::signer_wait_starts_before_first_poll_and_unpolled_drop_keeps_subscription",
+        "tests/core_lifecycle.rs::discarded_signer_status_rejection_reaches_host_with_original_cause"
       ],
       "source_dependencies": [
         {
@@ -905,7 +906,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "03b51eb5b6c77910818cb3f58d659e5b81eb65b91676d47f9f6ea617dd14d60b"
+          "sha256": "47bf5501462509f755cdbc9393fdba00925474bae0eeee95b4a8a0851be4cac2"
         }
       ],
       "guards": [
@@ -2437,7 +2438,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "03b51eb5b6c77910818cb3f58d659e5b81eb65b91676d47f9f6ea617dd14d60b"
+          "sha256": "47bf5501462509f755cdbc9393fdba00925474bae0eeee95b4a8a0851be4cac2"
         }
       ],
       "guards": [

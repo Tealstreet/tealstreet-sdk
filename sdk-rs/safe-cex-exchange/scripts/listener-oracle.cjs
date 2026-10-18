@@ -51,6 +51,25 @@ vm.runInContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarg
   }
   process.stdout.write(JSON.stringify(rows));return;
  }
+ if(process.argv.includes('--signer-rejection')) {
+  const rows=[];
+  for(const fail of ['disconnected','connected']) {
+   const failure=new TypeError(`${fail} listener failed`), emitter=new TinyEmitter();
+   let rejected, registrations=0, available=false;
+   emitter.on('remoteSignerStatus',status=>{available=true;if(status===fail)throw failure;});
+   const base=new context.Base();Object.assign(base,{emitter,options:{remoteSigner:{isAvailable:()=>available,onAvailabilityChange(){registrations++;}}},isDisposed:false,remoteSignerAvailabilityCleanups:new Set()});
+   const onUnhandled=error=>{rejected=error;};
+   process.once('unhandledRejection',onUnhandled);
+   try {
+    void base.waitForRemoteSigner();
+    await new Promise(setImmediate);
+    assert.equal(rejected,failure,'discarded signer rejection preserves original error');
+    assert.equal(registrations,0);
+    rows.push({fail,name:rejected.name,message:rejected.message,registrations});
+   } finally {process.removeListener('unhandledRejection',onUnhandled);}
+  }
+  process.stdout.write(JSON.stringify(rows));return;
+ }
  if(process.argv.includes('--signer-lifetime')) {
   const rows=[];
   for(const finish of ['available','disposed']) {
