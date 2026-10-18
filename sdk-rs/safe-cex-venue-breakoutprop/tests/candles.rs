@@ -184,12 +184,6 @@ fn actual_candle_read() {
             case["trace"],
             "CANDLE-REQUEST {name}"
         );
-        if *name == "missing-unused" {
-            assert!(case["expected"]["ok"].is_array());
-            assert!(result.is_err(), "CANDLE-DECLARED response refusal");
-            comparisons += 1;
-            continue;
-        }
         match result {
             Ok(rows) => {
                 let count = if *name == "empty" { 0 } else { 2 };
@@ -332,10 +326,52 @@ fn candle_nan_and_utf8_boundaries() {
         s["surrogate"]["count"], 2,
         "CANDLE-UTF8 source accepted ignored surrogate"
     );
-    assert!(
-        js_from_str::<JsNumberInput>(s["surrogate"]["raw"].as_str().unwrap()).is_err(),
-        "CANDLE-UTF8 shared refusal"
+    let input: JsNumberInput = js_from_str(s["surrogate"]["raw"].as_str().unwrap()).unwrap();
+    let retained: safe_cex_types::retained_json::RetainedJsonInput =
+        input.clone().decode().unwrap();
+    assert_eq!(
+        retained.get("events").unwrap().as_array().unwrap()[0]
+            .get("symbol")
+            .unwrap()
+            .as_text(),
+        Some([0xd800].as_slice())
     );
+    let rows = run(fetch_ohlcv(
+        OHLCVOptions {
+            symbol: "BTCUSD".into(),
+            interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),
+            from: None,
+            to: None,
+            limit: Some(1.0),
+        },
+        || ready(Ok("token".into())),
+        || ready(Ok("account".into())),
+        |_| ready(Ok(input)),
+        &|_| panic!("no requested date bounds"),
+        &|n| n,
+        &|_| panic!("ignored symbol must not report a failure"),
+    ))
+    .unwrap();
+    assert_eq!(rows.len(), 2, "source ignored-surrogate candle count");
+    for (row, expected) in rows
+        .iter()
+        .zip(ORACLE["cases"][0]["expected"]["ok"].as_array().unwrap())
+    {
+        for (field, value) in [
+            ("timestamp", row.timestamp),
+            ("open", row.open),
+            ("high", row.high),
+            ("low", row.low),
+            ("close", row.close),
+            ("volume", row.volume),
+        ] {
+            assert_eq!(
+                number(value),
+                expected[field],
+                "retained candle field {field}"
+            );
+        }
+    }
     let options = OHLCVOptions {
         symbol: "BTCUSD".into(),
         interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),

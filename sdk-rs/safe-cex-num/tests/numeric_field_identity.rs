@@ -318,13 +318,44 @@ fn retained_input_collection_cardinality_supplement() {
             "captured map members",
         );
     }
+    let mut compared = 0;
     for raw in [r#"[3.0,7.0]"#, r#"{"left":3.0,"right":7.0}"#] {
         let expected: Value = serde_json::from_str(raw).unwrap();
         for value in entries::<safe_cex_num::numeric_ingress::JsNumberInput>(raw) {
-            let actual = serde_json::to_value(value).unwrap();
-            assert_eq!(actual, expected, "CAPTURE-CARDINALITY opaque serialization");
+            let actual = serde_json::to_value(&value).unwrap();
+            let (native, wire) = if expected.is_array() {
+                let native = value.decode::<Vec<f64>>().unwrap();
+                let wire = actual.as_array().unwrap();
+                assert_eq!(wire.len(), 2, "CAPTURE-CARDINALITY opaque wire array");
+                (
+                    native,
+                    wire.iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>(),
+                )
+            } else {
+                let native = value
+                    .decode::<std::collections::BTreeMap<String, f64>>()
+                    .unwrap();
+                let wire = actual.as_object().unwrap();
+                assert_eq!(native.len(), 2, "CAPTURE-CARDINALITY opaque native map");
+                assert_eq!(
+                    wire.keys().collect::<Vec<_>>(),
+                    expected.as_object().unwrap().keys().collect::<Vec<_>>(),
+                    "CAPTURE-CARDINALITY opaque wire keys"
+                );
+                (
+                    vec![native["left"], native["right"]],
+                    vec![
+                        wire["left"].as_f64().unwrap(),
+                        wire["right"].as_f64().unwrap(),
+                    ],
+                )
+            };
+            numbers(&native, &[3., 7.], "opaque native numeric identity");
+            numbers(&wire, &[3., 7.], "opaque serialized numeric identity");
+            compared += native.len();
         }
     }
+    assert_eq!(compared, 12, "CAPTURE-CARDINALITY opaque comparisons");
 }
 
 #[test]
