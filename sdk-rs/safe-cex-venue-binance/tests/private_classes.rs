@@ -58,6 +58,7 @@ struct Runtime {
     now: Cell<f64>,
     monotonic_clock: Cell<Option<f64>>,
     sleep_clock: Rc<Cell<f64>>,
+    sleep_wakers: Rc<RefCell<Vec<(f64, Waker)>>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
     console_frames: RefCell<Vec<(String, Vec<EventValue>)>>,
@@ -66,6 +67,15 @@ struct Runtime {
 }
 impl Runtime {
     fn pump(&self) {
+        let ready: Vec<_> = self
+            .sleep_wakers
+            .borrow_mut()
+            .extract_if(.., |(deadline, _)| self.sleep_clock.get() >= *deadline)
+            .map(|(_, waker)| waker)
+            .collect();
+        for waker in ready {
+            waker.wake();
+        }
         let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
         for mut job in jobs {
             if job
@@ -88,11 +98,19 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         self.sleeps.borrow_mut().push(delay);
         let clock = self.sleep_clock.clone();
+        let wakers = self.sleep_wakers.clone();
         let deadline = self.now.get() + delay as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        Box::pin(std::future::poll_fn(move |cx| {
             if clock.get() >= deadline {
                 Poll::Ready(Ok(()))
             } else {
+                let mut wakers = wakers.borrow_mut();
+                if !wakers
+                    .iter()
+                    .any(|(at, waker)| *at == deadline && waker.will_wake(cx.waker()))
+                {
+                    wakers.push((deadline, cx.waker().clone()));
+                }
                 Poll::Pending
             }
         }))
@@ -588,7 +606,7 @@ fn shared_runtime_graph_enters_bound_private_orders_without_projection() {
             Js::object(vec![("o", data.clone())])
         };
         let events = Js::array(vec![event]);
-        events.splice_array(0, 0, vec![Js::Undefined]).unwrap();
+        events.splice_array(1, 0, 0, vec![Js::Undefined]).unwrap();
         events.delete(&[u16::from(b'0')]).unwrap();
         owner.handle_events(1, events).unwrap();
         let effects = parent.effects.borrow();
