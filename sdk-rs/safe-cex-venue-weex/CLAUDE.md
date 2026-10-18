@@ -579,3 +579,12 @@ use binary64 bits. Closed String outputs still visibly refuse lone units.
 Ignored surrogate fields reach the fill guard/mapper without narrowing the whole
 record; depth-budget refusal remains separate. The existing source corpus and
 all ordinary ingress-route comparison counts are unchanged.
+
+The public SDK invokes its actual source member before returning the Rust
+`ExchangeFuture`. Its `invoke` and `unit` helpers await the already-running
+source Promise; they do not wrap it in a second producer. The constructed
+`tests/eager_sdk_binding.rs` regression compares whole-class TypeScript call-time
+mode Store updates and both signed order requests after the caller drops an
+unpolled waiter. Wrapper candidates across venues are recorded in
+[the shared census](../parity/PUBLIC_ASYNC_WRAPPER_CENSUS.md); this does not waive
+the deeper typed-output or per-row refusal contracts above.
