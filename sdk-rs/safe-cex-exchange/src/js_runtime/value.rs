@@ -137,11 +137,29 @@ impl Thrown {
         if let Some(native) = &self.native {
             return (**native).clone();
         }
-        let mut error = ExchangeError::new(self.message());
-        if let Ok(name) = self.value.get("name")
-            && let Js::String(name) = name
-        {
-            error.name = String::from_utf16_lossy(&name);
+        let message = match &self.value {
+            Js::Object(_) | Js::Function(_) => self.value.get("message").ok(),
+            other => Some(other.clone()),
+        };
+        let mut error =
+            ExchangeError::new(message.as_ref().map(Js::to_display).unwrap_or_default());
+        let name = self.value.get("name").ok();
+        if let Some(Js::String(name)) = &name {
+            error.name = String::from_utf16_lossy(name);
+        }
+        let fields: Vec<_> = [("name", name), ("message", message)]
+            .into_iter()
+            .filter_map(|(key, value)| match value {
+                Some(Js::String(units)) => Some((key, OwnedJsValue::String(units.to_vec()))),
+                _ => None,
+            })
+            .collect();
+        if fields.iter().any(|(_, value)| {
+            matches!(value, OwnedJsValue::String(units) if String::from_utf16(units).is_err())
+        }) {
+            error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(
+                owned::OwnedCallbackError::new(OwnedJsValue::object(fields)),
+            ));
         }
         error
     }
@@ -171,14 +189,19 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
-        if let Some(failure) = error.origin.as_ref().and_then(|origin| {
-            origin
-                .error()
-                .downcast_ref::<safe_cex_transport::RestFailure>()
-        }) && let Some(safe_cex_transport::TransportError::Rejected(origin)) =
-            failure.transport_error.as_deref()
-            && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
-        {
+        if let Some(cause) = error.origin.as_ref().and_then(|origin| {
+            let original = origin.error();
+            if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
+                return Some(cause);
+            }
+            let failure = original.downcast_ref::<safe_cex_transport::RestFailure>()?;
+            let safe_cex_transport::TransportError::Rejected(origin) =
+                failure.transport_error.as_deref()?
+            else {
+                return None;
+            };
+            origin.error().downcast_ref::<owned::OwnedCallbackError>()
+        }) {
             for (field, projected) in [("name", &error.name), ("message", &error.message)] {
                 if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
                     && String::from_utf16(units).is_err()

@@ -117,10 +117,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.
     }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         panic!("unexpected raw exception in snapshot debounce runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.errors.borrow_mut().push(error.to_string());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {

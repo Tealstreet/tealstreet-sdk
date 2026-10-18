@@ -10,7 +10,7 @@
 //! field mutations are supported; symbol keys, arbitrary executable graph hooks,
 //! non-BMP string spreads/lone UTF16 and broad prototype mutation are unclaimed.
 use crate::{
-    private_event_value::*,
+    private_event_value::{EventOps, EventValue, number, record, string},
     request_weight::{Failure, type_error},
 };
 use std::{cell::Cell, future::Future, pin::Pin, rc::Rc};

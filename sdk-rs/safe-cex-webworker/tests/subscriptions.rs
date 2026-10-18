@@ -247,7 +247,7 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
         );
         assert_eq!(
             context,
-            &json!({"method":"sendOrderBookUpdate"}),
+            &json!({"method":"sendOrderBookUpdate"}).into(),
             "BBO-IDENTITY host boundary context"
         );
         unsubscribe_first();

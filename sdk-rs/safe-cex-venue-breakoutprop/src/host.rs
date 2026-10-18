@@ -69,7 +69,7 @@ impl ProductionHost {
             if let Err(error) = future.await {
                 runtime.report_exception(
                     &error,
-                    &json!({"venue":"breakoutprop","source":"owned continuation"}),
+                    &json!({"venue":"breakoutprop","source":"owned continuation"}).into(),
                 );
             }
         });
@@ -164,7 +164,7 @@ impl BreakoutHost for ProductionHost {
     fn report_abandoned_login(&self, error: &ExchangeError) {
         self.deps.runtime.report_exception(
             error,
-            &json!({"venue":"breakoutprop","source":"abandoned login"}),
+            &json!({"venue":"breakoutprop","source":"abandoned login"}).into(),
         );
     }
 }
@@ -211,7 +211,7 @@ impl NativeRuntimeHost for ProductionHost {
                 if let Err(error) = runtime.sleep(0).await {
                     runtime.report_exception(
                         &error,
-                        &json!({"venue":"breakoutprop","source":"poll callback"}),
+                        &json!({"venue":"breakoutprop","source":"poll callback"}).into(),
                     );
                     return;
                 }
@@ -243,7 +243,7 @@ impl NativeRuntimeHost for ProductionHost {
             {
                 runtime.report_exception(
                     &ExchangeError::new(error),
-                    &json!({"venue":"breakoutprop","source":"poll loop"}),
+                    &json!({"venue":"breakoutprop","source":"poll loop"}).into(),
                 );
             }
         });

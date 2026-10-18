@@ -9,7 +9,10 @@ use safe_cex_exchange::{
     },
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_types::*;
+use safe_cex_types::{
+    Candle, Market, OHLCVOptions, Order, OrderBook, PlaceOrderOpts, Position, PositionSide,
+    PublicTrade, Ticker, UpdateOrderOpts, ValidateAccountResult,
+};
 
 impl BinanceInverseExchange {
     pub(crate) fn invoke<T: serde::de::DeserializeOwned + 'static>(
@@ -205,7 +208,7 @@ impl BinanceInverseExchange {
                 Ok(value) => callback(value),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source":"binanceinverse listener payload"}),
+                    &serde_json::json!({"source":"binanceinverse listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)

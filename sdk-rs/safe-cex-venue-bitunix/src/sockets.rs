@@ -150,7 +150,7 @@ impl WsParent for Parent {
         &self,
         error: &str,
         message: Option<&str>,
-        extra: Option<&Value>,
+        extra: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         self.live()?.base.emit_and_log_error(
             safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(error.into()),

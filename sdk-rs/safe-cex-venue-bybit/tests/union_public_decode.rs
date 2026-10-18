@@ -329,7 +329,7 @@ fn decoded_response_and_execution_fields_have_native_identity() {
         );
         assert_eq!(
             decoded.ret_msg.as_deref(),
-            Some("identity"),
+            Some([105, 100, 101, 110, 116, 105, 116, 121].as_slice()),
             "native response ret_msg identity"
         );
         assert_eq!(
@@ -363,4 +363,52 @@ fn decoded_response_and_execution_fields_have_native_identity() {
         Some("7"),
         "native params slippage value identity"
     );
+}
+
+#[test]
+fn response_message_decoder_preserves_native_utf16_and_rejects_nontext() {
+    use safe_cex_exchange::js_runtime::value::{from_retained_input, from_typed, to_typed};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    use safe_cex_venue_bybit::response::BybitResponseMeta;
+
+    for units in [vec![0xd800], vec![0xdc00], vec![0xd800, 120, 0xdc00]] {
+        let data = Input::Object(vec![
+            ("isSuccess".encode_utf16().collect(), Input::Bool(false)),
+            (
+                "hasExplicitStatus".encode_utf16().collect(),
+                Input::Bool(true),
+            ),
+            (
+                "retMsg".encode_utf16().collect(),
+                Input::Text(units.clone()),
+            ),
+        ]);
+        let decoded: BybitResponseMeta = to_typed(&from_retained_input(data)).unwrap();
+        assert_eq!(decoded.ret_msg.as_deref(), Some(units.as_slice()));
+        assert_eq!(
+            from_typed(&decoded)
+                .unwrap()
+                .get("retMsg")
+                .unwrap()
+                .to_js_string()
+                .unwrap()
+                .as_ref(),
+            units.as_slice()
+        );
+    }
+    for invalid in [
+        Input::Null,
+        Input::Float(55296.),
+        Input::Array(vec![Input::Float(55296.)]),
+    ] {
+        let data = Input::Object(vec![
+            ("isSuccess".encode_utf16().collect(), Input::Bool(false)),
+            (
+                "hasExplicitStatus".encode_utf16().collect(),
+                Input::Bool(true),
+            ),
+            ("retMsg".encode_utf16().collect(), invalid),
+        ]);
+        assert!(to_typed::<BybitResponseMeta>(&from_retained_input(data)).is_err());
+    }
 }
