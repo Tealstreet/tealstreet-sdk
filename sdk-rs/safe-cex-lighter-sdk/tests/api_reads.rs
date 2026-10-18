@@ -338,6 +338,90 @@ fn same(a: &V, b: &V) -> bool {
     }
 }
 #[test]
+fn referral_constructor_retains_routes_replaces_and_releases_exact_client() {
+    assert_eq!(
+        corpus()["constructorOwnership"],
+        json!({
+            "sameClient":true,"enumerable":true,"writable":true,"configurable":true,
+            "results":["first","second"],"deleted":true,
+            "calls":[
+                {"label":"first","url":"/api/v1/referral/points","index":"1"},
+                {"label":"second","url":"/api/v1/referral/points","index":"2"}
+            ]
+        }),
+        "REFERRAL constructor source property and routing evidence"
+    );
+    let first_data = decode(&json!({"label":encode(&text("first"))}));
+    let first = Rc::new(Host::new(decode(
+        &json!({"success":true,"data":{"label":encode(&text("first"))}}),
+    )));
+    let first_weak = Rc::downgrade(&first);
+    let mut api = ReferralApi::new(first.clone());
+    assert!(
+        Rc::ptr_eq(&api.client, &first),
+        "REFERRAL constructor exact client"
+    );
+    assert_eq!(
+        Rc::strong_count(&first),
+        2,
+        "REFERRAL constructor one retained client"
+    );
+    assert!(
+        first.calls.borrow().is_empty(),
+        "REFERRAL constructor has no request"
+    );
+    assert!(
+        first.tasks.borrow().is_empty(),
+        "REFERRAL constructor has no task"
+    );
+    drop(first);
+    let pending = api.get_referral_points(BigInt::from(1), None);
+    api.client.drain();
+    assert_eq!(encode(&ready(pending).unwrap()), encode(&first_data));
+    assert_eq!(api.client.calls.borrow().len(), 1);
+    assert_eq!(
+        Rc::strong_count(&api.client),
+        1,
+        "REFERRAL settled request releases client"
+    );
+
+    let second = Rc::new(Host::new(decode(
+        &json!({"success":true,"data":{"label":encode(&text("second"))}}),
+    )));
+    let second_weak = Rc::downgrade(&second);
+    api.client = second.clone();
+    assert!(
+        first_weak.upgrade().is_none(),
+        "REFERRAL replacement releases first client"
+    );
+    let pending = api.get_referral_points(BigInt::from(2), None);
+    second.drain();
+    assert_eq!(
+        encode(&ready(pending).unwrap()),
+        json!({"label":encode(&text("second"))})
+    );
+    assert_eq!(second.calls.borrow().len(), 1);
+    assert_eq!(
+        second.calls.borrow()[0].0,
+        "/api/v1/referral/points".encode_utf16().collect::<Vec<_>>()
+    );
+    let config = second.calls.borrow()[0].1.clone();
+    let params = second.get(&config, "params").unwrap();
+    assert_eq!(
+        encode(&second.get(&params, "accountIndex").unwrap()),
+        encode(&text("2"))
+    );
+    drop(api);
+    assert_eq!(
+        Rc::strong_count(&second),
+        1,
+        "REFERRAL facade releases client"
+    );
+    drop(second);
+    assert!(second_weak.upgrade().is_none(), "REFERRAL no leaked client");
+}
+
+#[test]
 fn source_read_bodies_keep_requests_results_and_eager_ownership() {
     for (i, c) in corpus()["cases"].as_array().unwrap().iter().enumerate() {
         let kind = c["kind"].as_str().unwrap();
