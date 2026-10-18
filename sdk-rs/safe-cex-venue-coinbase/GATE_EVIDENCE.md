@@ -1828,3 +1828,9 @@ metadata directly. The actual HTTP witness and existing portfolio corpus pass.
 The constructed Host.merge_rest regression separately compiled RED when undefined
 array info was refused, then passed with the native Frame::Undefined carrier;
 its maintained source oracle pins undefined, NaN and infinity before output.
+
+`scripts/retained-info-contracts.mjs` runs the canonical inventory and native
+production probes for 4 selected retained-input decoder owners. Each contract
+observes direct typed fields plus numeric bits or UTF-16 units on distinct
+positive cases and rejected inputs. These selected contracts pass independently
+of whole-package accepted-set coverage; no package-wide green claim is made.

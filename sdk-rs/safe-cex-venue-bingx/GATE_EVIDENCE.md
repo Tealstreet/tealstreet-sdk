@@ -1514,3 +1514,9 @@ The same test compiled against archived master
 `2e703b7b8ee3a2a083e63530bde1a657b340f601` fails to commit the order because the
 old private parser refuses the opaque lone surrogate. The retained implementation
 passes. Numeric bits and UTF-16 units are observed directly from the native info.
+
+`scripts/retained-info-contracts.mjs` runs the canonical inventory and native
+production probes for 2 selected retained-input decoder owners. Each contract
+observes direct typed fields plus numeric bits or UTF-16 units on distinct
+positive cases and rejected inputs. These selected contracts pass independently
+of whole-package accepted-set coverage; no package-wide green claim is made.
