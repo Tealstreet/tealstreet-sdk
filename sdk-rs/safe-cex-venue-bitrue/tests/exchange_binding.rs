@@ -1364,21 +1364,3 @@ fn listen_ohlcv_maps_singapore_kline_times_through_the_real_dayjs_global() {
     cleanup().unwrap();
     venue.dispose().unwrap();
 }
-
-struct AccountRowsHttp(Rc<Http>, Value);
-impl JsHttpHost for AccountRowsHttp {
-    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
-        self.0.0.clone()
-    }
-    fn send(&self, config: Js) -> JsFuture<'static> {
-        if config.get("url").unwrap().to_display() != "/fapi/v2/account" {
-            return self.0.send(config);
-        }
-        let response = Js::object(vec![
-            ("status", Js::Number(200.)),
-            ("data", from_json(&self.1)),
-            ("config", config),
-        ]);
-        Box::pin(async move { Ok(response) })
-    }
-}
