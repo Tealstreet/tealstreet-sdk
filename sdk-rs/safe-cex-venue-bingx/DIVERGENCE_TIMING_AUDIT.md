@@ -53,16 +53,25 @@ existing tests pass with every source/corpus, Store, opaque error and alias
 identity assertion intact. The two native child modules reuse one harness module,
 so strict Clippy does not load the same file twice.
 
-Validation after integrating shared eager-start PR #1050: 131 tests across 19
-native targets pass, including all constructed bindings and history witnesses.
-The full suite then stops at the existing `tests/types.rs:106` expectation that
-shared decoding rejects a lone-surrogate `BINGX_BALANCE.userId`. That expectation
-is stale after decoder PR #1041. The decoder owner has the focused expectation
-migration; no typed-input, identity or corpus guard is relaxed by this PR. Full
-crate GREEN is not claimed. All nine production controls compiled RED and passed
-after exact restoration; original private listen-key source bytes are unchanged.
+The public-wrapper census classifies BingX as one typed-native async family.
+All 18 implemented asynchronous Exchange methods now call the shared boundary
+with their existing runtime and an owned native receiver. The three inherited
+Not implemented refusals have no source prefix or continuation to start.
+No per-method task helpers are introduced, and existing typed algorithms stay in
+one place. Both new family probes compiled and failed on the parked production
+binding: missing-symbol changeMarginType emitted zero errors before polling, and
+dropping an unpolled changePositionMode waiter sent zero POST requests. After the
+migration, the error is immediate and the held POST survives waiter drop, then
+performs the mode and position refetches when released. Ready HTTP and held HTTP
+are both covered by the complete binding suite.
 
-Final scoped gates pass: strict native all-target Clippy, separate wasm library
-Clippy, pinned formatting, all-features cancellation inventory (6 passed, one
-existing discovery-export ignore), and the Node cancellation source suite.
-The dependency PR #1050 is merged; this branch integrates master normally.
+Eleven independent production controls require named compiled failures and exact
+byte restoration followed by a passing replay. These include separate controls
+for the family prefix and detached held continuation, in addition to the nine
+original history, timer and disposal controls. Private listen-key source bytes
+remain unchanged. The two new test-only child modules use separate cfg(test) and
+cfg(not(wasm32)) attributes so the full production parity index excludes fixtures.
+
+The branch normally inherits master and the checked shared UTF expectation
+migration; all corpus, native identity, raw UTF-16, wire and numeric-bit guards
+remain intact. Final validation results are recorded in the PR description.

@@ -79,3 +79,58 @@ fn real_historical_fills_logs_params_before_future_is_polled() {
     );
     h.exchange.dispose().unwrap();
 }
+
+#[test]
+fn real_native_family_margin_error_runs_before_poll() {
+    let h = support::harness(ExchangeName::Bingx, support::options(), |_| {});
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let capture = errors.clone();
+    h.exchange.base().on(
+        "error",
+        Rc::new(move |_, error| {
+            capture.borrow_mut().push(error.clone());
+            Ok(())
+        }),
+    );
+    let pending = h.exchange.change_margin_type(true, None);
+    assert_eq!(
+        errors.borrow().len(),
+        1,
+        "source emits Symbol is required before returning its Promise"
+    );
+    assert_eq!(h.drive(pending).unwrap_err().message, "Symbol is required");
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(h.http.requests.borrow().is_empty());
+    h.exchange.dispose().unwrap();
+}
+
+#[test]
+fn real_native_family_dropped_mode_waiter_keeps_held_continuation() {
+    const MODE: &str = "/openApi/swap/v1/positionSide/dual";
+    let h = support::harness(ExchangeName::Bingx, support::options(), |http| {
+        http.ok("POST", MODE, json!({}));
+        http.ok("GET", MODE, json!({"dualSidePosition":true}));
+        http.ok("GET", "/openApi/swap/v2/user/positions", json!([]));
+    });
+    let gate = Rc::new(support::Release::default());
+    *h.http.held_request.borrow_mut() = Some(("POST".into(), MODE.into(), gate.clone()));
+    let pending = h.exchange.change_position_mode(true, None);
+    drop(pending);
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls(MODE).len(),
+        1,
+        "unpolled waiter drop must retain the source POST"
+    );
+    assert_eq!(h.http.calls("/openApi/swap/v2/user/positions").len(), 0);
+    gate.set(true);
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls(MODE).len(),
+        2,
+        "held POST continuation must refetch mode after waiter drop"
+    );
+    assert_eq!(h.http.calls("/openApi/swap/v2/user/positions").len(), 1);
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.exchange.dispose().unwrap();
+}

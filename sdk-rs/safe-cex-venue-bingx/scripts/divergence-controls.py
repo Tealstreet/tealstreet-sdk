@@ -26,6 +26,8 @@ def lazy_boundary(text, method):
     return text[:call] + 'Box::pin(async move { ' + expression + '.await })\n    ' + text[end-1:]
 
 controls = {
+    'native-family-prefix': ('src/binding/exchange.rs', lambda s: lazy_boundary(s, 'change_margin_type'), 'real_native_family_margin_error_runs_before_poll', '--test=divergence_timing'),
+    'native-family-continuation': ('src/binding/exchange.rs', lambda s: lazy_boundary(s, 'change_position_mode'), 'real_native_family_dropped_mode_waiter_keeps_held_continuation', '--test=divergence_timing'),
     'ohlcv': ('src/binding/exchange.rs', lambda s: lazy_boundary(s, 'fetch_ohlcv'), 'real_ohlcv_missing_market_emits_before_future_is_polled', '--test=divergence_timing'),
     'fills': ('src/binding/exchange.rs', lambda s: lazy_boundary(s, 'fetch_historical_fills'), 'real_historical_fills_logs_params_before_future_is_polled', '--test=divergence_timing'),
     'tick': ('src/read_history.rs', lambda s: lazy_boundary(s, 'tick'), 'real_tick_starts_selected_read_before_return', '--lib'),
