@@ -59,7 +59,10 @@ fn venue() -> Rc<PolymarketExchange> {
     .unwrap()
 }
 fn units(value: &Js) -> Vec<u16> {
-    value.string().expect("native text").to_vec()
+    match value {
+        Js::String(value) => value.to_vec(),
+        _ => panic!("expected native text"),
+    }
 }
 
 #[test]
@@ -200,6 +203,8 @@ fn native_receiver_properties_captures_literals_and_aggregation() {
         assert!(events.iter().all(|(this, _)| this.same_reference(&owner)));
         assert_eq!(units(&events[0].1[0]), [0xd800]);
         assert_eq!(units(&events[1].1[0]), [0xdfff]);
+        assert_eq!(units(&events[0].1[1]), units(&Js::str("warning")));
+        assert_eq!(units(&events[1].1[1]), units(&Js::str("error")));
         let method = Js::function("method", |this, args| {
             Ok(Js::array(vec![this, arg(&args, 0)]))
         });
@@ -307,6 +312,15 @@ fn native_receiver_class_allocation_and_bound_methods() {
                 .iter()
                 .all(|(this, _)| this.same_reference(&bound))
         );
+        for (_, args) in calls.borrow().iter() {
+            assert_eq!(
+                units(&args[0]),
+                units(&Js::str(
+                    "Leverage is not supported on Polymarket (always 1x)"
+                ))
+            );
+            assert_eq!(units(&args[1]), units(&Js::str("warning")));
+        }
         let payload = Js::object(vec![("opaque", child)]);
         let result = payload.clone();
         let xhr = Js::object(vec![(
