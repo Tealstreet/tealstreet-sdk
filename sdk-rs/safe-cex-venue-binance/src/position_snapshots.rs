@@ -3,7 +3,9 @@
 //! immutable Error failures. Response getters, concrete class/Store/socket wiring,
 //! sparse/executable properties and detached async ownership remain caller boundaries.
 use crate::{
-    private_event_value::*,
+    private_event_value::{
+        EventOps, EventValue, PrivateEnum, array_values, fallback, number, record, string, table,
+    },
     private_rest::{
         SnapshotClient, SnapshotRequestFuture, error_message, keyed, map, pair, pm_rows,
     },

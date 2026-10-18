@@ -5,7 +5,9 @@ use crate::{
     private_classes::{
         PrivateBase, PrivateDependencies, PrivateParent, PrivateSocket, PrivateTimers,
     },
-    private_event_value::*,
+    private_event_value::{
+        EventArray, EventOps, EventValue, in_current_realm, native_json, number, record, string,
+    },
     private_rest::{SnapshotClient, SnapshotRequestFuture},
     private_session::Venue,
     public_classes::{PublicDependencies, PublicKind, PublicSocket},
@@ -608,7 +610,9 @@ impl crate::private_session::ConstructorBindings for Constructor {
 }
 
 pub fn client_rule(venue: Venue) -> safe_cex_exchange::client_order_id::ClientOrderIdRule {
-    use safe_cex_exchange::client_order_id::*;
+    use safe_cex_exchange::client_order_id::{
+        ClientOrderIdRuleOverrides, pattern_client_order_id_rule,
+    };
     let max = if venue == Venue::PM { 32 } else { 36 };
     let spot = venue == Venue::Spot;
     pattern_client_order_id_rule(
@@ -1439,7 +1443,9 @@ impl crate::rest_history::HistoryBindings for Context {
 }
 impl crate::lifecycle::LifecycleBindings for Context {
     fn read(&mut self, key: crate::lifecycle::LifecycleRead) -> Result<EventValue, Failure> {
-        use crate::lifecycle::LifecycleRead::*;
+        use crate::lifecycle::LifecycleRead::{
+            Disposed, Loaded, NeedsOverlay, OrdersStale, PrivateConnected, PublicOnly,
+        };
         Ok(match key {
             NeedsOverlay => EventValue::Bool(self.0.needs_overlay()),
             Disposed => EventValue::Bool(self.0.base.is_disposed()),
@@ -1453,7 +1459,10 @@ impl crate::lifecycle::LifecycleBindings for Context {
         &mut self,
         key: crate::lifecycle::LifecycleSync,
     ) -> Result<crate::lifecycle::LifecycleCall, Failure> {
-        use crate::lifecycle::LifecycleSync::*;
+        use crate::lifecycle::LifecycleSync::{
+            Emit, Log, Paused, PrivateConnect, PublicConnect, SetSetting, TickInterval, Update,
+            Version,
+        };
         let owner = self.0.clone();
         Ok(Rc::new(move |args| {
             let arg = |i| args.get(i).cloned().unwrap_or(EventValue::Undefined);
@@ -1489,7 +1498,10 @@ impl crate::lifecycle::LifecycleBindings for Context {
         &mut self,
         key: crate::lifecycle::LifecycleAsync,
     ) -> Result<crate::lifecycle::LifecycleAsyncCall, Failure> {
-        use crate::lifecycle::LifecycleAsync::*;
+        use crate::lifecycle::LifecycleAsync::{
+            Balance, External, Markets, Orders, Overlay, PositionMode, Positions, PositionsBalance,
+            RetryOrders, StartPrivate, StartPublicOnly, Tick, Tickers,
+        };
         let owner = self.0.clone();
         Ok(Rc::new(move |args| {
             if key == External {
@@ -1864,7 +1876,10 @@ impl ExchangeState {
         }
     }
     pub async fn validate_account(self: &Rc<Self>) -> Result<EventValue, Failure> {
-        use crate::account_validation::*;
+        use crate::account_validation::{
+            AccountValidation, AccountValidationClient, FetchedAccountBalance,
+            validate_binance_account, validate_binance_pm_account, validate_binance_spot_account,
+        };
         let owner = self.clone();
         let get = move |client: AccountValidationClient, path| {
             let response = owner.http(
@@ -1983,7 +1998,10 @@ impl PrivateParent for ExchangeState {
     ) -> Result<crate::private_events::PrivateHandler, Failure> {
         let owner = self.this.upgrade().expect("live owner");
         Ok(Rc::new(move |args| {
-            use crate::private_events::PrivateOperation::*;
+            use crate::private_events::PrivateOperation::{
+                AddOrder, AddPosition, Fill, MarkPosition, OrderStatus, ThrottleOrders,
+                ThrottlePositions, UpdateOrder, UpdatePosition, UpdateStore,
+            };
             let arg = |i| args.get(i).cloned().unwrap_or(EventValue::Undefined);
             let patch = |v: &EventValue| -> Result<ModelPatch, Failure> {
                 let mut out = ModelPatch::default();
