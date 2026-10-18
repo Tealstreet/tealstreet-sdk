@@ -375,6 +375,9 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         Ok(Js::Number(arg(&a, 0).parse_float()?))
     });
     def("parseFloat", parse_float.clone());
+    def("isNaN", Js::function("isNaN", |_, args| {
+        Ok(Js::Bool(arg(&args, 0).to_number()?.is_nan()))
+    }));
     def(
         "parseInt",
         Js::function("parseInt", |_, a| {

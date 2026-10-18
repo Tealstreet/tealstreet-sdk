@@ -62,12 +62,11 @@ pub(crate) fn base_exchange_class(
         "log",
         2,
         Rc::new(|r, b, _, a| {
-            let message = r.to_rust_string(&arg(a, 0))?;
             let severity = match arg(a, 1) {
-                Js::Undefined => "Info".to_owned(),
+                Js::Undefined => "info".to_owned(),
                 s => r.to_rust_string(&s)?,
             };
-            b.log(&message, &severity).map_err(|e| thrown(r, e))?;
+            b.log_value(&arg(a, 0), &severity).map_err(|e| thrown(r, e))?;
             Ok(Js::Undefined)
         }),
     );
@@ -288,15 +287,14 @@ pub(crate) fn base_exchange_class(
             Ok(Js::Undefined)
         }),
     );
-    // The Rust base owns disposal (super.dispose() reaches it above); no venue
-    // body assigns isDisposed directly, so the setter has nothing to forward.
     let b = base.clone();
     let disposed = realm.native("get isDisposed", 0, move |_, _, _| {
         Ok(Js::Bool(b.is_disposed()))
     });
+    let setter = base.clone();
     prototype.define_property(&"isDisposed".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![
         ("get", disposed),
-        ("set", realm.native("set isDisposed", 1, |_,_,_| Ok(Js::Undefined))),
+        ("set", realm.native("set isDisposed", 1, move |_,_,args| { setter.set_disposed_flag(arg(args, 0).truthy()); Ok(Js::Undefined) })),
         ("configurable", Js::Bool(true)),
     ])).expect("fresh base prototype getter");
 
