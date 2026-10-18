@@ -41,7 +41,7 @@ mod browser {
         fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
             panic!("unexpected spawn")
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             "reporting-host".into()
         }
@@ -54,7 +54,7 @@ mod browser {
         fn report_exception(&self, _: &ExchangeError, _: &Value) {
             panic!("worker must post")
         }
-        fn report_raw_exception(&self, _: &Value, _: &Value) {
+        fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
             panic!("worker must post")
         }
         fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {

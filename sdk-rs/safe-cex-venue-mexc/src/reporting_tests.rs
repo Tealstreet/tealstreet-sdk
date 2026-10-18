@@ -5,6 +5,7 @@ pub(super) fn raw_reporting_base() -> BaseExchange {
         worker: false,
         consoles: RefCell::default(),
         reports: RefCell::default(),
+        raw_reports: RefCell::default(),
         trace: Rc::default(),
     });
     BaseExchange::new(
@@ -21,6 +22,7 @@ struct ReportingRuntime {
     worker: bool,
     consoles: RefCell<Vec<String>>,
     reports: RefCell<Vec<Value>>,
+    raw_reports: RefCell<Vec<safe_cex_exchange::js_runtime::value::Js>>,
     trace: Rc<RefCell<Vec<String>>>,
 }
 impl ExchangeRuntime for ReportingRuntime {
@@ -50,8 +52,9 @@ impl ExchangeRuntime for ReportingRuntime {
         0.5
     }
     fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, data: &Value) {
-        let error = safe_cex_exchange::js_runtime::value::to_json(error)
-            .expect("explicit JSON fixture observation");
+        // Retain the host's original value before any finite fixture observation.
+        self.raw_reports.borrow_mut().push(error.clone());
+        let error = native_report_shape(error);
         self.trace.borrow_mut().push("report".into());
         self.reports
             .borrow_mut()
@@ -197,6 +200,7 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                     worker,
                     consoles: RefCell::default(),
                     reports: RefCell::default(),
+                    raw_reports: RefCell::default(),
                     trace: Rc::default(),
                 });
                 let failure = Rc::new(ReportingFailure {
@@ -349,13 +353,12 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                     reported = if worker {
                         let raw = &worker_reports.borrow()[0];
                         if selected.is_string() {
-                            json!({
-                                "name": safe_cex_exchange::js_runtime::value::to_json(&raw.get("name").unwrap()).unwrap(),
-                                "message": safe_cex_exchange::js_runtime::value::to_json(&raw.get("message").unwrap()).unwrap(),
-                            })
-                        } else {
-                            safe_cex_exchange::js_runtime::value::to_json(raw).unwrap()
+                            assert!(
+                                matches!(raw, safe_cex_exchange::js_runtime::value::Js::Object(object) if object.class == "Error"),
+                                "worker posts a real Error before projection"
+                            );
                         }
+                        native_report_shape(raw)
                     } else {
                         assert_eq!(
                             runtime.reports.borrow().len(),
@@ -411,6 +414,19 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 }
                 let reported_json = if worker && !coercion {
                     json!(native_stringify(&worker_reports.borrow()[0]))
+                } else if !coercion && !selected.is_string() {
+                    let raw = runtime.raw_reports.borrow();
+                    assert_eq!(
+                        raw.len(),
+                        1,
+                        "main raw reporter retains its native argument"
+                    );
+                    assert_source_tree(
+                        selected,
+                        &native_report_shape(&raw[0]),
+                        "main raw report before JSON stringify",
+                    );
+                    json!(native_stringify(&raw[0]))
                 } else {
                     Value::Null
                 };
@@ -483,6 +499,7 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                 worker,
                 consoles: RefCell::default(),
                 reports: RefCell::default(),
+                raw_reports: RefCell::default(),
                 trace: Rc::default(),
             });
             let failure = Rc::new(ReportingFailure {
@@ -647,4 +664,15 @@ fn native_stringify(value: &safe_cex_exchange::js_runtime::value::Js) -> String 
         .expect("native reporting JSON.stringify")
         .expect("report value is JSON serializable");
     String::from_utf16(&units).expect("report JSON contains valid UTF-16")
+}
+
+// Match the source observer's Error property reads without redefining their
+// enumerability. JSON.stringify is checked separately on the same native value.
+fn native_report_shape(raw: &safe_cex_exchange::js_runtime::value::Js) -> Value {
+    use safe_cex_exchange::js_runtime::value::{Js, to_json};
+    if matches!(raw, Js::Object(object) if object.class == "Error") {
+        json!({"name": to_json(&raw.get("name").unwrap()).unwrap(), "message": to_json(&raw.get("message").unwrap()).unwrap()})
+    } else {
+        to_json(raw).expect("finite raw reporting fixture")
+    }
 }

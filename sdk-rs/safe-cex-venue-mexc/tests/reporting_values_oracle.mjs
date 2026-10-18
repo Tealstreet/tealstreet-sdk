@@ -108,7 +108,7 @@ for (const worker of [false, true]) for (const fixture of fixtures) for (const m
   rows.push({worker, label: fixture.label, method, result: result ?? null, error: caught ?? null,
     event: events.length ? events[0][0] : null, reported: !coercion ? shapes(worker ? events[0][1].sentryData.error : reports[0].error) : null,
     // Observe the real Error getters above separately from its enumerable wire shape.
-    reportedJson: worker && !coercion ? JSON.stringify(events[0][1].sentryData.error) : null,
+    reportedJson: !coercion && (worker || typeof selected !== 'string') ? JSON.stringify(worker ? events[0][1].sentryData.error : reports[0].error) : null,
     positionReads, after, report});
 }
 assert.equal(rows.length, 120, 'SOURCE independent raw reporting method root floor');
