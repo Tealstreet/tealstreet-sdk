@@ -16,14 +16,15 @@ const {DefaultStore}=require(path.join(root,'packages/safe-cex/src/store/store.b
   assert.equal(requests,0);
   const orderRequests=[];
   venue.xhr.defaults.adapter=async config=>{
-   orderRequests.push([config.method,config.url]);
+   const query=new URLSearchParams(config.params).toString();
+   orderRequests.push([config.method,config.url+(query?'?'+query:'')]);
    assert.ok(['/capi/v3/openOrders','/capi/v3/openAlgoOrders'].includes(config.url));
    return {data:[],status:200,statusText:'OK',headers:{},config};
   };
   // A caller discards the Promise; the source operation still owns its I/O.
   void venue.fetchOrders();
   for(let turn=0;turn<8 && orderRequests.length<2;turn++) await new Promise(setImmediate);
-  assert.deepEqual(orderRequests,[['get','/capi/v3/openOrders'],['get','/capi/v3/openAlgoOrders']]);
+  assert.deepEqual(orderRequests,[['get','/capi/v3/openOrders?limit=100&page=0'],['get','/capi/v3/openAlgoOrders?limit=100&page=1']]);
   process.stdout.write(JSON.stringify({prefix,settled:store.options.isHedged,requests,orderRequests}));
  }finally{venue.dispose();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
