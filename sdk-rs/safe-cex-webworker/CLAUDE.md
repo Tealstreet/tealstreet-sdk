@@ -732,3 +732,14 @@ start_eager. Clock, import, venue-start and startup-race typed results yield at
 their source await boundaries. Discarding a caller waiter cannot cancel startup
 or failed-worker table cleanup; token/disposal suppression and retained startup
 losers remain unchanged. Raw session/config admission is a separate audit row.
+
+WorkerModule owns its installed sessions; the returned session is an optional
+handle, not the listener lifetime owner. The reverse module link is weak. Module
+destruction unregisters listeners, clears ports/maps, disposes workers through
+canonical native teardown, and asks each context to release its runtime/replay
+work. Context shutdown must stop only work belonging to this worker module and
+must be idempotent for shared contexts; errors are reported while other contexts
+continue closing. Session ingress/config/replay/perf/opaque dispatch use native
+Js directly. Decode shared models only at their actual consumers, and keep
+buffered message identity. Separate ordinary output/report DTO findings remain
+tracked in the worker FIX-audit ledger.

@@ -11495,7 +11495,7 @@
   },
   {
     "file": "safe-cex-webworker/src/exchange_worker.rs",
-    "function": "clear_runtime_pipeline",
+    "function": "clear_pipeline_with_error_handler",
     "edges": [
       {
         "receiver": "dynamic",
@@ -11507,7 +11507,7 @@
   },
   {
     "file": "safe-cex-webworker/src/exchange_worker.rs",
-    "function": "dispose",
+    "function": "dispose_with_error_handler",
     "edges": [
       {
         "receiver": "dynamic",
