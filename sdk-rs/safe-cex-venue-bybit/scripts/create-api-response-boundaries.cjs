@@ -100,6 +100,10 @@ async function run(input) {
   let lastPhysicalConfig, lastPhysicalResponse;
   const payloads = [], configs = [], logs = [];
   const options = { key: 'key', secret: 'secret' };
+  const listenerError = Object.assign(new Error('subscriber refused diagnostic'), {
+    name: 'DiagnosticSubscriberError', code: { retry: false, sentinel: NaN, ownUndefined: undefined },
+  });
+  let diagnosticCalls = 0;
   const api = load(apiPath, {
     axios,
     'axios-retry': retry,
@@ -129,7 +133,9 @@ async function run(input) {
           lastPhysicalConfig = current;
           lastPhysicalResponse = {
             status: 200, statusText: 'OK', headers: {}, config: current,
-            data: input.id === 'clock-post-body-phase' && attempts === 1
+            data: input.id === 'diagnostic-listener-refusal'
+              ? { retCode: 10016, retMsg: 'service unavailable', raw_response: 'There might be too much traffic or a configuration error' }
+              : input.id === 'clock-post-body-phase' && attempts === 1
               ? { retCode: 10002, retMsg: 'recv window rejected' }
               : input.id === 'network-auth-unwind'
                 ? { retCode: 10003, retMsg: 'invalid key' }
@@ -164,9 +170,25 @@ async function run(input) {
   const exchange = {
     name: 'bybitinverse', isDemo: false,
     recordAuthFailure: () => authFailures++, recordAuthSuccess: () => authSuccesses++,
-    emitAndLogError: (...args) => logs.push(args),
+    emitAndLogError: (...args) => {
+      if (input.id === 'diagnostic-listener-refusal') {
+        assert.equal(args[0], 'Server was unavailable for a request, retrying...');
+        diagnosticCalls++;
+        throw listenerError;
+      }
+      logs.push(args);
+    },
   };
   const client = api.createAPI(options, exchange);
+  if (input.id === 'diagnostic-listener-refusal') {
+    await assert.rejects(client.request({ method: 'get', url: '/private' }), error => error === listenerError);
+    assert.equal(diagnosticCalls, 1);
+    assert.equal(attempts, 1, 'diagnostic rejection does not retry');
+    assert.ok(Number.isNaN(listenerError.code.sentinel));
+    assert.ok(Object.hasOwn(listenerError.code, 'ownUndefined'));
+    assert.equal(listenerError.code.ownUndefined, undefined);
+    return { attempts, diagnosticCalls, name: listenerError.name, code: listenerError.code };
+  }
   const result = await client.request({
     method: input.method, url: '/private',
     ...(Object.hasOwn(input, 'data') ? { data: input.data } : {}),
@@ -208,9 +230,10 @@ async function run(input) {
   for (const input of inputs) cases.push({ ...input, source: await run(input) });
   assert.equal(cases.length, 2, 'executed review case floor');
   assert.deepEqual(cases.map(value => value.id), pinnedIds);
+  const diagnosticListenerRefusal = await run({ id: 'diagnostic-listener-refusal', method: 'get' });
   process.stdout.write(JSON.stringify({
     scope: 'source-only; actual Axios/retry/qs and maintained API/response/read-retry bodies; scripted constructor/adapter and recording signer; common HTTP wrapper, native crypto and native factory not executed',
     sourceCallbacks: callbacks, sourceModuleFunctions: moduleFunctions, assembledAstDiagnostics: 0,
-    declaredCases: 2, cases,
+    declaredCases: 2, cases, diagnosticListenerRefusal,
   }) + '\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });

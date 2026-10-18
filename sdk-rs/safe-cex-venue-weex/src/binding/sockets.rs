@@ -65,8 +65,8 @@ fn call_unit(h: &Host, name: &str, args: Vec<Js>) -> Result<(), Thrown> {
 }
 fn parse(h: &Host, units: &[u16]) -> Result<Js, Thrown> {
     let _ = h;
-    Ok(safe_cex_exchange::js_runtime::value::from_json(
-        &safe_cex_transport::how::big_int_as_string_json_parse(&String::from_utf16_lossy(units)),
+    Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+        safe_cex_transport::how::big_int_as_string_json_parse_utf16(units),
     ))
 }
 fn serialize(h: &Host, value: Js) -> Result<Js, Thrown> {

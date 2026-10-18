@@ -17,12 +17,6 @@ pub(crate) fn ordered_entries(map: &Map<String, Value>) -> Vec<(&String, &Value)
     entries
 }
 
-fn json_bytes(value: &Value) -> Result<String, String> {
-    safe_cex_num::js_json_stringify(&value.clone().into())
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "JSON payload unexpectedly became undefined".into())
-}
-
 fn header_value(value: &str) -> String {
     let cleaned: String = value
         .chars()
@@ -187,8 +181,12 @@ async fn prepare_request(
     } else if let Some(body) = &request.body {
         // A resent config carries the body axios already serialized; sign it as sent.
         match body.untransformed().map_err(|e| e.to_string())? {
-            Value::String(text) => text.clone(),
-            value => json_bytes(value)?,
+            safe_cex_types::retained_json::RetainedJsonInput::Text(text) => {
+                String::from_utf16(text).map_err(|error| error.to_string())?
+            }
+            value => safe_cex_num::js_retained_json_stringify(value)
+                .map_err(|error| error.to_string())?
+                .unwrap_or_default(),
         }
     } else {
         String::new()
