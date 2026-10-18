@@ -1,5 +1,9 @@
 # WOO venue port
 
+`FIX_AUDIT_LEDGER.md` tracks the exact 60-row follow-up cohort. The isolated V3
+orderbook recovery port and its facade-only tests are retired after caller and
+constructed-runtime checks; the live legacy snapshot/delta/cleanup path remains.
+
 The canonical spread, lifecycle for-of and array-pattern slots consume the shared
 iterator protocol. Spread retains native values and UTF-16 code points; loops
 observe collection mutation during the body. Array patterns advance only their
