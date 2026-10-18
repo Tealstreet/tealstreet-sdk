@@ -189,3 +189,74 @@ fn maintained_source_preserves_six_callback_throws() {
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "6");
 }
+
+#[test]
+fn actual_socket_dispatch_reads_only_the_live_selected_handler() {
+    for field in ["publicWebsocket", "businessWebsocket"] {
+        let h = fixture();
+        let socket = h.exchange.scope.this.get(field).unwrap();
+        let reads = Rc::new(Cell::new(0));
+        let callbacks = Rc::new(Cell::new(0));
+        let count = callbacks.clone();
+        let parser = Js::function("parser", move |_, _| {
+            count.set(count.get() + 1);
+            Ok(Js::Undefined)
+        });
+        let table = Js::object(vec![("selected", Js::array(vec![parser.clone()]))]);
+        let bad = reads.clone();
+        table
+            .define_accessor(
+                "unrelated",
+                Some(Rc::new(move |_| {
+                    bad.set(bad.get() + 1);
+                    Err(Thrown::type_error(
+                        "unrelated handler getter must stay unread",
+                    ))
+                })),
+                None,
+            )
+            .unwrap();
+        socket.set("messageHandlers", table.clone()).unwrap();
+        let dispatch = || {
+            socket.call_method(
+                "dispatchMessageHandler",
+                vec![Js::str("selected"), Js::object(vec![])],
+            )
+        };
+        dispatch().unwrap();
+        assert_eq!(callbacks.get(), 1, "{field} selected callback");
+        assert_eq!(reads.get(), 0, "{field} never enumerates the handler table");
+        let core = h
+            .venue()
+            .base()
+            .get_socket(if field == "publicWebsocket" {
+                safe_cex_exchange::socket_lifecycle::SocketSlot::Public
+            } else {
+                safe_cex_exchange::socket_lifecycle::SocketSlot::Business
+            })
+            .unwrap();
+        assert_eq!(
+            core.message_handlers_stats.borrow()["selected"].had_handlers,
+            Some(true)
+        );
+        // These mutations bypass the listen API: the same aliased JS table must
+        // be read again, rather than a synchronized typed registry.
+        table.define("selected", Js::array(vec![])).unwrap();
+        dispatch().unwrap();
+        assert_eq!(
+            callbacks.get(),
+            1,
+            "{field} sees direct defineProperty replacement"
+        );
+        table
+            .delete(&"selected".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
+        dispatch().unwrap();
+        assert_eq!(callbacks.get(), 1, "{field} sees direct deletion");
+        table.set("selected", Js::array(vec![parser])).unwrap();
+        dispatch().unwrap();
+        assert_eq!(callbacks.get(), 2, "{field} sees alias assignment");
+        assert_eq!(reads.get(), 0);
+        h.venue().dispose().unwrap();
+    }
+}

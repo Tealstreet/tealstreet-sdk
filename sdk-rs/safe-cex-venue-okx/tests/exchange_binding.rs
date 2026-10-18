@@ -1437,17 +1437,7 @@ fn recorded_business_candle_tracks_registered_handlers_and_unsubscribe() {
         safe_cex_num::PrototypeScalar::Number(2.0)
     ));
     assert_eq!(second.borrow().len(), 1);
-    assert_eq!(
-        socket.message_handlers.borrow()[key].borrow().len(),
-        2,
-        "registration updates the core before a public frame can rebuild it"
-    );
     stop().unwrap();
-    assert_eq!(
-        socket.message_handlers.borrow()[key].borrow().len(),
-        1,
-        "unsubscribing one listener updates only its selected core slot"
-    );
     deliver();
     assert_eq!(candles.borrow().len(), 1);
     assert_eq!(second.borrow().len(), 2);
@@ -1456,11 +1446,6 @@ fn recorded_business_candle_tracks_registered_handlers_and_unsubscribe() {
         safe_cex_num::PrototypeScalar::Number(1.0)
     ));
     stop_second().unwrap();
-    assert_eq!(
-        socket.message_handlers.borrow()[key].borrow().len(),
-        0,
-        "the final empty own slot still shadows inherited names"
-    );
     assert!(
         !socket.message_handlers_stats.borrow().contains_key(key),
         "unsubscribe removes statistics"
@@ -1474,56 +1459,6 @@ fn recorded_business_candle_tracks_registered_handlers_and_unsubscribe() {
     assert!(
         !socket.message_handlers_stats.borrow().contains_key(key),
         "late frame cannot restore statistics"
-    );
-    h.venue().dispose().unwrap();
-}
-
-#[test]
-fn constructed_socket_registry_is_initialized_before_first_public_frame() {
-    use safe_cex_exchange::socket_lifecycle::SocketSlot;
-    let h = harness(ExchangeName::Okx, options(), okx);
-    let public = h.venue().base().get_socket(SocketSlot::Public).unwrap();
-    for key in [
-        "tickers",
-        "mark-price",
-        "index-tickers",
-        "open-interest",
-        "funding-rate",
-    ] {
-        assert_eq!(
-            public
-                .message_handlers
-                .borrow()
-                .get(key)
-                .map(|list| list.borrow().len()),
-            Some(1),
-            "static handler {key} initialized once without a frame"
-        );
-    }
-    h.drive(h.venue().start()).unwrap();
-    h.runtime.advance(50.0);
-    let stop = h
-        .venue()
-        .listen_order_book("BTCUSDT".into(), std::rc::Rc::new(|_| {}))
-        .unwrap();
-    assert_eq!(
-        public
-            .message_handlers
-            .borrow()
-            .get("books.BTC-USDT-SWAP")
-            .map(|list| list.borrow().len()),
-        Some(1),
-        "dynamic book registration before dispatch"
-    );
-    stop().unwrap();
-    assert_eq!(
-        public
-            .message_handlers
-            .borrow()
-            .get("books.BTC-USDT-SWAP")
-            .map(|list| list.borrow().len()),
-        Some(0),
-        "book unsubscribe before dispatch"
     );
     h.venue().dispose().unwrap();
 }
