@@ -4755,6 +4755,8 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
     }
     for (status, header, value, duration) in [
         (200, "x-mbx-used-weight-1m", "1920", 60_000.0),
+        (200, "X-MbX-UsEd-WeIgHt-1m", "1920", 60_000.0),
+        (429, "ReTrY-AfTeR", "2.5", 2_500.0),
         (429, "retry-after", "2.5", 2_500.0),
         (429, "retry-after", "invalid", 60_000.0),
     ] {
@@ -4807,7 +4809,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(
             owner.paused_until.get(),
             1_000.0 + duration,
-            "native request-weight observer must run on HTTP status {status}"
+            "native request-weight observer must run on HTTP status {status} header {header}"
         );
         assert!(owner.paused());
         let requests = requests.lock().unwrap();
