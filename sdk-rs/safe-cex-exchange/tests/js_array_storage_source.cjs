@@ -126,7 +126,10 @@ sortedArray.sort((a,b) => a-b);
 const jsonArray = [0, 1];
 Object.defineProperty(jsonArray, '0', {get() { delete jsonArray[1]; return -0; }});
 const liveReads = {mapped: JSON.stringify(mapped), mappedKeys: Object.keys(mapped), sliced, sorted: [sortedArray.finalFirst, sortedArray[1]], json: JSON.stringify(jsonArray)};
-const prototypeAliases = {samePrototype: Object.getPrototypeOf([]) === Array.prototype, sameMap: [].map === [].map, mapBorrow: Array.prototype.map.call({0: 4, length: 1}, v => v+1)};
+const prototypeAliases = {samePrototype: Object.getPrototypeOf([]) === Array.prototype, sameMap: [].map === [].map, mapBorrow: Array.prototype.map.call({0: 4, length: 1}, v => v+1),
+  toStringBorrow: [{join: 0}, function () {}, 7, false, 'x', 1n].map(v => Array.prototype.toString.call(v)),
+  toStringArray: Array.prototype.toString.call(Object.assign([], {join: 0})),
+  toStringNullish: [null, undefined].map(v => {try {Array.prototype.toString.call(v)} catch(e) {return [e.name, e.message]}})};
 
 const coercionArray = [2], coercionEvents = [];
 coercionArray.toString = function () { if (this !== coercionArray) throw Error('receiver'); coercionEvents.push('string'); return '\ud800!'; };

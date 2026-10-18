@@ -111,11 +111,16 @@ pub(in crate::js_runtime) fn prototype() -> Js {
         utf16("toString"),
         Prop::DataDescriptor {
             value: Js::function("toString", |this, _| {
+                if this.is_nullish() {
+                    return Err(Thrown::type_error(
+                        "Cannot convert undefined or null to object",
+                    ));
+                }
                 let join = this.get("join")?;
                 if join.is_callable() {
                     join.call(this, vec![])
                 } else {
-                    Ok(Js::str("[object Array]"))
+                    Ok(Js::String(this.object_tag_string()))
                 }
             }),
             writable: true,

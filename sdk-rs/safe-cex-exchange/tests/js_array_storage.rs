@@ -657,8 +657,31 @@ fn array_prototype_method_alias_uses_actual_call_receiver() {
             vec![callback],
         )
         .unwrap();
+    let to_string = prototype.get("toString").unwrap();
+    let mut borrowed_tags = Vec::new();
+    for receiver in [
+        Js::object(vec![("join", Js::Number(0.0))]),
+        Js::function("borrowed", |_, _| Ok(Js::Undefined)),
+        Js::Number(7.0),
+        Js::Bool(false),
+        Js::str("x"),
+        Js::BigInt(Rc::new(1.into())),
+    ] {
+        let tag = to_string.call(receiver, vec![]).unwrap();
+        borrowed_tags.push(String::from_utf16(tag.as_str().unwrap()).unwrap());
+    }
+    a.set("join", Js::Number(0.0)).unwrap();
+    let array_tag = to_string.call(a.clone(), vec![]).unwrap();
+    let nullish_errors: Vec<_> = [Js::Null, Js::Undefined]
+        .into_iter()
+        .map(|receiver| {
+            let error = to_string.call(receiver, vec![]).unwrap_err().value;
+            ["name", "message"]
+                .map(|key| String::from_utf16(error.get(key).unwrap().as_str().unwrap()).unwrap())
+        })
+        .collect();
     assert_eq!(
-        json!({"samePrototype":a.get("__proto__").unwrap().same_reference(&prototype),"sameMap":a.get("map").unwrap().same_reference(&b.get("map").unwrap()),"mapBorrow":[number(&result.get("0").unwrap()) as i64]}),
+        json!({"samePrototype":a.get("__proto__").unwrap().same_reference(&prototype),"sameMap":a.get("map").unwrap().same_reference(&b.get("map").unwrap()),"mapBorrow":[number(&result.get("0").unwrap()) as i64], "toStringBorrow":borrowed_tags,"toStringArray":String::from_utf16(array_tag.as_str().unwrap()).unwrap(),"toStringNullish":nullish_errors}),
         expected("prototypeAliases")
     );
 }

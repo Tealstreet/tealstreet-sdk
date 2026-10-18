@@ -23283,50 +23283,8 @@
               {
                 "type": {
                   "resolved_path": {
-                    "path": "core::cell::RefCell",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "resolved_path": {
-                                "path": "alloc::vec::Vec",
-                                "args": {
-                                  "angle_bracketed": {
-                                    "args": [
-                                      {
-                                        "type": {
-                                          "resolved_path": {
-                                            "path": "core::option::Option",
-                                            "args": {
-                                              "angle_bracketed": {
-                                                "args": [
-                                                  {
-                                                    "type": {
-                                                      "resolved_path": {
-                                                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                                                        "args": null
-                                                      }
-                                                    }
-                                                  }
-                                                ],
-                                                "constraints": []
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    ],
-                                    "constraints": []
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        ],
-                        "constraints": []
-                      }
-                    }
+                    "path": "safe_cex_exchange::js_runtime::value::array::ArrayData",
+                    "args": null
                   }
                 }
               }
@@ -23337,7 +23295,7 @@
       }
     },
     "evidence": "Individual source-role review: safe-cex-venue-binance/src/private_event_value.rs::EventArray. Authenticated acceptedAliasContext plus the actual native Deserialize/conversion probes in scripts/private-order-alias-contracts.mjs decide this exact alias classification. Separate production behavior is exercised through native_dependencies, real owner/HTTP/socket/Store and primitive terminal ports in tests/private_classes.rs::private_order_aliases::native_private_handler_and_event_array_keep_numeric_fields_before_transport; scripts/private-order-alias-controls.py requires a compiled named fault and exact-restoration pass for this alias. This finite native/default evidence does not exempt argument/result DTOs, arbitrary callbacks or other feature combinations.",
-    "reason": "Rc/RefCell handle for sparse native runtime graph rows, rather than a Serde DTO. Actual private parent orders reads return a handle whose rows retain native field kinds/bits and Rc cloning identity. Typed Store snapshots do not claim mutable aliases back into Store."
+    "reason": "Rc handle to the canonical sparse ArrayData owner for native runtime graph rows, rather than a Serde DTO. Actual private parent orders reads return a handle whose rows retain native field kinds/bits and Rc cloning identity. Typed Store snapshots do not claim mutable aliases back into Store. Indexed and named descriptors, holes, virtual length and extensibility share that owner; array-element/iteration failures propagate through the existing Failure boundary."
   },
   "safe_cex_venue_binance::private_events::PrivateHandler": {
     "category": "non-decoder",

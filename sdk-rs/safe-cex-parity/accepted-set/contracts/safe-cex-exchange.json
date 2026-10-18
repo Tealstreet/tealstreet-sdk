@@ -26402,29 +26402,43 @@
             ],
             "output": {
               "resolved_path": {
-                "path": "core::option::Option",
+                "path": "core::result::Result",
                 "args": {
                   "angle_bracketed": {
                     "args": [
                       {
                         "type": {
                           "resolved_path": {
-                            "path": "alloc::vec::Vec",
+                            "path": "core::option::Option",
                             "args": {
                               "angle_bracketed": {
                                 "args": [
                                   {
                                     "type": {
                                       "resolved_path": {
-                                        "path": "core::option::Option",
+                                        "path": "alloc::vec::Vec",
                                         "args": {
                                           "angle_bracketed": {
                                             "args": [
                                               {
                                                 "type": {
                                                   "resolved_path": {
-                                                    "path": "safe_cex_exchange::js_runtime::value::Js",
-                                                    "args": null
+                                                    "path": "core::option::Option",
+                                                    "args": {
+                                                      "angle_bracketed": {
+                                                        "args": [
+                                                          {
+                                                            "type": {
+                                                              "resolved_path": {
+                                                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                                "args": null
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "constraints": []
+                                                      }
+                                                    }
                                                   }
                                                 }
                                               }
@@ -26439,6 +26453,14 @@
                                 "constraints": []
                               }
                             }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
                           }
                         }
                       }
@@ -26475,22 +26497,36 @@
             ],
             "output": {
               "resolved_path": {
-                "path": "core::option::Option",
+                "path": "core::result::Result",
                 "args": {
                   "angle_bracketed": {
                     "args": [
                       {
                         "type": {
                           "resolved_path": {
-                            "path": "alloc::vec::Vec",
+                            "path": "core::option::Option",
                             "args": {
                               "angle_bracketed": {
                                 "args": [
                                   {
                                     "type": {
                                       "resolved_path": {
-                                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                                        "args": null
+                                        "path": "alloc::vec::Vec",
+                                        "args": {
+                                          "angle_bracketed": {
+                                            "args": [
+                                              {
+                                                "type": {
+                                                  "resolved_path": {
+                                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                    "args": null
+                                                  }
+                                                }
+                                              }
+                                            ],
+                                            "constraints": []
+                                          }
+                                        }
                                       }
                                     }
                                   }
@@ -26498,6 +26534,14 @@
                                 "constraints": []
                               }
                             }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
                           }
                         }
                       }

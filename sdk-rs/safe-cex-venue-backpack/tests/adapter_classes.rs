@@ -666,6 +666,62 @@ fn native_field_receiver_forwards_own_cells_without_projection() {
 }
 
 #[test]
+fn native_rest_array_host_retains_owner_and_inherited_getter_completion() {
+    use safe_cex_exchange::js_runtime::value::Thrown;
+    let (owner, runtime, _, wire) = support::fixture();
+    let array = Native::holey_array(vec![None]);
+    let alias = NativeValue::array(&array).unwrap();
+    assert!(alias.same_reference(&array), "REST_ARRAY original owner");
+    let tag = Native::object(vec![]);
+    array.set("tag", tag.clone()).unwrap();
+    let prototype = Native::object(vec![]);
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    let expected_tag = tag.clone();
+    prototype
+        .define_accessor(
+            "0",
+            Some(Rc::new(move |receiver| {
+                assert!(receiver.get("tag")?.same_reference(&expected_tag));
+                seen.set(seen.get() + 1);
+                Ok(Native::object(vec![]))
+            })),
+            None,
+        )
+        .unwrap();
+    array.set("__proto__", prototype.clone()).unwrap();
+    let before = wire.requests.lock().unwrap().len();
+    ready(
+        &runtime,
+        owner.fix_trigger_orders_without_trigger_by(alias.clone()),
+    )
+    .unwrap();
+    assert_eq!(calls.get(), 1, "REST_ARRAY inherited getter reached");
+    assert!(!array.has_own("0"), "REST_ARRAY hole remains a hole");
+    assert!(alias.get("tag").unwrap().same_reference(&tag));
+
+    let failure = Native::object(vec![("message", Native::str("original array getter"))]);
+    let thrown = failure.clone();
+    prototype
+        .define_accessor(
+            "0",
+            Some(Rc::new(move |_| {
+                Err(Thrown {
+                    value: thrown.clone(),
+                })
+            })),
+            None,
+        )
+        .unwrap();
+    let error = ready(&runtime, owner.fix_trigger_orders_without_trigger_by(alias)).unwrap_err();
+    assert!(
+        Thrown::from(error).value.same_reference(&failure),
+        "REST_ARRAY original getter rejection escapes"
+    );
+    assert_eq!(wire.requests.lock().unwrap().len(), before);
+}
+
+#[test]
 fn native_signing_record_alias_preserves_shared_ordered_cells() {
     use safe_cex_venue_backpack::signing::{BackpackSigningParams, SigningRecord};
     let value = Native::object(vec![

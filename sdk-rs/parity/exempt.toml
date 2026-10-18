@@ -7662,6 +7662,10 @@ rs = "safe-cex-exchange/src/js_runtime/value/array.rs::ArrayData"
 reason = "C3 native representation of the existing JavaScript Array exotic object: one sparse descriptor/length/prototype/extensibility owner, replacing the former mutable Vec. No TS SDK class/export is added. tests/js_array_storage.rs observes actual installed builtins, alias identity, holes, descriptors and numeric bits against independent Node; ARRAY_STORAGE_REVIEW.md states the finite scope."
 
 [[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::object_tag_string"
+reason = "C3 intrinsic object-tag operation shared by existing ordinary coercion and Array.prototype.toString's non-callable-join fallback. This native engine helper has no TS SDK declaration. The real installed Array alias witness compiles RED for six borrowed receiver tags and nullish TypeError observations, then matches independent Node after the single shared tag cutover; original array tagging and call receiver remain covered."
+
+[[exempt]]
 rs = "safe-cex-exchange/src/js_runtime/value/array.rs::ArrayData::len"
 reason = "C3 read of the canonical uint32 array length for native consumers and iterators; no new TS SDK method. Native maximum-index, blocked shrink, readonly growth and live iteration tests compare the actual Array.length behavior to Node without a dense storage mirror."
 

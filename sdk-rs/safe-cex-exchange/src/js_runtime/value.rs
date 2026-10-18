@@ -777,28 +777,7 @@ impl Js {
                             safe_cex_num::ProtoMember::ToString,
                         ) =>
                 {
-                    let tag = match self {
-                        Js::Function(_) => "Function",
-                        Js::Object(object) if object.class == "Buffer" => "Uint8Array",
-                        Js::Object(object)
-                            if matches!(
-                                object.class,
-                                "Error"
-                                    | "Blob"
-                                    | "ArrayBuffer"
-                                    | "Map Iterator"
-                                    | "Set Iterator"
-                                    | "Array Iterator"
-                                    | "String Iterator"
-                            ) =>
-                        {
-                            object.class
-                        }
-                        Js::Object(_) => "Object",
-                        Js::Array(_) => "Array",
-                        _ => unreachable!(),
-                    };
-                    Js::str(&format!("[object {tag}]"))
+                    Js::String(self.object_tag_string())
                 }
                 Js::Builtin(reference)
                     if reference.member()
@@ -817,6 +796,42 @@ impl Js {
         Err(Thrown::type_error(
             "Cannot convert object to primitive value",
         ))
+    }
+    /// Intrinsic object tag shared by ordinary coercion and Array.toString fallback.
+    fn object_tag_string(&self) -> Str {
+        let tag = match self {
+            Js::Undefined => "Undefined",
+            Js::Null => "Null",
+            Js::Bool(_) => "Boolean",
+            Js::Number(_) => "Number",
+            Js::BigInt(_) => "BigInt",
+            Js::String(_) => "String",
+            Js::SymbolIterator => "Symbol",
+            Js::Array(_) => "Array",
+            Js::Function(_) => "Function",
+            Js::Promise(_) => "Promise",
+            Js::Map(_) => "Map",
+            Js::Set(_) => "Set",
+            Js::Builtin(reference) if reference.is_callable() => "Function",
+            Js::Builtin(_) => "Object",
+            Js::Object(object) if object.class == "Buffer" => "Uint8Array",
+            Js::Object(object)
+                if matches!(
+                    object.class,
+                    "Error"
+                        | "Blob"
+                        | "ArrayBuffer"
+                        | "Map Iterator"
+                        | "Set Iterator"
+                        | "Array Iterator"
+                        | "String Iterator"
+                ) =>
+            {
+                object.class
+            }
+            Js::Object(_) => "Object",
+        };
+        utf16(&format!("[object {tag}]"))
     }
     /// Stock intrinsic conversion after primitive coercion dispatch.
     fn intrinsic_string(&self) -> Result<Str, Thrown> {

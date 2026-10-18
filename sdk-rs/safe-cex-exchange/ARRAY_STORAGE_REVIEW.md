@@ -27,6 +27,16 @@ The atomic compiler migration includes Backpack's associated REST array host,
 Binance's EventArray and public event reads, the HL DTO bridge, checked native
 orderbook splices, custom iterator adapters and the browser DATA materializer.
 Backpack retains Js itself and exposes checked length/element/Set operations.
+`adapter_classes::native_rest_array_host_retains_owner_and_inherited_getter_completion`
+invokes the constructed Backpack exchange's real trigger-repair method. It checks
+original array identity, inherited index getter receivers, holes, named aliases,
+original getter rejection and the absence of HTTP writes. Its separate
+`scripts/array-host-controls.py` removes the production host's index Get, requires
+the named compiled failure, restores exact source and replays the same witness.
+Borrowed `Array.prototype.toString` uses the shared intrinsic object-tag helper
+when join is non-callable; nullish receivers fail before reading join. Six
+non-array tags and both exact nullish errors compiled RED before this correction
+and then matched Node, alongside the unchanged original-array tag.
 The browser creates/caches the destination before reading enumerable children,
 including named array fields, preserving holes, original aliases and cycles.
 
