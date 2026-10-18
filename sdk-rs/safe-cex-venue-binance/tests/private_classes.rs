@@ -1,6 +1,3 @@
-#[cfg(feature = "native")]
-#[path = "support/public_subscription_receipts.rs"]
-mod public_subscription_receipts;
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
 #[cfg(feature = "native")]
@@ -9,6 +6,9 @@ mod lifecycle_aliases;
 #[cfg(feature = "native")]
 #[path = "support/public_frame_guard.rs"]
 mod public_frame_guard;
+#[cfg(feature = "native")]
+#[path = "support/public_subscription_receipts.rs"]
+mod public_subscription_receipts;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
