@@ -1743,6 +1743,13 @@ Independent dropped-retention and leaked-retention faults must compile, fail nam
 assertions, restore exact source and pass. This adds no native resource wire codec
 and does not switch a Hyperliquid consumer or change default prototype policy.
 
+The shared `in` operator validates the right-hand receiver, then reuses canonical
+property-presence traversal for ordinary objects, functions and intrinsics.
+Presence includes own undefined values, nonenumerable accessors and function
+names without invoking getters; array length and present indices remain covered.
+`tests/js_in_function_prototypes.rs` compares mixed prototype chains and null
+termination with Node. The original helper compiles but fails this witness;
+the independent function-bypass fault must fail and restore green as well.
 Ordinary objects can retain one native WriteObserver, installed or cleared by
 set_write_observer. Successful assignments notify after the property operation,
 including inherited setters, using the original receiver, UTF-16 key and value.
