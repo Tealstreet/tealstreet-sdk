@@ -1890,9 +1890,27 @@ pub struct ExchangeOptionsExtraKucoinBroker {
     pub verify: Option<bool>,
 }
 
+/// @ts-union
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub enum ExchangeOptionsExtraHyrotraderMode {
+    #[serde(rename = "demo")]
+    Demo,
+    #[serde(rename = "production")]
+    Production,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(optional_fields)]
 pub struct ExchangeOptionsExtra {
+    /// @ts-mutable
+    #[serde(rename = "hyrotraderMode")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
     /// @ts-mutable
     #[serde(rename = "tickInterval")]
     #[serde(
@@ -3100,7 +3118,7 @@ mod strict_codecs {
         ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
         ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
         ExchangeOptionsExternalPublicDataVariant1Type, ExchangeOptionsExtra,
-        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraKucoinBroker,
+        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode, ExchangeOptionsExtraKucoinBroker,
         ExchangeOptionsExtraLighterBuilderFeeMode, ExchangeOptionsHyperliquidBuilder,
         ExchangeOptionsTuning, ExecutionPositionSide, IncomeCategory, MarginType, MarketLimits,
         MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, ModelField,
@@ -5367,8 +5385,32 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::ExchangeOptionsExtraHyrotraderMode")]
+    enum WireExchangeOptionsExtraHyrotraderMode {
+        #[serde(rename = "demo")]
+        Demo,
+        #[serde(rename = "production")]
+        Production,
+    }
+    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtraHyrotraderMode {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireExchangeOptionsExtraHyrotraderMode::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::ExchangeOptionsExtra")]
     struct WireExchangeOptionsExtra {
+        #[serde(rename = "hyrotraderMode")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
         #[serde(rename = "tickInterval")]
         #[serde(
             default,
@@ -7184,6 +7226,7 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<ExchangeOptionsExtraKucoinBroker>(
                 "ExchangeOptionsExtraKucoinBroker",
             );
+            crate::strict_decode::tests::string_union::<ExchangeOptionsExtraHyrotraderMode>("ExchangeOptionsExtraHyrotraderMode", WireExchangeOptionsExtraHyrotraderMode::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Demo).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Production).unwrap().as_str().unwrap().to_owned()]);
             crate::strict_decode::tests::record::<ExchangeOptionsExtra>("ExchangeOptionsExtra");
             crate::strict_decode::tests::string_union::<ExchangeOptionsExternalPublicDataVariant0Type>("ExchangeOptionsExternalPublicDataVariant0Type", WireExchangeOptionsExternalPublicDataVariant0Type::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExternalPublicDataVariant0Type::Websocket).unwrap().as_str().unwrap().to_owned()]);
             crate::strict_decode::tests::record::<ExchangeOptionsExternalPublicDataVariant0>(

@@ -388,16 +388,18 @@ impl BybitExchange {
         if self.base.name == safe_cex_types::ExchangeName::Hyrotrader {
             if !matches!(category, PublicCategory::Linear) {
                 return Err(safe_cex_exchange::runtime::ExchangeError::new(
-                    "HyroTrader simulator only supports linear public WebSocket data",
+                    "HyroTrader only supports linear public WebSocket data",
                 ));
             }
-            return crate::types::HYROTRADER_SIMULATOR_WS_URL["public"]["linear"][network.key()]
+            let (label, _, ws) =
+                crate::hyro_configuration::get_configured_urls(&self.base.options());
+            return ws["public"]["linear"][network.key()]
                 .as_str()
                 .filter(|url| !url.is_empty())
                 .ok_or_else(|| {
-                    safe_cex_exchange::runtime::ExchangeError::new(
-                        "HyroTrader simulator public WebSocket URL is not configured",
-                    )
+                    safe_cex_exchange::runtime::ExchangeError::new(format!(
+                        "HyroTrader {label} public WebSocket URL is not configured"
+                    ))
                 });
         }
         Ok(
@@ -411,13 +413,15 @@ impl BybitExchange {
         network: Network,
     ) -> Result<&'static str, safe_cex_exchange::runtime::ExchangeError> {
         if self.base.name == safe_cex_types::ExchangeName::Hyrotrader {
-            return crate::types::HYROTRADER_SIMULATOR_WS_URL["private"][network.key()]
+            let (label, _, ws) =
+                crate::hyro_configuration::get_configured_urls(&self.base.options());
+            return ws["private"][network.key()]
                 .as_str()
                 .filter(|url| !url.is_empty())
                 .ok_or_else(|| {
-                    safe_cex_exchange::runtime::ExchangeError::new(
-                        "HyroTrader simulator private WebSocket URL is not configured",
-                    )
+                    safe_cex_exchange::runtime::ExchangeError::new(format!(
+                        "HyroTrader {label} private WebSocket URL is not configured"
+                    ))
                 });
         }
         let table = if self.uses_bybit_demo_environment() {

@@ -103,7 +103,7 @@ fn hyro_constructor_matches_source_configuration_boundary() {
     if configured() {
         let h = result.unwrap_or_else(|error| panic!("configured source constructor: {error}"));
         assert_eq!(h.venue().class_name(), "HyrotraderExchange");
-        assert!(h.venue().base().is_demo);
+        assert!(!h.venue().base().is_demo);
         assert!(!h.venue().base().is_spot);
         assert!(h.wire.requests.borrow().is_empty());
         assert!(h.runtime.sockets.borrow().is_empty());
@@ -114,7 +114,7 @@ fn hyro_constructor_matches_source_configuration_boundary() {
         };
         assert_eq!(
             error.message,
-            "HyroTrader simulator REST URL is not configured"
+            "HyroTrader production REST URL is not configured. Set NEXT_PUBLIC_HYROTRADER_PROD_REST_URL, or NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL while v1 is simulator-backed."
         );
     }
 }
@@ -126,7 +126,7 @@ fn hyro_configured_facade_preserves_metadata_and_mode_refusals() {
     }
     let h = support::harness_as(ExchangeName::Hyrotrader, support::options(), |_| {});
     assert_eq!(h.venue().class_name(), "HyrotraderExchange");
-    assert!(h.venue().base().is_demo);
+    assert!(!h.venue().base().is_demo);
     assert_eq!(
         h.drive(h.venue().get_account()).unwrap_err().message,
         "HyroTrader does not provide account identity metadata"

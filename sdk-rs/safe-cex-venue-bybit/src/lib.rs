@@ -2,6 +2,7 @@
 pub mod rate_limits;
 pub mod spot_types;
 pub mod types;
+mod hyro_configuration;
 
 pub mod response;
 
