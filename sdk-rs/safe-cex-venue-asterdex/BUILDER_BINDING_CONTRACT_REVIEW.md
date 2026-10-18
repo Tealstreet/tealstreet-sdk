@@ -68,3 +68,11 @@ all nineteen receipts to pass after each restoration:
 | --- | --- |
 | Optional typed decoding takes a JSON round trip | `binding::members::optional` loses native NaN. |
 | The fixed no-wallet result reports success | Both actual chain-switch and browser-approval no-wallet profiles return the wrong success field. |
+
+Both isolated faults compiled and failed exactly the named native owners (one
+and two respectively). Both exact restorations passed all nineteen receipts.
+The source oracle passed 17 expectations; the unchanged projection source oracle
+also passed its 274 expectations, including the two refreshed builder APIs.
+After merging master `a66804624e` and reusing its retained-body fixture, the
+selected native inventory again passed all nineteen owners. The public parity
+check passed with 7464 rows and 16630 Rust items.
