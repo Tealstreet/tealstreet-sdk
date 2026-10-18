@@ -43,7 +43,11 @@ impl NativeStartup {
         self.generation
             .send_modify(|value| *value = value.wrapping_add(1));
     }
-    fn post(&self, payload: StoreWorkerPayload) -> Result<(), ExchangeError> {
+    fn post(
+        &self,
+        payload: StoreWorkerPayload,
+        original: Option<(&NativeValue, &[u16])>,
+    ) -> Result<(), ExchangeError> {
         let op = payload.op;
         let data = NativeValue::from(payload.data.unwrap_or(Value::Null)).to_js();
         let account = self.account.as_deref().map_or(Js::Undefined, Js::str);
@@ -53,9 +57,16 @@ impl NativeStartup {
                     let args = data.array_values().expect("worker error args");
                     let sentry = args[1].get("sentryData")?;
                     sentry.get("tags")?.define("account", account)?;
-                    let error = sentry.get("error")?;
-                    if !error.has_own("stack") {
-                        error.define("stack", Js::Undefined)?;
+                    if let Some((error, message)) = original {
+                        data.set("0", Js::utf16(message))?;
+                        let fields = Js::object(vec![]);
+                        for key in ["name", "message", "stack"] {
+                            fields.define(
+                                key,
+                                error.get(key).map_or(Js::Undefined, NativeValue::to_js),
+                            )?;
+                        }
+                        sentry.define("error", fields)?;
                     }
                 }
                 StoreWorkerOp::Log => data.get("context")?.define("account", account)?,
@@ -83,22 +94,31 @@ impl NativeStartup {
         }
         Ok(())
     }
-    fn report_error(&self, account: &NativeAccount, error: &Value) -> Result<(), ExchangeError> {
-        let detail = error.get("message").and_then(Value::as_str).unwrap_or("");
-        let suffix = if detail.is_empty() {
-            String::new()
-        } else {
-            format!(": {detail}")
-        };
-        let message = format!("Error starting exchange: {}{suffix}", self.name);
+    fn report_error(
+        &self,
+        account: &NativeAccount,
+        error: &NativeValue,
+    ) -> Result<(), ExchangeError> {
+        let mut message: Vec<u16> = format!("Error starting exchange: {}", self.name)
+            .encode_utf16()
+            .collect();
+        if let Some(NativeValue::String(detail)) = error.get("message")
+            && !detail.is_empty()
+        {
+            message.extend(": ".encode_utf16());
+            message.extend(detail);
+        }
+        let console_message = String::from_utf16_lossy(&message);
+        // Native error envelopes carry name/message/code, without worker controls.
+        // Keep their text outside the JSON logger scaffold, including UTF-16 units.
         worker_logging::forward_error(
             &self.cooldowns,
             (
                 account.exchange_name(),
                 self.account.as_deref().unwrap_or(""),
             ),
-            &message,
-            error,
+            &console_message,
+            &Value::Null,
             Some(&json!({"sentryTags":{"worker_error_phase":"startup"}})),
             true,
             (
@@ -108,14 +128,8 @@ impl NativeStartup {
                         Err(error) => -error.duration().as_secs_f64() * 1000.0,
                     })
                 },
-                || {
-                    let mut fields = json!({"name":error["name"],"message":error["message"]});
-                    if let Some(stack) = error.get("stack") {
-                        fields["stack"] = stack.clone();
-                    }
-                    Ok(fields)
-                },
-                |payload| self.post(payload),
+                || Ok(Value::Null),
+                |payload| self.post(payload, Some((error, &message))),
                 |prefix, message, error, cause| {
                     eprintln!("{prefix} {message} {error} {cause}");
                     Ok(())
@@ -136,9 +150,14 @@ impl NativeStartup {
                 WorkerLogLevel::Info,
                 &format!("Starting exchange in webworker: {}", self.name),
                 None,
-                |payload| self.post(payload),
+                |payload| self.post(payload, None),
             )
-            .map_err(|error| json!({"name":error.name,"message":error.message}))?;
+            .map_err(|error| {
+                NativeValue::object([
+                    ("name", NativeValue::string(&error.name)),
+                    ("message", NativeValue::string(&error.message)),
+                ])
+            })?;
             let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
             let (finished, result) = oneshot::channel();
             let finished = Rc::new(RefCell::new(Some(finished)));
@@ -156,9 +175,13 @@ impl NativeStartup {
                 tokio::time::sleep_until(deadline).await;
                 if let Some(finished) = finished.borrow_mut().take() {
                     timed_out_account.cancel_startup();
-                    let _ = finished.send(Err(
-                        json!({"name":"Error","message":"Exchange start timed out after 30s"}),
-                    ));
+                    let _ = finished.send(Err(NativeValue::object([
+                        ("name", NativeValue::string("Error")),
+                        (
+                            "message",
+                            NativeValue::string("Exchange start timed out after 30s"),
+                        ),
+                    ])));
                 }
             });
             let mut result = pin!(result);
@@ -170,9 +193,10 @@ impl NativeStartup {
                     }
                     match result.as_mut().poll(context) {
                         Poll::Ready(Ok(result)) => Poll::Ready(result),
-                        Poll::Ready(Err(error)) => {
-                            Poll::Ready(Err(json!({"name":"Error","message":error.to_string()})))
-                        }
+                        Poll::Ready(Err(error)) => Poll::Ready(Err(NativeValue::object([
+                            ("name", NativeValue::string("Error")),
+                            ("message", NativeValue::string(&error.to_string())),
+                        ]))),
                         Poll::Pending => Poll::Pending,
                     }
                 })
@@ -186,15 +210,19 @@ impl NativeStartup {
                     outcome
                         .as_ref()
                         .err()
-                        .map_or(String::new(), |error| format!(" {error}"))
+                        .map_or(String::new(), |error| format!(" {error:?}"))
                 );
                 return Ok(JsData(NativeValue::Bool(false)));
             }
             match outcome {
                 Ok(result) => Ok(JsData(result)),
                 Err(error) => {
-                    self.report_error(&account, &error)
-                        .map_err(|error| json!({"name":error.name,"message":error.message}))?;
+                    self.report_error(&account, &error).map_err(|error| {
+                        NativeValue::object([
+                            ("name", NativeValue::string(&error.name)),
+                            ("message", NativeValue::string(&error.message)),
+                        ])
+                    })?;
                     Ok(JsData(NativeValue::Bool(false)))
                 }
             }
