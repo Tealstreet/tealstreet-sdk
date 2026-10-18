@@ -54,5 +54,9 @@ const optionsFile=path.resolve(path.dirname(file),'bybit.options.ts');
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(optionsFile,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:optionExports});
 assert.equal(optionExports.mapBybitOptionInstrument({status:'Trading',symbol:'SOL\ud800-6NOV26-0-P',optionsType:'Put'}),undefined);
 assert.equal(optionExports.mapBybitOptionInstrument({status:'Trading',symbol:'SOL\ud800-6NOV26-112d5-P',optionsType:'Unknown'}),undefined);
+let optionCoercionError;
+try { optionExports.mapBybitOptionInstrument({status:'Trading',symbol:'SOL-6NOV26-112d5-P',optionsType:'Put',lotSizeFilter:{qtyStep:{toString:null}}}); }
+catch (error) { optionCoercionError={name:error.name,message:error.message}; }
+assert.equal(optionCoercionError.name,'TypeError');
 assert.equal(coercionErrors.length,3);
-process.stdout.write(JSON.stringify({units:[selected[0].info.avgPrice.charCodeAt(0)],nativeMarkets,coercionErrors}));
+process.stdout.write(JSON.stringify({units:[selected[0].info.avgPrice.charCodeAt(0)],nativeMarkets,coercionErrors,optionCoercionError}));
