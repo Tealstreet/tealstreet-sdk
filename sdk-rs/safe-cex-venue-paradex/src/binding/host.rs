@@ -290,17 +290,11 @@ impl crate::market_data::MarketDataHost for Host {
         let mut a = v
             .array_values()
             .ok_or_else(|| Thrown::type_error("value.sort is not a function"))?;
-        let mut error = None;
-        a.sort_by(|x, y| match c(x.clone(), y.clone()) {
-            Ok(n) => n.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal),
-            Err(e) => {
-                error = Some(e);
-                std::cmp::Ordering::Equal
-            }
-        });
-        if let Some(e) = error {
-            return Err(e);
-        }
+        safe_cex_exchange::js_runtime::sorting::stable_sort(&mut a, |x, y| {
+            Ok(c(x.clone(), y.clone())?
+                .partial_cmp(&0.0)
+                .unwrap_or(std::cmp::Ordering::Equal))
+        })?;
         if let Js::Array(out) = &v {
             *out.borrow_mut() = a.into_iter().map(Some).collect();
         }

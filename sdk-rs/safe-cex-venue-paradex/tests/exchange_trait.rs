@@ -2187,3 +2187,74 @@ fn candle_audit_failure_reports_only_and_preserves_polling_and_shared_cleanup() 
     assert_eq!(json!(store.loaded().unwrap()), loaded);
     venue.dispose().unwrap();
 }
+
+#[test]
+fn real_socket_book_sort_accepts_nan_comparisons_without_losing_levels() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let prices = [
+        "NaN", "558", "NaN", "197", "572", "NaN", "NaN", "48", "245", "415", "459", "NaN", "665",
+        "NaN", "625", "832", "557", "440", "367", "613", "NaN", "NaN",
+    ];
+    for side in ["bids", "asks"] {
+        let (venue, runtime, store, _) =
+            support::fixture_with(json!({"key":"","secret":"","publicDataOnly":true}), script);
+        drive(&runtime, venue.start()).unwrap();
+        let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));
+        let sink = seen.clone();
+        let cleanup = venue
+            .listen_order_book(
+                "BTC-USD-PERP".into(),
+                Rc::new(move |book| sink.borrow_mut().push(book)),
+            )
+            .unwrap();
+        for _ in 0..16 {
+            runtime.pump();
+        }
+        let mut data = json!({"market":"BTC-USD-PERP","bids":[["101","2"]],"asks":[["102","3"]]});
+        data[side] = prices
+            .iter()
+            .enumerate()
+            .map(|(i, p)| json!([p, (i + 1).to_string()]))
+            .collect();
+        let frame = json!({"jsonrpc":"2.0","method":"subscription","params":{
+            "channel":"order_book.BTC-USD-PERP.snapshot@15@100ms","data":data
+        }});
+        runtime.sockets.borrow()[0]
+            .1
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        for _ in 0..16 {
+            runtime.pump();
+        }
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "{side}: {:?}",
+            runtime.console.borrow()
+        );
+        let books = seen.borrow();
+        let levels = if side == "bids" {
+            &books[0].bids
+        } else {
+            &books[0].asks
+        };
+        assert_eq!(levels.len(), prices.len());
+        for (i, price) in prices.iter().enumerate() {
+            let row = levels
+                .iter()
+                .find(|row| row.amount == (i + 1) as f64)
+                .unwrap();
+            let expected: f64 = price.parse().unwrap();
+            assert!(
+                row.price.to_bits() == expected.to_bits()
+                    || (row.price.is_nan() && expected.is_nan())
+            );
+        }
+        assert!(store.tickers().is_ok(), "NaN is valid numeric ticker data");
+        cleanup().unwrap();
+        venue.dispose().unwrap();
+    }
+}
