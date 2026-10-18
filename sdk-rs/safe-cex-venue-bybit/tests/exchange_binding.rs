@@ -1451,7 +1451,7 @@ fn native_position_controls_match_thirty_two_source_compositions() {
         } else {
             ExchangeName::Bybitdemo
         };
-        let h = support::harness_as(name, options(), |wire| {
+        let h = support::harness_as(name.clone(), options(), |wire| {
             wire.ok(
                 "GET",
                 "/v5/position/list",
@@ -1943,6 +1943,46 @@ fn retained_info_market_undefined_parents_follow_source_failure() {
         "Cannot read properties of undefined (reading 'qtyStep')"
     );
 }
+#[test]
+fn retained_info_market_coercion_keeps_source_error_name_and_message() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-position-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    let expected = &expected["coercionErrors"][0];
+    assert_eq!(expected["variant"], "bybit");
+    for name in [
+        safe_cex_types::ExchangeName::Bybit,
+        safe_cex_types::ExchangeName::Bybitdemo,
+    ] {
+        let h = support::harness_as(name.clone(), options(), |wire| {
+            wire.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+            wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+            let mut row = instrument("BTCUSDT", "Trading");
+            row["lotSizeFilter"]["qtyStep"] = json!({"toString":null});
+            wire.retained_routes.borrow_mut().push((
+                "/v5/market/instruments-info".into(),
+                retained_instrument_packet(vec![row.into()]),
+            ));
+        });
+        let error = h.drive(h.venue().fetch_markets()).unwrap_err();
+        assert_eq!(
+            json!({"name":error.name,"message":error.message}),
+            json!({"name":expected["name"],"message":expected["message"]}),
+            "BYBIT_RETAINED source error through constructed {name:?} binding"
+        );
+    }
+}
+
 #[test]
 fn retained_info_market_missing_and_undefined_fee_symbols_match() {
     use safe_cex_types::retained_json::RetainedJsonInput as I;

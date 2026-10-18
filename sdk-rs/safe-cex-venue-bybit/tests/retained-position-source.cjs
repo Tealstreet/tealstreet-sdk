@@ -21,6 +21,7 @@ const selected = new context.Subject().dedupePositionsById([row,{...row,info:{..
 assert.equal(selected.length,1);
 assert.equal(selected[0].info.avgPrice,'\ud800');
 const nativeMarkets = [];
+const coercionErrors = [];
 for (const variant of ['bybit','bybitinverse','bybitspot']) {
   const filename = path.resolve(path.dirname(file), `${variant}.exchange.ts`);
   const syntax = ts.createSourceFile(filename,fs.readFileSync(filename,'utf8'),ts.ScriptTarget.Latest,true);
@@ -39,6 +40,8 @@ for (const variant of ['bybit','bybitinverse','bybitspot']) {
   assert.equal(market.info,raw); assert.ok(Object.hasOwn(market.info,'missing'));
   assert.equal(market.info.missing,undefined); assert.ok(Number.isNaN(market.info.nan)); assert.ok(Object.is(market.info.zero,-0));
   assert.equal(market.info['\ud801'].charCodeAt(0),0xd800);
+  try { scope.map({...raw,lotSizeFilter:{...raw.lotSizeFilter,qtyStep:{toString:null}}}); }
+  catch (error) { coercionErrors.push({variant,name:error.name,message:error.message}); }
   assert.throws(()=>scope.map({...raw,lotSizeFilter:undefined}),/Cannot read properties of undefined/);
   if(variant!=='bybitspot') {
     scope.fees=[{takerFeeRate:{toString:null},makerFeeRate:'0'}];
@@ -51,4 +54,5 @@ const optionsFile=path.resolve(path.dirname(file),'bybit.options.ts');
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(optionsFile,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:optionExports});
 assert.equal(optionExports.mapBybitOptionInstrument({status:'Trading',symbol:'SOL\ud800-6NOV26-0-P',optionsType:'Put'}),undefined);
 assert.equal(optionExports.mapBybitOptionInstrument({status:'Trading',symbol:'SOL\ud800-6NOV26-112d5-P',optionsType:'Unknown'}),undefined);
-process.stdout.write(JSON.stringify({units:[selected[0].info.avgPrice.charCodeAt(0)],nativeMarkets}));
+assert.equal(coercionErrors.length,3);
+process.stdout.write(JSON.stringify({units:[selected[0].info.avgPrice.charCodeAt(0)],nativeMarkets,coercionErrors}));
