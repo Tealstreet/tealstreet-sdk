@@ -11,10 +11,6 @@ fn method(name: &str, f: impl Fn(Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js
     Js::function(name, move |_, args| f(args))
 }
 
-fn text(v: &Js) -> Result<String, Thrown> {
-    Ok(String::from_utf16_lossy(&v.to_js_string()?))
-}
-
 fn require_callback(callback: &Js) -> Result<(), Thrown> {
     if !callback.is_callable() {
         return Err(Thrown::type_error(&format!(
