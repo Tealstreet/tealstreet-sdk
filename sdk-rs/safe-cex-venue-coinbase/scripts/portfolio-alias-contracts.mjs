@@ -32,7 +32,9 @@ if (args.includes('--expect-unclassified')) {
 } else {
   for (const result of results) {
     assert.deepEqual(result.failures, [], result.name);
-    assert.equal(result.classificationOnly, true, `${result.name}: explicit capability role`);
+    const decoder = ['Portfolio', 'Portfolios', 'SupportedTypes'].some(name =>
+      result.name === `safe_cex_venue_coinbase::portfolios_balances::${name}`);
+    assert.equal(Boolean(result.classificationOnly), !decoder, `${result.name}: actual decoder capability`);
   }
-  console.log('All six portfolio aliases pass their native compiler classifications.');
+  console.log('Three portfolio decoder receipts and three native capability classifications pass.');
 }
