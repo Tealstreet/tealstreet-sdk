@@ -205,17 +205,56 @@ fn utility_enums_match_actual_typescript() {
         }
     }
     assert_eq!(compared, 6384, "cardinality::utils_oracle.rs::compared");
+    let mut retained_cases = 0;
     for case in corpus["refusals"].as_array().unwrap() {
         let raw = case["raw"].as_str().unwrap();
-        assert!(
-            serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
-            "utility_utf8_refusal"
-        );
-        assert!(
-            js_from_str::<WeexUtilityInput>(raw).is_err(),
-            "utility_utf8_refusal"
-        );
+        for input in [
+            serde_json::from_str::<WeexUtilityInput>(raw).unwrap(),
+            js_from_str::<WeexUtilityInput>(raw).unwrap(),
+        ] {
+            assert_eq!(input.as_value().as_text(), Some([0xd800].as_slice()));
+            match case["fn"].as_str().unwrap() {
+                "normalizePositionMode" => {
+                    let expected: PositionMode =
+                        serde_json::from_value(case["native"].clone()).unwrap();
+                    assert_eq!(normalize_position_mode(Some(&input)).unwrap(), expected);
+                }
+                "normalizeMarginType" => {
+                    let expected: MarginType =
+                        serde_json::from_value(case["native"].clone()).unwrap();
+                    assert_eq!(normalize_margin_type(Some(&input)).unwrap(), expected);
+                }
+                "normalizePositionSide" => {
+                    let expected: PositionSide =
+                        serde_json::from_value(case["native"].clone()).unwrap();
+                    assert_eq!(normalize_position_side(Some(&input)).unwrap(), expected);
+                }
+                "normalizeOrderSide" => {
+                    let expected: Option<OrderSide> =
+                        serde_json::from_value(case["native"].clone()).unwrap();
+                    assert_eq!(normalize_order_side(Some(&input)).unwrap(), expected);
+                }
+                "normalizeOrderStatus" => {
+                    let expected: OrderStatus =
+                        serde_json::from_value(case["native"].clone()).unwrap();
+                    assert_eq!(normalize_order_status(Some(&input)).unwrap(), expected);
+                }
+                "normalizeOrderType" => {
+                    let expected: OrderType =
+                        serde_json::from_value(case["native"].clone()).unwrap();
+                    assert_eq!(normalize_order_type(Some(&input)).unwrap(), expected);
+                }
+                "normalizeTriggerType" => {
+                    let expected: OrderStopTriggerType =
+                        serde_json::from_value(case["native"].clone()).unwrap();
+                    assert_eq!(normalize_trigger_type(Some(&input)).unwrap(), expected);
+                }
+                name => panic!("unknown UTF16 enum function {name}"),
+            }
+            retained_cases += 1;
+        }
     }
+    assert_eq!(retained_cases, 14, "retained UTF16 source comparisons");
     for case in corpus["depth"].as_array().unwrap() {
         let raw = case["raw"].as_str().unwrap();
         assert!(

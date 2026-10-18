@@ -1,3 +1,5 @@
+#[path = "support/retained_input_observations.rs"]
+mod retained_input_observations;
 include!("cardinality.inc");
 use safe_cex_num::JsJsonValue;
 use safe_cex_venue_backpack::api::*;
@@ -231,12 +233,15 @@ fn actual_typescript_api_helpers_corpus() {
         compared[5] += 1;
     }
     for (index, case) in corpus["utf16Data"].as_array().unwrap().iter().enumerate() {
+        let retained = retained_input_observations::capture(case["raw"].as_str().unwrap());
+        assert_eq!(
+            json!(retained_input_observations::string_units(&retained)),
+            case["units"],
+            "native retained prepared-data UTF-16 units {index}"
+        );
         assert!(
-            safe_cex_num::numeric_ingress::js_from_str::<
-                safe_cex_num::numeric_ingress::JsNumberInput,
-            >(case["raw"].as_str().unwrap())
-            .is_err(),
-            "shared UTF-8 prepared-data refusal {index}"
+            retained.into_value().is_err(),
+            "legacy prepared-data JSON projection still refuses UTF-16 {index}"
         );
         assert_eq!(
             case["record"],
