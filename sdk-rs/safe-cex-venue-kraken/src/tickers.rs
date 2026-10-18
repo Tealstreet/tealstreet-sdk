@@ -1,15 +1,12 @@
 //! Futures ticker read; shared get-key, number coercion and Store views.
-use crate::{types, wire};
+use crate::types;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{
-    get_key::{GetKeyUnknownValue, v_unknown},
-    js_string, js_truthy,
-    numeric_ingress::JsNumberInput,
-    parse_float,
-};
+use safe_cex_num::numeric_ingress::JsNumberInput;
+use safe_cex_num::{js_retained_string, parse_float};
 use safe_cex_store::Store;
 use safe_cex_types::Ticker;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
+
 use std::future::Future;
 
 fn type_error(message: impl Into<String>) -> ExchangeError {
@@ -17,18 +14,30 @@ fn type_error(message: impl Into<String>) -> ExchangeError {
     error.name = "TypeError".into();
     error
 }
-fn string(value: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(value).map_err(|error| type_error(error.message))
+fn string(value: Option<&Input>) -> Result<String, ExchangeError> {
+    js_retained_string(value).map_err(|error| type_error(error.message))
 }
-fn keyed(row: &Value, key: &str) -> Result<String, ExchangeError> {
-    match v_unknown(Some(row), key).map_err(|error| type_error(error.message))? {
-        GetKeyUnknownValue::Undefined => string(None),
-        GetKeyUnknownValue::Json(value) => string(Some(value)),
-        GetKeyUnknownValue::Length(value) => Ok(safe_cex_num::js_number_string(value as f64)),
-        GetKeyUnknownValue::ObjectInherited(value) => Ok(value.js_string().into()),
-        GetKeyUnknownValue::ArrayInherited(value) => Ok(value.js_string()),
-        GetKeyUnknownValue::ArrayPrototype => Ok(String::new()),
+fn keyed(row: &Input, key: &str) -> Result<String, ExchangeError> {
+    use safe_cex_exchange::js_runtime::{library::in_operator, value::from_retained_input};
+    let row = from_retained_input(row.clone());
+    if row.is_nullish() {
+        return string(None);
     }
+    for spelling in [
+        key.to_owned(),
+        safe_cex_num::lodash_snake_case(key),
+        safe_cex_num::lodash_camel_case(key),
+    ] {
+        if in_operator(&row, &spelling).map_err(|cause| cause.to_exchange_error())? {
+            let units = row
+                .get(&spelling)
+                .and_then(|value| value.to_js_string())
+                .map_err(|cause| cause.to_exchange_error())?;
+            return String::from_utf16(&units)
+                .map_err(|_| type_error("Kraken ticker field has no UTF-8 representation"));
+        }
+    }
+    string(None)
 }
 fn number(text: &str) -> f64 {
     let value = parse_float(text);
@@ -55,17 +64,17 @@ where
             .1;
         let data = read(endpoint)?
             .await?
-            .map(wire::decode)
+            .map(JsNumberInput::decode::<Input>)
             .transpose()
             .map_err(|error| ExchangeError::new(error.to_string()))?;
         let empty = Vec::new();
         let rows = match data
             .as_ref()
             .and_then(|data| data.get("tickers"))
-            .filter(|value| js_truthy(Some(value)))
+            .filter(|value| value.is_truthy())
         {
             None => &empty,
-            Some(Value::Array(rows)) => rows,
+            Some(Input::Array(rows)) => rows,
             _ => return Err(type_error("tickers.reduce is not a function")),
         };
         let mut tickers = Vec::new();
@@ -107,7 +116,7 @@ where
                 volume: number(&string(row.get("vol24h"))?),
                 quote_volume: number(&string(row.get("volumeQuote"))?),
                 open_interest: number(&keyed(row, "openInterest")?),
-                info: Some(row.clone().into()),
+                info: Some(row.clone()),
             });
         }
         Ok(tickers)

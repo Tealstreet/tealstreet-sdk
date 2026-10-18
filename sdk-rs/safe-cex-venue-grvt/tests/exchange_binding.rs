@@ -1297,3 +1297,77 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn market_info_preserves_source_own_keys_and_native_metadata() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    for metadata in [
+        None,
+        Some((
+            Js::utf16(&[0xd800, 65, 0xdc00]),
+            Js::Number(f64::INFINITY),
+            Js::Number(-0.0),
+        )),
+        Some((Js::Undefined, Js::Number(f64::NAN), Js::Undefined)),
+    ] {
+        let h = setup();
+        let raw = from_json(&instrument());
+        for key in ["ih", "bd", "qd"] {
+            raw.delete(&key.encode_utf16().collect::<Vec<_>>());
+        }
+        if let Some((ih, bd, qd)) = metadata.clone() {
+            raw.define("ih", ih).unwrap();
+            raw.define("bd", bd).unwrap();
+            raw.define("qd", qd).unwrap();
+        }
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/lite/v1/all_instruments");
+        h.http.route_native(
+            "POST",
+            "/lite/v1/all_instruments",
+            200.,
+            Js::object(vec![("r", Js::array(vec![raw]))]),
+        );
+        loaded(&h);
+        let markets = h.store.markets();
+        assert_eq!(markets.len(), 1, "real market fetch admits opaque metadata");
+        let info = markets[0].info.as_ref().unwrap();
+        assert_eq!(
+            info.as_object().unwrap().len(),
+            3,
+            "source creates three own keys"
+        );
+        for key in ["ih", "bd", "qd"] {
+            assert!(info.get(key).is_some(), "own {key}");
+        }
+        match metadata {
+            None => {
+                for key in ["ih", "bd", "qd"] {
+                    assert!(matches!(info.get(key), Some(Input::Undefined)));
+                }
+            }
+            Some((Js::Undefined, _, _)) => {
+                assert!(matches!(info.get("ih"), Some(Input::Undefined)));
+                assert!(info.get("bd").unwrap().as_f64().unwrap().is_nan());
+                assert!(matches!(info.get("qd"), Some(Input::Undefined)));
+            }
+            Some(_) => {
+                assert_eq!(
+                    info.get("ih").unwrap().as_text().unwrap(),
+                    &[0xd800, 65, 0xdc00]
+                );
+                assert_eq!(
+                    info.get("bd").unwrap().as_f64().unwrap().to_bits(),
+                    f64::INFINITY.to_bits()
+                );
+                assert_eq!(
+                    info.get("qd").unwrap().as_f64().unwrap().to_bits(),
+                    (-0.0f64).to_bits()
+                );
+            }
+        }
+    }
+}
