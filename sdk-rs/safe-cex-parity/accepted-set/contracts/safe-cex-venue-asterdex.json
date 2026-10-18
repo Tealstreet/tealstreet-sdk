@@ -22351,68 +22351,6 @@
                 "is_synthetic": false
               }
             }
-          },
-          {
-            "name": "impl IntoIterator<Item = (String, Option<f64>)>",
-            "kind": {
-              "type": {
-                "bounds": [
-                  {
-                    "trait_bound": {
-                      "trait": {
-                        "path": "core::iter::traits::collect::IntoIterator",
-                        "args": {
-                          "angle_bracketed": {
-                            "args": [],
-                            "constraints": [
-                              {
-                                "name": "Item",
-                                "args": null,
-                                "binding": {
-                                  "equality": {
-                                    "type": {
-                                      "tuple": [
-                                        {
-                                          "resolved_path": {
-                                            "path": "alloc::string::String",
-                                            "args": null
-                                          }
-                                        },
-                                        {
-                                          "resolved_path": {
-                                            "path": "core::option::Option",
-                                            "args": {
-                                              "angle_bracketed": {
-                                                "args": [
-                                                  {
-                                                    "type": {
-                                                      "primitive": "f64"
-                                                    }
-                                                  }
-                                                ],
-                                                "constraints": []
-                                              }
-                                            }
-                                          }
-                                        }
-                                      ]
-                                    }
-                                  }
-                                }
-                              }
-                            ]
-                          }
-                        }
-                      },
-                      "generic_params": [],
-                      "modifier": "none"
-                    }
-                  }
-                ],
-                "default": null,
-                "is_synthetic": true
-              }
-            }
           }
         ],
         "where_predicates": []
