@@ -1003,3 +1003,12 @@ production-body controls in scripts/public-listener-function-controls.py, with
 named native failures and byte-exact restoration passes. The canonical scoped
 runner is scripts/public-listener-function-contracts.mjs; the seven existing
 alias reviews and separate Book decoder remain unchanged.
+
+The SDK `exchange_trait::call` receipt uses a fixed `Vec<Candle>` instantiation,
+with six actual Futures/PM/Spot HTTP profiles and two native argument-error
+profiles. `SDK_CALL_REVIEW.md` records the bounded coverage. Candle binary64
+fields and native error metadata are observed before reporting. Public SDK tests
+compare the full maintained TS constructors; `scripts/sdk-call-controls.py`
+requires compiled named result/metadata failures and byte-exact restoration.
+Shared terminal I/O setup lives in `scripts/exchange-native-runtime.rs`; private
+context observers retain their original visibility and independent receipts.

@@ -52680,5 +52680,587 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_binance::exchange_classes::exchange_trait::call": {
+    "api": {
+      "kind": "function",
+      "name": "call",
+      "signature": {
+        "inputs": [
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::exchange_classes::ExchangeOwner",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::exchange_classes::Method",
+                "args": null
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "requiredFeatures": [
+      "native"
+    ],
+    "evidence": "Fixed Vec<Candle> instantiation only. Actual native Futures/PM/Spot SDK constructors, production class_jobs settlement/HTTP and the qualified private call function execute the same six candle profiles as complete maintained TS classes. All Candle f64 fields are read as bits/NaN class before JSON, including signed zero, infinity and missing volume. Two separate internal argument-failure cases directly verify Error name/code/context propagation and zero I/O; these Rust glue inputs have no separate TS API. scripts/sdk-call-controls.py independently faults actual typed-result forwarding and argument-error metadata, requires named compiled canonical output failures and exact restoration. This bounded instantiation is not arbitrary DeserializeOwned, class classification, thrown-graph or full feature-matrix coverage.",
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/sdk-call-observers.rs\")); } std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observed::observe($value, |owner,args| Box::pin($type::<Vec<safe_cex_types::Candle>>(owner,crate::exchange_classes::Method::OHLCV,args))))).unwrap_or_else(|_| serde_json::json!({\"unexpected_native_panic\":true})) }",
+    "cases": [
+      {
+        "input": {
+          "family": "futures",
+          "profile": "finite",
+          "options": {
+            "symbol": "BTCUSDT",
+            "interval": "1m",
+            "limit": 2,
+            "to": 120000
+          },
+          "data": [
+            [
+              1000,
+              "-0",
+              "1.25",
+              "-4",
+              "3.5",
+              "5"
+            ]
+          ]
+        },
+        "output": {
+          "result": {
+            "candles": [
+              {
+                "timestamp": {
+                  "bits": "3ff0000000000000"
+                },
+                "open": {
+                  "bits": "8000000000000000"
+                },
+                "high": {
+                  "bits": "3ff4000000000000"
+                },
+                "low": {
+                  "bits": "c010000000000000"
+                },
+                "close": {
+                  "bits": "400c000000000000"
+                },
+                "volume": {
+                  "bits": "4014000000000000"
+                },
+                "lastSide": null
+              }
+            ]
+          },
+          "requests": [
+            {
+              "method": "get",
+              "base": "https://fapi.binance.com",
+              "path": "/fapi/v1/klines",
+              "query": [
+                "symbol=BTCUSDT",
+                "interval=1m",
+                "startTime=0",
+                "endTime=120000",
+                "limit=2"
+              ],
+              "signed": false
+            }
+          ],
+          "reports": 0
+        }
+      },
+      {
+        "input": {
+          "family": "futures",
+          "profile": "nonfinite",
+          "options": {
+            "symbol": "ETHUSDT",
+            "interval": "5m",
+            "limit": 1,
+            "to": 600000
+          },
+          "data": [
+            [
+              2000,
+              "2",
+              "Infinity",
+              "-0",
+              "NaN"
+            ]
+          ]
+        },
+        "output": {
+          "result": {
+            "candles": [
+              {
+                "timestamp": {
+                  "bits": "4000000000000000"
+                },
+                "open": {
+                  "bits": "4000000000000000"
+                },
+                "high": {
+                  "bits": "7ff0000000000000"
+                },
+                "low": {
+                  "bits": "8000000000000000"
+                },
+                "close": {
+                  "kind": "NaN"
+                },
+                "volume": {
+                  "kind": "NaN"
+                },
+                "lastSide": null
+              }
+            ]
+          },
+          "requests": [
+            {
+              "method": "get",
+              "base": "https://fapi.binance.com",
+              "path": "/fapi/v1/klines",
+              "query": [
+                "symbol=ETHUSDT",
+                "interval=5m",
+                "startTime=300000",
+                "endTime=600000",
+                "limit=1"
+              ],
+              "signed": false
+            }
+          ],
+          "reports": 0
+        }
+      },
+      {
+        "input": {
+          "family": "pm",
+          "profile": "finite",
+          "options": {
+            "symbol": "BTCUSDT",
+            "interval": "1m",
+            "limit": 2,
+            "to": 120000
+          },
+          "data": [
+            [
+              1000,
+              "-0",
+              "1.25",
+              "-4",
+              "3.5",
+              "5"
+            ]
+          ]
+        },
+        "output": {
+          "result": {
+            "candles": [
+              {
+                "timestamp": {
+                  "bits": "3ff0000000000000"
+                },
+                "open": {
+                  "bits": "8000000000000000"
+                },
+                "high": {
+                  "bits": "3ff4000000000000"
+                },
+                "low": {
+                  "bits": "c010000000000000"
+                },
+                "close": {
+                  "bits": "400c000000000000"
+                },
+                "volume": {
+                  "bits": "4014000000000000"
+                },
+                "lastSide": null
+              }
+            ]
+          },
+          "requests": [
+            {
+              "method": "get",
+              "base": "https://fapi.binance.com",
+              "path": "/fapi/v1/klines",
+              "query": [
+                "symbol=BTCUSDT",
+                "interval=1m",
+                "startTime=0",
+                "endTime=120000",
+                "limit=2"
+              ],
+              "signed": false
+            }
+          ],
+          "reports": 0
+        }
+      },
+      {
+        "input": {
+          "family": "pm",
+          "profile": "nonfinite",
+          "options": {
+            "symbol": "ETHUSDT",
+            "interval": "5m",
+            "limit": 1,
+            "to": 600000
+          },
+          "data": [
+            [
+              2000,
+              "2",
+              "Infinity",
+              "-0",
+              "NaN"
+            ]
+          ]
+        },
+        "output": {
+          "result": {
+            "candles": [
+              {
+                "timestamp": {
+                  "bits": "4000000000000000"
+                },
+                "open": {
+                  "bits": "4000000000000000"
+                },
+                "high": {
+                  "bits": "7ff0000000000000"
+                },
+                "low": {
+                  "bits": "8000000000000000"
+                },
+                "close": {
+                  "kind": "NaN"
+                },
+                "volume": {
+                  "kind": "NaN"
+                },
+                "lastSide": null
+              }
+            ]
+          },
+          "requests": [
+            {
+              "method": "get",
+              "base": "https://fapi.binance.com",
+              "path": "/fapi/v1/klines",
+              "query": [
+                "symbol=ETHUSDT",
+                "interval=5m",
+                "startTime=300000",
+                "endTime=600000",
+                "limit=1"
+              ],
+              "signed": false
+            }
+          ],
+          "reports": 0
+        }
+      },
+      {
+        "input": {
+          "family": "spot",
+          "profile": "finite",
+          "options": {
+            "symbol": "BTCUSDT",
+            "interval": "1m",
+            "limit": 2,
+            "to": 120000
+          },
+          "data": [
+            [
+              1000,
+              "-0",
+              "1.25",
+              "-4",
+              "3.5",
+              "5"
+            ]
+          ]
+        },
+        "output": {
+          "result": {
+            "candles": [
+              {
+                "timestamp": {
+                  "bits": "3ff0000000000000"
+                },
+                "open": {
+                  "bits": "8000000000000000"
+                },
+                "high": {
+                  "bits": "3ff4000000000000"
+                },
+                "low": {
+                  "bits": "c010000000000000"
+                },
+                "close": {
+                  "bits": "400c000000000000"
+                },
+                "volume": {
+                  "bits": "4014000000000000"
+                },
+                "lastSide": null
+              }
+            ]
+          },
+          "requests": [
+            {
+              "method": "get",
+              "base": "https://api.binance.com",
+              "path": "/api/v3/klines",
+              "query": [
+                "symbol=BTCUSDT",
+                "interval=1m",
+                "startTime=0",
+                "endTime=120000",
+                "limit=2"
+              ],
+              "signed": false
+            }
+          ],
+          "reports": 0
+        }
+      },
+      {
+        "input": {
+          "family": "spot",
+          "profile": "nonfinite",
+          "options": {
+            "symbol": "ETHUSDT",
+            "interval": "5m",
+            "limit": 1,
+            "to": 600000
+          },
+          "data": [
+            [
+              2000,
+              "2",
+              "Infinity",
+              "-0",
+              "NaN"
+            ]
+          ]
+        },
+        "output": {
+          "result": {
+            "candles": [
+              {
+                "timestamp": {
+                  "bits": "4000000000000000"
+                },
+                "open": {
+                  "bits": "4000000000000000"
+                },
+                "high": {
+                  "bits": "7ff0000000000000"
+                },
+                "low": {
+                  "bits": "8000000000000000"
+                },
+                "close": {
+                  "kind": "NaN"
+                },
+                "volume": {
+                  "kind": "NaN"
+                },
+                "lastSide": null
+              }
+            ]
+          },
+          "requests": [
+            {
+              "method": "get",
+              "base": "https://api.binance.com",
+              "path": "/api/v3/klines",
+              "query": [
+                "symbol=ETHUSDT",
+                "interval=5m",
+                "startTime=300000",
+                "endTime=600000",
+                "limit=1"
+              ],
+              "signed": false
+            }
+          ],
+          "reports": 0
+        }
+      },
+      {
+        "input": {
+          "family": "futures",
+          "argumentError": "first argument refusal",
+          "negativeZero": false
+        },
+        "output": {
+          "result": {
+            "error": "ArgumentFailure",
+            "message": "first argument refusal",
+            "code": {
+              "bits": "4031000000000000"
+            },
+            "context": {
+              "stage": "argument"
+            }
+          },
+          "requests": [],
+          "reports": 0
+        }
+      },
+      {
+        "input": {
+          "family": "spot",
+          "argumentError": "second argument refusal",
+          "negativeZero": true
+        },
+        "output": {
+          "result": {
+            "error": "ArgumentFailure",
+            "message": "second argument refusal",
+            "code": {
+              "bits": "8000000000000000"
+            },
+            "context": {
+              "stage": "argument"
+            }
+          },
+          "requests": [],
+          "reports": 0
+        }
+      }
+    ]
   }
 }

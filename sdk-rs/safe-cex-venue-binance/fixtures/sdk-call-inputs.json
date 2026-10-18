@@ -1,0 +1,129 @@
+[
+  {
+    "family": "futures",
+    "profile": "finite",
+    "options": {
+      "symbol": "BTCUSDT",
+      "interval": "1m",
+      "limit": 2,
+      "to": 120000
+    },
+    "data": [
+      [
+        1000,
+        "-0",
+        "1.25",
+        "-4",
+        "3.5",
+        "5"
+      ]
+    ]
+  },
+  {
+    "family": "futures",
+    "profile": "nonfinite",
+    "options": {
+      "symbol": "ETHUSDT",
+      "interval": "5m",
+      "limit": 1,
+      "to": 600000
+    },
+    "data": [
+      [
+        2000,
+        "2",
+        "Infinity",
+        "-0",
+        "NaN"
+      ]
+    ]
+  },
+  {
+    "family": "pm",
+    "profile": "finite",
+    "options": {
+      "symbol": "BTCUSDT",
+      "interval": "1m",
+      "limit": 2,
+      "to": 120000
+    },
+    "data": [
+      [
+        1000,
+        "-0",
+        "1.25",
+        "-4",
+        "3.5",
+        "5"
+      ]
+    ]
+  },
+  {
+    "family": "pm",
+    "profile": "nonfinite",
+    "options": {
+      "symbol": "ETHUSDT",
+      "interval": "5m",
+      "limit": 1,
+      "to": 600000
+    },
+    "data": [
+      [
+        2000,
+        "2",
+        "Infinity",
+        "-0",
+        "NaN"
+      ]
+    ]
+  },
+  {
+    "family": "spot",
+    "profile": "finite",
+    "options": {
+      "symbol": "BTCUSDT",
+      "interval": "1m",
+      "limit": 2,
+      "to": 120000
+    },
+    "data": [
+      [
+        1000,
+        "-0",
+        "1.25",
+        "-4",
+        "3.5",
+        "5"
+      ]
+    ]
+  },
+  {
+    "family": "spot",
+    "profile": "nonfinite",
+    "options": {
+      "symbol": "ETHUSDT",
+      "interval": "5m",
+      "limit": 1,
+      "to": 600000
+    },
+    "data": [
+      [
+        2000,
+        "2",
+        "Infinity",
+        "-0",
+        "NaN"
+      ]
+    ]
+  },
+  {
+    "family": "futures",
+    "argumentError": "first argument refusal",
+    "negativeZero": false
+  },
+  {
+    "family": "spot",
+    "argumentError": "second argument refusal",
+    "negativeZero": true
+  }
+]
