@@ -84,8 +84,8 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.host.spawn_local(f)
     }
-    fn console(&self, s: &str, m: &str) {
-        self.host.console(s, m)
+    fn console_values(&self, s: &str, m: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.host.console_values(s, m)
     }
     fn unique_id(&self) -> String {
         self.host.unique_id()
@@ -96,7 +96,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &serde_json::Value) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, c: &Value) {

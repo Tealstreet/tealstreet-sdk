@@ -171,8 +171,8 @@ impl safe_cex_exchange::runtime::ExchangeRuntime for ConnectedRuntime {
     ) -> Box<dyn safe_cex_exchange::runtime::ExchangeTask> {
         self.inner.spawn_local(future)
     }
-    fn console(&self, level: &str, message: &str) {
-        self.inner.console(level, message);
+    fn console_values(&self, level: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.inner.console_values(level, message);
     }
     fn unique_id(&self) -> String {
         self.inner.unique_id()
@@ -183,7 +183,7 @@ impl safe_cex_exchange::runtime::ExchangeRuntime for ConnectedRuntime {
     fn random(&self) -> f64 {
         self.inner.random()
     }
-    fn report_raw_exception(&self, value: &serde_json::Value, context: &serde_json::Value) {
+    fn report_raw_exception(&self, value: &safe_cex_exchange::js_runtime::value::Js, context: &serde_json::Value) {
         self.inner.report_raw_exception(value, context);
     }
     fn report_exception(

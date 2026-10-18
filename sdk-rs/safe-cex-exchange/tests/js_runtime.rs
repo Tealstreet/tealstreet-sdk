@@ -23,6 +23,8 @@ struct Runtime {
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    console_arguments: RefCell<Vec<Vec<Js>>>,
+    raw_exceptions: RefCell<Vec<Js>>,
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
@@ -58,7 +60,10 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_arguments.borrow_mut().push(message.to_vec());
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.consoled
             .borrow_mut()
             .push((severity.into(), message.into()));
@@ -79,7 +84,9 @@ impl ExchangeRuntime for Runtime {
             .borrow_mut()
             .push((error.to_string(), context.clone()));
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {}
+    fn report_raw_exception(&self, error: &Js, _: &Value) {
+        self.raw_exceptions.borrow_mut().push(error.clone());
+    }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }

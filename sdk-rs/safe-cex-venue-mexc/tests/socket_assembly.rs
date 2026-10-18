@@ -86,7 +86,7 @@ impl ExchangeRuntime for Runtime {
         self.tasks.borrow_mut().push(task.clone());
         Box::new(Task(task))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         let next = self.sequence.get() + 1;
         self.sequence.set(next);
@@ -98,7 +98,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &serde_json::Value) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {

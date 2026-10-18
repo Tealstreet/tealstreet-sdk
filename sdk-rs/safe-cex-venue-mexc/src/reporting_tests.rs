@@ -36,7 +36,7 @@ impl ExchangeRuntime for ReportingRuntime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected spawn")
     }
-    fn console(&self, severity: &str, _: &str) {
+    fn console_values(&self, severity: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {
         self.trace.borrow_mut().push(severity.into());
         self.consoles.borrow_mut().push(severity.into());
     }
@@ -49,7 +49,8 @@ impl ExchangeRuntime for ReportingRuntime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, error: &Value, data: &Value) {
+    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, data: &Value) {
+        let error = safe_cex_exchange::js_runtime::value::to_json(error).expect("explicit JSON fixture observation");
         self.trace.borrow_mut().push("report".into());
         self.reports
             .borrow_mut()

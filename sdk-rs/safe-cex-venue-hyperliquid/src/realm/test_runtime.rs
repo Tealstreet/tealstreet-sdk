@@ -120,7 +120,9 @@ impl ExchangeRuntime for TestRuntime {
             .push((future, Arc::new(Flag(AtomicBool::new(true)))));
         Box::new(Noop)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.console
             .borrow_mut()
             .push((severity.into(), message.into()));
@@ -137,8 +139,8 @@ impl ExchangeRuntime for TestRuntime {
     fn report_exception(&self, error: &ExchangeError, _: &serde_json::Value) {
         self.reports.borrow_mut().push(error.message.clone());
     }
-    fn report_raw_exception(&self, error: &serde_json::Value, _: &serde_json::Value) {
-        self.reports.borrow_mut().push(error.to_string());
+    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &serde_json::Value) {
+        self.reports.borrow_mut().push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn execute_worker_request(
         &self,

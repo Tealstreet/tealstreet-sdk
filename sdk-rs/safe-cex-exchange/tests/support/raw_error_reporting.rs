@@ -361,3 +361,135 @@ fn raw_reporter_accessor_reads_follow_actual_source_order() {
         "RAW-REPORT actual source getter order"
     );
 }
+
+#[test]
+fn raw_reporter_console_and_sink_receive_original_native_errors() {
+    use safe_cex_exchange::js_runtime::value::error_object;
+    let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
+    for (name, message) in [
+        ("Error", "Remote WS signing unavailable: denied"),
+        (
+            "TypeError",
+            "Remote WS signing unavailable: missing signature",
+        ),
+    ] {
+        let error = error_object(name, message);
+        assert_eq!(
+            to_json(&error).unwrap(),
+            json!({}),
+            "JSON cannot carry Error data"
+        );
+        for _ in 0..2 {
+            assembled
+                .this
+                .call_method("emitAndLogError", vec![error.clone()])
+                .unwrap();
+            let console = assembled.runtime.console_arguments.borrow();
+            let arguments = &console[console.len() - 2];
+            assert_eq!(arguments.len(), 2);
+            assert!(arguments[0].strict_equals(&Js::str("exchange error")));
+            assert!(
+                arguments[1].same_reference(&error),
+                "console original Error identity"
+            );
+            assert!(console.last().unwrap().is_empty(), "trace arity");
+            let reports = assembled.runtime.raw_exceptions.borrow();
+            assert!(
+                reports.last().unwrap().same_reference(&error),
+                "sink original Error identity"
+            );
+            assert!(
+                reports
+                    .last()
+                    .unwrap()
+                    .get("name")
+                    .unwrap()
+                    .strict_equals(&Js::str(name))
+            );
+            assert!(
+                reports
+                    .last()
+                    .unwrap()
+                    .get("message")
+                    .unwrap()
+                    .strict_equals(&Js::str(message))
+            );
+            assert_eq!(
+                assembled
+                    .runtime
+                    .consoled
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .nth(1)
+                    .unwrap()
+                    .1,
+                format!("exchange error {name}: {message}")
+            );
+        }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let compiler = std::env::var_os("SAFE_CEX_TYPESCRIPT_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("../target/asterdex-oracle-deps/node_modules/typescript"));
+    let output = std::process::Command::new("node")
+        .arg(root.join("tests/raw-error-source.cjs"))
+        .arg("--console-profile")
+        .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
+    let actual: Vec<String> = assembled.runtime.consoled.borrow().iter()
+        .filter(|(severity, _)| severity == "error").map(|(_, text)| text.clone()).collect();
+    assert_eq!(actual, expected, "maintained TS console first lines");
+    let reports = assembled.runtime.raw_exceptions.borrow();
+    assert!(reports[0].same_reference(&reports[1]));
+    assert!(!reports[0].same_reference(&reports[2]));
+    drop(reports);
+    let suppressed = error_object("Error", "quiet");
+    let count = assembled.runtime.console_arguments.borrow().len();
+    assembled
+        .this
+        .call_method(
+            "emitAndLogError",
+            vec![
+                suppressed.clone(),
+                Js::Undefined,
+                Js::object(vec![("suppressConsoleLog", Js::Bool(true))]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(assembled.runtime.console_arguments.borrow().len(), count);
+    assert!(
+        assembled
+            .runtime
+            .raw_exceptions
+            .borrow()
+            .last()
+            .unwrap()
+            .same_reference(&suppressed)
+    );
+}
+
+#[test]
+fn raw_reporter_installed_console_retains_values_without_coercion() {
+    use safe_cex_exchange::js_runtime::value::error_object;
+    let (runtime, shared) = scoped_globals();
+    let error = error_object("TypeError", "native reason");
+    error.define_accessor(
+        "message",
+        Some(Rc::new(|_| {
+            panic!("console inspection must not execute message getter")
+        })),
+        None,
+    );
+    shared
+        .globals
+        .get("console")
+        .unwrap()
+        .call_method("error", vec![Js::str("prefix"), error.clone()])
+        .unwrap();
+    let arguments = runtime.console_arguments.borrow();
+    assert_eq!(arguments.last().unwrap().len(), 2);
+    assert!(arguments.last().unwrap()[1].same_reference(&error));
+}

@@ -153,7 +153,9 @@ impl ExchangeRuntime for Host {
         self.tasks.borrow_mut().push(f);
         Box::new(T)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         if severity == "error" && message.starts_with("exchange error ") {
             self.reports.borrow_mut().push(message[15..].into());
         } else if matches!(severity, "debug" | "warning") {
@@ -169,7 +171,7 @@ impl ExchangeRuntime for Host {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &serde_json::Value) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, _: &Value) {

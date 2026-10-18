@@ -141,7 +141,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -151,7 +151,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.25
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {}
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
     fn report_exception(&self, error: &ExchangeError, context: &Value) {
         panic!("unexpected exception {context}: {}", error.message);
     }

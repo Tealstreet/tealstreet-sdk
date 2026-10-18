@@ -25,6 +25,32 @@ const enhancer = ast('packages/safe-cex/src/utils/axiosErrorEnhancer.ts');
 const formatter = enhancer.statements.find(x => ts.isFunctionDeclaration(x) && x.name?.text === 'formatErrorForSentry');
 assert(formatter);
 const source = compile(`${read.getText(correlation).replace(/^export /, '')}\n${formatter.getText(enhancer).replace(/^export /, '')}\nclass Reporter { ${method.getText(base)} }\n`);
+if (process.argv.includes('--console-profile')) {
+  const {format} = require('node:util');
+  const output = [], originals = [], reports = [], events = [];
+  const env = {self: {}, window: {}, console: {
+    error: (...args) => { originals.push(args); output.push(format(...args).split("\n")[0]); },
+    trace: (...args) => assert.equal(args.length, 0), warn: () => {},
+  }, reportException: error => reports.push(error)};
+  const report = vm.runInNewContext(`${source}; Reporter.prototype.emitAndLogError`, env);
+  const host = {isDisposed: false, name: 'source', options: {}, _lastHttpFailure: undefined,
+    emitter: {emit: (...args) => events.push(args)}};
+  for (const [Constructor, reason] of [[Error, 'Remote WS signing unavailable: denied'],
+    [TypeError, 'Remote WS signing unavailable: missing signature']]) {
+    const error = new Constructor(reason);
+    for (let i = 0; i < 2; i++) {
+      report.call(host, error);
+      assert.equal(originals.at(-1).length, 2);
+      assert.equal(originals.at(-1)[1], error);
+      assert.equal(reports.at(-1), error);
+      assert.equal(reports.at(-1).name, Constructor.name);
+      assert.equal(reports.at(-1).message, reason);
+    }
+  }
+  assert.notEqual(reports[0], reports[2]);
+  process.stdout.write(JSON.stringify(output));
+  process.exit(0);
+}
 let cases = 0;
 const getterProfiles = [];
 for (const worker of [false, true]) {
