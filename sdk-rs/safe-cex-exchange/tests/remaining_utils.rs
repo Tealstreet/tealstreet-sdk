@@ -8,20 +8,9 @@ use safe_cex_exchange::{
 use safe_cex_types::{ClosedPnlEntry, DataProvenance, HistoricalTradeOptions};
 use std::{
     cell::{Cell, RefCell},
-    future::Future,
     rc::Rc,
     task::{Context, Poll, Waker},
 };
-fn ready<F: Future>(future: F) -> F::Output {
-    let mut future = std::pin::pin!(future);
-    match future
-        .as_mut()
-        .poll(&mut Context::from_waker(Waker::noop()))
-    {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("ready fixture"),
-    }
-}
 fn loop_ready(
     runtime: &fixture_runtime::Runtime,
     future: ExchangeFuture<'static, ()>,
