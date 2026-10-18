@@ -70,13 +70,14 @@ arity `position_mode_mapper_arguments`. `position-index-controls.py` also
 compiles early-copy and nonzero-Spot-return faults, requires named runtime
 failures, restores exact bytes and requires GREEN. No WebSocket bodies change.
 
-This batch reconciles five further rows. With the seven rows in PR #1182 and
-row 37 ACCEPT-safety in separate PR #1188, 13 of 37 are reconciled and 24 remain.
+The position batch reconciles five rows. With the seven rows in PR #1182,
+row 37 ACCEPT-safety in PR #1188 and the five Hyro rows below, 18 of 37
+are reconciled and 19 remain.
 
-The remaining 24 rows are split by module: codex-0efu4x owns rows
+The remaining 19 rows are split by module: codex-0efu4x owns rows
 1/2/3/6/7/8/12/13/16/23/25/35 (public/private socket lifecycle, history mapping
 and position controls); codex-0w5ohi retains rows
-18/22/24/26/27/28/29/30/31/32/33/36 (Spot/Hyro, placement options, account,
+18/24/26/27/32/33/36 (Spot, placement options, account,
 market and startup/facade work). Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
 
@@ -106,8 +107,9 @@ bytes and requires GREEN. Its existing instruments-info exclusion control stays.
 
 Evidence: `/tmp/bybit-retry-mutating-evidence.json` records the initial three
 source replays; the reproducible maintained oracle is
-`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is an accepted safety residual. The seven earlier verdicts
-and their proof are in PR #1182.
+`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is an
+accepted safety residual. The seven earlier verdicts and their proof are in
+PR #1182.
 
 
 ## Hyro account and configuration: rows 22, 28, 29, 30, 31
