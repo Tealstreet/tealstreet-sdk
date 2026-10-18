@@ -536,3 +536,8 @@ with distinct good rows surrounding malformed input. The shared control runner
 misroutes the live last-price publication and requires all three family tests
 to compile and fail, then all three pass after exact restoration. Default-feature
 filtered runs cannot execute these native-host witnesses.
+
+Native HTTP requests use the existing eager class settlement. Dropping a snapshot
+waiter after Promise.all rejection leaves its started sibling owned by the runtime,
+including response interceptors. Registry native_account_proxy_errors holds each
+orders/positions sibling response until after the first rejection to prove this.

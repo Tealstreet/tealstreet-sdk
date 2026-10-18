@@ -960,10 +960,14 @@ impl ExchangeImports for NativeImports {
             .this
             .upgrade()
             .ok_or_else(|| failure("native imports dropped"))?;
+        let request = crate::class_jobs::start(
+            self.runtime.clone(),
+            Box::pin(run_request(imports, target, method, path, args)),
+        );
         Ok(Box::pin(async move {
             SnapshotCompletion {
                 reaction_order: 0,
-                result: run_request(imports, target, method, path, args).await,
+                result: request.await,
             }
         }))
     }

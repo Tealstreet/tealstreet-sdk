@@ -21,7 +21,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
-    RestAdapter, RestExecution, RestFuture, RestRequest, RestResponse, RoutingOptions,
+    RestAdapter, RestExecution, RestFailure, RestFuture, RestRequest, RestResponse, RoutingOptions,
     TransportError, TransportFuture, rate_limit::RateLimitClock, secondary::SecondaryKeyClients,
     socket::SocketFrame,
 };
@@ -239,7 +239,10 @@ impl BlofinExchangeHost for NativeHost {
                 None,
             )
             .map_err(transport_error)?;
-        Ok(Rc::new(SecondaryRouter(clients)))
+        Ok(Rc::new(StartedRequests {
+            base: base.clone(),
+            client: Rc::new(SecondaryRouter(clients)),
+        }))
     }
     fn assign_xhr(&self, _: &NativeBase, _: Rc<dyn RestAdapter>) -> Result<(), ExchangeError> {
         Ok(())
@@ -513,6 +516,32 @@ impl crate::api::ApiRuntime for ApiClock {
     }
 }
 
+struct StartedRequests {
+    base: Rc<BaseExchange>,
+    client: Rc<dyn RestAdapter>,
+}
+impl RestAdapter for StartedRequests {
+    fn query_in_url(&self) -> bool {
+        self.client.query_in_url()
+    }
+    fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+        let pending = self.execute_with_receipt(request);
+        Box::pin(async move { pending.await.map(|receipt| receipt.response) })
+    }
+    fn execute_with_receipt(&self, request: RestRequest) -> RestFuture<'_, RestExecution> {
+        let client = self.client.clone();
+        let cancelled = request.clone();
+        let pending = self.base.start_shared_operation(move |_| async move {
+            Ok(client.execute_with_receipt(request).await)
+        });
+        Box::pin(async move {
+            pending
+                .wait()
+                .await
+                .map_err(|error| RestFailure::pre_transmit(error.message, cancelled))?
+        })
+    }
+}
 /// Rc venue API behind the shared Arc-based secondary-key composition.
 struct Shared(Rc<dyn RestAdapter>);
 impl RestAdapter for Shared {
