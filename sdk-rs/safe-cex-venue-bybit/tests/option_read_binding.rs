@@ -229,6 +229,7 @@ fn option_reads_match_maintained_methods_and_helpers() {
             Js::Array(_) => Value::Array(
                 value
                     .array_values()
+                    .expect("fixture array property reads")
                     .unwrap()
                     .into_iter()
                     .map(encode)

@@ -153,7 +153,7 @@ fn exercise(rejected: bool) {
     };
     if rejected {
         assert!(
-            rows.borrow().is_empty(),
+            rows.is_empty(),
             "failed conditional continuation returns source Store fallback, never partial regular rows"
         );
         assert_eq!(
@@ -167,7 +167,10 @@ fn exercise(rejected: bool) {
             "source catch forwards rejected response.data.msg through Base formatting"
         );
     } else {
-        let rows = rows.borrow();
+        let rows = EventValue::Array(rows.clone())
+            .array_items()
+            .unwrap()
+            .unwrap();
         assert_eq!(
             rows.len(),
             2,

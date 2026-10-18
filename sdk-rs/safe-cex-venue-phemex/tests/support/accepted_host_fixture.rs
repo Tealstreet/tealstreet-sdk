@@ -56,7 +56,7 @@ pub fn capture(value: &Js) -> Value {
         }
         Js::String(s) => json!({"kind":"string","units":s.as_ref()}),
         Js::Array(_) => {
-            json!({"kind":"array","items":value.array_values().unwrap().iter().map(capture).collect::<Vec<_>>()})
+            json!({"kind":"array","items":value.array_values().expect("fixture array property reads").unwrap().iter().map(capture).collect::<Vec<_>>()})
         }
         Js::Object(_) => {
             let mut fields = serde_json::Map::new();

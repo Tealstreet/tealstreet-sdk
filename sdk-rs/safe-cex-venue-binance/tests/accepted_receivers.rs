@@ -50,9 +50,21 @@ fn event_from_json_retains_native_fields_bits_and_captured_prototype() {
         let EventValue::Array(items) = value.read("items").unwrap() else {
             panic!("native array")
         };
-        assert_eq!(items.borrow().len(), 2);
-        assert!(matches!(items.borrow()[0], Some(EventValue::Null)));
-        assert!(matches!(items.borrow()[1], Some(EventValue::Number(3.0))));
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            EventValue::Array(items.clone())
+                .array_items()
+                .unwrap()
+                .unwrap()[0],
+            Some(EventValue::Null)
+        ));
+        assert!(matches!(
+            EventValue::Array(items.clone())
+                .array_items()
+                .unwrap()
+                .unwrap()[1],
+            Some(EventValue::Number(3.0))
+        ));
     }
     assert!(matches!(
         <EventValue as EventOps>::from_json(json!(null)),

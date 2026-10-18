@@ -384,8 +384,8 @@ impl Host for Frame {
     /// `Array.prototype.flat()`: one level, holes dropped.
     fn flatten_one(&mut self, v: Js) -> Result<Js, Thrown> {
         let mut out = vec![];
-        for item in v.array_items().unwrap_or_default().into_iter().flatten() {
-            match item.array_items() {
+        for item in v.array_items()?.unwrap_or_default().into_iter().flatten() {
+            match item.array_items()? {
                 Some(inner) => out.extend(inner.into_iter().flatten()),
                 None => out.push(item),
             }
@@ -423,7 +423,7 @@ impl Host for Frame {
         let Js::Array(cells) = &rows else {
             return Err(Thrown::type_error("orders.sort is not a function"));
         };
-        let items = cells.borrow().clone();
+        let items = rows.array_items()?.expect("array variant");
         let holes = items.iter().filter(|v| v.is_none()).count();
         let (undefined, values): (Vec<Js>, Vec<Js>) =
             items.into_iter().flatten().partition(Js::is_undefined);
@@ -434,22 +434,41 @@ impl Host for Frame {
         let sorted = merge_sort(values, &cmp)?;
         let mut out: Vec<Option<Js>> = sorted.into_iter().chain(undefined).map(Some).collect();
         out.extend(std::iter::repeat_n(None, holes));
-        *cells.borrow_mut() = out;
+        let _ = cells;
+        for (index, value) in out.into_iter().enumerate() {
+            let key = index.to_string();
+            if let Some(value) = value {
+                rows.set(&key, value)?;
+            } else {
+                rows.delete(&key.encode_utf16().collect::<Vec<_>>())?;
+            }
+        }
         Ok(rows)
     }
     /// `sorted.slice(0, limit)`
     fn slice(&mut self, v: Js, limit: Js) -> Result<Js, Thrown> {
-        let items = v.array_items().unwrap_or_default();
-        let len = items.len() as f64;
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("slice requires an array"));
+        };
+        let length = array.len() as f64;
         let end = limit.to_number()?;
         let end = if end.is_nan() { 0.0 } else { end.trunc() };
         let end = if end < 0.0 {
-            (len + end).max(0.0)
+            (length + end).max(0.0)
         } else {
-            end.min(len)
-        };
-        Ok(Js::holey_array(items[..end as usize].to_vec()))
+            end.min(length)
+        } as usize;
+        let mut items = Vec::new();
+        for index in 0..end {
+            items.push(if v.has_index(index) {
+                Some(v.get(&index.to_string())?)
+            } else {
+                None
+            });
+        }
+        Ok(Js::holey_array(items))
     }
+
     fn v(&mut self, v: &Js, k: &str) -> Result<Js, Thrown> {
         self.rt
             .global("v")?

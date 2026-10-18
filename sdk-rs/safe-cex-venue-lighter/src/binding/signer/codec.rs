@@ -146,7 +146,7 @@ pub(super) fn create_grouped_orders(
 ) -> Result<(CreateGroupedOrdersParams, Vec<OrderFlagValues>), Thrown> {
     let orders = params.get("orders")?;
     let values = orders
-        .array_values()
+        .array_values()?
         .ok_or_else(|| mismatch("orders", "an array", &orders))?;
     if values.is_empty() || values.len() > 3 {
         return Err(Thrown::error(
@@ -208,7 +208,7 @@ pub(super) fn create_grouped_orders(
         }
     };
     let decoded = orders
-        .array_values()
+        .array_values()?
         .ok_or_else(|| mismatch("orders", "an array", &orders))?
         .iter()
         .map(create_order)
@@ -316,7 +316,7 @@ pub(super) fn deadline(value: &Js) -> Result<BigInt, Thrown> {
 pub(super) fn send_tx_batch_response(value: &Js) -> Result<SendTxBatchResponse, Thrown> {
     let hashes = value.get("txHashes")?;
     let tx_hashes = hashes
-        .array_values()
+        .array_values()?
         .ok_or_else(|| mismatch("txHashes", "an array", &hashes))?
         .into_iter()
         .map(|hash| as_text("txHashes[]", hash))

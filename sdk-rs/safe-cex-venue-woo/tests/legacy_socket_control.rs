@@ -292,8 +292,8 @@ impl Host for Fixture {
         keys.sort_by_key(|k| k.parse::<u32>().unwrap_or(u32::MAX));
         Ok(keys.iter().map(|k| m[k].clone()).collect())
     }
-    fn flattenable_values(&mut self, v: &Value) -> Option<Vec<Value>> {
-        v.as_array().cloned()
+    fn flattenable_values(&mut self, v: &Value) -> Result<Option<Vec<Value>>, String> {
+        Ok(v.as_array().cloned())
     }
     fn track_last_received(&mut self) -> Result<(), String> {
         self.trace.push("track".into());

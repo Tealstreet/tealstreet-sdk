@@ -28,7 +28,7 @@ fn async_function(weak: &W, name: &str, body: Rc<dyn Fn(Vec<Js>) -> Task<Js, Thr
 }
 
 fn values(v: &Js) -> Result<Vec<Js>, Thrown> {
-    v.array_values()
+    v.array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
 }
 
@@ -53,7 +53,7 @@ fn next(it: &Js) -> Result<Option<Js>, Thrown> {
 }
 
 fn some(v: Js, f: Rc<dyn Fn(Js) -> Result<bool, Thrown>>) -> Result<bool, Thrown> {
-    for row in v.array_items().unwrap_or_default().into_iter().flatten() {
+    for row in v.array_items()?.unwrap_or_default().into_iter().flatten() {
         if f(row)? {
             return Ok(true);
         }
@@ -94,7 +94,7 @@ pub(crate) fn bootstrap(weak: &W, receiver: &Js) -> Rc<BootstrapOps<Js, Thrown>>
             values(&input)?;
             let mut out = vec![];
             for row in input
-                .array_items()
+                .array_items()?
                 .unwrap_or_default()
                 .into_iter()
                 .flatten()
