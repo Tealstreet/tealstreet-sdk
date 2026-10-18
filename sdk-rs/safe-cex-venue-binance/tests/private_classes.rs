@@ -1,6 +1,9 @@
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
 #[cfg(feature = "native")]
+#[path = "support/delegated_native_routes.rs"]
+mod delegated_native_routes;
+#[cfg(feature = "native")]
 #[path = "support/lifecycle_aliases.rs"]
 mod lifecycle_aliases;
 #[cfg(feature = "native")]
