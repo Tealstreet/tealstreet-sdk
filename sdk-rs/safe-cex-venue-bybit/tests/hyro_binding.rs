@@ -636,10 +636,11 @@ fn hyro_rejected_and_timed_out_auth_close_the_session_without_subscription() {
             "HyroTrader private auth acknowledgement timed out"
         };
         assert!(
-            errors
-                .borrow()
-                .iter()
-                .any(|value| value.to_string().contains(expected)),
+            errors.borrow().iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|text| String::from_utf16_lossy(text).contains(expected))
+            }),
             "{:?}",
             errors.borrow()
         );
@@ -1380,7 +1381,12 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     feed(json!({"topic":"order","data":[order.clone()]}));
     feed(json!({"topic":"order","data":[order.clone()]}));
     assert_eq!(
-        *fills.borrow(),
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Hyro fill fixture"),
         vec![
             json!({"id":"hyro-frame","side":"buy","symbol":"BTCUSDT","price":25000.0,"amount":0.004})
         ]

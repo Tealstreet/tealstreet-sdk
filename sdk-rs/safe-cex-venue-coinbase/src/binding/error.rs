@@ -22,7 +22,7 @@ pub(super) fn from_thrown(error: Thrown) -> PortfolioFailure {
         };
         native.response = property("response");
         native.config = property("config");
-        native.code = property("code");
+
         native.is_axios_error = error
             .value
             .get("isAxiosError")
@@ -60,7 +60,9 @@ mod tests {
         let mut original = ExchangeError::new("scripted HTTP failure");
         original.response =
             Some(serde_json::json!({"status": 503, "data": {"message":"unavailable"}}));
-        original.code = Some(serde_json::json!("ERR_BAD_RESPONSE"));
+        original.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+            &serde_json::json!("ERR_BAD_RESPONSE"),
+        ));
         original.store_subscriber_ids = vec![17, 29];
         let carrier = from_thrown(Thrown::from(original.clone()));
         assert_eq!(carrier.value.as_ref().unwrap()["response"]["status"], 503);

@@ -878,13 +878,26 @@ fn private_topic_fills_emit_incremental_amount_and_update_real_orders() {
             }),
         );
         private_topic_frame(&f, &socket, private_order_topic(spot, "match"));
-        let amount = if spot { 0.1 } else { 0.001 };
+        let amount: f64 = if spot { 0.1 } else { 0.001 };
         let id = if spot { "s1" } else { "o1" };
         let symbol = if spot { "BTC-USDT" } else { "BTCUSDT" };
-        assert_eq!(
-            &*fills.borrow(),
-            &[json!({"id":id,"side":"buy","symbol":symbol,"price":97.5,"amount":amount})]
-        );
+        {
+            let fills = fills.borrow();
+            assert_eq!(fills.len(), 1);
+            let fill = &fills[0];
+            assert_eq!(fill.own_entries().unwrap().len(), 5);
+            for (key, expected) in [("price", 97.5_f64), ("amount", amount)] {
+                assert!(fill.has_own(key));
+                assert_eq!(
+                    fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+                    expected.to_bits()
+                );
+            }
+            assert_eq!(
+                safe_cex_exchange::js_runtime::value::to_json(fill).unwrap(),
+                json!({"id":id,"side":"buy","symbol":symbol,"price":97.5,"amount":amount})
+            );
+        }
         assert_eq!(f.store.orders()[0].filled, if spot { 0.2 } else { 0.002 });
         let mut terminal = private_order_topic(spot, "filled");
         terminal["data"]
@@ -1018,4 +1031,71 @@ fn private_topic_spot_positions_preserve_real_synthetic_store_without_fill() {
         f.wire.take().is_empty(),
         "unsupported position topic must not trigger HTTP"
     );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+fn native_ticker_coercion(spot: bool) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let name = if spot { "kucoinspot" } else { "kucoin" };
+    let source = ticker_coercion::source(name);
+    assert_eq!(
+        source["cases"].as_array().unwrap().len(),
+        if spot { 256 } else { 72 }
+    );
+    let (venue, f, _) = private_topic_fixture(spot);
+    let socket = f
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|socket| {
+            socket.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text).is_ok_and(|value| {
+                    value["type"] == "subscribe" && value["privateChannel"] == false
+                })
+            })
+        })
+        .expect("constructed public subscription")
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed(name)),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            f.runtime.pump();
+        }
+        ticker_coercion::assert_native(&f.store.tickers(), case);
+    }
+    assert!(
+        f.runtime.errors.borrow().is_empty(),
+        "{:?}",
+        f.runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    native_ticker_coercion(false);
+}
+
+#[test]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    native_ticker_coercion(true);
 }
