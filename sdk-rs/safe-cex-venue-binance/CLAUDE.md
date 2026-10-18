@@ -610,3 +610,24 @@ Their real native owner/HTTP/socket/signing/Store witnesses and compiled control
 are described in `LIFECYCLE_ALIAS_REVIEW.md`. Income paging uses the canonical
 native typed bridge on both sides of the shared pager, preserving native number
 bits while retaining the existing numeric transaction/trade ID String policy.
+
+### Retired duplicate order throttle
+
+The former `orders_throttle` generic module had no production caller; its only
+Rust caller was its standalone oracle target. The assembled private constructor
+already installs `PrivateState::start_fetch_throttled`, and its live
+`throttled_orders` method selects and schedules that callback. The two TypeScript
+private-socket source methods remain mapped to those canonical class bodies.
+Do not restore `FetchOrdersCallback`/`LoadedProperties` or their duplicate helper
+module to satisfy an alias inventory.
+
+`tests/support/order_throttle_binding.rs` exercises the production native
+Futures/PM constructor, 10000ms timer, both signed order requests and one loaded
+Store publication with the ticker-loaded sibling retained. Run the native
+`private_classes` target with filter `order_throttle_binding` from `sdk-rs`.
+`scripts/live-order-throttle-controls.py` separately corrupts the real class delay
+and loaded flag, requires compiled named native failures, and restores the exact
+production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
+receipts describe the retired oracle-only helper; they are not current class
+execution evidence. No package script directly names the deleted target/oracle;
+the existing all-targets Binance oracle command continues to discover live tests.
