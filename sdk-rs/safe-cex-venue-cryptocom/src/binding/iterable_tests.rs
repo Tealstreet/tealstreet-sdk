@@ -368,7 +368,10 @@ fn production_prepared_pair_captures_method_once_and_keeps_receiver_and_native_p
             .to_bits(),
         bits
     );
-    assert_eq!(value.get("text").unwrap().as_str().unwrap(), &[0xdc00]);
+    assert_eq!(
+        value.get("text").unwrap().as_str().unwrap().as_ref(),
+        &[0xdc00]
+    );
     assert!(value.has_own("undefined"));
     assert!(value.get("undefined").unwrap().is_undefined());
     assert_eq!(reads.get(), 1);

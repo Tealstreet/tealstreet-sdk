@@ -36,8 +36,8 @@ assert.deepEqual(results.map(result => result.name).sort(), names);
 if (args.includes('--expect-unclassified')) {
   assert.ok(results.every(result => result.failures.some(failure =>
     failure.includes('public alias needs an accepted-set contract'))));
-  console.log('The prepared-call alias fail missing classification by name.');
+  console.log('The prepared-call alias fails missing classification by name.');
 } else {
   for (const result of results) assert.deepEqual(result.failures, [], result.name);
-  console.log('The actual prepared-call alias pass native compiler trait probes.');
+  console.log('The actual prepared-call alias passes native compiler trait probes.');
 }
