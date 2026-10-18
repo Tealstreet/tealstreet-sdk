@@ -51,7 +51,7 @@ test('generated JsJsonValue observer compiles and observes native String object 
   const contracts = loadContracts();
   const anchor = '[k,observe(v)]';
   assert.equal(contracts[owner].call.split(anchor).length, 2, 'one native String-key observation');
-  contracts[owner].call = contracts[owner].call.replace(anchor, '[{ let _ = k; "wrong key" },observe(v)]');
+  contracts[owner].call = contracts[owner].call.replace(anchor, '[format!("wrong key{k}"),observe(v)]');
   const failures = generated(contracts);
   assert.equal(failures.length, 2, 'both ASCII and Unicode object fixtures reject wrong keys');
   assert.ok(failures.some(failure => failure.includes('function output mismatch') && failure.includes('wrong key')),
