@@ -182,7 +182,17 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
         let actual: Vec<_> = actual
             .into_iter()
             .map(|order| {
-                let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
+                let mut value = encode_json_numbers(&order);
+                for (key, undefined) in [
+                    ("status", order.status.is_undefined()),
+                    ("type", order.r#type.is_undefined()),
+                    ("side", order.side.is_undefined()),
+                    ("timeInForce", order.time_in_force.is_undefined()),
+                ] {
+                    if undefined {
+                        value.as_object_mut().unwrap().remove(key);
+                    }
+                }
                 for (key, n) in [
                     ("price", order.price.to_number()),
                     ("amount", order.amount),
@@ -402,7 +412,17 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         let mapped: Vec<_> = actual
             .into_iter()
             .map(|order| {
-                let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
+                let mut value = encode_json_numbers(&order);
+                for (key, undefined) in [
+                    ("status", order.status.is_undefined()),
+                    ("type", order.r#type.is_undefined()),
+                    ("side", order.side.is_undefined()),
+                    ("timeInForce", order.time_in_force.is_undefined()),
+                ] {
+                    if undefined {
+                        value.as_object_mut().unwrap().remove(key);
+                    }
+                }
                 for (key, n) in [
                     ("price", order.price.to_number()),
                     ("amount", order.amount),
