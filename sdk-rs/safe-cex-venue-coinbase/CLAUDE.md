@@ -354,3 +354,10 @@ class witnesses cancel a real timer and retain an independent uncancelled timer.
 `lifecycle-timer-controls.py` restores the JSON-roundtrip defect, requires both
 named native failures, restores exact source bytes and reruns both witnesses.
 The fixed timer alias has a specific non-decoder capability receipt.
+
+The shared retained/numeric typed decoder now replaces isolated UTF-16 units
+with U+FFFD in materialized String fields instead of rejecting the entire record.
+`tests/string_boundaries.rs` retains the live source corpus and exact unit/path
+pins, measures that accepted typed-view cost, and checks that ignored strings
+leave declared fields intact. Standalone serde_json::Value parsing and the
+separate bounded recursion behavior retain their own explicit checks.
