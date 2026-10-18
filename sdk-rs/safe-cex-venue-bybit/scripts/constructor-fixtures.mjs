@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import axios from 'axios';
+import axiosRateLimit from 'axios-rate-limit';
 const root = new URL('../../../packages/safe-cex/src/', import.meta.url);
 const parse = file => ts.createSourceFile(file, readFileSync(new URL(file, root), 'utf8'), ts.ScriptTarget.Latest, true);
 const venue = parse('exchanges/bybit/bybit.exchange.ts');
@@ -44,6 +46,7 @@ const margin = types.statements.find(n => ts.isEnumDeclaration(n) && n.name.text
 assert.ok(retry && margin);
 const statusInputs = [null, '1', '1.0', '1e0', '1.00000000000000001', '2', '6', '0', '-0', '1e400', '"1"', 'true', 'null', '[]', '[1]', '{}'];
 const cases = [];
+let sourceRateOptions;
 for (const inverse of [undefined, 'enabled', 'external']) for (const secondary of [undefined, '', 'read-key']) for (const failAt of [-1, 0, 1, 2]) {
   const options = {key:'write-key', secret:'write-secret', ...(secondary === undefined ? {} : {secondary_key:secondary, secondary_secret:'read-secret'}),
     ...(inverse === undefined ? {} : {enableInverseMarkets:true}), ...(inverse === 'external' ? {externalPublicData:{type:'websocket',url:'wss://gateway.invalid',exchangeId:'bybit'}} : {})};
@@ -55,7 +58,7 @@ for (const inverse of [undefined, 'enabled', 'external']) for (const secondary o
       if (count++ === failAt) throw new Error('factory failure');
       return {};
     },
-    rateLimit: (xhr, opts) => { assert.equal(opts.maxRPS, 5); return xhr; },
+    rateLimit: (xhr, opts) => { assert.equal(opts.maxRPS, 5); sourceRateOptions = {...opts}; return xhr; },
     BybitPublicWebsocket: class { constructor(parent, category) { trace.push(['public', parent.name, category]); } },
     BybitPrivateWebsocket: class { constructor(parent) { trace.push(['private', parent.name]); } },
   });
@@ -105,4 +108,57 @@ for (const inverse of [undefined, 'enabled', 'external']) for (const secondary o
   cases.push({captureArchitecture:process.arch,options, failAt, trace, error, state, statuses, placements, reinitializations});
 }
 assert.equal(cases.length, 36);
+// Run the actual installed rate limiter with the maintained constructor's options.
+// Timer registration leaves time unchanged; the sixth request needs a completed window.
+const originalTimeout = globalThis.setTimeout;
+const originalClearTimeout = globalThis.clearTimeout;
+const originalNow = Date.now;
+let windowProfiles = 0;
+try {
+  for (const fixedWallClock of [true, false]) {
+    let now = 0;
+    const timers = [];
+    const delays = [];
+    const dispatched = [];
+    Date.now = () => fixedWallClock ? 1700000000000 : now;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      const timer = {callback: () => callback(...args), deadline: now + delay, active: true};
+      timers.push(timer); if (delay === 1000) delays.push(delay); return timer;
+    };
+    globalThis.clearTimeout = timer => { if (timer) timer.active = false; };
+    const flush = async () => { for (let i = 0; i < 64; i++) await Promise.resolve(); };
+    const advance = async value => {
+      now = value;
+      let timer;
+      while ((timer = timers.find(candidate => candidate.active && candidate.deadline <= now))) {
+        timer.active = false;
+        timer.callback();
+        await flush();
+      }
+      await flush();
+    };
+    const client = axiosRateLimit(axios.create({adapter: async config => {
+      dispatched.push([Number(config.url), now]);
+      return {config, data: null, status: 200, statusText: 'OK', headers: {}};
+    }}), sourceRateOptions);
+    const requests = Array.from({length: 6}, (_, i) => client.get(String(i)));
+    await flush();
+    await advance(0);
+    assert.deepEqual(dispatched, Array.from({length: 5}, (_, i) => [i, 0]));
+    assert.equal(now, 0);
+    assert.deepEqual(delays, [1000]);
+    await advance(999);
+    assert.equal(dispatched.length, 5);
+    await advance(1000);
+    await Promise.all(requests);
+    assert.deepEqual(dispatched, [...Array.from({length: 5}, (_, i) => [i, 0]), [5, 1000]]);
+    assert.deepEqual(delays, [1000, 1000]);
+    windowProfiles++;
+  }
+} finally {
+  globalThis.setTimeout = originalTimeout;
+  globalThis.clearTimeout = originalClearTimeout;
+  Date.now = originalNow;
+}
+assert.equal(windowProfiles, 2);
 process.stdout.write(JSON.stringify(cases));
