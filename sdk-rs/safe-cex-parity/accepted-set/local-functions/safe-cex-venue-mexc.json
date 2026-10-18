@@ -11,8 +11,8 @@
   },
   "safe-cex-venue-mexc/src/exchange_helpers.rs::LOCAL_FUNCTION:nonnull": {
     "category": "non-decoder",
-    "reason": "Inside submit_error_fields: filters a JSON reference to non-null. No coercion, no typed output.",
-    "sourceSha256": "f254372ec750712e4012388c88935d4b9b5db291368f2962c248ba1ea7be24df"
+    "reason": "Inside submit_error_fields: filters a JSON reference to non-null. No coercion, no typed output. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",
+    "sourceSha256": "95c105a5964ba0aae39148dfc27429f7dcd33baee8c604cb77a2ae5471e2b11b"
   },
   "safe-cex-venue-mexc/src/utils.rs::LOCAL_FUNCTION:row_balance": {
     "category": "decoder-helper",
