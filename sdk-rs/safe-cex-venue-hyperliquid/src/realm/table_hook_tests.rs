@@ -328,3 +328,37 @@ fn legacy_table_hooks_can_reenter_without_retaining_property_borrows() {
         Some(2.0)
     );
 }
+
+#[test]
+fn common_error_delegate_retains_native_response_and_opaque_origin() {
+    use super::value::{PropKey, Value};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let mut realm = Realm::new(Rc::new(TestRuntime::default()));
+    let response = Input::Object(vec![
+        (vec![0xd800], Input::Float(-0.0)),
+        ("ownUndefined".encode_utf16().collect(), Input::Undefined),
+    ]);
+    let error = ExchangeError::new("retained response").with_retained_response(response.clone());
+    let origin = error.origin.clone();
+    let thrown = facade_rest::thrown_from(&mut realm, error);
+    let projected = realm.get_str(&thrown, "response").unwrap();
+    let number = realm
+        .get(&projected, &PropKey::String(vec![0xd800].into()))
+        .unwrap();
+    let Value::Number(number) = number else {
+        panic!("retained response number")
+    };
+    assert_eq!(number.to_bits(), (-0.0f64).to_bits());
+    assert!(
+        realm
+            .has_own(&projected, &PropKey::str("ownUndefined"))
+            .unwrap()
+    );
+    assert!(matches!(
+        realm.get_str(&projected, "ownUndefined").unwrap(),
+        Value::Undefined
+    ));
+    let recovered = realm.exchange_error(&thrown);
+    assert_eq!(recovered.origin, origin);
+    assert_eq!(recovered.retained_response_input(), Some(response));
+}

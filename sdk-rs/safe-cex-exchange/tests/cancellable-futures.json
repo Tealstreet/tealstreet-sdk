@@ -583,7 +583,7 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "9135f6c32f6378468f54f82df41fc237929ffed40db9bfea54a2e9bb5c40190d",
+      "producer_sha256": "35ce35ab62bab53a067bb6b2f3891878d0f90cb41ebfe429b3c86dba4c8417f9",
       "classification": "no-owned-latch",
       "reason": "Only the supplied overlay future is pending; overlay/store assignment follows settlement and creates no independent caller reservation. The inner async block includes overlay settlement and the notifying Store commit in the source catch; it creates no task or registration. Reviewed Store cutover: reached Store reads return owned Result values and propagate their original failure at the same expression; existing future ownership, guards, retry catches and registration lifetimes are unchanged. retained-response cutover: only the settled catch reads a computed diagnostic response view; pending overlay, Store commit and cancellation ownership remain unchanged."
     },
