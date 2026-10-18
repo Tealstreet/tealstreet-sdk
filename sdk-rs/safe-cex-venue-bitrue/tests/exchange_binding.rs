@@ -1278,3 +1278,89 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         f.runtime.reports.borrow()
     );
 }
+
+#[test]
+fn listen_ohlcv_maps_singapore_kline_times_through_the_real_dayjs_global() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let runtime = Rc::new(support::Runtime::default());
+    let http = Rc::new(Http(
+        runtime.clone(),
+        RefCell::new(vec![]),
+        Cell::new(false),
+    ));
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http: http.clone(),
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    complete(&runtime, venue.start()).unwrap();
+    let public_socket = || {
+        runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url.contains("/kline-api/ws"))
+            .map(|(_, s)| s.clone())
+    };
+    for _ in 0..16 {
+        if public_socket().is_some() {
+            break;
+        }
+        runtime.advance(1000.);
+    }
+    let public = public_socket().expect("public socket");
+    let candles = Rc::new(RefCell::new(vec![]));
+    let sink = candles.clone();
+    let cleanup = venue
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"E-BTC-USDT","interval":"15m"})).unwrap(),
+            Rc::new(move |c| sink.borrow_mut().push(c)),
+        )
+        .expect("BIND listenOHLCV");
+    runtime.pump();
+    let topic = "market_e_btcusdt_kline_15min";
+    assert!(
+        public
+            .sent
+            .borrow()
+            .iter()
+            .any(|s| s.contains("\"event\":\"sub\"") && s.contains(topic)),
+        "listenOHLCV subscribes the kline topic: {:?}",
+        public.sent.borrow()
+    );
+    // Bitrue `ds` is Singapore wall time; real dayjs+utc in a UTC host gives these seconds.
+    for tick in [
+        json!({"ds":"2024-03-10 08:00:00","open":1,"high":3,"low":0.5,"close":2,"vol":10,"amount":20,"id":1,"tradeId":1}),
+        json!({"ds":"2024-03-10 08:15:00","open":2,"high":4,"low":1.5,"close":3,"vol":11,"amount":33,"id":2,"tradeId":2}),
+    ] {
+        let frame = json!({"channel":topic,"tick":tick});
+        public
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        runtime.pump();
+    }
+    let fields: Vec<_> = candles
+        .borrow()
+        .iter()
+        .map(|c: &safe_cex_types::Candle| (c.timestamp, c.open, c.high, c.low, c.close, c.volume))
+        .collect();
+    assert_eq!(
+        fields,
+        vec![
+            (1_710_028_800., 1., 3., 0.5, 2., 10.),
+            (1_710_029_700., 2., 4., 1.5, 3., 11.)
+        ],
+        "reports: {:?}",
+        runtime.reports.borrow()
+    );
+    cleanup().unwrap();
+    venue.dispose().unwrap();
+}
