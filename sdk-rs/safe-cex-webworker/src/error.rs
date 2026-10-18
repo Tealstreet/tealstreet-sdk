@@ -1,5 +1,5 @@
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 // ts: SerializableWorkerError
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -32,25 +32,29 @@ impl<'de> Deserialize<'de> for SerializableWorkerError {
 }
 
 // ts: readStringProperty
-fn read_string_property<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key)?.as_str().filter(|value| !value.is_empty())
+fn read_string_property(value: &Js, key: &str) -> Result<Option<String>, Thrown> {
+    if value.is_nullish() || value.type_of() != "object" {
+        return Ok(None);
+    }
+    Ok(match value.get(key)? {
+        Js::String(text) if !text.is_empty() => Some(String::from_utf16_lossy(&text)),
+        _ => None,
+    })
 }
 
 // ts: serializeWorkerErrorForSentry
 pub fn serialize_worker_error_for_sentry(
-    error: &Value,
+    error: &Js,
     fallback_message: &str,
     fallback_name: Option<&str>,
-) -> SerializableWorkerError {
-    SerializableWorkerError {
-        message: read_string_property(error, "message")
-            .unwrap_or(fallback_message)
-            .to_owned(),
-        name: read_string_property(error, "name")
-            .unwrap_or(fallback_name.unwrap_or("Error"))
-            .to_owned(),
-        stack: read_string_property(error, "stack").map(str::to_owned),
-    }
+) -> Result<SerializableWorkerError, Thrown> {
+    Ok(SerializableWorkerError {
+        message: read_string_property(error, "message")?
+            .unwrap_or_else(|| fallback_message.to_owned()),
+        name: read_string_property(error, "name")?
+            .unwrap_or_else(|| fallback_name.unwrap_or("Error").to_owned()),
+        stack: read_string_property(error, "stack")?,
+    })
 }
 
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(

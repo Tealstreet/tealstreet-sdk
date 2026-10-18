@@ -8,7 +8,7 @@ use safe_cex_exchange::{
     js_runtime::{
         client::JsHttpHost,
         promise::JsFuture,
-        value::{Js, Thrown, from_json},
+        value::{Js, Thrown, error_object, from_json},
     },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
@@ -324,6 +324,7 @@ fn real_tunnel_constructor_installs_provider_adapter_or_retains_host() {
 struct NetworkHttp {
     runtime: Rc<Runtime>,
     case: Value,
+    error_kind: &'static str,
     attempts: Cell<usize>,
 }
 impl JsHttpHost for NetworkHttp {
@@ -338,10 +339,12 @@ impl JsHttpHost for NetworkHttp {
             failed_config
                 .define("method", from_json(&self.case["method"]))
                 .unwrap();
-            let error = Js::object(vec![
-                ("message", Js::str("synthetic network failure")),
-                ("config", failed_config),
-            ]);
+            let error = if self.error_kind == "object" {
+                Js::object(vec![("message", Js::str("synthetic network failure"))])
+            } else {
+                error_object(self.error_kind, "synthetic network failure")
+            };
+            error.define("config", failed_config).unwrap();
             for field in ["code", "response"] {
                 if let Some(value) = self.case.get(field) {
                     error.define(field, from_json(value)).unwrap();
@@ -374,6 +377,7 @@ fn real_read_retry_matches_live_axios_exclusions_and_response_truthiness() {
         let http = Rc::new(NetworkHttp {
             runtime: runtime.clone(),
             case: case.clone(),
+            error_kind: "Error",
             attempts: Cell::new(0),
         });
         let venue = construct(ExchangeName::Bitget, false, runtime.clone(), http.clone()).unwrap();
@@ -388,6 +392,81 @@ fn real_read_retry_matches_live_axios_exclusions_and_response_truthiness() {
             expected,
             "real network retry must match TS: {}",
             case["name"]
+        );
+    }
+}
+
+#[test]
+fn actual_factory_retry_distinguishes_error_instances_from_plain_objects() {
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/transport-retry-factory-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 3);
+    for case in cases {
+        let kind = match case["kind"].as_str().unwrap() {
+            "Error" => "Error",
+            "AxiosError" => "AxiosError",
+            "object" => "object",
+            other => panic!("unknown source kind {other}"),
+        };
+        let runtime = runtime(None);
+        let http = Rc::new(NetworkHttp {
+            runtime: runtime.clone(),
+            case: json!({"code":"ECONNRESET", "method":"get"}),
+            error_kind: kind,
+            attempts: Cell::new(0),
+        });
+        let venue = construct(ExchangeName::Bitget, false, runtime.clone(), http.clone()).unwrap();
+        let result = drive(&runtime, venue.fetch_markets());
+        assert_eq!(
+            http.attempts.get(),
+            case["attempts"].as_u64().unwrap() as usize,
+            "actual factory retry {kind}"
+        );
+        assert_eq!(
+            result.is_err(),
+            kind == "object",
+            "actual factory terminal result {kind}"
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
+fn owned_transport_error_keeps_error_class_and_read_retry_config() {
+    use safe_cex_exchange::js_runtime::client::{JsRestAdapter, create, rest_http_host};
+    for kind in ["Error", "AxiosError"] {
+        let runtime = runtime(None);
+        let terminal = Rc::new(NetworkHttp {
+            runtime: runtime.clone(),
+            case: json!({"code":"ECONNRESET", "method":"get"}),
+            error_kind: kind,
+            attempts: Cell::new(0),
+        });
+        let client = create(terminal.clone(), Js::object(vec![]));
+        let adapter = Arc::new(JsRestAdapter::new(runtime.clone(), client));
+        let http = rest_http_host(runtime.clone(), adapter);
+        let venue = construct(ExchangeName::Bitget, false, runtime.clone(), http).unwrap();
+        let result = drive(&runtime, venue.fetch_markets());
+        assert_eq!(
+            terminal.attempts.get(),
+            2,
+            "BITGET-OWNED-READ-RETRY must retain {kind} code/class/config across the actual typed transport bridge"
+        );
+        assert!(
+            result.is_ok(),
+            "retried market request completes: {result:?}"
         );
     }
 }
