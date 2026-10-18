@@ -130,7 +130,7 @@ still apply.
 
 ## Master integration
 
-The normal master merge retains all 140 existing contract records, including
+The normal master merges retain all 159 existing contract records, including
 the separately reviewed Wire owners from #868, and adds only these eleven keys.
 The selected runner does not assert the historical package-wide owner total.
 
@@ -151,3 +151,5 @@ master7d76523624f4 compiles and fails all three ordinary regressions: the two DT
 accept their complete arrays, and ExecutionOrder rejects decimals with
 `invalid type: map, expected f64`. Exact restoration passes all three. The required
 all-features cancellation inventory also passes.
+After the final master union, source comparisons, parity7464/16636, scoped strict
+Clippy, formatting and the required all-features cancellation target pass.
