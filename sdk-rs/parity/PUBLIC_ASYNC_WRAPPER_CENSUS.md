@@ -64,6 +64,14 @@ Backpack creates some HTTP operations before returning its task; Coinbase has it
 
 Refresh this snapshot only after reviewing changed wrapper bodies. Its hashes identify the inspected baseline; they are not an allowlist or a policy exemption. Source drift alone must not silently turn a candidate into an executed verdict.
 
+Shared socket entrypoints also require an eager prefix. BaseWebSocket now starts
+preparation/dial through the existing OwnedTasks registry and canonical
+`eager::start_eager`; Bitget secondary and Backpack public prove the real ready
+host prefix. This is a core dial boundary, not a new venue SDK wrapper family.
+It does not close native CONNECTING-handle presence during a held handshake;
+that independently compiled Bitget finding remains open. See
+`safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md` for scope and controls.
+
 ## Native final-handle destruction
 
 The coordinator lifetime ruling requires deterministic full teardown when the
