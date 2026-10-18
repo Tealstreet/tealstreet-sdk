@@ -44,7 +44,11 @@ short-circuit and stamp profiles. `api-receiver-controls.py` compiles one semant
 fault per concrete receiver: cancelled-code spelling, signature stamp and join
 separator. Each must fail its named native witness, then pass on exact restoration.
 
-The canonical receiver inventory reduces eleven refusals to exactly eight,
-clearing these three reviewed rows. Those eight belong to the separate SpotCancel/Account/Class
-cohort. Following aliases remain unknown until all receiver guards clear; no
-shared inventory guard or array/Store admission rule is relaxed here.
+The isolated canonical receiver inventory reduces eleven refusals to exactly
+eight, clearing these three reviewed rows. After normally inheriting the separate
+SpotCancel/Account/Class cohort (#1040), all 25 reviewed Kraken receiver guards
+clear. The full inventory then stops honestly on the next generic alias:
+`rest_account::Handle<H> = Rc<<H as ReadHost>::Value>` requires explicit finite
+compiler coverage. This PR does not classify that alias or relax a shared
+inventory guard or array/Store admission rule. The public denial-data declaration
+is mapped to its existing source network-read policy with exact provenance.
