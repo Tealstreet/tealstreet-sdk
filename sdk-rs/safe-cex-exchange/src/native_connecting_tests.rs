@@ -138,9 +138,11 @@ fn native_connecting_waiter_drop_releases_registration_without_canceling_dial() 
 thread_local! {
     static ON_WAKER_DROP: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
 }
-struct ReentrantWaker;
+struct ReentrantWaker(Arc<AtomicUsize>);
 impl Wake for ReentrantWaker {
-    fn wake(self: Arc<Self>) {}
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 impl Drop for ReentrantWaker {
     fn drop(&mut self) {
@@ -164,7 +166,8 @@ fn native_connecting_waker_replacement_can_reenter_close() {
         ON_WAKER_DROP.with(|slot| {
             *slot.borrow_mut() = Some(Box::new(move || weak.upgrade().unwrap().close()))
         });
-        let old = Waker::from(Arc::new(ReentrantWaker));
+        let stale_wakes = Arc::new(AtomicUsize::new(0));
+        let old = Waker::from(Arc::new(ReentrantWaker(stale_wakes.clone())));
         let mut event = socket.next_event();
         assert!(
             event
@@ -185,6 +188,11 @@ fn native_connecting_waker_replacement_can_reenter_close() {
             drops.get(),
             1,
             "CONNECTING waker destruction can close the same socket without a live state borrow"
+        );
+        assert_eq!(
+            stale_wakes.load(Ordering::SeqCst),
+            0,
+            "CONNECTING replacement releases the old waker without waking it"
         );
         assert!(matches!(event.await.unwrap(), WsEvent::Error(_)));
         assert!(matches!(
