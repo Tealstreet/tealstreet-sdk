@@ -7,7 +7,7 @@ native task context as typed capabilities. It neither decodes wire data nor
 claims a universal generic payload domain.
 
 The independent native binding witness constructs production dependencies and an
-actual Futures exchange owner. Its terminal adapter holds the signed listen-key
+actual Futures exchange owner. Its terminal adapter holds the real listen-key
 request. Two cloned settlement handles share that one request, remain pending
 until release and then both complete without another request. The actual bound
 receiver remains usable afterwards.
