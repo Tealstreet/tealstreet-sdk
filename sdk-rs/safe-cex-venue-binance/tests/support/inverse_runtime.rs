@@ -216,9 +216,19 @@ impl WsRuntime for Runtime {
 
 #[derive(Clone)]
 pub struct Http {
+    pub hold: Rc<Cell<bool>>,
+    hold_waker: Rc<RefCell<Option<std::task::Waker>>>,
     pub runtime: Rc<Runtime>,
     pub requests: Rc<RefCell<Vec<Js>>>,
     pub replies: Rc<RefCell<VecDeque<Result<Js, Thrown>>>>,
+}
+impl Http {
+    pub fn release(&self) {
+        self.hold.set(false);
+        if let Some(waker) = self.hold_waker.borrow_mut().take() {
+            waker.wake();
+        }
+    }
 }
 impl JsHttpHost for Http {
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
@@ -231,7 +241,18 @@ impl JsHttpHost for Http {
             .borrow_mut()
             .pop_front()
             .unwrap_or_else(|| Err(Thrown::error("Error", "unscripted inverse HTTP request")));
+        let hold = self.hold.clone();
+        let hold_waker = self.hold_waker.clone();
         Box::pin(async move {
+            std::future::poll_fn(move |cx| {
+                if hold.get() {
+                    *hold_waker.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
             let data = reply?;
             Ok(Js::object(vec![
                 ("data", data),
@@ -252,6 +273,8 @@ pub fn fixture(public_only: bool, testnet: bool) -> Harness {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(START_MS);
     let http = Rc::new(Http {
+        hold: Default::default(),
+        hold_waker: Default::default(),
         runtime: runtime.clone(),
         requests: Default::default(),
         replies: Default::default(),
