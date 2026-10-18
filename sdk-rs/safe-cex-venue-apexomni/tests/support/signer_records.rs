@@ -31,11 +31,13 @@ fn compare(corpus: &Value) {
     assert!(corpus["header"]["nodeArch"].as_str().is_some());
     assert_eq!(corpus["header"]["rustArch"], std::env::consts::ARCH);
     assert_eq!(corpus["boundary"]["units"], json!([0xd800]));
-    assert!(
-        serde_json::from_str::<TxEthSignature>(corpus["boundary"]["serialized"].as_str().unwrap())
-            .is_err(),
-        "TxEthSignature shared UTF-8 actual source boundary"
+    let raw = corpus["boundary"]["serialized"].as_str().unwrap();
+    let value: TxEthSignature = serde_json::from_str(raw).unwrap();
+    assert_eq!(
+        value.signature, "\u{fffd}",
+        "native signer String replacement"
     );
+    typed_utf16::assert_projection(raw, &value);
     let mut fields = corpus["fields"].as_array().unwrap().clone();
     fields.sort_by_key(|f| f["name"].as_str().unwrap().to_owned());
     assert_eq!(
@@ -122,14 +124,11 @@ fn signer_signature_rejects_invalid_shapes() {
             "TxEthSignature raw strict shape {value}"
         );
     }
-    assert!(
-        serde_json::from_str::<TxEthSignature>(
-            r#"{"type":"EthereumSignature","signature":"\ud800"}"#
-        )
-        .is_err(),
-        "TxEthSignature shared UTF-8 boundary"
-    );
+    let raw = r#"{"type":"EthereumSignature","signature":"\ud800"}"#;
+    typed_utf16::assert_projection(raw, &serde_json::from_str::<TxEthSignature>(raw).unwrap());
 }
+
+use crate::typed_utf16;
 #[test]
 fn signer_signature_source_and_cardinality_controls() {
     let error = std::panic::catch_unwind(|| compare(&capture(true)))

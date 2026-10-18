@@ -32,9 +32,11 @@ fn utility_rows_actual_typescript() {
         12,
         "tick_source_success_count"
     );
-    let (mut comparisons, mut refusals) = (0, 0);
+    let (mut comparisons, mut typed_boundaries) = (0, 0);
     for (index, case) in cases.iter().enumerate() {
         let raw = case["raw"].as_str().unwrap();
+        let boundary = case["kind"] == "string"
+            && String::from_utf16(typed_utf16::retained(raw).as_text().unwrap()).is_err();
         let values = match case["kind"].as_str().unwrap() {
             "number" => {
                 let value: Value = serde_json::from_str(raw).unwrap();
@@ -57,18 +59,13 @@ fn utility_rows_actual_typescript() {
                     })
                     .collect::<Vec<_>>()
             }
-            "string" => match js_from_str::<String>(raw) {
-                Ok(value) => vec![Some(PrecisionInput::String(value))],
-                Err(_) => {
-                    assert!(
-                        raw.contains("\\ud800") || raw.contains("\\udc00"),
-                        "tick_only_surrogate_refusal"
-                    );
-                    assert_eq!(case["errorName"], "Error", "tick_surrogate_source_error");
-                    refusals += 1;
-                    continue;
+            "string" => {
+                let value = js_from_str::<String>(raw).unwrap();
+                if boundary {
+                    typed_utf16::assert_projection(raw, &value);
                 }
-            },
+                vec![Some(PrecisionInput::String(value))]
+            }
             "null" => vec![None],
             other => panic!("unknown tick input kind {other}"),
         };
@@ -92,13 +89,22 @@ fn utility_rows_actual_typescript() {
                 let actual = actual.expect_err("tick_native_expected_error");
                 let expected: Vec<u16> =
                     serde_json::from_value(case["errorUnits"].clone()).unwrap();
+                let expected = if boundary {
+                    String::from_utf16_lossy(&expected).encode_utf16().collect()
+                } else {
+                    expected
+                };
                 assert_eq!(
                     actual.encode_utf16().collect::<Vec<_>>(),
                     expected,
                     "tick_native_error_message:{index}"
                 );
             }
-            comparisons += 1;
+            if boundary {
+                typed_boundaries += 1;
+            } else {
+                comparisons += 1;
+            }
             case_comparisons += 1;
         }
         assert_eq!(
@@ -106,7 +112,7 @@ fn utility_rows_actual_typescript() {
             "tick_case_comparisons:{index}"
         );
     }
-    assert_eq!(refusals, 2, "tick_surrogate_refusal_count");
+    assert_eq!(typed_boundaries, 2, "tick_surrogate_typed_comparisons");
     assert_eq!(comparisons, 99, "tick_total_native_comparisons");
     let token_cases = corpus["tokenCases"].as_array().unwrap();
     let expected_counts = [
@@ -163,9 +169,11 @@ fn utility_rows_actual_typescript() {
     assert_eq!(total_native, 15, "tokens_native_total_comparisons");
     let precision_cases = corpus["precisionCases"].as_array().unwrap();
     assert_eq!(precision_cases.len(), 3565, "precision_source_case_count");
-    let (mut precision_comparisons, mut precision_refusals) = (0, 0);
+    let (mut precision_comparisons, mut precision_boundaries) = (0, 0);
     for (index, case) in precision_cases.iter().enumerate() {
         let raw = case["raw"].as_str().unwrap();
+        let boundary = case["kind"] == "string"
+            && String::from_utf16(typed_utf16::retained(raw).as_text().unwrap()).is_err();
         let inputs = match case["kind"].as_str().unwrap() {
             "number" => {
                 let value: Value = serde_json::from_str(raw).unwrap();
@@ -188,21 +196,13 @@ fn utility_rows_actual_typescript() {
                     })
                     .collect::<Vec<_>>()
             }
-            "string" => match js_from_str::<String>(raw) {
-                Ok(value) => vec![Some(PrecisionInput::String(value))],
-                Err(_) => {
-                    assert!(
-                        raw.contains("\\ud800") || raw.contains("\\udc00"),
-                        "precision_only_surrogate_refusal"
-                    );
-                    assert_eq!(
-                        case["outputBits"], "4000000000000000",
-                        "precision_surrogate_source_fallback"
-                    );
-                    precision_refusals += 1;
-                    continue;
+            "string" => {
+                let value = js_from_str::<String>(raw).unwrap();
+                if boundary {
+                    typed_utf16::assert_projection(raw, &value);
                 }
-            },
+                vec![Some(PrecisionInput::String(value))]
+            }
             "null" => vec![None],
             other => panic!("precision unknown input {other}"),
         };
@@ -219,11 +219,21 @@ fn utility_rows_actual_typescript() {
             performed += 1;
         }
         assert_eq!(performed, routes, "precision_case_comparisons:{index}");
-        precision_comparisons += performed;
+        if boundary {
+            precision_boundaries += performed;
+        } else {
+            precision_comparisons += performed;
+        }
     }
-    assert_eq!(precision_refusals, 2, "precision_boundary_refusals");
+    assert_eq!(
+        precision_boundaries, 2,
+        "precision_boundary_typed_comparisons"
+    );
     assert_eq!(
         precision_comparisons, 14159,
         "precision_total_native_comparisons"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

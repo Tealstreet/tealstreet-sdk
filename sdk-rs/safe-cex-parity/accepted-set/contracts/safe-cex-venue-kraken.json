@@ -7608,5 +7608,327 @@
         }
       }
     }
+  },
+  "safe_cex_venue_kraken::lifecycle::SocketCallback": {
+    "category": "non-decoder",
+    "reason": "Reference-counted host-bound callable over a borrowed dyn Any event. It owns a captured socket receiver and returns completion or ExchangeError; it admits no wire value or record decoder. The production adapter passes the native Js event to the actual assembled onMessage member.",
+    "evidence": "scripts/loop-socket-alias-contracts.mjs uses fresh compiler/artifact/macro/source-authenticated native identity, Serde and conversion probes for this exact alias. tests/support/accepted_loop_socket_aliases.rs observes actual constructed socket callbacks through physical messages and native Store fields, native event getters/errors, and scheduled real signed tick synchronization with held HTTP, exact deadlines and synchronous/detached error reports. scripts/loop-socket-alias-controls.py compiles separate event-loss, callback-loss and swallowed-future-error faults and requires named failures plus exact restored passes. See LOOP_SOCKET_ALIAS_REVIEW.md; the underlying payload parsers and other aliases remain independently classified.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "dyn_trait": {
+                                        "traits": [
+                                          {
+                                            "trait": {
+                                              "path": "core::any::Any",
+                                              "args": null
+                                            },
+                                            "generic_params": []
+                                          }
+                                        ],
+                                        "lifetime": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "dyn_trait": {
+                                        "traits": [
+                                          {
+                                            "trait": {
+                                              "path": "core::any::Any",
+                                              "args": null
+                                            },
+                                            "generic_params": []
+                                          }
+                                        ],
+                                        "lifetime": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::periodic_sync::TickCallback": {
+    "category": "non-decoder",
+    "reason": "Reference-counted zero-argument timer continuation returning a boxed ExchangeFuture or a synchronous ExchangeError. It owns a live Scope and its completion task; the future is an output capability, not decoded input.",
+    "evidence": "scripts/loop-socket-alias-contracts.mjs uses fresh compiler/artifact/macro/source-authenticated native identity, Serde and conversion probes for this exact alias. tests/support/accepted_loop_socket_aliases.rs observes actual constructed socket callbacks through physical messages and native Store fields, native event getters/errors, and scheduled real signed tick synchronization with held HTTP, exact deadlines and synchronous/detached error reports. scripts/loop-socket-alias-controls.py compiles separate event-loss, callback-loss and swallowed-future-error faults and requires named failures plus exact restored passes. See LOOP_SOCKET_ALIAS_REVIEW.md; the underlying payload parsers and other aliases remain independently classified.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "lifetime": "'static"
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "tuple": []
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "lifetime": "'static"
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "tuple": []
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }

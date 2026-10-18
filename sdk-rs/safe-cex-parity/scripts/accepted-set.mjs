@@ -155,8 +155,12 @@ for (const pkg of members) {
       const current = providerArtifacts.filter(item => item.package_id === dependency.id && item.target.name === library.name && item.target.kind.includes('lib'));
       assert.equal(current.length, 1, `accepted-set: dependency export artifact missing ${dependency.name}`);
       assert.deepEqual(current[0].features.slice().sort(), features, `accepted-set: dependency export features changed ${dependency.name}`);
+      const dependencyMacroOrigins = verifiedMacroOrigins(dependencyDoc, dependency, metadata, providerArtifacts, compilerSysroot);
+      dependencyMacroOrigins.push(...verifiedNumberOutputOrigin(dependencyDoc, dependency, metadata, providerArtifacts, scanner));
+      const dependencyNumberOutputDefinition = verifiedNumberOutputDefinition(dependencyDoc, dependency, metadata, providerArtifacts, scanner);
+      if (dependencyNumberOutputDefinition) dependencyMacroOrigins.push(dependencyNumberOutputDefinition.selfOrigin);
       dependencyExports.set(key, { names: publicRootExportNames(dependencyDoc, { workspace: root, library }),
-        sources: JSON.parse(guarded.stdout), macroOrigins: verifiedMacroOrigins(dependencyDoc, dependency, metadata, providerArtifacts, compilerSysroot),
+        sources: JSON.parse(guarded.stdout), macroOrigins: dependencyMacroOrigins, numberOutputDefinition: dependencyNumberOutputDefinition,
         types: inventory(dependencyDoc, { defaultTraits, receiverTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) }).types });
     }
     globExports[name] = dependencyExports.get(key).names;
@@ -212,6 +216,7 @@ for (const pkg of members) {
     assert.equal(effects.status, 0, `accepted-set: dependency export source scan failed: ${effects.stderr}`);
     for (const line of effects.stdout.trim().split('\n').filter(Boolean)) {
       const [file, ident, row, column] = line.split('\t');
+      if (numberOutputDefinitionCovers(provider.numberOutputDefinition, file, ident, row, column)) continue;
       const helper = { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
       if (reviewedGenericDecoderHelper(helper, localTypeHelpers, fs.readFileSync(file), provider.types, allContracts)) continue;
       assert.ok(!ident.startsWith('UNSUPPORTED_'), `${file}::${ident}: accepted-set assertion: dependency export source effect is unverified`);

@@ -64,5 +64,8 @@ pub mod cross_trade;
 pub mod fill_event_units;
 pub mod how_facade;
 
+mod native_teardown;
+pub use native_teardown::native_final_drop;
+
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod replay_clock;

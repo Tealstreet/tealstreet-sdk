@@ -193,7 +193,7 @@ fn record_reads_actual_typescript() {
     eprintln!("capture header: {}", corpus["capture"]);
     let cases = corpus["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 36, "record_source_case_count");
-    let (mut accepted, mut refused, mut rows, mut levels) = (0, 0, 0, 0);
+    let (mut accepted, mut refused, mut projected, mut rows, mut levels) = (0, 0, 0, 0, 0);
     let names = ["getMarkets", "getOrderBook", "getOrderBooks", "getPrices"];
     // Fixed 4 x 9 traversal stays load-bearing when source length guards are removed.
     for method in 0..4 {
@@ -238,7 +238,20 @@ fn record_reads_actual_typescript() {
                     &client(Ok(response(body.clone())), calls.clone()),
                     &ids,
                 ));
-                if case["accepted"] == true {
+                if method == 0 && iteration == 7 {
+                    let Records::Markets(markets) =
+                        result.expect("record typed surrogate projection")
+                    else {
+                        panic!("record surrogate market variant");
+                    };
+                    assert_eq!(markets.len(), 2, "record surrogate market count");
+                    assert_eq!(
+                        markets[0].minimum_tick_size, "\u{fffd}",
+                        "record typed tick U+FFFD"
+                    );
+                    typed_utf16::assert_projection(raw, &markets);
+                    projected += 1;
+                } else if case["accepted"] == true {
                     let records = result.unwrap_or_else(|e| {
                         panic!("record_native_accept:{method}:{iteration}: {e:?}")
                     });
@@ -272,7 +285,13 @@ fn record_reads_actual_typescript() {
         }
     }
     assert_eq!(accepted, 69, "record_accepted_comparisons");
-    assert_eq!(refused, 37, "record_refused_comparisons");
+    assert_eq!(refused, 36, "record_refused_comparisons");
+    assert_eq!(projected, 1, "record typed surrogate projection count");
+    assert_eq!(
+        refused + projected,
+        37,
+        "record original source boundary partition"
+    );
     assert_eq!(rows, 102, "record_performed_rows");
     assert_eq!(levels, 135, "record_performed_levels");
     let failures = corpus["failures"].as_array().unwrap();
@@ -319,3 +338,6 @@ fn record_reads_actual_typescript() {
         request(&calls[0], &failures[index]);
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

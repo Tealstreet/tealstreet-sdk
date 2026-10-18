@@ -42,6 +42,12 @@ impl Store for ObservedStore {
     fn reset(&self) -> Result<(), StoreMutationError> {
         Store::reset(&self.inner)
     }
+    fn subscribe_native(
+        &self,
+        callback: safe_cex_store::contract::NativeStoreSubscriber,
+    ) -> Box<dyn Fn()> {
+        safe_cex_store::Store::subscribe_native(&self.inner, callback)
+    }
     fn subscribe(&self, callback: Subscriber) -> Box<dyn Fn()> {
         Store::subscribe(&self.inner, callback)
     }

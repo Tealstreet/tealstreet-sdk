@@ -288,43 +288,48 @@ pub fn subscribe_to_all_markets<H: RuntimeHost + 'static>(
 ) -> Result<(), H::Error> {
     let captured = host.clone();
     host.borrow_mut().timeout(
-        Box::new(move || {
-            if captured.borrow_mut().disposed()? {
-                return Ok(());
-            }
-            let mut index = 0;
-            while index < captured.borrow_mut().length(&markets)? {
-                let market = captured.borrow_mut().market_at(&markets, index)?;
-                let result = (|| {
-                    for kind in [
-                        StreamKind::Ticker,
-                        StreamKind::Trades,
-                        StreamKind::BookTicker,
-                    ] {
-                        let mut h = captured.borrow_mut();
-                        let target = h.subscriber(kind)?;
-                        let id = h.market_id(&market)?;
-                        h.subscribe(target, id)?;
-                    }
-                    Ok(())
-                })();
-                if let Err(error) = result {
-                    let mut h = captured.borrow_mut();
-                    let logger = h.log_target()?;
-                    let id = h.market_id(&market)?;
-                    let error = h.error_text(&error)?;
-                    h.log(
-                        logger,
-                        join(&[&units("Failed to subscribe to "), &id, &units(": "), &error]),
-                        Some(Severity::Warning),
-                    )?;
-                }
-                index += 1;
-            }
-            Ok(())
-        }),
+        Box::new(move || subscribe_markets_now(markets, captured)),
         2000.0,
     )
+}
+// The delayed callback body is shared with the native weak-owner timer binding.
+pub(crate) fn subscribe_markets_now<H: RuntimeHost + 'static>(
+    markets: H::Value,
+    captured: Rc<RefCell<H>>,
+) -> Result<(), H::Error> {
+    if captured.borrow_mut().disposed()? {
+        return Ok(());
+    }
+    let mut index = 0;
+    while index < captured.borrow_mut().length(&markets)? {
+        let market = captured.borrow_mut().market_at(&markets, index)?;
+        let result = (|| {
+            for kind in [
+                StreamKind::Ticker,
+                StreamKind::Trades,
+                StreamKind::BookTicker,
+            ] {
+                let mut h = captured.borrow_mut();
+                let target = h.subscriber(kind)?;
+                let id = h.market_id(&market)?;
+                h.subscribe(target, id)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let mut h = captured.borrow_mut();
+            let logger = h.log_target()?;
+            let id = h.market_id(&market)?;
+            let error = h.error_text(&error)?;
+            h.log(
+                logger,
+                join(&[&units("Failed to subscribe to "), &id, &units(": "), &error]),
+                Some(Severity::Warning),
+            )?;
+        }
+        index += 1;
+    }
+    Ok(())
 }
 // ts: BackpackExchange.tick
 pub fn tick<H: RuntimeHost + 'static>(

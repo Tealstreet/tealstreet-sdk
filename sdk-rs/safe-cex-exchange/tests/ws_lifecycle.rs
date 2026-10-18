@@ -1074,7 +1074,7 @@ mod js_sockets {
     }
 
     #[test]
-    fn listeners_are_removed_by_identity_and_errors_reach_them() {
+    fn listeners_are_removed_by_identity_and_base_stops_error_listeners() {
         let (venue, runtime, _store, _) = fixture();
         let context = JsSocketContext::new(runtime.clone());
         *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
@@ -1104,7 +1104,11 @@ mod js_sockets {
             .borrow_mut()
             .push_back(WsEvent::Error("boom".into()));
         runtime.pump();
-        assert_eq!((kept.get(), removed.get(), errors.get()), (1, 0, 1));
+        assert_eq!(
+            (kept.get(), removed.get(), errors.get()),
+            (1, 0, 0),
+            "the base error listener precedes and stops the later plain-socket listener"
+        );
     }
 
     #[test]
@@ -1473,4 +1477,45 @@ fn online_transition_clears_the_explicit_reconnect_cap() {
         102,
         "explicit reconnect works again after online recovery"
     );
+}
+
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[test]
+fn native_failed_upgrade_delivers_error_then_close_without_open() {
+    use safe_cex_exchange::{native::native_runtime, websocket::WsRuntime};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let host = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&host, async {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let server = tokio::task::spawn_local(async move {
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let mut bytes = [0; 1024];
+                let count = tcp.read(&mut bytes).await.unwrap();
+                assert_ne!(count, 0);
+                request.extend_from_slice(&bytes[..count]);
+            }
+            tcp.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await.unwrap();
+            tcp.shutdown().await.unwrap();
+        });
+        let runtime = native_runtime();
+        let socket = runtime.dial(url, vec![], Default::default(), false).await.unwrap();
+        assert_eq!(socket.ready_state(), 3);
+        assert!(matches!(socket.next_event().await.unwrap(), WsEvent::Error(message) if message.contains("400")));
+        assert!(matches!(socket.next_event().await.unwrap(), WsEvent::Close { code: Some(1006), reason } if reason.is_empty()));
+        assert!(socket.next_event().as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        let error = match runtime.dial("invalid".into(), vec![], Default::default(), false).await {
+            Err(error) => error,
+            Ok(_) => panic!("invalid URL is a constructor failure, never a failed socket"),
+        };
+        assert!(matches!(error.origin.as_ref().unwrap().error()
+            .downcast_ref::<safe_cex_transport::TransportError>(), Some(safe_cex_transport::TransportError::Host(_))));
+        server.await.unwrap();
+    });
 }

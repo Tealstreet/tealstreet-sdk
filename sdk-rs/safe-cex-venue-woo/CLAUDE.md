@@ -7,6 +7,10 @@ The unused V3 cancel-all-after descriptor/response module is retired too. WOO
 inherits the source BaseExchange.scheduleCancel `Error: Not implemented` rejection;
 the actual signed cancelAllOrders route remains available.
 
+The unused strict V3 account-info decoder and balance mapper are retired with
+their orphan DTO/enum/helper and exact facade cases. The real legacy balance
+binding and unrelated asset/futures/helper/pagination witnesses remain.
+
 `ASYNC_WRAPPER_REVIEW.md` records the real class's eager public call boundary.
 The common wrappers call the existing member before constructing their waiter
 and await its original Promise; do not wrap that Promise in another spawn.
@@ -536,3 +540,7 @@ class witnesses, TypeScript URL/HMAC comparison and native query-kind observatio
 The history catch reporter selects the canonical retained response message and
 passes its native value to Raw(Js), preserving non-string formatting and UTF16.
 The configured-class/source regression also pins falsy fallback and empty results.
+
+History page parsing uses shared get-key admission before object mapping: null
+and stock arrays without a symbol are skipped; primitives retain the source lookup
+failure. The signed class regression preserves valid sibling fills and error text.

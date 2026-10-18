@@ -507,6 +507,15 @@ script executes the live utility and exact Spot retry arrow. The three serial
 `api-receiver-controls.py` faults must fail named compiled witnesses and restore
 exactly. Array.join UTF16 behavior is shared-owned and repaired separately in #1037.
 
+### Public async wrapper timing
+
+The shared `invoke`/`invoke_unit` helpers must invoke the assembled member before
+returning a Rust waiter. That member already starts a canonical eager Promise;
+keep its existing runtime-owned continuation and do not wrap it in another spawn.
+`EAGER_WRAPPER_REVIEW.md` describes the real HTTP/drop/rejection regressions and
+live-source witness. Pumping physical Axios interceptor jobs is separate from
+polling the returned SDK waiter.
+
 
 The three `rest_account` aliases have finite profiles at the actual constructed
 `binding::rt::Rt` host (and explicit `bool` payload for ReadResult), with native
@@ -550,3 +559,9 @@ by two constructed Spot clients, signed AddOrder requests and entropy refusal;
 `scripts/client-id-alias-controls.py` requires named compiled semantic failures
 and exact restored passes. `scripts/client-id-alias-contracts.mjs` uses fresh
 compiler-authenticated identity/Serde/conversion probes for this one alias.
+
+`LOOP_SOCKET_ALIAS_REVIEW.md` covers the concrete socket event and periodic tick
+callback capabilities. `loop-socket-alias-contracts.mjs` runs authenticated native
+alias probes; `accepted_loop_socket_aliases` drives the actual socket/Store and
+signed timer/HTTP paths. Three named compiled consumer faults and exact restored
+passes are required by `loop-socket-alias-controls.py`.

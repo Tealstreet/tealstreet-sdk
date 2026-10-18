@@ -123,13 +123,14 @@ already-gone `-2011` response; cancellation still logs completion.
 `tests/exchange_trait.rs` covers both HTTP-success and HTTP-error envelopes through
 the constructed venue, signer, transport and event emitter.
 
-Public transport errors call the stream's existing `on_close(None, "")` path,
-matching the source error listener's `this.onClose()` call. This runs the existing
-subscription reset wrapper and native reconnect without an invented close code.
-`public_socket_error` proves master has no redial before the watchdog timeout and
-requires one after the hook is installed. Shared scripted response data lives in
-`tests/support/exchange_data.rs`; frame queues stay injectable at the transport
-boundary while the production constructor, API and socket handlers run unchanged.
+Plain WebSocket errors stop at the base listener, which is registered before
+this venue's error callback and calls `stopImmediatePropagation`. They log without
+running the subscription reset or scheduling a reconnect. Actual close events
+still invoke the existing close wrapper. The registry's
+`native_socket_error_dispatch` compares maintained Aster/Bitunix WebSocket
+dispatch with production native hosts and loopback upgrade failures and close frames;
+`public_socket_error` also checks that an error alone does not redial.
+Grouped RWS dispatch retains the venue error listener, matching its dispatcher.
 
 `fetchPositions` consumes raw `positionRisk` rows, matching the source's field
 access and parseFloat coercions instead of requiring the declared 17-field DTO.
@@ -207,3 +208,12 @@ whole TS class with NativeRuntime and signed reqwest loopback requests: missing
 credentials log before polling; discarded getAccount/changePositionMode waiters
 retain their held HTTP continuation and Store effect. This family proof does
 not resolve the separate socket or validateAccount error-envelope findings.
+
+Public socket ingress uses canonical retained capture, then derives the existing
+typed Value callback argument. String fields and keys use the canonical typed
+decoder's U+FFFD view; numeric scalars keep the retained projection, including
+overflow and signed zero. It does not stringify/reparse the frame or use the
+request-params parser. `exchange_trait` compares twelve actual constructed TS
+and Rust socket cases (twenty frames), including whole batches with lone units
+in an unused nested value/key, ordinary siblings and native numeric bits. The
+private stream's Value callback/info seam remains a separate migration.

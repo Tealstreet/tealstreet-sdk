@@ -270,11 +270,22 @@ fn live_inline_tpsl_corpus() {
             boundary["result"].get("ok").is_some(),
             "source_inline_ingress_admission case={i}"
         );
-        assert!(
-            js_from_str::<Vec<Order>>(boundary["raw"].as_str().unwrap()).is_err(),
-            "inline_typed_ingress_boundary case={i}"
-        );
+        let raw = boundary["raw"].as_str().unwrap();
+        if i == 4 {
+            let orders: Vec<Order> = js_from_str(raw).unwrap();
+            assert_eq!(orders.len(), 1);
+            assert_eq!(orders[0].id, "\u{fffd}", "typed Order ID view");
+            typed_utf16::assert_projection(raw, &orders);
+        } else {
+            assert!(
+                js_from_str::<Vec<Order>>(raw).is_err(),
+                "inline_typed_ingress_boundary case={i}"
+            );
+        }
         pin.hit("boundaries");
     }
     pin.finish("boundaries", pin.count("/boundaries"));
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
