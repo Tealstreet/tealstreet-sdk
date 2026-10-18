@@ -246,3 +246,66 @@ fn native_pm_order_diagnostics_keep_nested_nonfinite_metadata() {
         owner.dispose().unwrap();
     }
 }
+#[test]
+fn native_captured_error_emitter_preserves_lone_utf16_messages() {
+    use safe_cex_venue_binance::position_snapshots::PositionSnapshotBindings;
+    for units in [[0xd800_u16], [0xdc00_u16]] {
+        let (owner, runtime, http) = owner("[]", true);
+        let errors = Rc::new(RefCell::new(vec![]));
+        let seen = errors.clone();
+        owner.base.on(
+            "error",
+            Rc::new(move |_, value| {
+                seen.borrow_mut().push(value.clone());
+                Ok(())
+            }),
+        );
+        let emit = owner.state.capture_emit().unwrap();
+        emit(EventValue::utf16(&units)).expect("native source message reaches Base reporting");
+        let mut expected = "Exchange Error: ".encode_utf16().collect::<Vec<_>>();
+        expected.extend(units);
+        assert_eq!(errors.borrow().len(), 1);
+        assert_eq!(errors.borrow()[0].as_str().unwrap().as_ref(), expected);
+        assert_eq!(&*runtime.reported.borrow(), &["ExchangeError"]);
+        assert!(http.paths.lock().unwrap().is_empty());
+        owner.dispose().unwrap();
+    }
+}
+
+#[test]
+fn native_pm_order_errors_report_retained_cause_message_units() {
+    for raw in [r#"{"msg":"\ud800"}"#, r#"{"msg":"\udc00"}"#] {
+        let expected = source(true, raw);
+        let (owner, runtime, http) = owner(raw, true);
+        let errors = Rc::new(RefCell::new(vec![]));
+        let seen = errors.clone();
+        owner.base.on(
+            "error",
+            Rc::new(move |_, value| {
+                seen.borrow_mut().push(value.clone());
+                Ok(())
+            }),
+        );
+        let rows = run(&runtime, owner.invoke(Method::Orders, vec![])).unwrap();
+        assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+        let mut expected_units = "Exchange Error: ".encode_utf16().collect::<Vec<_>>();
+        expected_units.extend(
+            expected["message"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|unit| unit.as_u64().unwrap() as u16),
+        );
+        assert_eq!(errors.borrow().len(), 1);
+        assert_eq!(
+            errors.borrow()[0].as_str().unwrap().as_ref(),
+            expected_units
+        );
+        assert_eq!(&*runtime.reported.borrow(), &["ExchangeError"]);
+        assert_eq!(
+            http.paths.lock().unwrap().as_slice(),
+            ["/papi/v1/um/openOrders"]
+        );
+        owner.dispose().unwrap();
+    }
+}
