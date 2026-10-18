@@ -15,7 +15,7 @@ cases = [
      b'\n    let _ = payload;\n    Ok(String::new())\n'),
     ('response_message.rs', 'response_message',
      'safe_cex_venue_binance::response_message::response_message',
-     b'\n    let _ = (payload, js_string(None), js_truthy(None));\n    Ok(String::new())\n'),
+     b'\n    let _ = payload.map(from_json);\n    Ok(String::new())\n'),
 
 ]
 originals = {crate / 'src' / file: (crate / 'src' / file).read_bytes() for file, _, _, _ in cases}

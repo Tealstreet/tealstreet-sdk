@@ -1,4 +1,906 @@
 {
+  "safe_cex_venue_binance::ticker_capture::Capture": {
+    "shape": "typed",
+    "evidence": "ticker_capture::Capture::new receives only an already constructed Rc<dyn Store>, retains it weakly, builds native ticker cells and subscribes to Store changes. It neither parses raw input nor implements Deserialize. The real constructed native_dependencies class test production_native_ticker_capture_aliases_retain_cells_and_replace_generations asserts immediate updates before any dictionary reread, generation replacement, stable row identity and all three venue paths. Its compiled subscription-refresh removal control must fail; this typed classification itself is not a decoder execution receipt.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "store",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_store::contract::Store",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "A concrete Store capability constructs a subscribed state view; no raw field or string enters this constructor."
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_dispatch::Handlers": {
+    "shape": "observed",
+    "evidence": "public_dispatch::Handlers::get performs own-before-prototype lookup and otherwise reads the captured Object prototype. The exact native getter is called with independent own/prototype, shadowed false, stock inherited callable and missing keys; observations inspect Rc identity, length, callable identity class, truthiness and enumerable key order before serialization. Actual constructed NativeImports public frames separately prove dispatch, error and lookup integration against maintained TS.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::public_dispatch::Handler",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual raw-key getter; callback fixtures are not executed during lookup."
+      }
+    ],
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-dispatch-observers.rs\")); } witness::handler($value, <$type>::get) }",
+    "cases": [
+      {
+        "input": {
+          "key": "event.BTC"
+        },
+        "output": {
+          "kind": "list",
+          "length": 2,
+          "sameOwn": true,
+          "samePrototype": false,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "event.ETH"
+        },
+        "output": {
+          "kind": "list",
+          "length": 1,
+          "sameOwn": false,
+          "samePrototype": true,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "flag"
+        },
+        "output": {
+          "kind": "boolean",
+          "callable": false,
+          "truthy": false,
+          "length": null,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "constructor"
+        },
+        "output": {
+          "kind": "function",
+          "callable": true,
+          "truthy": true,
+          "length": "3ff0000000000000",
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "toString"
+        },
+        "output": {
+          "kind": "function",
+          "callable": true,
+          "truthy": true,
+          "length": "0000000000000000",
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "__proto__"
+        },
+        "output": {
+          "kind": "object",
+          "callable": false,
+          "truthy": true,
+          "length": null,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "missing"
+        },
+        "output": {
+          "kind": "undefined",
+          "callable": false,
+          "truthy": false,
+          "length": null,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::ticker_capture::lookup": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "lookup",
+      "signature": {
+        "inputs": [
+          [
+            "dictionary",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::ticker_capture::Dictionary",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::ticker_capture::Target",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "ticker_capture::lookup accepts a raw symbol key over the actual Capture dictionary. Execute that exact free function using real DefaultStore and Capture; inspect returned row Rc identity, Store membership, every native Ticker number bit, optional presence and keys. The fixture seeds opaque Input info including NaN, infinity, signed zero, lone UTF16 and own undefined; DefaultStore intentionally strips truthy ticker info, matching store.base.ts::stripTickerInfo, and the returned row must reflect that. Stock inherited keys return the actual inherited Target; missing key returns None. The constructed real socket/source prototype witness exercises all three class families.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-dispatch-observers.rs\")); } witness::lookup($value, crate::ticker_capture::lookup) }",
+    "cases": [
+      {
+        "input": {
+          "key": "BTC",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "row",
+          "keys": [
+            "BTC"
+          ],
+          "sameRow": true,
+          "belongsToStore": true,
+          "ticker": {
+            "bid": "8000000000000000",
+            "ask": "3ff4000000000000",
+            "last": "c004000000000000",
+            "mark": "400e000000000000",
+            "index": "4010800000000000",
+            "percentage": "4016000000000000",
+            "openInterest": "4019000000000000",
+            "fundingRate": "c01e000000000000",
+            "fundingTime": "4021800000000000",
+            "volume": "4022400000000000",
+            "quoteVolume": "4025000000000000",
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": "8000000000000000",
+            "timestamp": "4004000000000000",
+            "infoOwn": false,
+            "info": null
+          }
+        }
+      },
+      {
+        "input": {
+          "key": "ETH",
+          "ticker": {
+            "bid": 0.0,
+            "ask": 11.25,
+            "last": 12.5,
+            "mark": 13.75,
+            "index": 14.125,
+            "percentage": 15.5,
+            "openInterest": 16.25,
+            "fundingRate": 17.5,
+            "fundingTime": 18.75,
+            "volume": 19.125,
+            "quoteVolume": 20.5,
+            "id": "right",
+            "symbol": "ETH"
+          }
+        },
+        "output": {
+          "kind": "row",
+          "keys": [
+            "ETH"
+          ],
+          "sameRow": true,
+          "belongsToStore": true,
+          "ticker": {
+            "bid": "0000000000000000",
+            "ask": "4026800000000000",
+            "last": "4029000000000000",
+            "mark": "402b800000000000",
+            "index": "402c400000000000",
+            "percentage": "402f000000000000",
+            "openInterest": "4030400000000000",
+            "fundingRate": "4031800000000000",
+            "fundingTime": "4032c00000000000",
+            "volume": "4033200000000000",
+            "quoteVolume": "4034800000000000",
+            "id": "right",
+            "symbol": "ETH",
+            "midPrice": null,
+            "timestamp": null,
+            "infoOwn": false,
+            "info": null
+          }
+        }
+      },
+      {
+        "input": {
+          "key": "constructor",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "inherited",
+          "keys": [
+            "BTC"
+          ],
+          "id": "undefined"
+        }
+      },
+      {
+        "input": {
+          "key": "toString",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "inherited",
+          "keys": [
+            "BTC"
+          ],
+          "id": "undefined"
+        }
+      },
+      {
+        "input": {
+          "key": "__proto__",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "inherited",
+          "keys": [
+            "BTC"
+          ],
+          "id": "undefined"
+        }
+      },
+      {
+        "input": {
+          "key": "not-owned",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "missing",
+          "keys": [
+            "BTC"
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_dispatch::dispatch_binance_message": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "dispatch_binance_message",
+      "signature": {
+        "inputs": [
+          [
+            "handlers",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_dispatch::Handlers",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "record_stats",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&str) -> Result<(), Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "The actual public_dispatch::dispatch_binance_message free function selects native Handlers, records statistics before parsing, shares one native packet among callbacks, observes list mutation live, chooses inherited enumerable prefix handlers, and returns original callback failures. Independently authored cases assert callback order, reference identity, signed-zero mutation, reentrant clearing/appending, malformed input and exact failure identity. The actual constructed NativeImports socket tests separately prove the assembled handler path for Futures, PM and Spot; no dispatcher or parser is replaced.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-dispatch-observers.rs\")); } witness::dispatch($value, |handlers, wire, stats| crate::public_dispatch::dispatch_binance_message(handlers, wire, stats)) }",
+    "cases": [
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "broadcast",
+            "exact"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 1,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true,
+          "append": true,
+          "mutate": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "broadcast",
+            "appended",
+            "exact"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": "8000000000000000"
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": "8000000000000000"
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": "8000000000000000"
+              }
+            }
+          ],
+          "broadcastLength": 2,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "prefix": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "prefix",
+            "inherited-prefix"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 0,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true,
+          "clearOnStats": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "exact"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 0,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"",
+          "broadcast": true,
+          "exact": true,
+          "statsError": true
+        },
+        "output": {
+          "trace": [
+            "stats:event"
+          ],
+          "packets": [],
+          "broadcastLength": 1,
+          "error": {
+            "name": "Error",
+            "message": "configured failure",
+            "sameError": true
+          }
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true,
+          "handlerError": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "broadcast"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 1,
+          "error": {
+            "name": "Error",
+            "message": "configured failure",
+            "sameError": true
+          }
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"",
+          "broadcast": true
+        },
+        "output": {
+          "trace": [
+            "stats:event"
+          ],
+          "packets": [],
+          "broadcastLength": 1,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}"
+        },
+        "output": {
+          "trace": [],
+          "packets": [],
+          "broadcastLength": 0,
+          "error": null
+        }
+      }
+    ]
+  },
   "safe_cex_venue_binance::binance_types::BinanceIncomeHistoryOptions": {
     "category": "decoder",
     "shape": "map",
@@ -4504,72 +5406,6 @@
         }
       }
     ]
-  },
-  "safe_cex_venue_binance::response_shape::malformed": {
-    "category": "non-decoder",
-    "api": {
-      "kind": "function",
-      "name": "malformed",
-      "signature": {
-        "inputs": [
-          [
-            "venue",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "primitive": "str"
-                }
-              }
-            }
-          ],
-          [
-            "endpoint",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "primitive": "str"
-                }
-              }
-            }
-          ],
-          [
-            "shape",
-            {
-              "resolved_path": {
-                "path": "alloc::string::String",
-                "args": null
-              }
-            }
-          ],
-          [
-            "message",
-            {
-              "resolved_path": {
-                "path": "alloc::string::String",
-                "args": null
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "safe_cex_venue_binance::response_shape::BinanceResponseError",
-            "args": null
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "reason": "Constructs an Error diagnostic from the already typed venue, endpoint, shape and message strings; it formats those arguments without interpreting an input representation or validating a wire schema.",
-    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native response_shape::accepted_contract_tests::private_malformed_constructor_preserves_error_fields executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
   },
   "safe_cex_venue_binance::response_shape::BinanceResponseError": {
     "shape": "observed",
@@ -20545,6 +21381,2567 @@
     },
     "evidence": "Individual source-role review: safe-cex-venue-binance/src/private_session.rs::RetryAction. Authenticated acceptedAliasContext plus the actual native Deserialize/conversion probes in scripts/private-order-alias-contracts.mjs decide this exact alias classification. Separate production behavior is exercised through native_dependencies, real owner/HTTP/socket/Store and primitive terminal ports in tests/private_classes.rs::private_order_aliases::native_key_and_retry_capabilities_reconnect_and_cancel_refresh; scripts/private-order-alias-controls.py requires a compiled named fault and exact-restoration pass for this alias. This finite native/default evidence does not exempt argument/result DTOs, arbitrary callbacks or other feature combinations.",
     "reason": "Executable deferred reconnect action. A real failed key request schedules five-second retry, which resolves the current connect method, succeeds and installs refresh."
+  },
+  "safe_cex_venue_binance::private_rest::keyed": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "keyed",
+      "signature": {
+        "inputs": [
+          [
+            "o",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Private REST source-owned native graph operation. Direct production calls observe native units, binary64 bits, own undefined, array length or original referent identity before finite reporting. Actual native dependencies/ExchangeOwner/signed HTTP behavior is covered by private_classes::private_rest_native; existing private-rest live-source corpus covers mapping and reconciliation order. This finite contract does not claim arbitrary executable graphs or whole-venue parity.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let input=witness::input($value); witness::result(super::keyed(&input, $value[\"key\"].as_str().unwrap())) }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "order_id": 17
+          },
+          "key": "orderId"
+        },
+        "output": {
+          "kind": "number",
+          "bits": "4031000000000000"
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "order_id": 17
+          },
+          "key": "orderId",
+          "profile": "undefined"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "order_id": false
+          },
+          "key": "orderId",
+          "profile": "surrogate"
+        },
+        "output": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "key": "orderId"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "key": "orderId",
+          "profile": "array"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::private_rest::order_type": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "order_type",
+      "signature": {
+        "inputs": [
+          [
+            "o",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::private_rest::Venue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Private REST source-owned native graph operation. Direct production calls observe native units, binary64 bits, own undefined, array length or original referent identity before finite reporting. Actual native dependencies/ExchangeOwner/signed HTTP behavior is covered by private_classes::private_rest_native; existing private-rest live-source corpus covers mapping and reconciliation order. This finite contract does not claim arbitrary executable graphs or whole-venue parity.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let input=witness::input($value); let venue=if $value[\"spot\"]==true {super::Venue::Spot} else {super::Venue::Futures}; witness::result(super::order_type(&input,venue,\"type\")) }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "type": "LIMIT"
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            108,
+            105,
+            109,
+            105,
+            116
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "type": "MARKET"
+          }
+        },
+        "output": {
+          "kind": "string",
+          "units": [
+            109,
+            97,
+            114,
+            107,
+            101,
+            116
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "type": "unknown"
+          }
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::private_rest::map": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "map",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "expression",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "visit",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                          "args": null
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(EventValue) -> Result<EventValue, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Private REST source-owned native graph operation. Direct production calls observe native units, binary64 bits, own undefined, array length or original referent identity before finite reporting. Actual native dependencies/ExchangeOwner/signed HTTP behavior is covered by private_classes::private_rest_native; existing private-rest live-source corpus covers mapping and reconciliation order. This finite contract does not claim arbitrary executable graphs or whole-venue parity.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let input=witness::input($value); let seen=std::cell::RefCell::new(Vec::new()); let output=super::map(input.clone(),\"rows\",|row|{seen.borrow_mut().push(witness::observe(&row)); if $value[\"append\"]==true {input.push(crate::private_event_value::string(\"later\")).unwrap();} Ok(row)}); let identity=output.as_ref().ok().and_then(|v|v.array_values()).zip(input.array_values()).is_some_and(|(a,b)|a.iter().zip(b.iter()).all(|(a,b)|a.strict_equals(b))); serde_json::json!({\"output\":witness::result(output),\"visited\":seen.into_inner(),\"identity\":identity}) }",
+    "cases": [
+      {
+        "input": {
+          "data": [
+            17,
+            false
+          ]
+        },
+        "output": {
+          "output": {
+            "kind": "array",
+            "length": 2
+          },
+          "visited": [
+            {
+              "kind": "number",
+              "bits": "4031000000000000"
+            },
+            {
+              "kind": "boolean",
+              "value": false
+            }
+          ],
+          "identity": true
+        }
+      },
+      {
+        "input": {
+          "data": [
+            17
+          ],
+          "append": true
+        },
+        "output": {
+          "output": {
+            "kind": "array",
+            "length": 1
+          },
+          "visited": [
+            {
+              "kind": "number",
+              "bits": "4031000000000000"
+            }
+          ],
+          "identity": true
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "profile": "array"
+        },
+        "output": {
+          "output": {
+            "kind": "array",
+            "length": 1
+          },
+          "visited": [
+            {
+              "kind": "string",
+              "units": [
+                56320
+              ]
+            }
+          ],
+          "identity": true
+        }
+      },
+      {
+        "input": {
+          "data": [
+            {
+              "keep": 17
+            }
+          ]
+        },
+        "output": {
+          "output": {
+            "kind": "array",
+            "length": 1
+          },
+          "visited": [
+            {
+              "kind": "object"
+            }
+          ],
+          "identity": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::private_rest::find_futures_order_by_client_id": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "find_futures_order_by_client_id",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "id",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "b",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "safe_cex_venue_binance::private_rest::SnapshotBindings",
+                          "args": null
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl SnapshotBindings",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_binance::private_rest::SnapshotBindings",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Private REST source-owned native graph operation. Direct production calls observe native units, binary64 bits, own undefined, array length or original referent identity before finite reporting. Actual native dependencies/ExchangeOwner/signed HTTP behavior is covered by private_classes::private_rest_native; existing private-rest live-source corpus covers mapping and reconciliation order. This finite contract does not claim arbitrary executable graphs or whole-venue parity.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let mut bindings=witness::Bindings::new($value[\"profile\"].as_str().unwrap()); let value=witness::ready(super::find_futures_order_by_client_id(\"BTCUSDT\",\"client-A\",&mut bindings)).unwrap(); witness::lookup(value,&bindings) }",
+    "cases": [
+      {
+        "input": {
+          "profile": "rest"
+        },
+        "output": {
+          "found": {
+            "kind": "boolean",
+            "value": true
+          },
+          "definitive": {
+            "kind": "undefined"
+          },
+          "remaining": {
+            "kind": "number",
+            "bits": "4000000000000000"
+          },
+          "cachedIdentity": false,
+          "infoIdentity": true,
+          "calls": [
+            {
+              "client": "Private",
+              "path": "/fapi/v1/order"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "profile": "primary"
+        },
+        "output": {
+          "found": {
+            "kind": "boolean",
+            "value": true
+          },
+          "definitive": {
+            "kind": "undefined"
+          },
+          "remaining": {
+            "kind": "number",
+            "bits": "4000000000000000"
+          },
+          "cachedIdentity": false,
+          "infoIdentity": true,
+          "calls": [
+            {
+              "client": "Primary",
+              "path": "/fapi/v1/order"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "profile": "cached"
+        },
+        "output": {
+          "found": {
+            "kind": "boolean",
+            "value": true
+          },
+          "definitive": {
+            "kind": "undefined"
+          },
+          "remaining": {
+            "kind": "number",
+            "bits": "3ff0000000000000"
+          },
+          "cachedIdentity": true,
+          "infoIdentity": false,
+          "calls": []
+        }
+      },
+      {
+        "input": {
+          "profile": "missing-market"
+        },
+        "output": {
+          "found": {
+            "kind": "boolean",
+            "value": false
+          },
+          "definitive": {
+            "kind": "boolean",
+            "value": false
+          },
+          "remaining": {
+            "kind": "undefined"
+          },
+          "cachedIdentity": false,
+          "infoIdentity": false,
+          "calls": []
+        }
+      },
+      {
+        "input": {
+          "profile": "notfound"
+        },
+        "output": {
+          "found": {
+            "kind": "boolean",
+            "value": false
+          },
+          "definitive": {
+            "kind": "boolean",
+            "value": true
+          },
+          "remaining": {
+            "kind": "undefined"
+          },
+          "cachedIdentity": false,
+          "infoIdentity": false,
+          "calls": [
+            {
+              "client": "Private",
+              "path": "/fapi/v1/order"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::private_rest::endpoint": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::private_rest::Venue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed every call in private_rest.rs: callers supply the closed local Venue enum and source-owned literal ENDPOINTS keys. Native private_rest HTTP witnesses assert Futures openOrders/openAlgoOrders and PM openOrders paths. Source private-rest corpus retains all three families. Classification receipts do not execute this selector.",
+    "reason": "Selects a generated static endpoint from a closed venue and internal literal key; no response, JSON parsing, raw field admission or model construction occurs. Its &str parameter is an internal table key, not a host decoder."
+  },
+  "safe_cex_venue_binance::private_rest::pm_rows": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "pm_rows",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "ep",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Single native response guard and private snapshot adapter, with direct production calls before descriptor reporting. Cases retain original array handles and child UTF16 units, own undefined, nonfinite Number kind, selective response-message fallback, six-key order and retained Error metadata. Actual constructed venue/signed native HTTP source regressions are private_classes::private_rest_native. Existing 1188 live response-shape inputs and native borrowed-array/error witnesses remain unchanged. Js-only text/shape helpers are executed by the guard; this finite corpus is not whole-package or arbitrary executable-object equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let input=witness::input($value); let output=super::pm_rows(input.clone(),\"/path\"); let identity=output.as_ref().is_ok_and(|out|out.strict_equals(&input)); serde_json::json!({\"result\":witness::result(output),\"identity\":identity,\"child\":witness::child(&input)}) }",
+    "cases": [
+      {
+        "input": {
+          "data": []
+        },
+        "output": {
+          "result": {
+            "kind": "array",
+            "length": 0
+          },
+          "identity": true,
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "profile": "array"
+        },
+        "output": {
+          "result": {
+            "kind": "array",
+            "length": 1
+          },
+          "identity": true,
+          "child": {
+            "present": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                56320
+              ]
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "profile": "surrogate"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                105,
+                103,
+                110,
+                111,
+                114,
+                101,
+                100,
+                41
+              ]
+            }
+          },
+          "identity": false,
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "profile": "native-number"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                110,
+                117,
+                109,
+                98,
+                101,
+                114
+              ]
+            }
+          },
+          "identity": false,
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0,
+            "msg": "bad"
+          }
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                99,
+                111,
+                100,
+                101,
+                44,
+                109,
+                115,
+                103,
+                41,
+                32,
+                40,
+                99,
+                111,
+                100,
+                101,
+                61,
+                48,
+                32,
+                98,
+                97,
+                100,
+                41
+              ]
+            }
+          },
+          "identity": false,
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "msg": {
+              "toString": null
+            }
+          }
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                84,
+                121,
+                112,
+                101,
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                67,
+                97,
+                110,
+                110,
+                111,
+                116,
+                32,
+                99,
+                111,
+                110,
+                118,
+                101,
+                114,
+                116,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                32,
+                116,
+                111,
+                32,
+                112,
+                114,
+                105,
+                109,
+                105,
+                116,
+                105,
+                118,
+                101,
+                32,
+                118,
+                97,
+                108,
+                117,
+                101
+              ]
+            }
+          },
+          "identity": false,
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_shape::native_array_guard": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "native_array_guard",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Single native response guard and private snapshot adapter, with direct production calls before descriptor reporting. Cases retain original array handles and child UTF16 units, own undefined, nonfinite Number kind, selective response-message fallback, six-key order and retained Error metadata. Actual constructed venue/signed native HTTP source regressions are private_classes::private_rest_native. Existing 1188 live response-shape inputs and native borrowed-array/error witnesses remain unchanged. Js-only text/shape helpers are executed by the guard; this finite corpus is not whole-package or arbitrary executable-object equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let input=witness::input($value); let output=super::native_array_guard(\"Binance PM\",\"/path\",&input); let output=output.map(|()|input.clone()).map_err(std::rc::Rc::from); let shape=crate::response_shape::native_shape(&input); let message=crate::response_message::native_response_message(&input).map(crate::private_event_value::EventValue::String).map_err(std::rc::Rc::from); serde_json::json!({\"result\":witness::result(output),\"shape\":shape.as_ref(),\"message\":witness::result(message),\"child\":witness::child(&input)}) }",
+    "cases": [
+      {
+        "input": {
+          "data": []
+        },
+        "output": {
+          "result": {
+            "kind": "array",
+            "length": 0
+          },
+          "shape": [
+            97,
+            114,
+            114,
+            97,
+            121,
+            40,
+            48,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": []
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "profile": "array"
+        },
+        "output": {
+          "result": {
+            "kind": "array",
+            "length": 1
+          },
+          "shape": [
+            97,
+            114,
+            114,
+            97,
+            121,
+            40,
+            49,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": []
+          },
+          "child": {
+            "present": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                56320
+              ]
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0,
+            "msg": "bad"
+          }
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                99,
+                111,
+                100,
+                101,
+                44,
+                109,
+                115,
+                103,
+                41,
+                32,
+                40,
+                99,
+                111,
+                100,
+                101,
+                61,
+                48,
+                32,
+                98,
+                97,
+                100,
+                41
+              ]
+            }
+          },
+          "shape": [
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            40,
+            99,
+            111,
+            100,
+            101,
+            44,
+            109,
+            115,
+            103,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": [
+              99,
+              111,
+              100,
+              101,
+              61,
+              48,
+              32,
+              98,
+              97,
+              100
+            ]
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0,
+            "msg": "bad"
+          },
+          "profile": "undefined-code"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                99,
+                111,
+                100,
+                101,
+                44,
+                109,
+                115,
+                103,
+                41,
+                32,
+                40,
+                98,
+                97,
+                100,
+                41
+              ]
+            }
+          },
+          "shape": [
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            40,
+            99,
+            111,
+            100,
+            101,
+            44,
+            109,
+            115,
+            103,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": [
+              98,
+              97,
+              100
+            ]
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "profile": "surrogate-message"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                109,
+                115,
+                103,
+                41,
+                32,
+                40,
+                55296,
+                41
+              ]
+            }
+          },
+          "shape": [
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            40,
+            109,
+            115,
+            103,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": [
+              55296
+            ]
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "profile": "native-number"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                110,
+                117,
+                109,
+                98,
+                101,
+                114
+              ]
+            }
+          },
+          "shape": [
+            110,
+            117,
+            109,
+            98,
+            101,
+            114
+          ],
+          "message": {
+            "kind": "string",
+            "units": []
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "profile": "surrogate-key"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                55296,
+                41
+              ]
+            }
+          },
+          "shape": [
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            40,
+            55296,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": []
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0,
+            "msg": 0
+          },
+          "profile": "nonfinite-metadata"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                99,
+                111,
+                100,
+                101,
+                44,
+                109,
+                115,
+                103,
+                41,
+                32,
+                40,
+                99,
+                111,
+                100,
+                101,
+                61,
+                73,
+                110,
+                102,
+                105,
+                110,
+                105,
+                116,
+                121,
+                32,
+                45,
+                73,
+                110,
+                102,
+                105,
+                110,
+                105,
+                116,
+                121,
+                41
+              ]
+            }
+          },
+          "shape": [
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            40,
+            99,
+            111,
+            100,
+            101,
+            44,
+            109,
+            115,
+            103,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": [
+              99,
+              111,
+              100,
+              101,
+              61,
+              73,
+              110,
+              102,
+              105,
+              110,
+              105,
+              116,
+              121,
+              32,
+              45,
+              73,
+              110,
+              102,
+              105,
+              110,
+              105,
+              116,
+              121
+            ]
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0,
+            "msg": 0
+          },
+          "profile": "nan-metadata"
+        },
+        "output": {
+          "result": {
+            "name": {
+              "kind": "string",
+              "units": [
+                69,
+                114,
+                114,
+                111,
+                114
+              ]
+            },
+            "message": {
+              "kind": "string",
+              "units": [
+                66,
+                105,
+                110,
+                97,
+                110,
+                99,
+                101,
+                32,
+                80,
+                77,
+                32,
+                47,
+                112,
+                97,
+                116,
+                104,
+                32,
+                114,
+                101,
+                115,
+                112,
+                111,
+                110,
+                115,
+                101,
+                32,
+                109,
+                97,
+                108,
+                102,
+                111,
+                114,
+                109,
+                101,
+                100,
+                58,
+                32,
+                101,
+                120,
+                112,
+                101,
+                99,
+                116,
+                101,
+                100,
+                32,
+                97,
+                114,
+                114,
+                97,
+                121,
+                44,
+                32,
+                114,
+                101,
+                99,
+                101,
+                105,
+                118,
+                101,
+                100,
+                32,
+                111,
+                98,
+                106,
+                101,
+                99,
+                116,
+                40,
+                99,
+                111,
+                100,
+                101,
+                44,
+                109,
+                115,
+                103,
+                41,
+                32,
+                40,
+                99,
+                111,
+                100,
+                101,
+                61,
+                78,
+                97,
+                78,
+                41
+              ]
+            }
+          },
+          "shape": [
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            40,
+            99,
+            111,
+            100,
+            101,
+            44,
+            109,
+            115,
+            103,
+            41
+          ],
+          "message": {
+            "kind": "string",
+            "units": [
+              99,
+              111,
+              100,
+              101,
+              61,
+              78,
+              97,
+              78
+            ]
+          },
+          "child": {
+            "present": false,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_shape::native_malformed": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "native_malformed",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "shape",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Formats one Error from already selected venue/endpoint strings plus UTF16 shape/message slices. It admits no response shape and performs no field decoding or raw parsing. Actual UTF16/error metadata and Display are observed by the direct native constructor test and the native guard contract; classification receipts do not execute this diagnostic builder.",
+    "evidence": "Canonical native diagnostic constructor. The former UTF8 malformed helper is retired; all response validators delegate here. Existing private_malformed_constructor_preserves_error_fields assertions retain their three cases, name/message and Display checks."
   },
   "safe_cex_venue_binance::account_leverage_overlay::build_overlay": {
     "category": "decoder",

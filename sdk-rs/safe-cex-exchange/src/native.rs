@@ -284,8 +284,13 @@ impl ExchangeRuntime for NativeRuntime {
         error: &ExchangeError,
         context: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
+        let context = match context.json_stringify() {
+            Ok(Some(text)) => text,
+            Ok(None) => "undefined".into(),
+            Err(error) => format!("<{}: {}>", error.name, error.message),
+        };
         eprintln!(
-            "[safe-cex uncaught] {}: {} {context:?}",
+            "[safe-cex uncaught] {}: {} {context}",
             error.name, error.message
         );
     }
@@ -295,7 +300,12 @@ impl ExchangeRuntime for NativeRuntime {
         context: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         let description = crate::runtime::console_text(std::slice::from_ref(error));
-        eprintln!("[safe-cex uncaught] {description} {context:?}");
+        let context = match context.json_stringify() {
+            Ok(Some(text)) => text,
+            Ok(None) => "undefined".into(),
+            Err(error) => format!("<{}: {}>", error.name, error.message),
+        };
+        eprintln!("[safe-cex uncaught] {description} {context}");
     }
     fn execute_worker_request(&self, _request: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async {

@@ -1741,33 +1741,16 @@ Sub-agent post-merge review approved all seven SHA-bound records/hashes, 18 unch
 
 Fetched and merged latest integration `e5bae834bdc27615e4986fb1f3d71a8fcbb57356`, producing `f98e7d9fd35e9ddb76b7ebe374f9e0b3802eb264`. Fresh test/check gate `eeaa0f851fd626cebef9467e7714c7e1a2927f0b` to this merge: crate src/tests comparison **exit 0**; oracle/Binance manifests/TypeScript/shared dependencies/Cargo manifests/lock comparison **exit 0**. All 18 original input hashes still match. Thus the fresh **4/0/0 test exit 0** and scoped all-targets **cargo check exit 0** still cover these inputs; neither was rerun for this other-venue-only merge. Original three control exits 101 remain bound to c0e6ab71e3. Extractor was rerun because other venue manifests changed: **exit 0**, inspected zero updates/additions/orphans. Diff check **exit 0**. Full outputs and independent census versus latest integration are tracked in `CANCEL_SYMBOL_FINAL_MERGE_GATE_EXITS.json`: **3 pending -> ported, 0 -> divergent**, **117/22/147**. Evidence-only delivery commit changes no body, test, oracle or dependency input. Scope/floor/unrun limits above still apply.
 
-### Six newly ported delegation bodies
+### Retired standalone delegation harness
 
-Moved **6 pending -> ported, 0 -> divergent**, independently measured with Python 3.11 `tomllib` over Binance manifests: **117/22/147 -> 123/22/141**. Fresh branch `feat/rust-binance-market-listeners` starts directly from requested integration parent `f3189bc39dbbb104821ef45cdcc838c99a63c174`, with no extra unreviewed work in its base. Rows: PM/Spot.listenOHLCV (2), Binance/PM/Spot.listenOrderBook (3), Binance.fetchHistoricalPositions (1). No symbol additions/removals.
-
-The five listeners forward original decoded options/callbacks and returned cleanup/errors. Futures order-book uses the configured external provider when present, otherwise the public websocket, without fallback after provider failure. Historical positions forwards original options with symbolScoped=true and adopts the configured fold result/rejection, including synchronous-fold failure. Native decoded Candle/OrderBook fields, option mutation visibility, object/callback/cleanup/result/error identity, route/symbol and independent call counts precede all source comparisons. Repeated cleanup calls are forwarded individually.
-
-Tracked `DELEGATED_METHODS_GATE_EXITS.json` binds all 12 final records, full logs/hashes and 17 exactly restored inputs to gate SHA `83452742e044ba715ccf5b30f13bc6a48f6a0d86`. Serial reproduction: `/opt/homebrew/bin/python3.11 sdk-rs/safe-cex-venue-binance/scripts/delegated-method-controls.py --gate-sha 83452742e044ba715ccf5b30f13bc6a48f6a0d86 --base-sha f3189bc39dbbb104821ef45cdcc838c99a63c174`.
-
-- Baseline and final exact restoration: **exit 0**, each **7 passed / 0 failed / 0 ignored**. Completed the authored **27 source-case floor**: Futures book 8 (stopped external=true/cleanup-reject), historical fold 3 (stopped reject), PM/Spot candles/books 4 each (stopped cleanup-reject). One pending-fold case additionally checks no early result/retry and original resolved native container identity.
-- Six compiling controls, one per new row: each **exit 101**, **0 passed / 1 failed**, at recorded named native assertions. PM/Spot option-copy controls: original options identity **false versus true**; Futures provider flip: **external versus public**; PM/Spot book symbol controls: **WRONG versus BTCUSDT**; history flag: **false versus true**. Each exact public-function call site/replacement/assertion is inventoried in JSON. Stopped after these six selected controls; none survived. Exact byte restoration precedes continuation and final pass.
-- Scoped all-targets cargo check (`-p safe-cex-venue-binance --jobs 2`), extractor check, two-file Rustfmt and diff check: each **exit 0**. Extractor output inspected: `Would update 0 manifests; 0 added, 0 orphaned symbols.` Writer before commit: exit 0, updated 3 manifests with zero additions/orphans.
-
-Configured method/provider-presence boundaries and typed decoded OHLCVOptions handles are explicit. Concrete class/provider/websocket/journal binding, executable property getters, malformed providers and arrow receiver wiring remain pending composition. Futures seeded listenOHLCV remains pending. The initial fixture-lifetime compile failure (exit 101, no tests ran), preliminary seven-test pass, initial runner filename abort (exit 1, no gates ran), and earlier partial runner are disclosed in JSON. That partial runner measured baseline 0 and three compiled kills 101, then its PM wrong-symbol control failed compilation under unused-variable denial; **that attempt is not counted as a killed mutation or a survivor**. It restored source in finally and did not reach its remaining gates. The corrected full run above supplies final candidate evidence.
-
-Not run: full crate suite, workspace compilation, host clippy, wasm clippy, CI, concrete class/provider/websocket/journal composition, whole-venue audit or cross-engine error wording verification. No whole-123 proof claim. Sub-agent source/test/oracle/manifest/control review approved native-first assertions, six actual targets and declared scope; final evidence review follows.
-
-Sub-agent final evidence review approved all twelve SHA-bound records and log hashes, six compiled named value-pair failures, seven-test baseline/restoration, 17 exact input hashes, actual requested parent and independent six-row census. The five embedded partial-run records and both earlier aborts were verified and excluded from final gate claims. No material findings; no cargo, mutations or CI were run by the reviewer.
-
-### Delegation merge-down and fresh checks
-
-Merged fetched integration `e9b4202fc66f3f4ae6bc6ec7f78f09f27795c5d5`, producing measured merge SHA `398bea602531f4e287b74ecf184da30e76dec0e1`. **Unchanged Binance src/tests case**: source/test comparison **exit 0**; scripts/Binance manifests/TypeScript comparison **exit 0**, all 17 original input hashes match. Shared dependency comparison **exit 1**: additive BaseWebSocket.has_websocket helper plus other-venue Cargo.lock edge. Fresh new-port tests at the merged SHA: **exit 0, 7/0/0**. Scoped all-targets cargo check, extractor and diff check: each **exit 0**, extractor inspected with zero updates/additions/orphans. Tracked `DELEGATED_METHODS_MERGE_GATE_EXITS.json` contains all seven records, complete outputs/hashes and changed shared-input hashes. Independent census versus this integration still moves **6 pending -> ported, 0 -> divergent**, **123/22/141**. Six controls and Rustfmt remain bound to original gate 83452742e0; no extra control matrix was rerun for this additive helper. Previous body-boundary, authored-floor and unrun-gate limits still apply.
-
-Sub-agent post-merge evidence review approved all seven records/hashes, 17 unchanged original inputs, two changed shared-input hashes, actual integration second parent, fresh seven-test/check/extractor exits and independent six-row census. No material findings; the reviewer ran no cargo, mutations or CI.
-
-### Immediately-before-delivery delegation merge
-
-Fetched and merged latest integration `2c04dafa36dd53b183f10b974fcd0a4adf2ada1a`, producing `7ef0355c8f1c2e2f4d08adee59381a076e93bf06`. Fresh test/check gate `398bea602531f4e287b74ecf184da30e76dec0e1` to this merge: crate src/tests comparison **exit 0**; oracle/Binance manifests/TypeScript/shared dependencies/Cargo manifests/lock comparison **exit 0**. All 17 original input hashes still match. The fresh **7/0/0 test exit 0** and scoped all-targets **cargo check exit 0** therefore retain their input coverage; neither was rerun for this Lighter-only merge. Six controls remain bound to 83452742e0. Extractor rerun for changed other-venue manifests: **exit 0**, inspected zero updates/additions/orphans. Diff check **exit 0**. Tracked `DELEGATED_METHODS_FINAL_MERGE_GATE_EXITS.json` holds commands, complete outputs/hashes and independent census against this integration: **6 pending -> ported, 0 -> divergent**, **123/22/141**. Evidence-only delivery changes no body/test/oracle/dependency input. Earlier scope/floor/unrun limits still apply.
+The six `delegated_methods` extractions and their options alias had no production
+caller after retirement of the message-entry/public-candle-delegate tail. Their
+standalone test/oracle/control and three historical receipts are removed. This
+retirement makes no additional TypeScript status claim. The actual class methods
+remain mapped in all six existing manifest rows. See `DELEGATED_ROUTE_REVIEW.md`
+for the SDK-wide caller review, retained constructed native candle/depth/history
+witnesses, and the compiled live history flag fault/exact restoration control.
+Historical broad-run inventories below remain bound to their original SHAs.
 
 ### Six newly ported private-socket lifecycle helpers
 
@@ -3170,11 +3153,17 @@ full coercion/UTF16, mutable/non-Error failures, nested error-response identity,
 host scheduling and discarded async/drop/unwind ownership are unclaimed.
 No shared SDK type/trait change.
 
-**FINDING, UNREMEASURED**: `private_rest::pm_rows → json_data → response_message`
-still projects nonfinite malformed OBJECT code/message metadata to JSON null.
-Finite JSON malformed-object metadata is the declared new PM boundary. Root
-native Infinity kind was corrected and proved. No source execution, survivor
-control or correction is claimed for nested nonfinite metadata.
+**Historical finding, now remeasured**: the former
+`private_rest::pm_rows → json_data → response_message` projection replaced nested
+nonfinite code/message metadata with null. The native guard cutover removes
+`json_data`. `private_rest_native::native_pm_order_diagnostics_keep_nested_nonfinite_metadata`
+executes the real native owner/signed HTTP path against the maintained TS guard:
+master compiles and fails (`code=null` versus `code=Infinity -Infinity`), and the
+restored cutover passes both authored HTTP cases. The separate three surrogate
+projection regressions are also master-red/restored-green. Native NaN/Infinity,
+own undefined and UTF16 key/message observations are in the canonical guard
+contract. See `PRIVATE_REST_CONTRACT_REVIEW.md` for the bounded cohort; this does
+not reclassify unrelated historical evidence as current execution.
 
 Not run: full Binance suite (only two scoped targets ran), workspace build,
 host clippy, wasm clippy, CI, exhaustive cases/mutations or whole-venue audit.

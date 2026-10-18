@@ -4,6 +4,20 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
 
+`scripts/public-dispatch-contracts.mjs` uses the maintained compiler driver with
+four exact owner filters for `public_dispatch::{Handlers,dispatch_binance_message}`
+and `ticker_capture::{Capture,lookup}`. The three raw-key/frame operations have
+direct native observations; `Capture::new` is a typed Store capability factory.
+Its classification does not claim decoder execution. Keep retained metadata,
+callback identity/order and inherited lookup observations before JSON projection.
+
+The constructed NativeImports socket witness compares twelve prototype/capture
+cases against the maintained TypeScript exchange classes. Capture assertions
+must inspect retained cells before rereading the dictionary, so a lazy refresh
+cannot conceal a broken Store subscription. `scripts/public-dispatch-controls.py`
+requires four independently compiled production faults to fail their named
+constructed socket tests, then restores each source file byte for byte.
+
 ## Source-owned tables
 
 `scripts/types.mjs` evaluates all three live TypeScript type modules, resolving
@@ -778,6 +792,14 @@ the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
 
+Private REST shape checks, field aliases and diagnostics consume the canonical
+native graph directly. Never restore the recursive `json_data` projection.
+Existing borrowed-JSON array validators delegate to the same native guard.
+The executed function contracts and constructed native HTTP witnesses are
+reviewed in `PRIVATE_REST_CONTRACT_REVIEW.md`; snapshot callable aliases remain
+a separate cohort. Refresh the two reviewed nested-helper source pins after
+reviewing any change to `private_rest.rs`.
+
 The snapshot rejection fixture settles rejected HTTP through `RestFailure`, not
 a fulfilled response with status 400. Its exact Base-formatted emitter assertion
 distinguishes transport rejection from malformed fulfilled-body validation.
@@ -793,3 +815,10 @@ Use `private_classes --features native` for actual native private frame/Store,
 public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
+
+The standalone `delegated_methods` extraction layer has no production caller and
+is retired with its options alias and mock-only oracle. Keep the six TypeScript
+rows on the live ExchangeState listener/dispatch members. The native candle,
+depth and historical-position witnesses and compiled live history flag control
+are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
+to satisfy accepted-owner discovery.
