@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. This first batch covers seven rows; the other
-30 remain pending individual production-binding audits.
+`divergence-cluster-rulings.md`. Eight rows are reconciled below; the other
+29 remain pending individual production-binding audits.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -45,3 +45,33 @@ The old combined count included an extra eager scheduler wake (4 versus 3),
 which has no TS Promise counterpart. The maintained Axios source independently
 asserts that both response observers settle after probe release. Original
 singleflight, cached-response, HTTP, clock, auth and disposal assertions remain.
+
+## Original-method retry guard: row 37 ACCEPT-safety
+
+The coordinator ruled the original-method guard an accepted safety residual on
+2026-10-19 (thread-dm3hk29u8vyn). It remains in the production factory unchanged.
+An original order-mutating POST may have executed before a network failure;
+replaying its body can duplicate or contradict that operation.
+
+The maintained `createAPI` / `shouldRetryBybitRequest`, actual Axios and
+axios-retry replay `/v5/order/create`, `/v5/order/cancel` and `/v5/order/amend`
+when a terminal adapter reports `error.config.method = 'get'`. Each source case
+sends POST then signed GET to the same endpoint, retains the serialized POST
+body, and generates a fresh request ID and signature. An unchanged POST failure
+makes only one attempt. These are scripted transport witnesses; they do not
+assert that the live venue accepts a GET mutation or that a duplicate occurred.
+
+`tests/api_factory.rs::native_order_mutation_network_failures_never_replay_post_bodies`
+uses the actual native factory and signed terminal requests for all three routes
+with unchanged, lowercase GET and uppercase GET failure configs. All nine must
+make one attempt, preserve POST bytes/HMAC and retain the network error config.
+The source test executes the six maintained-source rewrite/control profiles.
+`factory-retry-condition-control.py` bypasses only the original-method conjunct,
+requires the named native replay-count failure, then restores exact production
+bytes and requires GREEN. Its existing instruments-info exclusion control stays.
+
+Evidence: `/tmp/bybit-retry-mutating-evidence.json` records the initial three
+source replays; the reproducible maintained oracle is
+`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is the
+eighth reconciled audit row; 29 rows remain pending. The seven earlier verdicts
+and their proof are in PR #1182.

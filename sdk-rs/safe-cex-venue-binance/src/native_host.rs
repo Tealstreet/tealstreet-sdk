@@ -1448,7 +1448,7 @@ impl ListenerHost for NativeListenerOperations {
             let EventValue::Array(levels) = data.get(key)? else {
                 return Ok(vec![]);
             };
-            let levels = array_values(&levels);
+            let levels = array_values(&levels)?;
             levels
                 .iter()
                 .map(|row| Ok(vec![row.read("0")?.text()?, row.read("1")?.text()?]))

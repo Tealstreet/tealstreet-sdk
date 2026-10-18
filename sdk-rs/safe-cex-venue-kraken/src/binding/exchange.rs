@@ -30,6 +30,9 @@ mod accepted_loop_socket_aliases;
 #[path = "../../tests/support/accepted_member_aliases.rs"]
 mod accepted_member_aliases;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_numeric_changes.rs"]
+mod accepted_numeric_changes;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_page_aliases.rs"]
 mod accepted_page_aliases;
 #[cfg(test)]

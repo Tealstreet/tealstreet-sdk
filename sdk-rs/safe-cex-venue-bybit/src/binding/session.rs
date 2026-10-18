@@ -30,7 +30,7 @@ fn selected_owner(method: &Js, expected: &str) -> Result<Vec<Js>, Thrown> {
     }
     method
         .get(OWNER)?
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{expected} was not read from an array")))
 }
 
@@ -168,7 +168,7 @@ impl SessionHost for Rt {
             ))),
             "destructure three" => {
                 let values = arg(&args, 0)
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
                 Ok(Js::array(
                     (0..3)
@@ -236,7 +236,7 @@ impl SessionHost for Rt {
                 .call_method("isArray", args),
             "destructure first" => {
                 let values = arg(&args, 0)
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
                 Ok(values.first().cloned().unwrap_or(Js::Undefined))
             }
@@ -263,7 +263,7 @@ impl SessionHost for Rt {
             }
             "destructure2" => {
                 let values = arg(&args, 0)
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
                 Ok(Js::array(vec![
                     values.first().cloned().unwrap_or(Js::Undefined),
@@ -449,7 +449,7 @@ impl SpotOrderHost for Rt {
         F: FnMut(Js, usize) -> SessionFuture<'a, Js, Thrown> + 'a,
     {
         Box::pin(async move {
-            let items = values.array_values().ok_or_else(|| {
+            let items = values.array_values()?.ok_or_else(|| {
                 Thrown::type_error(&format!("{} is not iterable", values.to_display()))
             })?;
             let mut out = Vec::with_capacity(items.len());
@@ -538,7 +538,7 @@ impl crate::spot_exchange_reads::SpotExchangeHost for Rt {
         )?;
         let mut out = vec![];
         for index in indices
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("times result is not iterable"))?
         {
             out.push(body(index)?);

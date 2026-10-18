@@ -1,5 +1,10 @@
 # Binance field-identity and NaN capture audit
 
+Current scope: FINAL_FIX_AUDIT.md retires the four unused Futures/PM wire
+codecs and their standalone record/depth/field-identity fixtures. References to
+those fixtures below are historical receipts at the stated revisions. All live
+native binding and surviving union/inverse guards remain in force.
+
 Baseline: `48a5682a73`; capture host darwin-arm64, Node26.7.0. This is a new
 audit and supplement, not a retroactive independence claim for earlier fixtures.
 

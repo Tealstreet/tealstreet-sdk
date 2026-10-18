@@ -1,7 +1,7 @@
-use safe_cex_exchange::native_store::DefaultStore;
 #[path = "support/log_observer.rs"]
 mod log_observer;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},

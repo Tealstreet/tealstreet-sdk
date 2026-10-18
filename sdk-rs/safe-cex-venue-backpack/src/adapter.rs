@@ -173,7 +173,7 @@ impl BackpackExchange {
     }
     pub fn fix_trigger_orders_without_trigger_by(
         self: &Rc<Self>,
-        orders: reads::Array<Value>,
+        orders: Value,
     ) -> reads::Task<(), ExchangeError> {
         let future = reads::fix_trigger_orders_without_trigger_by(self.frame(), orders);
         safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
@@ -264,6 +264,23 @@ impl Frame {
 }
 impl reads::Host for Frame {
     type Value = Value;
+    type Array = Value;
+    fn array_length(&mut self, a: &Value) -> Result<usize, ExchangeError> {
+        Ok(a.get("length")?.to_number()? as usize)
+    }
+    fn array_element(&mut self, a: &Value, index: usize) -> Result<Option<Value>, ExchangeError> {
+        if a.has_index(index) {
+            Ok(Some(a.get(&index.to_string())?))
+        } else {
+            Ok(None)
+        }
+    }
+    fn array_set(&mut self, a: &Value, index: usize, value: Value) -> Result<(), ExchangeError> {
+        Ok(a.set(&index.to_string(), value)?)
+    }
+    fn array_from(&mut self, values: Vec<Option<Value>>) -> Value {
+        Value::holey_array(values)
+    }
     type Error = ExchangeError;
     type LogTarget = ();
     type Order = Order;
@@ -278,7 +295,7 @@ impl reads::Host for Frame {
     fn field(&mut self, v: &Value, k: &str) -> Result<Value, ExchangeError> {
         v.field(k)
     }
-    fn array(&mut self, v: &Value) -> Result<reads::Array<Value>, ExchangeError> {
+    fn array(&mut self, v: &Value) -> Result<Value, ExchangeError> {
         v.array()
     }
     fn is_array(&mut self, v: &Value) -> bool {
@@ -322,11 +339,7 @@ impl reads::Host for Frame {
     }
     fn pair(&mut self, v: &Value) -> Result<(Value, Value), ExchangeError> {
         let a = v.array()?;
-        let a = a.borrow();
-        Ok((
-            a.first().cloned().flatten().unwrap_or(Value::Undefined),
-            a.get(1).cloned().flatten().unwrap_or(Value::Undefined),
-        ))
+        Ok((a.get("0")?, a.get("1")?))
     }
     fn spread(&mut self, v: &[Value]) -> Result<Value, ExchangeError> {
         Value::spread(v)
@@ -410,7 +423,7 @@ impl reads::Host for Frame {
             })
             .transpose()
     }
-    fn markets(&mut self) -> Result<reads::Array<Value>, ExchangeError> {
+    fn markets(&mut self) -> Result<Value, ExchangeError> {
         let m = self
             .owner
             .base
@@ -423,7 +436,7 @@ impl reads::Host for Frame {
                     .map_err(|e| ExchangeError::new(e.to_string()))
             })
             .collect::<Result<_, _>>()?;
-        Ok(Rc::new(RefCell::new(m)))
+        Ok(Value::holey_array(m))
     }
     fn position_mode(&mut self) -> Result<reads::Task<PositionMode, ExchangeError>, ExchangeError> {
         Ok(self.owner.get_position_mode())
@@ -449,10 +462,7 @@ impl reads::Host for Frame {
             format!("{s}:{side}")
         }))
     }
-    fn repair(
-        &mut self,
-        orders: reads::Array<Value>,
-    ) -> Result<reads::Task<(), ExchangeError>, ExchangeError> {
+    fn repair(&mut self, orders: Value) -> Result<reads::Task<(), ExchangeError>, ExchangeError> {
         Ok(self.owner.fix_trigger_orders_without_trigger_by(orders))
     }
     fn map_order(&mut self, v: Value) -> Result<Order, ExchangeError> {
