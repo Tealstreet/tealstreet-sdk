@@ -85,3 +85,18 @@ use a non-coercing type label at the existing string-only console capability. Wo
 posts and local emitter listeners receive original native values. Hyperliquid's
 separate realm still uses its existing owned typed-snapshot bridge; it does not gain
 shared-realm accessor or object-reference identity from this API migration.
+
+Browser Error custom fields are omitted before the physical post, matching native
+Error structured clone. The actual Wasm `post_worker_error_getter_data` regression
+compares Error, TypeError, SyntaxError and RangeError with Node: throwing custom
+code and accessor cause getters remain unread, uncloneable custom functions are
+ignored, and an own data cause keeps its nested Infinity. The dependency baseline
+compiled but threw from the code getter; a second baseline with only custom-field
+skipping still threw from the cause getter. Both pass after the descriptor repair.
+Existing DATA numeric/UTF-16/alias/cycle checks and Error stack/subtype checks pass.
+This is an actual Wasm plus Node structuredClone proof, not browser startup/DB execution.
+
+`safe-cex-webworker/scripts/error-clone-controls.py` separately restores custom
+member enumeration and accessor-cause reading. Each modified production adapter
+compiles to Wasm, reaches its expected throwing getter through the real DATA post,
+and fails the Node harness. Exact source restoration passes the complete harness.
