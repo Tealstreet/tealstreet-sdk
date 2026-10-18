@@ -782,7 +782,12 @@ fn discarded_ticker_call_still_sends_its_request() {
         1,
         "a discarded source Promise still sends its ticker request"
     );
-    assert_eq!(safe_cex_store::Store::tickers(store.as_ref()).len(), 1);
+    assert_eq!(
+        safe_cex_store::Store::tickers(store.as_ref())
+            .unwrap()
+            .len(),
+        1
+    );
     drop(requests);
     venue.dispose().unwrap();
 }

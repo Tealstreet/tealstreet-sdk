@@ -3,10 +3,11 @@
 use safe_cex_exchange::{
     exchange::Exchange,
     native::{NativeHttpHost, native_runtime},
+    native_store::DefaultStore,
     socket_lifecycle::SocketSlot,
     websocket::WsRuntime,
 };
-use safe_cex_store::{Store, store::DefaultStore, virtual_clock::VIRTUAL_CLOCK};
+use safe_cex_store::{Store, virtual_clock::VIRTUAL_CLOCK};
 use safe_cex_transport::rate_limit::RateLimitClock;
 use safe_cex_types::{ExchangeName, StoreSubscriberError};
 use safe_cex_venue_bybit::{BybitDependencies, BybitExchange, ws_private, ws_public};
@@ -97,6 +98,7 @@ async fn observe(name: ExchangeName) {
     assert!(
         store
             .socket_health()
+            .unwrap()
             .as_object()
             .is_some_and(|health| !health.is_empty()),
         "health commits before notification throws"

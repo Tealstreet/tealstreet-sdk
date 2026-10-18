@@ -817,7 +817,7 @@ fn signed_start_logs_in_on_the_private_socket_before_its_ping_loop() {
 #[test]
 fn position_adapter_dependencies_use_real_account_and_store_quote_resolution() {
     let (venue, rt, store, wire) = support::fixture_with(false);
-    let mut markets = store.markets().to_vec();
+    let mut markets = store.markets().unwrap().to_vec();
     markets[0].quote = "USDC".into();
     Store::update(
         store.as_ref(),

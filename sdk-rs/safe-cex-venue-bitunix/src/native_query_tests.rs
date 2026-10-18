@@ -70,7 +70,7 @@ fn native_query_signatures_match_source_locale_sort_at_every_level() {
 fn eager_fixture() -> (
     std::rc::Rc<crate::adapter::BitunixVenue>,
     std::rc::Rc<fixture::Runtime>,
-    std::rc::Rc<safe_cex_store::store::DefaultStore>,
+    std::rc::Rc<safe_cex_exchange::native_store::DefaultStore>,
     std::sync::Arc<fixture::Wire>,
 ) {
     let (venue, runtime, store, wire) = fixture::fixture_with(false);
@@ -193,7 +193,7 @@ fn discarded_native_writes_resume_store_updates_after_held_http() {
             "production signed request"
         );
         drop(requests);
-        let positions = store.positions();
+        let positions = store.positions().unwrap();
         assert_eq!(positions.len(), 2);
         for position in positions.iter() {
             assert_eq!(position.leverage, 10., "Store waits for actual response");
@@ -201,7 +201,7 @@ fn discarded_native_writes_resume_store_updates_after_held_http() {
         drop(positions);
         gate.release();
         runtime.pump();
-        let positions = store.positions();
+        let positions = store.positions().unwrap();
         assert_eq!(positions.len(), 2);
         for (position, id) in positions.iter().zip(["BTCUSDT:long", "BTCUSDT:short"]) {
             assert_eq!(position.id, id);
@@ -275,8 +275,8 @@ fn ready_native_http_preserves_source_await_before_store_write() {
         } else {
             venue.set_leverage("BTCUSDT".into(), 23.)
         };
-        assert_eq!(store.positions().len(), 2);
-        for position in store.positions().iter() {
+        assert_eq!(store.positions().unwrap().len(), 2);
+        for position in store.positions().unwrap().iter() {
             assert_eq!(
                 position.leverage, 10.,
                 "ready HTTP must retain source await fence; metadata={metadata}"
@@ -284,7 +284,7 @@ fn ready_native_http_preserves_source_await_before_store_write() {
         }
         drop(pending);
         runtime.pump();
-        for position in store.positions().iter() {
+        for position in store.positions().unwrap().iter() {
             assert_eq!(
                 position.leverage, 23.,
                 "ready HTTP continuation remains owned"
