@@ -659,14 +659,37 @@ impl RestAdapter for JsRestAdapter {
                         .ok()
                         .filter(|r| !r.is_nullish())
                         .and_then(|r| rest_response(&r).ok());
-                    let code = optional(&thrown.value, "code")
-                        .ok()
-                        .filter(Js::is_string)
-                        .map(|c| String::from_utf16_lossy(&c.to_js_string().unwrap_or_default()));
+                    let code = optional(&thrown.value, "code").ok().and_then(|value| {
+                        if let Js::String(units) = value {
+                            Some(units)
+                        } else {
+                            None
+                        }
+                    });
+                    let message = thrown.message();
+                    // RestFailure.code is the existing UTF-8 diagnostic view.
+                    // The owned cause is authoritative for the native string.
+                    let mut fields = vec![(
+                        "message",
+                        super::value::owned::OwnedJsValue::string(&message),
+                    )];
+                    if let Some(code) = &code {
+                        fields.push((
+                            "code",
+                            super::value::owned::OwnedJsValue::String(code.to_vec()),
+                        ));
+                    }
+                    let cause = super::value::owned::OwnedCallbackError::new(
+                        super::value::owned::OwnedJsValue::object(fields),
+                    );
                     let failure = RestFailure {
-                        code,
-                        message: thrown.message(),
-                        transport_error: None,
+                        code: code.as_ref().map(|units| String::from_utf16_lossy(units)),
+                        message,
+                        transport_error: Some(Box::new(
+                            safe_cex_transport::TransportError::Rejected(
+                                safe_cex_transport::provider::TransportErrorOrigin::new(cause),
+                            ),
+                        )),
                         response: response.map(Box::new),
                         request: Box::new(request),
                         context: None,

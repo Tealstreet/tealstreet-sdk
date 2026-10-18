@@ -1636,9 +1636,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "05ecbcc1e553c938ae25614c991e5c9d9937bdff3d6728b5c1fb826b3218bc71",
+      "producer_sha256": "f3fc3b68349efef47408e988bde90a6e359fa8336dc2fd1a7c6d33ebd2e7d865",
       "classification": "no-owned-latch",
-      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing."
+      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing. Reviewed retained string-code origin: after the same child await, synchronous owned metadata capture preserves UTF-16 units before publishing the settled rejection. No task, waiter, reservation or registration is added; the original rejection slot is still written only after settlement."
     },
     {
       "owner": "src/js_runtime/client.rs::JsRestAdapter::send",
