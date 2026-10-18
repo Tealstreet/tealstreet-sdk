@@ -1,7 +1,7 @@
 {
   "safe-cex-venue-bybit/src/ws_public.rs::LOCAL_FUNCTION:round_numbers": {
     "category": "non-decoder",
-    "reason": "Inside parse_frame: canonicalizes numeric tokens in an already JSON-parsed generic Value tree, retaining negative zero spelling and refusing nonfinite projections. Its output is the same untyped tree, not a typed domain record or a field/enum admission decision; the surrounding JSON parser remains a separate production boundary. Reviewed ticker error propagation since 1b81d57fe2: Store errors retain their native conversion and source failures retain TypeError identity; parse_frame and its numeric normalization helper are unchanged.",
-    "sourceSha256": "6f47902a4410ffee2d4884cc8ed2f4e8a667c4a445795d560bf713b2472a5ee7"
+    "reason": "Inside parse_frame: canonicalizes numeric tokens in an already JSON-parsed generic Value tree, retaining negative zero spelling and refusing nonfinite projections. Its output is the same untyped tree, not a typed domain record or a field/enum admission decision; the surrounding JSON parser remains a separate production boundary. Reviewed ticker error propagation since 1b81d57fe2: Store errors retain their native conversion and source failures retain TypeError identity; parse_frame and its numeric normalization helper are unchanged. Reviewed inherited ticker lookup and parse ordering: native lookup truthiness and delayed update-id access change handle_tickers_event outside parse_frame. The nested numeric normalization body is unchanged.",
+    "sourceSha256": "ff3985d0ad1e91e726857202f15562abf5046180d9800257a6f11c5fb45f2d93"
   }
 }
