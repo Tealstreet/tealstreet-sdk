@@ -32613,5 +32613,553 @@
     },
     "reason": "Shared own-currency dictionary and explicit prototype balance handle, not a raw object parser.",
     "evidence": "Fresh maintained compiler/artifact/declaration-claim discovery authenticates this exact alias. tests/support/portfolio_alias_native.rs directly exercises native PortfolioState capture and these live references, array/row identity, retained metadata, numeric bits, native typed snapshots and the venue error adapter before reporting. Alias trait receipts distinguish three real Deserialize aliases from three non-decoder capabilities; they do not claim all source callbacks, arbitrary JavaScript graph identity, JSON error-view widening or a complete feature matrix. portfolio-alias-controls.py independently clears actual production portfolio metadata, requires a compiled native assertion failure, restores exact source bytes and requires GREEN."
+  },
+  "safe_cex_venue_coinbase::exchange_tick::TickRegistry": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "indexmap::map::IndexMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "primitive": "u16"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "alloc::vec::Vec",
+                                                                    "args": {
+                                                                      "angle_bracketed": {
+                                                                        "args": [
+                                                                          {
+                                                                            "type": {
+                                                                              "resolved_path": {
+                                                                                "path": "alloc::rc::Rc",
+                                                                                "args": {
+                                                                                  "angle_bracketed": {
+                                                                                    "args": [
+                                                                                      {
+                                                                                        "type": {
+                                                                                          "dyn_trait": {
+                                                                                            "traits": [
+                                                                                              {
+                                                                                                "trait": {
+                                                                                                  "path": "core::ops::function::Fn",
+                                                                                                  "args": {
+                                                                                                    "parenthesized": {
+                                                                                                      "inputs": [
+                                                                                                        {
+                                                                                                          "resolved_path": {
+                                                                                                            "path": "safe_cex_venue_coinbase::starbase_public_frames::CoinbaseStarbaseFrameValue",
+                                                                                                            "args": null
+                                                                                                          }
+                                                                                                        }
+                                                                                                      ],
+                                                                                                      "output": {
+                                                                                                        "resolved_path": {
+                                                                                                          "path": "core::result::Result",
+                                                                                                          "args": {
+                                                                                                            "angle_bracketed": {
+                                                                                                              "args": [
+                                                                                                                {
+                                                                                                                  "type": {
+                                                                                                                    "tuple": []
+                                                                                                                  }
+                                                                                                                },
+                                                                                                                {
+                                                                                                                  "type": {
+                                                                                                                    "resolved_path": {
+                                                                                                                      "path": "alloc::rc::Rc",
+                                                                                                                      "args": {
+                                                                                                                        "angle_bracketed": {
+                                                                                                                          "args": [
+                                                                                                                            {
+                                                                                                                              "type": {
+                                                                                                                                "resolved_path": {
+                                                                                                                                  "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                                                                                                  "args": null
+                                                                                                                                }
+                                                                                                                              }
+                                                                                                                            }
+                                                                                                                          ],
+                                                                                                                          "constraints": []
+                                                                                                                        }
+                                                                                                                      }
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                }
+                                                                                                              ],
+                                                                                                              "constraints": []
+                                                                                                            }
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                },
+                                                                                                "generic_params": []
+                                                                                              }
+                                                                                            ],
+                                                                                            "lifetime": null
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    ],
+                                                                                    "constraints": []
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        ],
+                                                                        "constraints": []
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared UTF16 topic registry carrying captured callback-array handles, not a wire parser. The actual production TickHost adapter is observed on both constructed class variants.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::public_stream_dispatch::PublicSocket": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::starbase_public_frames::CoinbaseStarbaseFrameValue",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared mutable native frame root stored in the actual public socket receiver slot; this wrapper carries a socket capability rather than a raw response decoder.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::public_market_listeners::PublicListenerBook": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::public_market_listeners::PublicBook",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared mutable book state pointing at bid/ask level arrays; the production native_book Store adapter directly reads the captured root and later mutations.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::public_market_listeners::ListenerFailure": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::public_stream_dispatch::PublicStreamFailure",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared public-stream error record; a constructed-class on_message callback failure retains the same Rc cause through dispatch.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::public_market_listeners::PublicBookLevels": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_venue_coinbase::public_market_listeners::PublicBookLevel",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared ordered array of mutable price/amount/total level roots; native_book preserves row cardinality, ordering and native numeric bits.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::public_stream_dispatch::PublicStreamHandlers": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::public_stream_dispatch::PublicStreamHandler",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared live array of builtin tags and function callbacks; actual constructed-class on_message dispatch sees an appended handler during native for-of iteration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::exchange_tick::TickHandlers": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "dyn_trait": {
+                                                        "traits": [
+                                                          {
+                                                            "trait": {
+                                                              "path": "core::ops::function::Fn",
+                                                              "args": {
+                                                                "parenthesized": {
+                                                                  "inputs": [
+                                                                    {
+                                                                      "resolved_path": {
+                                                                        "path": "safe_cex_venue_coinbase::starbase_public_frames::CoinbaseStarbaseFrameValue",
+                                                                        "args": null
+                                                                      }
+                                                                    }
+                                                                  ],
+                                                                  "output": {
+                                                                    "resolved_path": {
+                                                                      "path": "core::result::Result",
+                                                                      "args": {
+                                                                        "angle_bracketed": {
+                                                                          "args": [
+                                                                            {
+                                                                              "type": {
+                                                                                "tuple": []
+                                                                              }
+                                                                            },
+                                                                            {
+                                                                              "type": {
+                                                                                "resolved_path": {
+                                                                                  "path": "alloc::rc::Rc",
+                                                                                  "args": {
+                                                                                    "angle_bracketed": {
+                                                                                      "args": [
+                                                                                        {
+                                                                                          "type": {
+                                                                                            "resolved_path": {
+                                                                                              "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                                                              "args": null
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      ],
+                                                                                      "constraints": []
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          ],
+                                                                          "constraints": []
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            "generic_params": []
+                                                          }
+                                                        ],
+                                                        "lifetime": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared ordered array of native function callbacks; the production TickHost adapter captures actual public class callbacks and invokes them with native frames.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
   }
 }
