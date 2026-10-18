@@ -40,8 +40,8 @@ fn args(tag: &str) -> Vec<Js> {
 fn units(value: Js) -> Value {
     json!(value.to_js_string().unwrap().as_ref())
 }
-// Observe the actual object's descriptors; the host does not bind the reflective
-// Object.getOwnPropertyDescriptor API. Creation/keys/assign/JSON remain real globals.
+// Observe native stored descriptors independently of JS descriptor reflection.
+// Creation/keys/assign/JSON still use the actual installed globals.
 fn descriptor(error: &Js, key: &str) -> Value {
     let Js::Object(object) = error else {
         panic!("Error must be an object")
@@ -56,7 +56,7 @@ fn descriptor(error: &Js, key: &str) -> Value {
             enumerable,
             configurable,
         }) => (value, writable, enumerable, configurable),
-        Some(Prop::Accessor(..)) => panic!("Error instance descriptor must be data"),
+        Some(Prop::Accessor { .. }) => panic!("Error instance descriptor must be data"),
     };
     json!({"value":units(value),"writable":writable,"enumerable":enumerable,"configurable":configurable})
 }

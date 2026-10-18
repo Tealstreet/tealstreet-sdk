@@ -119,7 +119,7 @@ fn assemble(
     let weak = Rc::downgrade(&shared);
     let class = define_classes(&weak, spot).map_err(err)?;
     let this = class
-        .call(Js::Undefined, vec![name, options, store])
+        .construct(vec![name, options, store], None)
         .map_err(err)?;
     *shared.exchange.borrow_mut() = this.clone();
     Ok(Assembly { shared, this })

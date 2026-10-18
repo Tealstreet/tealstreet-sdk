@@ -1,7 +1,7 @@
 //! lighter.signer.ts: the TealstreetLighterSignerAdapter class and the
 //! createLighterSignerAdapter factory, assembled by the ported
 //! `signer_adapter`/`signer_runtime` bodies over js_runtime values.
-use super::{Host, NativeSlots, error, has_prototype, instance_of};
+use super::{Host, NativeSlots, error};
 use crate::{
     binding::{
         ops::{Arithmetic, arithmetic, to_string},
@@ -54,7 +54,11 @@ fn runtime(host: &Host) -> Runtime {
             Ok(h.awaited(value, Ok))
         },
         // ts: new TransactionClient(config)
-        construct_transaction_client: |h, config| global_call(h, "TransactionClient", vec![config]),
+        construct_transaction_client: |h, config| {
+            h.global("TransactionClient")
+                .and_then(|class| class.construct(vec![config], None))
+                .map_err(to_signing)
+        },
         object: Js::object,
         array: Js::array,
         undefined: || Js::Undefined,
@@ -151,13 +155,9 @@ impl SignerAdapterRealm<Host, Js> for AdapterRealm {
     ) -> SigningResult<Js> {
         let _ = length;
         let prototype = Js::object(vec![]);
-        let (realm, own_prototype) = (self.this.clone(), prototype.clone());
-        let class = Js::constructor(name, move |this, a| {
-            if !has_prototype(&this, &own_prototype) {
-                return Err(Thrown::type_error(&format!(
-                    "Class constructor {name} cannot be invoked without 'new'"
-                )));
-            }
+        let realm = self.this.clone();
+        let class = Js::constructor(name, None, move |target, a| {
+            let this = target.allocate_instance()?;
             let realm = upgrade(&realm)?;
             body(realm.as_ref(), this, &a).map_err(to_thrown)
         });
@@ -206,10 +206,7 @@ impl SignerAdapterRealm<Host, Js> for AdapterRealm {
         })
     }
     fn construct(&self, class: Js, args: Vec<Js>) -> SigningResult<Js> {
-        let prototype = class.get("prototype").map_err(to_signing)?;
-        let receiver = instance_of(&prototype);
-        let result = class.call(receiver.clone(), args).map_err(to_signing)?;
-        Ok(if result.is_object() { result } else { receiver })
+        class.construct(args, None).map_err(to_signing)
     }
     fn strict_equals_text(&self, value: &Js, text: &str) -> bool {
         value.strict_equals(&Js::str(text))

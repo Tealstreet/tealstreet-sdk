@@ -355,7 +355,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     let w = weak.clone();
     def(
         "BaseExchange",
-        Js::constructor("BaseExchange", move |_, a| {
+        Js::constructor("BaseExchange", None, move |_, a| {
             base_exchange(&scope_of(&w)?, arg(&a, 0), arg(&a, 1), arg(&a, 2))
         }),
     );

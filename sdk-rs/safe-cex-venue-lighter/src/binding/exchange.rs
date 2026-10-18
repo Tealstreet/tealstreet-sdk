@@ -67,7 +67,7 @@ fn err(e: Thrown) -> ExchangeError {
 /// The `BaseExchange` binding the class extends: the shared JS base over the
 /// Rust core, whose handle is kept for `Exchange::base()`.
 fn base_exchange_class(weak: Weak<Shared>, name: ExchangeName, options: ExchangeOptions) -> Js {
-    let class = Js::constructor("BaseExchange", move |_, a| {
+    let class = Js::constructor("BaseExchange", None, move |_, a| {
         let shared = weak
             .upgrade()
             .ok_or_else(|| Thrown::error("Error", "Lighter scope was dropped"))?;
@@ -165,13 +165,13 @@ impl LighterNativeExchange {
         let dyn_venue: Rc<dyn Exchange> = venue.clone();
         *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
         let this = to_js(&class)
-            .call(
-                Js::Undefined,
+            .construct(
                 vec![
                     from_typed(&name).map_err(err)?,
                     from_typed(&options).map_err(err)?,
                     store::facade(store),
                 ],
+                None,
             )
             .map_err(err)?;
         *shared.exchange.borrow_mut() = this.clone();

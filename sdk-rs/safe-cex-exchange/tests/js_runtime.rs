@@ -667,12 +667,12 @@ fn bigint_and_url_search_params_follow_ecmascript() {
     let params = globals
         .get("URLSearchParams")
         .unwrap()
-        .call(
-            Js::Undefined,
+        .construct(
             vec![Js::object(vec![
                 ("a b", Js::str("x y&z")),
                 ("k", Js::str("~*")),
             ])],
+            None,
         )
         .unwrap();
     assert_eq!(
@@ -1486,7 +1486,11 @@ fn to_js_json_keeps_undefined_and_bigint_and_ordered_fields() {
 #[test]
 fn ws_direct_fallback_moves_to_the_next_host_after_silent_connects() {
     let g = library();
-    let fallback = run(&g, "WsDirectFallback", vec![Js::Number(1.0)]);
+    let fallback = g
+        .get("WsDirectFallback")
+        .unwrap()
+        .construct(vec![Js::Number(1.0)], None)
+        .unwrap();
     let resolve = |f: &Js| {
         let url = f
             .call_method(
@@ -1980,7 +1984,7 @@ fn performance_now_and_math_random_read_the_runtime() {
 #[test]
 fn map_constructor_adds_entries_from_iterables() {
     let g = library();
-    let new_map = |v: Vec<Js>| g.get("Map").unwrap().call(Js::Undefined, v);
+    let new_map = |v: Vec<Js>| g.get("Map").unwrap().construct(v, None);
     let entry = |k: &str, v: f64| Js::array(vec![Js::str(k), Js::Number(v)]);
     let map = new_map(vec![Js::array(vec![
         entry("a", 1.0),
@@ -2019,7 +2023,7 @@ fn map_constructor_adds_entries_from_iterables() {
     let set = g
         .get("Set")
         .unwrap()
-        .call(Js::Undefined, vec![Js::array(vec![entry("s", 1.0)])])
+        .construct(vec![Js::array(vec![entry("s", 1.0)])], None)
         .unwrap();
     let from_set = new_map(vec![set]).unwrap();
     assert_eq!(
@@ -2082,20 +2086,26 @@ fn array_from_reads_iterables_and_array_likes() {
     let chars = from(vec![text]).unwrap();
     assert_eq!(chars.get("length").unwrap().as_f64(), Some(3.0));
     assert_eq!(json_of(&g, chars), "[\"a\",\"\u{1F600}\",\"b\"]");
-    let map = run(
-        &g,
-        "Map",
-        vec![Js::array(vec![Js::array(vec![
-            Js::str("k"),
-            Js::Number(1.0),
-        ])])],
-    );
+    let map = g
+        .get("Map")
+        .unwrap()
+        .construct(
+            vec![Js::array(vec![Js::array(vec![
+                Js::str("k"),
+                Js::Number(1.0),
+            ])])],
+            None,
+        )
+        .unwrap();
     assert_eq!(json_of(&g, from(vec![map]).unwrap()), r#"[["k",1]]"#);
-    let set = run(
-        &g,
-        "Set",
-        vec![Js::array(vec![Js::str("x"), Js::str("x"), Js::str("y")])],
-    );
+    let set = g
+        .get("Set")
+        .unwrap()
+        .construct(
+            vec![Js::array(vec![Js::str("x"), Js::str("x"), Js::str("y")])],
+            None,
+        )
+        .unwrap();
     assert_eq!(json_of(&g, from(vec![set]).unwrap()), r#"["x","y"]"#);
     let like = Js::object(vec![("length", Js::str("2.9")), ("0", Js::str("x"))]);
     let like = from(vec![like]).unwrap();

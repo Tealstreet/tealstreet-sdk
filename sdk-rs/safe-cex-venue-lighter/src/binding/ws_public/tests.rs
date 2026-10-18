@@ -386,7 +386,7 @@ fn fixture() -> Fixture {
     ]);
     let class = realm.global("LighterPublicWebsocket").unwrap();
     let socket = class
-        .call(Js::Undefined, vec![parent])
+        .construct(vec![parent], None)
         .unwrap_or_else(|e| panic!("construct: {}", e.message()));
     Fixture {
         runtime,

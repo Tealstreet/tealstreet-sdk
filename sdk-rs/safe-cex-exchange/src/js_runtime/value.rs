@@ -6,7 +6,11 @@ pub use owned::OwnedJsValue;
 use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
-use std::{cell::RefCell, fmt, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    fmt,
+    rc::Rc,
+};
 mod typed;
 
 pub type Str = Rc<[u16]>;
@@ -32,10 +36,24 @@ pub enum Prop {
         enumerable: bool,
         configurable: bool,
     },
-    Accessor(Option<Getter>, Option<Setter>),
+    Accessor {
+        get: Option<Js>,
+        set: Option<Js>,
+        enumerable: bool,
+        configurable: bool,
+    },
+}
+
+fn same_optional_value(left: &Option<Js>, right: &Option<Js>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => same_value(left, right),
+        _ => false,
+    }
 }
 
 pub struct ObjectData {
+    extensible: Cell<bool>,
     pub class: &'static str,
     pub(crate) iterator_next: RefCell<Option<NativeFn>>,
     pub(crate) symbol_iterator: RefCell<Option<Prop>>,
@@ -44,10 +62,18 @@ pub struct ObjectData {
 }
 
 pub struct FunctionData {
+    extensible: Cell<bool>,
     pub name: Str,
     pub call: NativeFn,
     pub props: RefCell<IndexMap<Str, Prop>>,
     pub proto: RefCell<Option<Js>>,
+    construct: Option<Construct>,
+    realm: Rc<safe_cex_num::PrototypeRealm>,
+}
+
+enum Construct {
+    Native(NativeFn),
+    Bound { target: Js, args: Vec<Js> },
 }
 
 #[derive(Clone)]
@@ -260,7 +286,7 @@ pub fn error_object(name: &str, message: &str) -> Js {
 }
 
 pub(super) fn error_constructor(name: &'static str) -> Js {
-    Js::constructor(name, move |_, args| {
+    let body: NativeFn = Rc::new(move |_, args| {
         let message = arg(&args, 0);
         let message = if message.is_undefined() {
             None
@@ -268,7 +294,31 @@ pub(super) fn error_constructor(name: &'static str) -> Js {
             Some(message.to_js_string()?)
         };
         Ok(make_error_object(name, message))
-    })
+    });
+    let call = body.clone();
+    let constructor = Js::constructor(name, Some(call), move |target, args| {
+        let prototype = target.get("prototype")?;
+        let error = body(Js::Undefined, args)?;
+        if prototype.is_object()
+            && let Js::Object(data) = &error
+        {
+            *data.proto.borrow_mut() = Some(prototype);
+        }
+        Ok(error)
+    });
+    let Js::Function(function) = &constructor else {
+        unreachable!()
+    };
+    function.props.borrow_mut().insert(
+        utf16("prototype"),
+        Prop::DataDescriptor {
+            value: error_prototype(name).0,
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        },
+    );
+    constructor
 }
 
 fn error_string(error: &Js) -> Result<Str, Thrown> {
@@ -321,7 +371,7 @@ impl fmt::Debug for Js {
                         Prop::Data(v) | Prop::DataDescriptor { value: v, .. } => {
                             map.entry(&String::from_utf16_lossy(k), v)
                         }
-                        Prop::Accessor(..) => {
+                        Prop::Accessor { .. } => {
                             map.entry(&String::from_utf16_lossy(k), &"<accessor>")
                         }
                     };
@@ -366,6 +416,7 @@ impl Js {
     }
     pub fn object_with_class(class: &'static str, fields: Vec<(&str, Js)>) -> Js {
         Js::Object(Rc::new(ObjectData {
+            extensible: Cell::new(true),
             class,
             iterator_next: RefCell::new(None),
             symbol_iterator: RefCell::new(None),
@@ -379,23 +430,114 @@ impl Js {
         }))
     }
     pub fn function(name: &str, call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
+        let realm = safe_cex_num::PrototypeRealm::current();
         Js::Function(Rc::new(FunctionData {
+            extensible: Cell::new(true),
             name: utf16(name),
             call: Rc::new(call),
             props: RefCell::new(IndexMap::new()),
             proto: RefCell::new(
-                safe_cex_num::PrototypeRealm::current()
+                realm
                     .reference(safe_cex_num::ProtoMember::Constructor)
                     .prototype()
                     .map(Js::Builtin),
             ),
+            construct: None,
+            realm,
         }))
     }
     pub fn constructor(
         name: &str,
-        call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
+        call: Option<NativeFn>,
+        construct: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
     ) -> Js {
-        Self::function(name, call)
+        let class_name = name.to_owned();
+        let mut value = Self::function(name, move |this, args| match &call {
+            Some(call) => call(this, args),
+            None => Err(Thrown::type_error(&format!(
+                "Class constructor {class_name} cannot be invoked without 'new'"
+            ))),
+        });
+        let Js::Function(function) = &mut value else {
+            unreachable!()
+        };
+        Rc::get_mut(function)
+            .expect("unpublished constructor")
+            .construct = Some(Construct::Native(Rc::new(construct)));
+        value
+    }
+
+    pub fn is_constructor(&self) -> bool {
+        matches!(self, Js::Function(function) if function.construct.is_some())
+    }
+
+    /// GetSuperConstructor reads metadata, without the shadowable `__proto__` property.
+    pub fn super_constructor(&self) -> Result<Js, Thrown> {
+        if !self.is_callable() {
+            return Err(Thrown::type_error("Active class must be a function"));
+        }
+        Ok(self.prototype().unwrap_or(Js::Null))
+    }
+
+    /// The native construct body receives original new.target, then arguments.
+    pub fn construct(&self, args: Vec<Js>, new_target: Option<&Js>) -> Result<Js, Thrown> {
+        let Js::Function(function) = self else {
+            return Err(Thrown::type_error("Value is not a constructor"));
+        };
+        let Some(construct) = &function.construct else {
+            return Err(Thrown::type_error("Value is not a constructor"));
+        };
+        let new_target = new_target.unwrap_or(self);
+        if !new_target.is_constructor() {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        }
+        let value = match construct {
+            Construct::Native(body) => body(new_target.clone(), args)?,
+            Construct::Bound {
+                target,
+                args: prefix,
+            } => {
+                let mut combined = prefix.clone();
+                combined.extend(args);
+                let new_target = if new_target.same_reference(self) {
+                    target
+                } else {
+                    new_target
+                };
+                target.construct(combined, Some(new_target))?
+            }
+        };
+        if !value.is_object() {
+            return Err(Thrown::type_error(
+                "Constructor returned a non-object value",
+            ));
+        }
+        Ok(value)
+    }
+
+    /// OrdinaryCreateFromConstructor for native class bodies allocating `this`.
+    pub fn allocate_instance(&self) -> Result<Js, Thrown> {
+        let Js::Function(function) = self else {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        };
+        if !self.is_constructor() {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        }
+        let prototype = self.get("prototype")?;
+        let object = Js::object(vec![]);
+        let Js::Object(data) = &object else {
+            unreachable!()
+        };
+        *data.proto.borrow_mut() = Some(if prototype.is_object() {
+            prototype
+        } else {
+            Js::Builtin(
+                function
+                    .realm
+                    .reference(safe_cex_num::ProtoMember::Prototype),
+            )
+        });
+        Ok(object)
     }
     pub fn new_map() -> Js {
         Js::Map(Rc::default())
@@ -431,19 +573,12 @@ impl Js {
     }
     /// Consume the shared iterator protocol for spread/Array.from adapters.
     pub fn iterable_values(&self) -> Result<Vec<Js>, Thrown> {
-        let iterator = self.iterator()?;
-        let next = iterator.get("next")?;
+        let iterator = super::iterator::IteratorRecord::get(self)?;
         let mut values = vec![];
-        loop {
-            let item = next.call(iterator.clone(), vec![])?;
-            if !item.is_object() {
-                return Err(Thrown::type_error("Iterator result is not an object"));
-            }
-            if item.get("done")?.truthy() {
-                return Ok(values);
-            }
-            values.push(item.get("value")?);
+        while let Some(value) = iterator.step_value()? {
+            values.push(value);
         }
+        Ok(values)
     }
     pub fn is_undefined(&self) -> bool {
         matches!(self, Js::Undefined)
@@ -822,8 +957,10 @@ impl Js {
         let prop = props.borrow().get(key).cloned();
         match prop {
             Some(Prop::Data(v) | Prop::DataDescriptor { value: v, .. }) => Ok(v),
-            Some(Prop::Accessor(Some(getter), _)) => getter(receiver),
-            Some(Prop::Accessor(None, _)) => Ok(Js::Undefined),
+            Some(Prop::Accessor {
+                get: Some(getter), ..
+            }) => getter.call(receiver.clone(), vec![]),
+            Some(Prop::Accessor { get: None, .. }) => Ok(Js::Undefined),
             None => {
                 if let Js::Function(function) = self {
                     if key == utf16("name").as_ref() {
@@ -922,8 +1059,10 @@ impl Js {
                     .own_props()
                     .and_then(|p| p.borrow().get(key).cloned());
                 match inherited {
-                    Some(Prop::Accessor(_, Some(setter))) => return setter(self, value),
-                    Some(Prop::Accessor(_, None))
+                    Some(Prop::Accessor {
+                        set: Some(setter), ..
+                    }) => return setter.call(self.clone(), vec![value]).map(|_| ()),
+                    Some(Prop::Accessor { set: None, .. })
                     | Some(Prop::DataDescriptor {
                         writable: false, ..
                     }) => {
@@ -959,16 +1098,30 @@ impl Js {
                             Js::Function(function) => &function.proto,
                             _ => unreachable!(),
                         };
-                        *target.borrow_mut() = (!matches!(value, Js::Null)).then_some(value);
+                        let parent = (!matches!(value, Js::Null)).then_some(value);
+                        if !self.is_extensible()? && !same_optional_value(&target.borrow(), &parent)
+                        {
+                            return Err(Thrown::type_error(
+                                "Cannot change prototype of a non-extensible object",
+                            ));
+                        }
+                        *target.borrow_mut() = parent;
                         return Ok(());
                     }
                 }
                 ancestor = parent.prototype();
             }
         }
+        if existing.is_none() && !self.is_extensible()? {
+            return Err(Thrown::type_error(
+                "Cannot add a property to a non-extensible object",
+            ));
+        }
         match existing {
-            Some(Prop::Accessor(_, Some(setter))) => setter(self, value),
-            Some(Prop::Accessor(_, None))
+            Some(Prop::Accessor {
+                set: Some(setter), ..
+            }) => setter.call(self.clone(), vec![value]).map(|_| ()),
+            Some(Prop::Accessor { set: None, .. })
             | Some(Prop::DataDescriptor {
                 writable: false, ..
             }) => Err(Thrown::type_error("Cannot assign to read only property")),
@@ -1005,26 +1158,148 @@ impl Js {
         if let Some(props) = self.own_props() {
             if matches!(
                 props.borrow().get(key),
-                Some(Prop::DataDescriptor {
-                    configurable: false,
-                    ..
-                })
+                Some(
+                    Prop::DataDescriptor {
+                        configurable: false,
+                        ..
+                    } | Prop::Accessor {
+                        configurable: false,
+                        ..
+                    }
+                )
             ) {
                 return Err(Thrown::type_error("Cannot redefine property"));
+            }
+            if !props.borrow().contains_key(key) && !self.is_extensible()? {
+                return Err(Thrown::type_error(
+                    "Cannot define a property on a non-extensible object",
+                ));
             }
             props.borrow_mut().insert(key.into(), Prop::Data(value));
         }
         Ok(())
     }
-    /// Object.defineProperty's ordinary-object data-descriptor profile.
-    /// Absence differs from an explicit undefined value and flags use ToBoolean.
+    fn extensible_flag(&self) -> Option<&Cell<bool>> {
+        match self {
+            Js::Object(object) => Some(&object.extensible),
+            Js::Function(function) => Some(&function.extensible),
+            _ => None,
+        }
+    }
+    pub(super) fn is_extensible(&self) -> Result<bool, Thrown> {
+        match self.extensible_flag() {
+            Some(flag) => Ok(flag.get()),
+            None if !self.is_object() => Ok(false),
+            None => Err(Thrown::type_error(
+                "Extensibility requires an ordinary object or function",
+            )),
+        }
+    }
+    pub(super) fn prevent_extensions(&self) -> Result<Js, Thrown> {
+        match self.extensible_flag() {
+            Some(flag) => flag.set(false),
+            None if !self.is_object() => return Ok(self.clone()),
+            None => {
+                return Err(Thrown::type_error(
+                    "Extensibility requires an ordinary object or function",
+                ));
+            }
+        }
+        Ok(self.clone())
+    }
+    pub(super) fn freeze(&self) -> Result<Js, Thrown> {
+        self.prevent_extensions()?;
+        if let Some(props) = self.own_props() {
+            for property in props.borrow_mut().values_mut() {
+                match property {
+                    Prop::Data(value) => {
+                        *property = Prop::DataDescriptor {
+                            value: value.clone(),
+                            writable: false,
+                            enumerable: true,
+                            configurable: false,
+                        }
+                    }
+                    Prop::DataDescriptor {
+                        writable,
+                        configurable,
+                        ..
+                    } => {
+                        *writable = false;
+                        *configurable = false;
+                    }
+                    Prop::Accessor { configurable, .. } => *configurable = false,
+                }
+            }
+        }
+        Ok(self.clone())
+    }
+    pub(super) fn is_frozen(&self) -> Result<bool, Thrown> {
+        if !self.is_object() {
+            return Ok(true);
+        }
+        if self.is_extensible()? {
+            return Ok(false);
+        }
+        Ok(self
+            .own_props()
+            .expect("ordinary property storage")
+            .borrow()
+            .values()
+            .all(|property| match property {
+                Prop::Data(_) => false,
+                Prop::DataDescriptor {
+                    writable,
+                    configurable,
+                    ..
+                } => !writable && !configurable,
+                Prop::Accessor { configurable, .. } => !configurable,
+            }))
+    }
+    pub(super) fn own_property_descriptor(&self, key: &[u16]) -> Result<Js, Thrown> {
+        let props = self.own_props().ok_or_else(|| {
+            Thrown::type_error("Descriptor reflection requires an ordinary object or function")
+        })?;
+        Ok(match props.borrow().get(key) {
+            None => Js::Undefined,
+            Some(Prop::Data(value)) => Js::object(vec![
+                ("value", value.clone()),
+                ("writable", Js::Bool(true)),
+                ("enumerable", Js::Bool(true)),
+                ("configurable", Js::Bool(true)),
+            ]),
+            Some(Prop::DataDescriptor {
+                value,
+                writable,
+                enumerable,
+                configurable,
+            }) => Js::object(vec![
+                ("value", value.clone()),
+                ("writable", Js::Bool(*writable)),
+                ("enumerable", Js::Bool(*enumerable)),
+                ("configurable", Js::Bool(*configurable)),
+            ]),
+            Some(Prop::Accessor {
+                get,
+                set,
+                enumerable,
+                configurable,
+            }) => Js::object(vec![
+                ("get", get.clone().unwrap_or(Js::Undefined)),
+                ("set", set.clone().unwrap_or(Js::Undefined)),
+                ("enumerable", Js::Bool(*enumerable)),
+                ("configurable", Js::Bool(*configurable)),
+            ]),
+        })
+    }
+    /// ToPropertyDescriptor observes fields in order and retains accessor identities.
     pub(super) fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
         let props = self.own_props().ok_or_else(|| {
             Thrown::type_error(
                 "Object.defineProperty target must be an ordinary object or function",
             )
         })?;
-        if descriptor.own_props().is_none() {
+        if !descriptor.is_object() {
             return Err(Thrown::type_error("Property description must be an object"));
         }
         let read = |name: &str| -> Result<Option<Js>, Thrown> {
@@ -1034,58 +1309,123 @@ impl Js {
                 Ok(None)
             }
         };
-        // ToPropertyDescriptor read order is observable through getters.
-        let enumerable = read("enumerable")?.map(|v| v.truthy());
-        let configurable = read("configurable")?.map(|v| v.truthy());
+        let enumerable = read("enumerable")?.map(|value| value.truthy());
+        let configurable = read("configurable")?.map(|value| value.truthy());
         let value = read("value")?;
-        let writable = read("writable")?.map(|v| v.truthy());
+        let writable = read("writable")?.map(|value| value.truthy());
         let get = read("get")?;
+        if get
+            .as_ref()
+            .is_some_and(|value| !value.is_undefined() && !value.is_callable())
+        {
+            return Err(Thrown::type_error("Getter must be a function"));
+        }
         let set = read("set")?;
-        if get.is_some() || set.is_some() {
+        if set
+            .as_ref()
+            .is_some_and(|value| !value.is_undefined() && !value.is_callable())
+        {
+            return Err(Thrown::type_error("Setter must be a function"));
+        }
+        let accessor = get.is_some() || set.is_some();
+        let data = value.is_some() || writable.is_some();
+        if accessor && data {
             return Err(Thrown::type_error(
-                "Object.defineProperty accessor descriptors are not bound",
+                "Invalid mixed data and accessor descriptor",
             ));
         }
         let existing = props.borrow().get(key).cloned();
-        let (old_value, old_writable, old_enumerable, old_configurable) = match existing {
-            Some(Prop::Data(value)) => (value, true, true, true),
-            Some(Prop::DataDescriptor {
-                value,
-                writable,
-                enumerable,
-                configurable,
-            }) => (value, writable, enumerable, configurable),
-            Some(Prop::Accessor(..)) => {
-                if value.is_none() && writable.is_none() {
-                    if enumerable.is_none() && configurable.is_none() {
-                        return Ok(());
-                    }
-                    return Err(Thrown::type_error("Accessor attributes are not bound"));
+        if existing.is_none() && !self.is_extensible()? {
+            return Err(Thrown::type_error(
+                "Cannot define a property on a non-extensible object",
+            ));
+        }
+        let (old_enumerable, old_configurable) = match &existing {
+            Some(Prop::Data(_)) => (true, true),
+            Some(
+                Prop::DataDescriptor {
+                    enumerable,
+                    configurable,
+                    ..
                 }
-                (Js::Undefined, false, true, true)
-            }
-            None => (Js::Undefined, false, false, false),
+                | Prop::Accessor {
+                    enumerable,
+                    configurable,
+                    ..
+                },
+            ) => (*enumerable, *configurable),
+            None => (false, false),
         };
-        if props.borrow().contains_key(key) && !old_configurable {
-            if configurable == Some(true) || enumerable.is_some_and(|v| v != old_enumerable) {
-                return Err(Thrown::type_error("Cannot redefine property"));
-            }
-            if !old_writable
-                && (writable == Some(true)
-                    || value.as_ref().is_some_and(|v| !same_value(v, &old_value)))
+        let old_accessor = matches!(existing, Some(Prop::Accessor { .. }));
+        if existing.is_some() && !old_configurable {
+            if configurable == Some(true)
+                || enumerable.is_some_and(|value| value != old_enumerable)
+                || (accessor && !old_accessor)
+                || (data && old_accessor)
             {
                 return Err(Thrown::type_error("Cannot redefine property"));
             }
+            match &existing {
+                Some(Prop::DataDescriptor {
+                    value: previous,
+                    writable: false,
+                    ..
+                }) if writable == Some(true)
+                    || value
+                        .as_ref()
+                        .is_some_and(|value| !same_value(value, previous)) =>
+                {
+                    return Err(Thrown::type_error("Cannot redefine property"));
+                }
+                Some(Prop::Accessor {
+                    get: previous_get,
+                    set: previous_set,
+                    ..
+                }) => {
+                    let getter_changed = get.as_ref().is_some_and(|get| {
+                        !same_value(get, previous_get.as_ref().unwrap_or(&Js::Undefined))
+                    });
+                    let setter_changed = set.as_ref().is_some_and(|set| {
+                        !same_value(set, previous_set.as_ref().unwrap_or(&Js::Undefined))
+                    });
+                    if getter_changed || setter_changed {
+                        return Err(Thrown::type_error("Cannot redefine property"));
+                    }
+                }
+                _ => {}
+            }
         }
-        props.borrow_mut().insert(
-            key.into(),
-            Prop::DataDescriptor {
-                value: value.unwrap_or(old_value),
-                writable: writable.unwrap_or(old_writable),
+        let next = if accessor || (old_accessor && !data) {
+            let (previous_get, previous_set) = match existing {
+                Some(Prop::Accessor { get, set, .. }) => (get, set),
+                _ => (None, None),
+            };
+            Prop::Accessor {
+                get: get
+                    .map(|value| (!value.is_undefined()).then_some(value))
+                    .unwrap_or(previous_get),
+                set: set
+                    .map(|value| (!value.is_undefined()).then_some(value))
+                    .unwrap_or(previous_set),
                 enumerable: enumerable.unwrap_or(old_enumerable),
                 configurable: configurable.unwrap_or(old_configurable),
-            },
-        );
+            }
+        } else {
+            let (previous_value, previous_writable) = match existing {
+                Some(Prop::Data(value)) => (value, true),
+                Some(Prop::DataDescriptor {
+                    value, writable, ..
+                }) => (value, writable),
+                _ => (Js::Undefined, false),
+            };
+            Prop::DataDescriptor {
+                value: value.unwrap_or(previous_value),
+                writable: writable.unwrap_or(previous_writable),
+                enumerable: enumerable.unwrap_or(old_enumerable),
+                configurable: configurable.unwrap_or(old_configurable),
+            }
+        };
+        props.borrow_mut().insert(key.into(), next);
         Ok(())
     }
     fn has_property(&self, key: &[u16]) -> bool {
@@ -1108,9 +1448,22 @@ impl Js {
     }
     pub fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
         if let Some(props) = self.own_props() {
-            props
-                .borrow_mut()
-                .insert(utf16(key), Prop::Accessor(getter, setter));
+            let get = getter.map(|get| Js::function("get", move |this, _| get(&this)));
+            let set = setter.map(|set| {
+                Js::function("set", move |this, args| {
+                    set(&this, arg(&args, 0))?;
+                    Ok(Js::Undefined)
+                })
+            });
+            props.borrow_mut().insert(
+                utf16(key),
+                Prop::Accessor {
+                    get,
+                    set,
+                    enumerable: true,
+                    configurable: true,
+                },
+            );
         }
     }
     pub fn delete(&self, key: &[u16]) {
@@ -1126,10 +1479,15 @@ impl Js {
                 if let Some(props) = self.own_props() {
                     if !matches!(
                         props.borrow().get(key),
-                        Some(Prop::DataDescriptor {
-                            configurable: false,
-                            ..
-                        })
+                        Some(
+                            Prop::DataDescriptor {
+                                configurable: false,
+                                ..
+                            } | Prop::Accessor {
+                                configurable: false,
+                                ..
+                            }
+                        )
                     ) {
                         props.borrow_mut().shift_remove(key);
                     }
@@ -1166,6 +1524,9 @@ impl Js {
                         !matches!(
                             p,
                             Prop::DataDescriptor {
+                                enumerable: false,
+                                ..
+                            } | Prop::Accessor {
                                 enumerable: false,
                                 ..
                             }
@@ -1285,7 +1646,17 @@ impl Js {
                     if let Js::String(target_name) = target_name {
                         name.extend_from_slice(&target_name);
                     }
+                    let construct = this.is_constructor().then(|| Construct::Bound {
+                        target: this.clone(),
+                        args: bound_args.clone(),
+                    });
+                    let realm = match &this {
+                        Js::Function(function) => function.realm.clone(),
+                        Js::Builtin(reference) => reference.realm().clone(),
+                        _ => unreachable!(),
+                    };
                     Ok(Js::Function(Rc::new(FunctionData {
+                        extensible: Cell::new(true),
                         name: name.into(),
                         call: Rc::new(move |_, args| {
                             let mut combined = bound_args.clone();
@@ -1294,6 +1665,8 @@ impl Js {
                         }),
                         props: RefCell::default(),
                         proto: RefCell::new(proto),
+                        construct,
+                        realm,
                     })))
                 }
                 safe_cex_num::BuiltinIdentity::FunctionMethod(
