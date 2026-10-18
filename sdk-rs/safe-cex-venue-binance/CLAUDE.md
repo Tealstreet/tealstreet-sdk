@@ -141,6 +141,12 @@ Public websocket subscription helpers snapshot shared JS own-key order and read
 each count immediately before sending. Native-count callbacks preserve NaN and
 infinities; nonnumeric counts are None. Bind the fallible send callback to the
 core socket when composing classes. Send errors abort the remaining keys.
+All five concrete PublicState kinds use subscribe_binance_public and its private
+encoder. Keep the live-source cases on that actual shared route; do not recreate
+unused family-named forwarding wrappers. The native subscription receipt test
+opens every kind with native_dependencies and checks outgoing bytes, reentry and
+send failure. See PUBLIC_SUBSCRIPTION_REVIEW.md for individual classifications
+and compiled body controls.
 
 Public onOpen bodies use BaseWebSocket send/reset rather than local socket or
 orderbook replicas. Market variants keep their books; public/Spot variants reset
@@ -600,6 +606,13 @@ Futures/PM overlay witness checks signed bracket requests, Store publication and
 unchanged market fields. `scripts/account-leverage-alias-contracts.mjs` measures
 their actual native traits with the maintained authenticated compiler context.
 
+The two `margin_mode` free functions are typed asynchronous commands, with exact
+compiler API classifications rather than decoder-admission claims. Their separate
+production-function witnesses in `margin_mode` and `margin_dispose` compare 64
+maintained source cases and poll both futures margin modes across a pending POST.
+Run the canonical accepted-set `--measure --module=margin_mode` for classification
+receipts; those receipts do not execute the commands or cover arbitrary JS inputs.
+
 ### Position snapshot callback alias receipts
 
 `position_snapshots::{Emit,Log}` are executable capabilities captured from the
@@ -669,6 +682,19 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+
+The private REST `SnapshotCall` capture preserves each source console argument
+as a native value and forwards the explicit log severity. Caught errors use the
+canonical `Thrown` materialization, so their name/message reach the console sink
+as an Error rather than a message string. `snapshot_call_binding` in the native
+`private_classes` target executes actual signed order requests and observes the
+captured severity, original data bits/presence and caught Error before projection.
+`scripts/snapshot-call-controls.py` independently corrupts those three production
+forwarding paths, requires compiled named assertion failures and exact-restoration
+passes. `scripts/snapshot-call-alias-contracts.mjs` authenticates fresh compiler
+metadata and checks only the selected alias classification; it does not replace
+the native callback execution witnesses or classify the continuation aliases.
 
 The public ticker handlers consume canonical native EventArray values from the
 constructed public classes. The old PublicEvent/PublicEvents JSON adapter and its
@@ -743,3 +769,12 @@ distinguishes transport rejection from malformed fulfilled-body validation.
 `scripts/snapshot-rejection-fixture-control.py` compiles the old fulfilled fixture,
 requires that assertion to fail and restores the genuine rejection path. This is
 a fixture-semantics check, separate from the two production continuation controls.
+
+The legacy `public_message`, `private_message`, `spot_public_message` and
+`public_candle_delegate` callback extractions have no production callers and were
+removed with `message_entry` and its standalone oracle/control receipts. All
+nine mapped source members retain their existing concrete native class bodies.
+Use `private_classes --features native` for actual native private frame/Store,
+public ticker generations, candle delegation/cleanup and depth recovery proofs.
+Registry/N-API construction reaches those concrete classes. The current wasm FFI
+exports only `parity_probe`/`version`, with no legacy message entry.

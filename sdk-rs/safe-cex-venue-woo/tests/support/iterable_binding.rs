@@ -132,22 +132,26 @@ fn woo_host_array_pattern_elisions_skip_value_and_step_errors_do_not_close() {
         let thrown = original.clone();
         let result = Js::object(vec![]);
         let done_error = original.clone();
-        result.define_accessor(
-            "done",
-            Some(Rc::new(move |_| {
-                if phase == "done" {
-                    Err(Thrown::new(done_error.clone()))
-                } else {
-                    Ok(Js::Bool(false))
-                }
-            })),
-            None,
-        );
-        result.define_accessor(
-            "value",
-            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
-            None,
-        );
+        result
+            .define_accessor(
+                "done",
+                Some(Rc::new(move |_| {
+                    if phase == "done" {
+                        Err(Thrown::new(done_error.clone()))
+                    } else {
+                        Ok(Js::Bool(false))
+                    }
+                })),
+                None,
+            )
+            .expect("fresh test accessor target");
+        result
+            .define_accessor(
+                "value",
+                Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+                None,
+            )
+            .expect("fresh test accessor target");
         let next_error = original.clone();
         values
             .define(

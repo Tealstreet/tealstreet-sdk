@@ -1,12 +1,12 @@
 {
   "safe-cex-venue-okx/src/binding/ops.rs::LOCAL_FUNCTION:by_id": {
     "category": "non-decoder",
-    "reason": "Inside map_position host assembly: reads the existing native Store marketsById property using the supplied id coerced to a JS key. It returns the existing Js reference and performs no market construction or schema validation. Reviewed runtime-aware Promise.all composition in 9b6cf7e01e: eager callback startup and ordered settlement now use the exchange runtime; the nested Store lookup body is unchanged. Reviewed amendment-presence change: mutation_ops now delegates to the existing shared fallible in_operator so inherited fields and primitive RHS errors match source; this separate nested Store lookup is unchanged.",
-    "sourceSha256": "95b6b29d422d9d27273155d16ff5092d3afb7664d2fce00b858b2f79f0af60f2"
+    "reason": "Inside map_position host assembly: reads the existing native Store marketsById property using the supplied id coerced to a JS key. It returns the existing Js reference and performs no market construction or schema validation. Reviewed runtime-aware Promise.all composition in 9b6cf7e01e: eager callback startup and ordered settlement now use the exchange runtime; the nested Store lookup body is unchanged. Reviewed amendment-presence change: mutation_ops now delegates to the existing shared fallible in_operator so inherited fields and primitive RHS errors match source; this separate nested Store lookup is unchanged. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",
+    "sourceSha256": "97a300ac751fc029613e54d8721ff67464422ec7639be0fe645fd01bfc829051"
   },
   "safe-cex-venue-okx/src/binding/typed_members.rs::LOCAL_FUNCTION:read": {
     "category": "non-decoder",
-    "reason": "Inside price_loads: snapshots the existing native Set state as UTF-16 key units for the typed price-load membership operation, returning empty for a non-Set receiver. This projects VM bookkeeping state, not raw JSON into an exchange/domain model.",
-    "sourceSha256": "148a96a9802f79dc0f34f323dbf9575bfea1c4b51cfb7fe12d292ec7ea337e84"
+    "reason": "Inside price_loads: snapshots the existing native Set state as UTF-16 key units for the typed price-load membership operation, returning empty for a non-Set receiver. This projects VM bookkeeping state, not raw JSON into an exchange/domain model. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",
+    "sourceSha256": "0f14cbb3fadd9e2da71ba5d6a4c865d69951b4dfe47fe7a9df4aed23bf8b1ed0"
   }
 }

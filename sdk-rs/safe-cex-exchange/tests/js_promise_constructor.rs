@@ -216,22 +216,24 @@ fn constructor_resolves_thenables_after_return_with_live_getter_and_first_call_r
         let thenable = Js::object(vec![]);
         let expected_this = thenable.clone();
         let calls = trace.clone();
-        thenable.define_accessor(
-            "then",
-            Some(Rc::new(move |_| {
-                calls.borrow_mut().push("get then");
-                let calls = calls.clone();
-                let expected_this = expected_this.clone();
-                Ok(Js::function("then", move |this, args| {
-                    assert!(this.same_reference(&expected_this));
-                    calls.borrow_mut().push("call then");
-                    arg(&args, 0).call(Js::Undefined, vec![Js::Number(11.)])?;
-                    arg(&args, 1).call(Js::Undefined, vec![Js::str("ignored")])?;
-                    Err(Thrown::new(Js::str("also ignored")))
-                }))
-            })),
-            None,
-        );
+        thenable
+            .define_accessor(
+                "then",
+                Some(Rc::new(move |_| {
+                    calls.borrow_mut().push("get then");
+                    let calls = calls.clone();
+                    let expected_this = expected_this.clone();
+                    Ok(Js::function("then", move |this, args| {
+                        assert!(this.same_reference(&expected_this));
+                        calls.borrow_mut().push("call then");
+                        arg(&args, 0).call(Js::Undefined, vec![Js::Number(11.)])?;
+                        arg(&args, 1).call(Js::Undefined, vec![Js::str("ignored")])?;
+                        Err(Thrown::new(Js::str("also ignored")))
+                    }))
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
         let calls = trace.clone();
         let promise = construct(
             &scope,
@@ -289,11 +291,13 @@ fn constructor_rejects_self_resolution_and_preserves_then_getter_error() {
         let error = Js::object(vec![("marker", Js::str("get then throws"))]);
         let thrown = error.clone();
         let thenable = Js::object(vec![]);
-        thenable.define_accessor(
-            "then",
-            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
-            None,
-        );
+        thenable
+            .define_accessor(
+                "then",
+                Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+                None,
+            )
+            .expect("test accessor target permits definition");
         let promise = construct(
             &scope,
             Js::function("executor", move |_, args| {

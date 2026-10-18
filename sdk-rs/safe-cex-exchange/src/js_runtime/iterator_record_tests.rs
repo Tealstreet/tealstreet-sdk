@@ -58,20 +58,23 @@ fn installed_array_from_does_not_close_on_iterator_value_failure() {
                         })
                     })),
                     None,
-                );
+                )
+                .expect("test accessor target permits definition");
             }
             Ok(step)
         });
         let iterator = Js::object(vec![]);
         let events = trace.clone();
-        iterator.define_accessor(
-            "next",
-            Some(Rc::new(move |_| {
-                events.borrow_mut().push("getNext");
-                Ok(next.clone())
-            })),
-            None,
-        );
+        iterator
+            .define_accessor(
+                "next",
+                Some(Rc::new(move |_| {
+                    events.borrow_mut().push("getNext");
+                    Ok(next.clone())
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
         let events = trace.clone();
         let Js::Object(data) = &iterator else {
             unreachable!()
@@ -178,55 +181,62 @@ fn record_elisions_cached_next_and_normal_close_match_node() {
                         }
                     })),
                     None,
-                );
+                )
+                .expect("test accessor target permits definition");
             }
             Ok(step)
         });
         let events = trace.clone();
-        iterator.define_accessor(
-            "next",
-            Some(Rc::new(move |_| {
-                events.borrow_mut().push("getNext".into());
-                Ok(next.clone())
-            })),
-            None,
-        );
+        iterator
+            .define_accessor(
+                "next",
+                Some(Rc::new(move |_| {
+                    events.borrow_mut().push("getNext".into());
+                    Ok(next.clone())
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
         let events = trace.clone();
         let close_mode = mode.clone();
         let failure = cleanup.clone();
-        iterator.define_accessor(
-            "return",
-            Some(Rc::new(move |this| {
-                events.borrow_mut().push("getReturn".into());
-                match close_mode.as_str() {
-                    "getThrow" => Err(Thrown::new(failure.clone())),
-                    "undefined" => Ok(Js::Undefined),
-                    "number" => Ok(Js::Number(7.0)),
-                    "class" => Ok(Js::constructor("Return", None, |_, _| {
-                        Ok(Js::object(vec![]))
-                    })),
-                    _ => {
-                        let Js::Object(data) = this else {
-                            unreachable!()
-                        };
-                        let receiver = Rc::downgrade(data);
-                        let events = events.clone();
-                        let close_mode = close_mode.clone();
-                        let failure = failure.clone();
-                        Ok(Js::function("return", move |this, _| {
-                            assert!(this.same_reference(&Js::Object(receiver.upgrade().unwrap())));
-                            events.borrow_mut().push("return".into());
-                            match close_mode.as_str() {
-                                "throw" => Err(Thrown::new(failure.clone())),
-                                "object" => Ok(Js::object(vec![])),
-                                _ => Ok(Js::Number(7.0)),
-                            }
-                        }))
+        iterator
+            .define_accessor(
+                "return",
+                Some(Rc::new(move |this| {
+                    events.borrow_mut().push("getReturn".into());
+                    match close_mode.as_str() {
+                        "getThrow" => Err(Thrown::new(failure.clone())),
+                        "undefined" => Ok(Js::Undefined),
+                        "number" => Ok(Js::Number(7.0)),
+                        "class" => Ok(Js::constructor("Return", None, |_, _| {
+                            Ok(Js::object(vec![]))
+                        })),
+                        _ => {
+                            let Js::Object(data) = this else {
+                                unreachable!()
+                            };
+                            let receiver = Rc::downgrade(data);
+                            let events = events.clone();
+                            let close_mode = close_mode.clone();
+                            let failure = failure.clone();
+                            Ok(Js::function("return", move |this, _| {
+                                assert!(
+                                    this.same_reference(&Js::Object(receiver.upgrade().unwrap()))
+                                );
+                                events.borrow_mut().push("return".into());
+                                match close_mode.as_str() {
+                                    "throw" => Err(Thrown::new(failure.clone())),
+                                    "object" => Ok(Js::object(vec![])),
+                                    _ => Ok(Js::Number(7.0)),
+                                }
+                            }))
+                        }
                     }
-                }
-            })),
-            None,
-        );
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
         let iterable = Js::object(vec![]);
         let Js::Object(data) = &iterable else {
             unreachable!()

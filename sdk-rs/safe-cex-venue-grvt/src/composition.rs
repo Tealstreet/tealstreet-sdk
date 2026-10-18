@@ -85,7 +85,11 @@ pub trait CompositionHost: SigningHost {
         store: Self::Value,
     ) -> JsResult<Self::Value>;
     fn base_socket(&self, parent: Self::Value) -> JsResult<Self::Value>;
-    fn attach_fields(&self, instance: &Self::Value, fields: Fields<Self::Value>);
+    fn attach_fields(
+        &self,
+        instance: &Self::Value,
+        fields: Fields<Self::Value>,
+    ) -> JsResult<Self::Value, ()>;
     fn rule_value(&self, rule: Rc<ClientOrderIdRule>) -> Self::Value;
     fn nonce_ids_view(&self, ids: NonceIds) -> Self::Value;
     fn nonce_times_view(&self, times: NonceTimes) -> Self::Value;
@@ -252,7 +256,7 @@ pub fn new_exchange<H: CompositionHost>(
 ) -> JsResult<H::Value, GrvtExchange<H::Value>> {
     let base = h.base_exchange(name, opts.clone(), store)?;
     let fields = Rc::new(RefCell::new(IndexMap::new()));
-    h.attach_fields(&base, fields.clone());
+    h.attach_fields(&base, fields.clone())?;
     let rule = Rc::new(ClientOrderIdRule);
     let rule_value = h.rule_value(rule.clone());
     fields.borrow_mut().insert("clientOrderIdRule", rule_value);
@@ -424,7 +428,7 @@ pub fn new_public_socket<H: CompositionHost>(
 ) -> JsResult<H::Value, GrvtPublicWebSocket<H::Value, H::Timer>> {
     let base = h.base_socket(parent.clone())?;
     let fields = Rc::new(RefCell::new(IndexMap::new()));
-    h.attach_fields(&base, fields.clone());
+    h.attach_fields(&base, fields.clone())?;
     let state = Rc::new(PublicSubscriptions::default());
     for key in [
         "subscriptions",
@@ -456,7 +460,7 @@ pub fn new_private_socket<H: CompositionHost>(
 ) -> JsResult<H::Value, GrvtPrivateWebSocket<H::Value, H::PrivateTimer, H::FillKey>> {
     let base = h.base_socket(parent.clone())?;
     let fields = Rc::new(RefCell::new(IndexMap::new()));
-    h.attach_fields(&base, fields.clone());
+    h.attach_fields(&base, fields.clone())?;
     let state = Rc::new(PrivateCommands::default());
     for key in [
         "reportedMissingProxyHost",
