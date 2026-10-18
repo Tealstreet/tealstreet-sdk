@@ -11,6 +11,13 @@ fn table<T: serde::Serialize>(rows: &[(&str, T)]) -> Result<Js, Thrown> {
 }
 
 pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
+    globals.define(
+        "OrderRejectReason",
+        Js::object(vec![(
+            "PostOnly",
+            from_typed(&safe_cex_types::OrderRejectReason::PostOnly)?,
+        )]),
+    )?;
     globals.define("RECV_WINDOW", Js::Number(RECV_WINDOW))?;
     globals.define("BASE_URL", table(BASE_URL)?)?;
     globals.define("BASE_WS_URL", table(BASE_WS_URL)?)?;
