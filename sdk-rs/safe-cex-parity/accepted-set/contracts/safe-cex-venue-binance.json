@@ -15222,5 +15222,1157 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::orderbook::BinanceDepthUpdate": {
+    "category": "decoder",
+    "shape": "map",
+    "target": {
+      "resolved_path": {
+        "path": "serde_json::map::Map",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "sample": {
+      "U": 11,
+      "u": 12,
+      "b": [
+        [
+          "100",
+          "2"
+        ]
+      ],
+      "a": [
+        [
+          "101",
+          "3"
+        ]
+      ]
+    },
+    "evidence": "The live inverse Depth::apply captures this exact map alias and calls apply_binance_depth_update; its buffer calls get_buffered_binance_depth_updates. Ordinary native alias trait probes establish actual map admission. These two observations read every decoded member, key, ordered row, UTF16 unit and numeric bit before transport; inverse_socket_binding::depth_buffers_snapshot_requires_previous_id_and_resyncs_gap executes the actual constructed socket/HTTP/Store sequence. This does not widen the existing UTF8 JSON frame profile.",
+    "entrypoints": [
+      {
+        "trait": "FromStr",
+        "reason": "The exact serde_json Map alias implements FromStr; execute the parser directly over both raw object strings and reject primitive/array/malformed strings.",
+        "positive": [
+          "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"🚀\"},\"note\":null}",
+          "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"é\"]}"
+        ],
+        "negative": [
+          "[]",
+          "null",
+          "\"text\"",
+          "true",
+          "7",
+          "{"
+        ],
+        "nativeCases": [
+          {
+            "input": "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"🚀\"},\"note\":null}",
+            "output": [
+              "object",
+              7,
+              [
+                [
+                  [
+                    85
+                  ],
+                  [
+                    "number",
+                    "4026000000000000"
+                  ]
+                ],
+                [
+                  [
+                    117
+                  ],
+                  [
+                    "number",
+                    "4028000000000000"
+                  ]
+                ],
+                [
+                  [
+                    112,
+                    117
+                  ],
+                  [
+                    "number",
+                    "4024000000000000"
+                  ]
+                ],
+                [
+                  [
+                    98
+                  ],
+                  [
+                    "array",
+                    2,
+                    [
+                      [
+                        "array",
+                        2,
+                        [
+                          [
+                            "text",
+                            [
+                              49,
+                              48,
+                              48
+                            ]
+                          ],
+                          [
+                            "text",
+                            [
+                              50
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "array",
+                        2,
+                        [
+                          [
+                            "text",
+                            [
+                              57,
+                              57
+                            ]
+                          ],
+                          [
+                            "text",
+                            [
+                              48
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    97
+                  ],
+                  [
+                    "array",
+                    2,
+                    [
+                      [
+                        "array",
+                        2,
+                        [
+                          [
+                            "text",
+                            [
+                              49,
+                              48,
+                              49
+                            ]
+                          ],
+                          [
+                            "text",
+                            [
+                              51
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "array",
+                        2,
+                        [
+                          [
+                            "text",
+                            [
+                              49,
+                              48,
+                              50
+                            ]
+                          ],
+                          [
+                            "text",
+                            [
+                              52
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    111,
+                    112,
+                    97,
+                    113,
+                    117,
+                    101
+                  ],
+                  [
+                    "object",
+                    3,
+                    [
+                      [
+                        [
+                          110,
+                          101,
+                          103
+                        ],
+                        [
+                          "number",
+                          "8000000000000000"
+                        ]
+                      ],
+                      [
+                        [
+                          104,
+                          117,
+                          103,
+                          101
+                        ],
+                        [
+                          "number",
+                          "7ff0000000000000"
+                        ]
+                      ],
+                      [
+                        [
+                          116,
+                          97,
+                          103
+                        ],
+                        [
+                          "text",
+                          [
+                            55357,
+                            56960
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    110,
+                    111,
+                    116,
+                    101
+                  ],
+                  [
+                    "null"
+                  ]
+                ]
+              ]
+            ]
+          },
+          {
+            "input": "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"é\"]}",
+            "output": [
+              "object",
+              5,
+              [
+                [
+                  [
+                    85
+                  ],
+                  [
+                    "text",
+                    [
+                      50,
+                      49
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    117
+                  ],
+                  [
+                    "number",
+                    "4036000000000000"
+                  ]
+                ],
+                [
+                  [
+                    98
+                  ],
+                  [
+                    "array",
+                    1,
+                    [
+                      [
+                        "array",
+                        2,
+                        [
+                          [
+                            "text",
+                            [
+                              50,
+                              48,
+                              48,
+                              46,
+                              53
+                            ]
+                          ],
+                          [
+                            "text",
+                            [
+                              45,
+                              49
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    97
+                  ],
+                  [
+                    "array",
+                    0,
+                    []
+                  ]
+                ],
+                [
+                  [
+                    111,
+                    112,
+                    97,
+                    113,
+                    117,
+                    101
+                  ],
+                  [
+                    "array",
+                    4,
+                    [
+                      [
+                        "bool",
+                        true
+                      ],
+                      [
+                        "null"
+                      ],
+                      [
+                        "number",
+                        "0000000000000000"
+                      ],
+                      [
+                        "text",
+                        [
+                          101,
+                          769
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "TryFrom<Map>",
+        "reason": "The blanket identity conversion accepts owned maps; the maintained adapter rejects every non-map input before conversion.",
+        "positive": [
+          {
+            "u": 7,
+            "b": [
+              [
+                "1",
+                "2"
+              ]
+            ],
+            "extra": null
+          },
+          {
+            "U": 9,
+            "a": [],
+            "nested": {
+              "flag": true,
+              "text": "x"
+            }
+          }
+        ],
+        "negative": [
+          null,
+          false,
+          4,
+          "x",
+          []
+        ],
+        "nativeCases": [
+          {
+            "input": {
+              "u": 7,
+              "b": [
+                [
+                  "1",
+                  "2"
+                ]
+              ],
+              "extra": null
+            },
+            "output": [
+              "object",
+              3,
+              [
+                [
+                  [
+                    117
+                  ],
+                  [
+                    "number",
+                    "401c000000000000"
+                  ]
+                ],
+                [
+                  [
+                    98
+                  ],
+                  [
+                    "array",
+                    1,
+                    [
+                      [
+                        "array",
+                        2,
+                        [
+                          [
+                            "text",
+                            [
+                              49
+                            ]
+                          ],
+                          [
+                            "text",
+                            [
+                              50
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    101,
+                    120,
+                    116,
+                    114,
+                    97
+                  ],
+                  [
+                    "null"
+                  ]
+                ]
+              ]
+            ]
+          },
+          {
+            "input": {
+              "U": 9,
+              "a": [],
+              "nested": {
+                "flag": true,
+                "text": "x"
+              }
+            },
+            "output": [
+              "object",
+              3,
+              [
+                [
+                  [
+                    85
+                  ],
+                  [
+                    "number",
+                    "4022000000000000"
+                  ]
+                ],
+                [
+                  [
+                    97
+                  ],
+                  [
+                    "array",
+                    0,
+                    []
+                  ]
+                ],
+                [
+                  [
+                    110,
+                    101,
+                    115,
+                    116,
+                    101,
+                    100
+                  ],
+                  [
+                    "object",
+                    2,
+                    [
+                      [
+                        [
+                          102,
+                          108,
+                          97,
+                          103
+                        ],
+                        [
+                          "bool",
+                          true
+                        ]
+                      ],
+                      [
+                        [
+                          116,
+                          101,
+                          120,
+                          116
+                        ],
+                        [
+                          "text",
+                          [
+                            120
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        ]
+      }
+    ],
+    "observation": {
+      "call": "{ mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-stream-alias-observers.rs\")); } let decoded:$type=serde_json::from_str($value[\"wire\"].as_str().unwrap()).unwrap(); witness::depth(&decoded) }",
+      "cases": [
+        {
+          "input": {
+            "wire": "{\"U\":11,\"u\":12,\"pu\":10,\"b\":[[\"100\",\"2\"],[\"99\",\"0\"]],\"a\":[[\"101\",\"3\"],[\"102\",\"4\"]],\"opaque\":{\"neg\":-0.0,\"huge\":1e400,\"tag\":\"🚀\"},\"note\":null}"
+          },
+          "output": [
+            "object",
+            7,
+            [
+              [
+                [
+                  85
+                ],
+                [
+                  "number",
+                  "4026000000000000"
+                ]
+              ],
+              [
+                [
+                  117
+                ],
+                [
+                  "number",
+                  "4028000000000000"
+                ]
+              ],
+              [
+                [
+                  112,
+                  117
+                ],
+                [
+                  "number",
+                  "4024000000000000"
+                ]
+              ],
+              [
+                [
+                  98
+                ],
+                [
+                  "array",
+                  2,
+                  [
+                    [
+                      "array",
+                      2,
+                      [
+                        [
+                          "text",
+                          [
+                            49,
+                            48,
+                            48
+                          ]
+                        ],
+                        [
+                          "text",
+                          [
+                            50
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "array",
+                      2,
+                      [
+                        [
+                          "text",
+                          [
+                            57,
+                            57
+                          ]
+                        ],
+                        [
+                          "text",
+                          [
+                            48
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ],
+              [
+                [
+                  97
+                ],
+                [
+                  "array",
+                  2,
+                  [
+                    [
+                      "array",
+                      2,
+                      [
+                        [
+                          "text",
+                          [
+                            49,
+                            48,
+                            49
+                          ]
+                        ],
+                        [
+                          "text",
+                          [
+                            51
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "array",
+                      2,
+                      [
+                        [
+                          "text",
+                          [
+                            49,
+                            48,
+                            50
+                          ]
+                        ],
+                        [
+                          "text",
+                          [
+                            52
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ],
+              [
+                [
+                  111,
+                  112,
+                  97,
+                  113,
+                  117,
+                  101
+                ],
+                [
+                  "object",
+                  3,
+                  [
+                    [
+                      [
+                        110,
+                        101,
+                        103
+                      ],
+                      [
+                        "number",
+                        "8000000000000000"
+                      ]
+                    ],
+                    [
+                      [
+                        104,
+                        117,
+                        103,
+                        101
+                      ],
+                      [
+                        "number",
+                        "7ff0000000000000"
+                      ]
+                    ],
+                    [
+                      [
+                        116,
+                        97,
+                        103
+                      ],
+                      [
+                        "text",
+                        [
+                          55357,
+                          56960
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ],
+              [
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ],
+                [
+                  "null"
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "input": {
+            "wire": "{\"U\":\"21\",\"u\":22,\"b\":[[\"200.5\",\"-1\"]],\"a\":[],\"opaque\":[true,null,0.0,\"é\"]}"
+          },
+          "output": [
+            "object",
+            5,
+            [
+              [
+                [
+                  85
+                ],
+                [
+                  "text",
+                  [
+                    50,
+                    49
+                  ]
+                ]
+              ],
+              [
+                [
+                  117
+                ],
+                [
+                  "number",
+                  "4036000000000000"
+                ]
+              ],
+              [
+                [
+                  98
+                ],
+                [
+                  "array",
+                  1,
+                  [
+                    [
+                      "array",
+                      2,
+                      [
+                        [
+                          "text",
+                          [
+                            50,
+                            48,
+                            48,
+                            46,
+                            53
+                          ]
+                        ],
+                        [
+                          "text",
+                          [
+                            45,
+                            49
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ],
+              [
+                [
+                  97
+                ],
+                [
+                  "array",
+                  0,
+                  []
+                ]
+              ],
+              [
+                [
+                  111,
+                  112,
+                  97,
+                  113,
+                  117,
+                  101
+                ],
+                [
+                  "array",
+                  4,
+                  [
+                    [
+                      "bool",
+                      true
+                    ],
+                    [
+                      "null"
+                    ],
+                    [
+                      "number",
+                      "0000000000000000"
+                    ],
+                    [
+                      "text",
+                      [
+                        101,
+                        769
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    "nativeProjection": "{ mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-stream-alias-observers.rs\")); } witness::depth($decoded) }"
+  },
+  "safe_cex_venue_binance::public_ticker_events::Failure": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::runtime::ExchangeError",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "The Rc holds a native ExchangeError, including its cause and origin; ExchangeError has no Deserialize implementation. This alias propagates a source failure rather than decoding raw input.",
+    "evidence": "public_ticker_events::parse_field and the live handlers propagate the original native error to public_classes; private_classes::production_ticker_coercion_ and production_depth_binding_preserves_the_source_type_error_and_recovers exercise assembled NativeImports/socket/Store paths.",
+    "entrypoints": []
+  },
+  "safe_cex_venue_binance::public_ticker_events::TickerFields": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::public_ticker_events::TickerField",
+                        "args": null
+                      }
+                    },
+                    {
+                      "primitive": "f64"
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "The Vec stores already-coerced (TickerField,f64) patches. TickerField has no Deserialize implementation; raw field reads/coercions occur before constructing this ordered patch.",
+    "evidence": "public_ticker_events live handlers publish ordered fields into public_classes::handle_stream Store updates. The three production_ticker_coercion_ native constructor tests compare all native numeric fields against maintained TS.",
+    "entrypoints": []
+  },
+  "safe_cex_venue_binance::public_dispatch::CallbackList": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "dyn_trait": {
+                                                        "traits": [
+                                                          {
+                                                            "trait": {
+                                                              "path": "core::ops::function::Fn",
+                                                              "args": {
+                                                                "parenthesized": {
+                                                                  "inputs": [
+                                                                    {
+                                                                      "resolved_path": {
+                                                                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                                        "args": null
+                                                                      }
+                                                                    }
+                                                                  ],
+                                                                  "output": {
+                                                                    "resolved_path": {
+                                                                      "path": "core::result::Result",
+                                                                      "args": {
+                                                                        "angle_bracketed": {
+                                                                          "args": [
+                                                                            {
+                                                                              "type": {
+                                                                                "tuple": []
+                                                                              }
+                                                                            },
+                                                                            {
+                                                                              "type": {
+                                                                                "resolved_path": {
+                                                                                  "path": "alloc::rc::Rc",
+                                                                                  "args": {
+                                                                                    "angle_bracketed": {
+                                                                                      "args": [
+                                                                                        {
+                                                                                          "type": {
+                                                                                            "resolved_path": {
+                                                                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                                              "args": null
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      ],
+                                                                                      "constraints": []
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          ],
+                                                                          "constraints": []
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            "generic_params": []
+                                                          }
+                                                        ],
+                                                        "lifetime": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "The Rc/RefCell Vec retains executable Parser closures (Rc<dyn Fn>), which cannot deserialize from data. The live inverse dispatcher reads these callbacks during traversal.",
+    "evidence": "inverse/ws_public.rs installs Handler::List callbacks. inverse_socket_binding::public_wire_topics_and_all_three_ticker_streams_reach_real_store exercises the real constructed inverse socket and Store.",
+    "entrypoints": []
+  },
+  "safe_cex_venue_binance::public_dispatch::CoreInvoke": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::websocket::MessageHandler",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "The Rc<dyn Fn(MessageHandler,EventValue)> is an executable adapter captured from the actual public socket, not a decoded payload. Native trait probes must continue to reject Deserialize.",
+    "evidence": "public_classes.rs installs Handler::CoreList and invokes its captured core handler. The three production_ticker_coercion_ tests dispatch real socket frames into the constructed venue Store.",
+    "entrypoints": []
   }
 }
