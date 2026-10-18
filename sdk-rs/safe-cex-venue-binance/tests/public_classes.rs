@@ -46,7 +46,9 @@ impl WsSocket for Socket {
         }
         if self.fail.get() {
             let mut e = ExchangeError::new("fixture send");
-            e.metadata.code = Some(json!("fixture-code"));
+            e.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "fixture-code"
+            )));
             Err(e)
         } else {
             Ok(())

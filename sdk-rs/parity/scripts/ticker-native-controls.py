@@ -5,6 +5,8 @@ import sys
 
 root = Path(__file__).resolve().parents[3]
 cases = {
+    "polymarket-store": ("binding/socket.rs", "exchange_binding", 'Js::object(vec![("id", id.clone())]),', 'id.clone(),'),
+    "polymarket": ("ws_dispatch.rs", "exchange_binding", 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price));', 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price)) + 1.0;'),
     "bitunix": ("sockets.rs", "native_identity", "patch.set_number(*k, *n);", "patch.set_number(*k, if n.is_nan() { 0.0 } else { *n });"),
     "bitrue": ("public_bodies.rs", "exchange_binding", "let last = h.unary_plus(close)?;", "let _original = h.unary_plus(close)?; let last = h.number(0.0);"),
     "apexomni": ("ws_public.rs", "binding", '("p", "last"),', '("mp", "last"),'),
@@ -26,7 +28,7 @@ selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "hyrotrader": "bybit"}.get(venue, venue)
+    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "hyrotrader": "bybit", "polymarket-store": "polymarket"}.get(venue, venue)
     test = {
         "binance": "production_ticker_coercion_",
         "bybit": "production_ticker_coercion_",

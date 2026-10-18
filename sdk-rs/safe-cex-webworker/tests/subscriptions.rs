@@ -172,7 +172,7 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
             url: Some("https://example.invalid/bbo".into()),
             method: Some("POST".into()),
             original_error: Some(json!({"original":"bbo-original"})),
-            code: Some(json!(197)),
+            code: Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197))),
         });
         let original_cause: safe_cex_types::StoreSubscriberError = original.clone().into();
         let thrown = original_cause.clone();

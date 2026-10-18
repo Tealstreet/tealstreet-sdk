@@ -4,8 +4,8 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../../..');
 const { DefaultStore } = require(path.join(root, 'packages/safe-cex/src/store/store.base.ts'));
 const venue = process.argv[2];
-assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'blofin', 'cryptocom', 'coinbase', 'binance', 'binancepm', 'binancespot', 'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'].includes(venue), `unsupported ticker corpus ${venue}`);
-const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', blofin: 'BlofinExchange', cryptocom: 'CryptocomExchange', coinbase: 'CoinbaseExchange', binance: 'BinanceExchange', binancepm: 'BinancePMExchange', binancespot: 'BinanceSpotExchange', bybit: 'BybitExchange', bybitdemo: 'BybitExchange', bybitinverse: 'BybitInverseExchange', bybitspot: 'BybitSpotExchange', hyrotrader: 'HyrotraderExchange' }[venue];
+assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'blofin', 'cryptocom', 'coinbase', 'binance', 'binancepm', 'binancespot', 'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader', 'polymarket'].includes(venue), `unsupported ticker corpus ${venue}`);
+const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', blofin: 'BlofinExchange', cryptocom: 'CryptocomExchange', coinbase: 'CoinbaseExchange', binance: 'BinanceExchange', binancepm: 'BinancePMExchange', binancespot: 'BinanceSpotExchange', bybit: 'BybitExchange', bybitdemo: 'BybitExchange', bybitinverse: 'BybitInverseExchange', bybitspot: 'BybitSpotExchange', hyrotrader: 'HyrotraderExchange', polymarket: 'PolymarketExchange' }[venue];
 const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid', binancepm: 'binance', binancespot: 'binance', bybitdemo: 'bybit', bybitinverse: 'bybit', bybitspot: 'bybit', hyrotrader: 'bybit' }[venue] || venue;
 const Exchange = require(path.join(root, `packages/safe-cex/src/exchanges/${directory}/${venue === 'bybitdemo' ? 'bybit' : venue}.exchange.ts`))[name];
 const fields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'volume', 'quoteVolume', 'fundingRate', 'fundingTime', 'openInterest'];
@@ -13,8 +13,8 @@ if (venue.startsWith('hyperliquid')) fields.push('midPrice');
 const store = new DefaultStore();
 const symbols = ['BTC', 'ETH', 'ADA'];
 const tickers = symbols.map(asset => ({
-  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), blofin: `${asset}-USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT` }[venue],
-  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, blofin: `${asset}USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT` }[venue],
+  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), blofin: `${asset}-USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT`, polymarket: `${asset}-token` }[venue],
+  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, blofin: `${asset}USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT`, polymarket: `${asset}-Yes` }[venue],
   ...Object.fromEntries(fields.map((field, index) => [field, 101 + index])),
 }));
 store.update({ tickers: structuredClone(tickers), markets: tickers.map(t => ({ id: t.id, symbol: t.symbol, ...(venue === 'cryptocom' ? { info: { underlyingSymbol: t.id.split('-')[0] } } : {}) })) });
@@ -55,6 +55,7 @@ function putInput(data, key, value) {
 const bybitInputs = ['bid1Price', 'ask1Price', 'lastPrice', 'markPrice', 'indexPrice', 'price24hPcnt', 'openInterest', 'fundingRate', 'nextFundingTime', 'volume24h', 'turnover24h'];
 const channels = ['bybit', 'bybitdemo'].includes(venue) ? { linear: bybitInputs, inverse: bybitInputs }
   : ['bybitinverse', 'bybitspot', 'hyrotrader'].includes(venue) ? { tickers: bybitInputs }
+  : venue === 'polymarket' ? { price_change: ['best_bid', 'best_ask'], last_trade_price: ['price'] }
   : venue.startsWith('binance') ? { '24hrTicker': ['c', 'P', 'v', 'q'], ...(venue === 'binancespot' ? {} : { markPriceUpdate: ['p', 'i', 'r', 'T'] }), bookTicker: ['b', 'a'] }
   : venue === 'blofin' ? { tickers: ['open24h', 'last', 'bidPrice', 'askPrice', 'volCurrency24h', 'vol24h'], 'funding-rate': ['fundingRate', 'fundingTime'] }
   : venue === 'cryptocom' ? { ticker: ['b', 'k', 'a', 'c', 'v', 'vv', 'oi'], mark: ['v'], index: ['v'], funding: ['v'], book: ['bid', 'ask'] }
@@ -82,6 +83,11 @@ const channels = ['bybit', 'bybitdemo'].includes(venue) ? { linear: bybitInputs,
           const data = { symbol: ticker.symbol, bid1Price: String(29.5 + offset), ask1Price: String(33.75 + offset), lastPrice: String(31.5 + offset), markPrice: String(37.75 + offset), indexPrice: String(38.25 + offset), price24hPcnt: String(.125 + index), openInterest: String(91.25 + offset), fundingRate: String(.0025 + index), nextFundingTime: String(1700000000 + offset), volume24h: String(53.25 + offset), turnover24h: String(1091.75 + offset) };
           if (index === 0) data[key] = value;
           return JSON.stringify({ topic: `tickers.${ticker.symbol}`, type: 'delta', data });
+        }
+        if (venue === 'polymarket') {
+          const data = { asset_id: ticker.id, best_bid: String(29.5 + offset), best_ask: String(33.75 + offset), price: String(31.5 + offset) };
+          if (index === 0) data[key] = value;
+          return channel === 'price_change' ? data : JSON.stringify({ event_type: channel, ...data });
         }
         if (venue.startsWith('binance')) {
           const data = { e: channel, s: ticker.symbol, c: String(31.5 + offset), P: String(.125 + index), v: String(53.25 + offset), q: String(1091.75 + offset), p: String(37.75 + offset), i: String(38.25 + offset), r: String(.0025 + index), T: String(1700000000 + offset), b: String(29.5 + offset), a: String(33.75 + offset) };
@@ -171,6 +177,7 @@ const channels = ['bybit', 'bybitdemo'].includes(venue) ? { linear: bybitInputs,
         } else if (index === 0) data[key] = value;
         return JSON.stringify({ ch: channel, symbol: ticker.symbol, data });
       });
+      if (venue === 'polymarket' && channel === 'price_change') frames = [JSON.stringify({ event_type: channel, price_changes: [frames[1], frames[0], frames[2]] })];
       if (venue.startsWith('binance')) frames = [JSON.stringify([frames[1], frames[0], frames[2]])];
       if (venue === 'coinbase') frames = [JSON.stringify({ channel, events: [{ type: 'update', tickers: [frames[1], frames[0], frames[2]] }] })];
       if (venue === 'lighter' && channel === 'tickers') frames = [JSON.stringify({ channel, data: [frames[1], frames[0], frames[2]] })];
@@ -185,11 +192,17 @@ const channels = ['bybit', 'bybitdemo'].includes(venue) ? { linear: bybitInputs,
         const receiver = ['bybit', 'bybitdemo'].includes(venue) && channel === 'inverse' ? exchange.publicWebsocketSecondary
           : venue === 'bitunix' && channel === 'price' ? exchange.publicWebsocketSecondary
           : venue.startsWith('binance') && venue !== 'binancespot' && channel !== 'bookTicker' ? socket.marketWebsocket : socket;
-        if (venue === 'cryptocom') {
-          const fresh = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture', enableInverseMarkets: ['bybit', 'bybitdemo'].includes(venue) }, store);
-          try { await fresh.publicWebsocket.onMessage({ data: frame }); } finally { fresh.dispose(); }
+        if (['cryptocom', 'polymarket'].includes(venue)) {
+          const fresh = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture' }, store);
+          if (venue === 'polymarket') for (const ticker of tickers) fresh.tokenToSymbol.set(ticker.id, ticker.symbol);
+          try { await fresh.publicWebsocket.onMessage({ data: frame }); } finally {
+            const observedTickers = structuredClone(store.tickers);
+            fresh.dispose();
+            if (venue === 'polymarket') store.update({ tickers: observedTickers });
+          }
         } else await receiver.onMessage({ data: frame });
       }
+      assert.equal(store.tickers.length, 3, 'constructed ticker corpus retains all rows');
       cases.push({ channel, field: key, label, frames, expected: store.tickers.map(ticker => ({
         id: ticker.id, symbol: ticker.symbol,
         fields: Object.fromEntries(fields.map(field => [field, bits(ticker[field])])),

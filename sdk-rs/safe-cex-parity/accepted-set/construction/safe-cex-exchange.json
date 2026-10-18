@@ -1,4 +1,10 @@
 {
+  "safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed js_runtime/value/owned.rs: the private field holds an already captured OwnedJsValue diagnostic tree. Derived Clone recursively copies its owned strings, arrays and object fields without sharing mutable JS referents or creating validation/retry authority. js_runtime::owned_callback_error_clone_preserves_independent_native_metadata observes distinct array storage and retained name/message, NaN payload bits, signed zero, own Undefined and lone UTF-16 units after dropping the original. Actual registry/napi signer-rejection tests independently exercise the production captured diagnostic. Public construction, JS capture refusal and inbound typed decoding retain their separate obligations; no Copy or decoder exemption is granted."
+  },
   "safe_cex_exchange::exchange::SharedExchangeOptions": {
     "traits": [
       "core::clone::Clone"

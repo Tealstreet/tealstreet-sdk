@@ -164,8 +164,10 @@ fn venue(rt: Rc<runtime::Runtime>, events: Rc<RefCell<Vec<Event>>>) -> Rc<dyn Ex
         ex.base().on(
             name,
             Rc::new(move |event, data| {
-                ev.borrow_mut()
-                    .push(Event::Emit(event.into(), data.as_str().unwrap().into()));
+                ev.borrow_mut().push(Event::Emit(
+                    event.into(),
+                    String::from_utf16_lossy(data.as_str().unwrap()),
+                ));
                 Ok(())
             }),
         );
