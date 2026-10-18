@@ -284,13 +284,7 @@ use safe_cex_webworker::{
     ui_state::update_positions_with_leverage,
 };
 use serde_json::json;
-use std::{
-    cell::RefCell,
-    future::Future,
-    pin::pin,
-    rc::Rc,
-    task::{Context, Poll, Waker},
-};
+use std::{cell::RefCell, rc::Rc};
 
 struct Venue {
     base: BaseExchange,
@@ -313,15 +307,6 @@ fn position(leverage: f64) -> Position {
 }
 fn view(data: &StoreData) -> Value {
     json!({"leverage":data.positions.first().map(|p| p.leverage),"orders":data.orders.iter().map(|o|&o.id).collect::<Vec<_>>()})
-}
-fn ready<T>(future: impl Future<Output = T>) -> T {
-    match pin!(future)
-        .as_mut()
-        .poll(&mut Context::from_waker(Waker::noop()))
-    {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("NOTIFICATION expected completed worker call"),
-    }
 }
 #[test]
 fn native_store_notification_reaches_worker_after_committed_mutation() {
@@ -446,11 +431,12 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                             data_trace::post(post),
                             error_post_support::unexpected(),
                         );
-                        ready(handler.handle_call_method(
+                        drop(handler.handle_call_method(
                             "r".into(),
                             "removeOrders".into(),
                             vec![json!([{"id":"o"}])],
                         ));
+                        runtime.advance(10_000);
                     }
                     "leverage" => {
                         let leverage =

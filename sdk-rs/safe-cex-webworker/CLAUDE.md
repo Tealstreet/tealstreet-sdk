@@ -710,6 +710,15 @@ an awaiting caller continues. Posting failures preserve earlier state commits
 and stop later cleanup/removal; tests compare actual source instances before
 polling as well as after settlement.
 
+Chaser placement/completion use the canonical eager Promise driver. Caller waiter
+abandonment cannot cancel late-placement cleanup or fill reconciliation. Typed
+leaf results cross source await checkpoints before logs, retries, fills or events;
+ready, failed, no-op and held results are compared with the actual TS manager.
+
+CallMethod dispatch starts through the canonical eager driver at either entry.
+Ready venue futures yield at the source await before replying; synchronous cases
+reply during entry. Dropping a caller waiter leaves the operation and reply owned
+by the runtime. Runtime teardown keeps the existing guarded cancellation report.
 
 Chaser module composition is scoped per host thread, matching independent worker
 module realms. Eager TS construction and lazy native construction only allocate
