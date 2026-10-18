@@ -89,7 +89,7 @@ pub fn map_bybit_option_instrument(raw: &Input) -> Result<Option<Market>, String
             cost: None,
             amount: MarketLimitsAmount {
                 min: num(nested(raw, "lotSizeFilter", "minOrderQty"))?,
-                max: num(nested(raw, "lotSizeFilter", "maxOrderQty"))?,
+                max: (num(nested(raw, "lotSizeFilter", "maxOrderQty"))?).into(),
             },
             leverage: MarketLimitsLeverage { min: 1., max: 1. },
             price: Some(MarketLimitsPrice {

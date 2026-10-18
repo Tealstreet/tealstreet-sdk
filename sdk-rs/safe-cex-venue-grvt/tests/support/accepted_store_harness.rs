@@ -113,7 +113,7 @@ pub fn retained(value: &safe_cex_types::retained_json::RetainedJsonInput) -> Val
 pub fn view_market(value: &Market) -> Value {
     json!({"id":value.id,"symbol":value.symbol,"base":value.base,"quote":value.quote,"active":value.active,
         "pretty":value.pretty_symbol,"precision":[bits(value.precision.amount),bits(value.precision.price)],
-        "amount":[bits(value.limits.amount.min),bits(value.limits.amount.max)],
+        "amount":[bits(value.limits.amount.min),bits(safe_cex_num::numeric_value_to_number(&value.limits.amount.max))],
         "leverage":[bits(value.limits.leverage.min),bits(value.limits.leverage.max)],"price_limits":value.limits.price.is_some(),
         "flags":[value.is_spot,value.is_perpetual,value.is_inverse,value.is_expiring,value.is_read_only],
         "contract_size":value.contract_size.map(bits),"option":value.option.is_some(),

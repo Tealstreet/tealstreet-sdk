@@ -302,7 +302,7 @@ impl BingxDataReads {
                                 cost: None,
                                 amount: MarketLimitsAmount {
                                     min,
-                                    max: f64::INFINITY,
+                                    max: (f64::INFINITY).into(),
                                 },
                                 leverage: MarketLimitsLeverage {
                                     min: 1.0,

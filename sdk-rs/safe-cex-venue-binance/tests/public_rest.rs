@@ -63,7 +63,10 @@ fn cached_market() -> RestMarket {
             amount: 1.0,
             price: 2.0,
         },
-        amount: MarketLimitsAmount { min: 3.0, max: 4.0 },
+        amount: MarketLimitsAmount {
+            min: 3.0,
+            max: (4.0).into(),
+        },
         leverage_min: 1.0,
         leverage_max: json!(5),
     }
@@ -89,7 +92,7 @@ fn cached_ticker() -> Ticker {
     }
 }
 fn market_wire(m: &RestMarket) -> Value {
-    let mut v = json!({"id":m.id,"symbol":opt(m.symbol.as_ref()),"base":opt(m.base.as_ref()),"quote":opt(m.quote.as_ref()),"active":m.active,"precision":{"amount":number(m.precision.amount),"price":number(m.precision.price)},"limits":{"amount":{"min":number(m.amount.min),"max":number(m.amount.max)},"leverage":{"min":number(m.leverage_min),"max":m.leverage_max}}});
+    let mut v = json!({"id":m.id,"symbol":opt(m.symbol.as_ref()),"base":opt(m.base.as_ref()),"quote":opt(m.quote.as_ref()),"active":m.active,"precision":{"amount":number(m.precision.amount),"price":number(m.precision.price)},"limits":{"amount":{"min":number(m.amount.min),"max":number(safe_cex_num::numeric_value_to_number(&m.amount.max))},"leverage":{"min":number(m.leverage_min),"max":m.leverage_max}}});
     if let Some(spot) = m.is_spot {
         v["isSpot"] = json!(spot)
     }
@@ -704,7 +707,7 @@ fn markets_test(v: RestVenue) {
                             &format!("{row_label}: native minimum"),
                         );
                         eq_number(
-                            m.amount.max,
+                            safe_cex_num::numeric_value_to_number(&m.amount.max),
                             if missing {
                                 if v == RestVenue::Spot {
                                     999_999_999.0

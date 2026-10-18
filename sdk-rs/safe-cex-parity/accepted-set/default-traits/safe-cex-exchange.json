@@ -3601,6 +3601,6 @@
         "reason": "No-op returns Ok(()) and ignores its symbol selector."
       }
     ],
-    "sourceSha256": "cf6999b610d98fadf3afc9209fab21138d58cbc63180a80e20687f400beece2d"
+    "sourceSha256": "c8cc9dd62287faece0db680fa3bd8d3fe085077566172a0f8fa9162066b29ac4"
   }
 }

@@ -46,7 +46,23 @@ fn arg(args: &[Value], i: usize) -> Value {
 }
 
 pub(crate) fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
-    let e = r.error(&error.message);
+    let cause = error.origin.as_ref().and_then(|origin| {
+        let failure = origin
+            .error()
+            .downcast_ref::<safe_cex_transport::RestFailure>()?;
+        let safe_cex_transport::TransportError::Rejected(origin) =
+            failure.transport_error.as_deref()?
+        else {
+            return None;
+        };
+        origin
+            .error()
+            .downcast_ref::<safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError>()
+    });
+    let e = match cause {
+        Some(cause) => super::imports_venue::signing_error(r, cause.clone()),
+        None => r.error(&error.message),
+    };
     if error.name != "Error" {
         r.define_hidden(&e, PropKey::str("name"), Value::str(&error.name));
     }

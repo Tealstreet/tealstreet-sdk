@@ -771,9 +771,9 @@ impl BaseExchange {
             .markets_by_symbol()
             .get(&opts.symbol)
             .is_some_and(|market| {
-                market.limits.amount.max > 0.0
+                safe_cex_num::numeric_value_to_number(&market.limits.amount.max) > 0.0
                     && safe_cex_num::adjust(opts.amount, market.precision.amount)
-                        > market.limits.amount.max
+                        > safe_cex_num::numeric_value_to_number(&market.limits.amount.max)
             })
     }
     pub fn assert_single_native_client_order_id(
@@ -1391,9 +1391,9 @@ impl BaseExchange {
         }
         let markets = self.store.markets_by_symbol();
         let market = markets.get(&options.symbol)?;
-        if market.limits.amount.max > 0.0
+        if safe_cex_num::numeric_value_to_number(&market.limits.amount.max) > 0.0
             && safe_cex_num::adjust(options.amount, market.precision.amount)
-                > market.limits.amount.max
+                > safe_cex_num::numeric_value_to_number(&market.limits.amount.max)
         {
             return None;
         }
