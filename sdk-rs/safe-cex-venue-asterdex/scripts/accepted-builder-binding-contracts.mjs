@@ -40,11 +40,15 @@ const pkg = metadata.packages.find(item => item.name === 'safe-cex-venue-asterde
 assert.ok(pkg && metadata.workspace_members.includes(pkg.id));
 const target = pkg.targets.find(item => item.kind.includes('lib'));
 assert.ok(target);
-cargo(['rustdoc', '--locked', '-p', pkg.name, '--jobs=1', '--lib', '--',
+// Keep bootstrapped rustdoc artifacts away from ordinary native builds.
+const docTarget = path.join(metadata.target_directory, 'accepted-set-build');
+cargo(['rustdoc', '--locked', '-p', pkg.name, '--jobs=1', '--lib', '--target-dir', docTarget, '--',
   '-Z', 'unstable-options', '--output-format=json', '--document-private-items',
   '--document-hidden-items', '-A', 'rustdoc::all']);
-const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'doc', `${target.name}.json`)));
+const doc = JSON.parse(fs.readFileSync(path.join(docTarget, 'doc', `${target.name}.json`)));
 assert.equal(doc.index[String(doc.root)].name, target.name);
+assert.equal(fs.realpathSync(path.resolve(workspace, doc.index[String(doc.root)].span.filename)),
+  fs.realpathSync(target.src_path), 'rustdoc must describe the selected production package');
 const policyRoot = path.join(workspace, 'safe-cex-parity/accepted-set');
 const found = inventory(doc, {
   onlyOwners: selected,
