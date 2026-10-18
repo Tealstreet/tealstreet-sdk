@@ -50,18 +50,25 @@ export function byteDifference(ts, rust) {
 
 export function outcome(method, left, right, requests) {
   const diffs = differences(left.failure ?? left.value, right.failure ?? right.value);
+  const acceptsFallback = (request) =>
+    request.expectedFallback &&
+    (method === '$startPublic' ||
+      (request.host === 'fapi.asterdex.com' && ['refreshMarkets', 'fetchMarkets', 'fetchTickers'].includes(method)));
   const transportBlocked = requests.some(
     (request) =>
       request.transportError ||
       request.blocked ||
-      (request.status >= 400 && !(method === '$startPublic' && request.expectedFallback)),
+      (request.protocol === 'websocket' && (request.failure || request.tlsError)) ||
+      (request.status >= 400 && !acceptsFallback(request)),
   );
+  const errorBudget = (implementation) =>
+    requests.filter((request) => request.implementation === implementation && acceptsFallback(request)).length;
   const blocked =
     transportBlocked ||
     left.failure ||
     right.failure ||
-    left.errors ||
-    right.errors ||
+    left.errors > errorBudget('ts') ||
+    right.errors > errorBudget('rust') ||
     left.value?.error ||
     right.value?.error ||
     (method === '$balance' && (!Number.isFinite(left.value?.total) || !Number.isFinite(right.value?.total))) ||

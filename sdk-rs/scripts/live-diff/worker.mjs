@@ -18,6 +18,8 @@ const sign = async (request) => {
   return { id: request.id, config: { params: config.params, data: config.data, headers: config.headers } };
 };
 process.on('message', async (message) => {
+  await new Promise(setImmediate);
+  const initialErrors = errors;
   signerTime = message.time;
   try {
     let value;
@@ -57,20 +59,40 @@ process.on('message', async (message) => {
           pairedSign ? sign : undefined,
         );
       }
-    } else if (message.method === '$startPublic' || message.method === '$startPrivate') {
-      if (message.method === '$startPublic' && !options.publicDataOnly)
+    } else if (['$startPublic', '$startPrivate', '$startPublicWS'].includes(message.method)) {
+      if (message.method !== '$startPrivate' && !options.publicDataOnly)
         throw new Error('Public startup requires a public-only account');
       if (implementation === 'ts') {
-        instance.disablePublicWebsockets();
+        if (message.method !== '$startPublicWS') instance.disablePublicWebsockets();
         await instance.start();
       } else {
-        await native.nativeAccountCallMethod(id, 'disablePublicWebsockets', []);
+        if (message.method !== '$startPublicWS')
+          await native.nativeAccountCallMethod(id, 'disablePublicWebsockets', []);
         const started = await native.nativeAccountCallMethod(id, 'start', []);
         if (!started) throw new Error('Native public startup failed');
         for (let count = 0; count < 100 && !store.markets?.length; count++) {
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
       }
+      value = null;
+    } else if (message.method === '$waitLiveTickers') {
+      const [minimum = 1, deadlineMs = 20000] = message.args;
+      const deadline = Date.now() + deadlineMs;
+      let updated = 0;
+      do {
+        const tickers = implementation === 'ts' ? instance.store.tickers : store.tickers;
+        updated = (tickers ?? []).filter((ticker) =>
+          ['last', 'bid', 'ask', 'mark'].some((field) => Number.isFinite(ticker[field]) && ticker[field] > 0),
+        ).length;
+        if (updated >= minimum) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } while (Date.now() < deadline);
+      value = { updated };
+    } else if (message.method === '$settle') {
+      // A JS sleep can observe a partially processed native message. Wait for
+      // the native LocalSet to finish its current synchronous venue handler.
+      if (implementation === 'rust') await native.nativeAccountCallMethod(id, 'getActiveTickerSymbols', []);
+      await new Promise((resolve) => setTimeout(resolve, message.args[0] ?? 500));
       value = null;
     } else if (message.method === '$markets' || message.method === '$tickers' || message.method === '$balance') {
       const field = message.method.slice(1);
@@ -87,7 +109,8 @@ process.on('message', async (message) => {
           ? await instance[message.method](...message.args)
           : await native.nativeAccountCallMethod(id, message.method, message.args);
     }
-    process.send({ requestId: message.requestId, value, errors });
+    await new Promise(setImmediate);
+    process.send({ requestId: message.requestId, value, errors: errors - initialErrors });
   } catch (error) {
     process.send({
       requestId: message.requestId,
@@ -96,7 +119,7 @@ process.on('message', async (message) => {
         // Forward only the error summary; the parent removes credential values.
         message: String(error.message).slice(0, 240),
       },
-      errors,
+      errors: errors - initialErrors,
     });
   }
 });

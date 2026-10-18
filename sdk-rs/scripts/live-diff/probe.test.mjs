@@ -40,6 +40,16 @@ test('identical empty data, exceptions and HTTP failures cannot pass parity', ()
   const fallback = [{ status: 422, expectedFallback: true }];
   assert.equal(outcome('$startPublic', { value: null }, { value: null }, fallback).status, 'PASS');
   assert.equal(outcome('fetchMarkets', valid, valid, fallback).status, 'BLOCKED');
+  const optionalAster = ['ts', 'rust'].map((implementation) => ({
+    implementation,
+    host: 'fapi.asterdex.com',
+    status: 401,
+    expectedFallback: true,
+  }));
+  const degraded = { ...valid, errors: 1 };
+  assert.equal(outcome('fetchMarkets', degraded, degraded, optionalAster).status, 'PASS');
+  assert.equal(outcome('fetchOrders', degraded, degraded, optionalAster).status, 'BLOCKED');
+  assert.equal(outcome('fetchMarkets', { ...degraded, errors: 2 }, degraded, optionalAster).status, 'BLOCKED');
 });
 
 test('replay key drops auth freshness/correlation, retaining business inputs', () => {
@@ -50,6 +60,8 @@ test('replay key drops auth freshness/correlation, retaining business inputs', (
   assert.notEqual(readKey('GET', a, ''), readKey('GET', b, ''));
   assert.equal(isRead('POST', new URL('https://api.hyperliquid.xyz/info'), '{}'), true);
   assert.equal(isRead('POST', new URL('https://api.hyperliquid.xyz/exchange'), '{}'), false);
+  assert.equal(isRead('POST', new URL('https://clob.polymarket.com/midpoints'), '[]'), true);
+  assert.equal(isRead('POST', new URL('https://clob.polymarket.com/order'), '{}'), false);
 });
 
 test('terminal recorder replays one live response, blocks writes, verifies TLS SAN', async (t) => {

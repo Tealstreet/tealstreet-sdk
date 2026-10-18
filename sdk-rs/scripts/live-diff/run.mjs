@@ -6,7 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { differences, byteDifference, outcome } from './compare.mjs';
 import { hash, makeCA, recordingProxy } from './recorder.mjs';
-import { venueHosts as hosts } from './venues.mjs';
+import { venueHosts as hosts, websocketHosts } from './venues.mjs';
+import { buildConnectHook, connectHookEnvironment, websocketRecorder } from './ws-recorder.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../..');
@@ -23,6 +24,8 @@ if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 300000)
   throw new Error('--timeout-ms must be 1000..300000');
 const trade = args.includes('--trade');
 const capturePublic = args.includes('--capture-public');
+const streamHosts = websocketHosts[exchange];
+if (streamHosts && rowIndex) throw new Error('Recorded WS startup currently requires keyless public mode');
 if (capturePublic && rowIndex) throw new Error('--capture-public is restricted to keyless public mode');
 if (trade && !rowIndex) throw new Error('--trade requires an explicit test-account --row from yarn keys');
 if (rowIndex && !/^\d+$/.test(rowIndex)) throw new Error('--row must be a sheet row number');
@@ -73,14 +76,15 @@ const directory = mkdtempSync(join(tmpdir(), 'safe-cex-live-diff-'));
 const cache = new Map(),
   records = [],
   workers = [],
-  proxies = [];
+  proxies = [],
+  wsProxies = [];
 let failed = false;
-function worker(implementation, proxy, cert) {
+function worker(implementation, proxy, cert, socketEnvironment = {}) {
   const child = fork(join(here, 'worker.mjs'), [implementation], {
     cwd: root,
     execArgv: ['--import', 'tsx'],
     serialization: 'advanced',
-    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    stdio: ['ignore', 'ignore', row ? 'ignore' : 'pipe', 'ipc'],
     env: {
       ...process.env,
       HTTPS_PROXY: proxy.url,
@@ -95,9 +99,15 @@ function worker(implementation, proxy, cert) {
       NODE_EXTRA_CA_CERTS: cert,
       TSX_TSCONFIG_PATH: join(root, 'packages/safe-cex/tsconfig.json'),
       LIVE_DIFF_ADDON: report.addon,
+      ...socketEnvironment,
     },
   });
   const pending = new Map();
+  child.stderr?.on('data', (bytes) => {
+    report.diagnostics ??= [];
+    if (report.diagnostics.length < 30)
+      report.diagnostics.push({ implementation, text: bytes.toString().slice(0, 2000) });
+  });
   let sequence = 0;
   child.on('message', (reply) => {
     const waiter = pending.get(reply.requestId);
@@ -143,6 +153,23 @@ function redact(value) {
 }
 try {
   const ca = makeCA(directory);
+  let connectHook;
+  if (streamHosts) {
+    connectHook = buildConnectHook(directory, join(here, 'ws-connect.c'));
+    const streams = new Map();
+    for (const implementation of ['ts', 'rust'])
+      wsProxies.push(
+        await websocketRecorder({
+          directory,
+          ca,
+          hosts: streamHosts,
+          implementation,
+          streams,
+          records,
+          captureDirectory: capturePublic ? join(root, '.cache/live-diff/fixtures', exchange) : undefined,
+        }),
+      );
+  }
   for (const implementation of ['ts', 'rust'])
     proxies.push(
       await recordingProxy({
@@ -156,8 +183,18 @@ try {
         captureDirectory: capturePublic ? join(root, '.cache/live-diff/fixtures', exchange) : undefined,
       }),
     );
-  const ts = worker('ts', proxies[0], ca.cert),
-    rust = worker('rust', proxies[1], ca.cert);
+  const ts = worker(
+      'ts',
+      proxies[0],
+      ca.cert,
+      connectHook ? connectHookEnvironment(connectHook, wsProxies[0].ports) : {},
+    ),
+    rust = worker(
+      'rust',
+      proxies[1],
+      ca.cert,
+      connectHook ? connectHookEnvironment(connectHook, wsProxies[1].ports) : {},
+    );
   const options = {
     key: row?.apiKey ?? '',
     secret: row?.secret ?? '',
@@ -173,6 +210,28 @@ try {
   for (const call of [ts, rust]) {
     const opened = await call('open', [], { exchange, options });
     if (opened.failure) throw new Error(`Failed to open account: ${opened.failure.name}: ${opened.failure.message}`);
+  }
+  if (exchange === 'breakoutprop' && !row) {
+    report.classification = {
+      kind: 'AUTH_REQUIRED',
+      reason:
+        'DXtrade instruments and quotes require getSessionToken/login and accountCode; there is no anonymous public-data path.',
+      source:
+        'packages/safe-cex/src/exchanges/breakoutprop/breakoutprop.exchange.ts:getSessionToken,fetchInstrumentsRaw,fetchTickersForSymbols',
+    };
+    report.checks.push(...['markets', 'tickers'].map((method) => ({ method, status: 'AUTH_REQUIRED' })));
+    failed = true;
+    throw new Error(report.classification.reason);
+  }
+  if (exchange === 'txflow') {
+    report.classification = {
+      kind: 'UNSUPPORTED_BY_TS',
+      reason: 'TS registers TXFlow as a Phase 0 scaffold: REST, WebSocket and trading support are not implemented.',
+      source: 'packages/safe-cex/src/exchanges/txflow/txflow.exchange.ts:start',
+    };
+    report.checks.push(...['markets', 'tickers'].map((method) => ({ method, status: 'UNSUPPORTED_BY_TS' })));
+    failed = true;
+    throw new Error(report.classification.reason);
   }
   async function check(method, methodArgs = [], label = method) {
     const start = records.length,
@@ -216,10 +275,103 @@ try {
   // Hyperliquid intentionally inherits the base fetchMarkets/fetchTickers
   // rejections in both implementations. Its supported public API is startup
   // plus Store delivery, with sockets disabled to keep the recorded REST oracle.
-  if (exchange === 'hyperliquid') await check('$startPublic', [], 'public startup');
+  let liveTickers, earlyMarkets;
+  if (streamHosts) {
+    const start = records.length;
+    const startup = { method: 'public WS startup', status: 'RUNNING', phase: 'TS startup' };
+    report.checks.push(startup);
+    try {
+      const left = await ts('$startPublicWS');
+      startup.phase = 'TS live data';
+      const live = await ts('$waitLiveTickers', [1, 20000]);
+      // Lighter can hydrate prices through its REST watchdog before the real
+      // WS handshake completes. Give the stream its own bounded capture window.
+      startup.receivedSocketMessage = await wsProxies[0].waitForMessage(10000);
+      wsProxies[0].freeze();
+      await ts('$settle', [500]);
+      startup.phase = 'native startup';
+      const right = await rust('$startPublicWS');
+      earlyMarkets = await check('$markets', [], 'markets');
+      startup.phase = 'native live data';
+      liveTickers = {
+        ts: live.value?.updated ?? 0,
+        rust: (await rust('$waitLiveTickers', [Math.max(1, live.value?.updated ?? 0), 20000])).value?.updated ?? 0,
+      };
+      startup.liveTickers = liveTickers;
+      startup.phase = 'native event-loop barrier';
+      await rust('$settle', [500]);
+      liveTickers.rust = (await rust('$waitLiveTickers', [1, 1])).value?.updated ?? 0;
+      Object.assign(startup, outcome('$startPublicWS', left, right, records.slice(start)), { phase: 'complete' });
+      if (!liveTickers.ts) {
+        startup.status = 'BLOCKED';
+        report.classification = {
+          kind: 'NO_LIVE_STREAM_DATA',
+          reason: 'TS did not hydrate a nonzero live ticker before the bounded capture deadline.',
+        };
+      } else if (!liveTickers.rust) {
+        const captured = records.filter(
+          (record) => record.protocol === 'websocket' && record.implementation === 'ts' && record.inboundMessages > 0,
+        );
+        const sameInput =
+          captured.length > 0 &&
+          captured.every((source) =>
+            records.some(
+              (record) =>
+                record.protocol === 'websocket' &&
+                record.implementation === 'rust' &&
+                record.frameHash === source.frameHash &&
+                record.status === 101 &&
+                record.inboundMessages === source.inboundMessages,
+            ),
+          );
+        startup.status = sameInput ? 'DIFF' : 'BLOCKED';
+        report.classification = {
+          kind: sameInput ? 'NATIVE_PUBLIC_STREAM_MISMATCH' : 'WS_TRANSPORT_OR_REPLAY_BLOCKED',
+          reason: sameInput
+            ? 'TS hydrated live prices but native retained zero-price stubs after identical replay and an event-loop barrier.'
+            : 'The native receiver did not consume the same recorded WS input; no final ticker parity claim.',
+          liveTickers,
+        };
+      }
+      if (startup.status !== 'PASS') failed = true;
+      console.log(
+        `${exchange} public WS startup: ${startup.status} (${liveTickers.ts}/${liveTickers.rust} live tickers)`,
+      );
+    } catch (error) {
+      startup.status = /timed out/.test(error.message) ? 'TIMEOUT' : 'BLOCKED';
+      startup.reason = error.message;
+      if (startup.phase === 'native event-loop barrier')
+        report.classification = {
+          kind: 'NATIVE_EVENT_LOOP_STALL',
+          reason:
+            'Native getActiveTickerSymbols cannot complete after recorded public startup input; partial Store deliveries are not compared as final values.',
+          liveTickers,
+        };
+      throw error;
+    }
+  } else if (exchange === 'hyperliquid') await check('$startPublic', [], 'public startup');
+  else if (exchange === 'txflow') await check('start', [], 'scaffold startup');
   else await check('refreshMarkets');
-  const markets = await check(exchange === 'hyperliquid' ? '$markets' : 'fetchMarkets', [], 'markets');
-  const tickers = await check(exchange === 'hyperliquid' ? '$tickers' : 'fetchTickers', [], 'tickers');
+  const useStore = Boolean(streamHosts) || exchange === 'hyperliquid';
+  const markets = earlyMarkets ?? (await check(useStore ? '$markets' : 'fetchMarkets', [], 'markets'));
+  const tickers = await check(useStore ? '$tickers' : 'fetchTickers', [], 'tickers');
+  const venueData = records.find((request) => request.venueData)?.venueData;
+  if (
+    exchange === 'coinbase' &&
+    venueData?.instruments &&
+    venueData.tradingPerpetuals === 0 &&
+    markets.left?.length === 0 &&
+    markets.right?.length === 0 &&
+    tickers.left?.length === 0 &&
+    tickers.right?.length === 0
+  ) {
+    report.classification = {
+      kind: 'NO_TRADING_MARKETS',
+      reason: 'Live INTX instruments include zero TRADING perpetuals; both maintained filters correctly return empty.',
+      ...venueData,
+    };
+    for (const check of [markets.check, tickers.check]) check.status = 'NO_TRADING_MARKETS';
+  }
   if (row) {
     await check('validateAccount', [], 'account validation');
     await check('fetchAndSetPrivateSnapshot');
@@ -343,6 +495,7 @@ try {
     }
   }
   for (const proxy of proxies) await proxy.close();
+  for (const proxy of wsProxies) await proxy.close();
   rmSync(directory, { recursive: true, force: true });
   report.requests = records.map(({ requestBytes, response, ...metadata }) => ({
     ...metadata,

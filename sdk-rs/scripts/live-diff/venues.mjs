@@ -29,3 +29,9 @@ export const venueHosts = {
   weex: ['api-contract.weex.com'],
   woo: ['api.woox.io', 'api-pub.woox.io'],
 };
+
+export const websocketHosts = {
+  lighter: ['mainnet.zklighter.elliot.ai'],
+  apexomni: ['quote.omni.apex.exchange'],
+  bitrue: ['fmarket-ws.bitrue.com'],
+};

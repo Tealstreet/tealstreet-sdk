@@ -33,11 +33,56 @@ export function makeCA(directory) {
   return { key, cert };
 }
 
+export function certificateCache(directory, ca) {
+  const certificates = new Map();
+  return (hostname) => {
+    if (!certificates.has(hostname)) {
+      const key = join(directory, `${hostname}.key`),
+        csr = join(directory, `${hostname}.csr`);
+      const cert = join(directory, `${hostname}.pem`),
+        extensions = join(directory, `${hostname}.ext`);
+      execFileSync(
+        'openssl',
+        ['req', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', csr, '-subj', `/CN=${hostname}`],
+        { stdio: 'ignore' },
+      );
+      // SAN validates in Node and Rust. An extfile works with macOS LibreSSL
+      // too, where `-copy_extensions` / `-addext` are not always available.
+      writeFileSync(extensions, `subjectAltName=DNS:${hostname}\nextendedKeyUsage=serverAuth\n`);
+      execFileSync(
+        'openssl',
+        [
+          'x509',
+          '-req',
+          '-in',
+          csr,
+          '-CA',
+          ca.cert,
+          '-CAkey',
+          ca.key,
+          '-CAcreateserial',
+          '-out',
+          cert,
+          '-days',
+          '1',
+          '-extfile',
+          extensions,
+        ],
+        { stdio: 'ignore' },
+      );
+      certificates.set(hostname, tls.createSecureContext({ key: readFileSync(key), cert: readFileSync(cert) }));
+    }
+    return certificates.get(hostname);
+  };
+}
+
 export function isRead(method, url, body) {
   if (method === 'GET' || method === 'HEAD') return true;
   // Hyperliquid reads use POST /info. No other POST is implicitly a read.
   if (method !== 'POST') return false;
   if (url.hostname === 'api.hyperliquid.xyz' && url.pathname === '/info') return true;
+  if (url.hostname === 'clob.polymarket.com' && url.pathname === '/midpoints') return true;
+  if (url.hostname === 'breakout.prosp.devexperts.com' && url.pathname === '/dxsca-web/marketdata') return true;
   if (
     url.hostname === 'market-data.grvt.io' &&
     ['/lite/v1/all_instruments', '/lite/v1/ticker', '/lite/v1/mini'].includes(url.pathname)
@@ -73,7 +118,7 @@ export async function recordingProxy({
   validateLive = false,
   captureDirectory,
 }) {
-  const certificates = new Map();
+  const certificateFor = certificateCache(directory, ca);
   let allowWrites = false;
   const pending = new Set();
   const sockets = new Set();
@@ -89,10 +134,9 @@ export async function recordingProxy({
         body = bytes.toString();
       const method = request.method;
       const sessionRead =
-        allowWrites &&
-        url.hostname === 'fapi.binance.com' &&
-        url.pathname === '/fapi/v1/listenKey' &&
-        method === 'POST';
+        method === 'POST' &&
+        ((allowWrites && url.hostname === 'fapi.binance.com' && url.pathname === '/fapi/v1/listenKey') ||
+          (validateLive && url.hostname === 'breakout.prosp.devexperts.com' && url.pathname === '/dxsca-web/login'));
       const read = isRead(method, url, body) || sessionRead;
       // Only explicit placement/cancel phases enable writes. Public mode fails
       // closed even if a venue accidentally performs a write during a read.
@@ -182,7 +226,41 @@ export async function recordingProxy({
       // rejected exchange response visible without failing an identical,
       // successfully populated public bootstrap.
       record.expectedFallback = answer.status === 422 && record.infoType === 'userFees' && JSON.parse(body).user === '';
+      if (url.hostname === 'fapi.asterdex.com') {
+        let code;
+        try {
+          code = JSON.parse(answer.bytes).code;
+        } catch {}
+        record.expectedFallback =
+          (url.pathname === '/fapi/v1/leverageBracket' &&
+            answer.status === 401 &&
+            !validateLive &&
+            code === -2014 &&
+            !request.headers['x-mbx-apikey']) ||
+          (url.pathname === '/fapi/v1/openInterest' &&
+            answer.status === 400 &&
+            code === -1102 &&
+            !url.searchParams.has('symbol'));
+      }
       record.responseHash = hash(answer.bytes);
+      if (
+        url.hostname === 'api.international.coinbase.com' &&
+        url.pathname === '/api/v1/instruments/' &&
+        answer.status === 200
+      ) {
+        const instruments = JSON.parse(answer.bytes);
+        if (Array.isArray(instruments))
+          record.venueData = {
+            instruments: instruments.length,
+            tradingPerpetuals: instruments.filter(
+              (instrument) => instrument.type === 'PERP' && instrument.trading_state === 'TRADING',
+            ).length,
+            states: instruments.reduce((counts, instrument) => {
+              counts[instrument.trading_state] = (counts[instrument.trading_state] ?? 0) + 1;
+              return counts;
+            }, {}),
+          };
+      }
       response.writeHead(answer.status, answer.headers);
       response.end(answer.bytes);
     } catch {
@@ -204,45 +282,10 @@ export async function recordingProxy({
     const hostname = request.url.split(':')[0];
     if (!allowHost(hostname) || !request.url.endsWith(':443')) return socket.destroy();
     try {
-      if (!certificates.has(hostname)) {
-        const key = join(directory, `${hostname}.key`),
-          csr = join(directory, `${hostname}.csr`);
-        const cert = join(directory, `${hostname}.pem`),
-          extensions = join(directory, `${hostname}.ext`);
-        execFileSync(
-          'openssl',
-          ['req', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', csr, '-subj', `/CN=${hostname}`],
-          { stdio: 'ignore' },
-        );
-        // SAN validates in Node and Rust. An extfile works with macOS LibreSSL
-        // too, where `-copy_extensions` / `-addext` are not always available.
-        writeFileSync(extensions, `subjectAltName=DNS:${hostname}\nextendedKeyUsage=serverAuth\n`);
-        execFileSync(
-          'openssl',
-          [
-            'x509',
-            '-req',
-            '-in',
-            csr,
-            '-CA',
-            ca.cert,
-            '-CAkey',
-            ca.key,
-            '-CAcreateserial',
-            '-out',
-            cert,
-            '-days',
-            '1',
-            '-extfile',
-            extensions,
-          ],
-          { stdio: 'ignore' },
-        );
-        certificates.set(hostname, tls.createSecureContext({ key: readFileSync(key), cert: readFileSync(cert) }));
-      }
+      const context = certificateFor(hostname);
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head.length) socket.unshift(head);
-      const secure = new tls.TLSSocket(socket, { isServer: true, secureContext: certificates.get(hostname) });
+      const secure = new tls.TLSSocket(socket, { isServer: true, secureContext: context });
       secure.on('error', () => socket.destroy());
       const inside = http.createServer((req, res) => {
         const task = handle(req, res, hostname);

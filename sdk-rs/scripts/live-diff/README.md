@@ -27,10 +27,12 @@ node sdk-rs/scripts/live-diff/run.mjs --venue okx --capture-public
 node sdk-rs/scripts/live-diff/sweep.mjs
 # Or selected remaining venues:
 node sdk-rs/scripts/live-diff/sweep.mjs bitget phemex woo
-node --test sdk-rs/scripts/live-diff/probe.test.mjs
+node --test sdk-rs/scripts/live-diff/*.test.mjs
 ```
 
-Node, `tsx`, and OpenSSL must be available. The probe creates a short-lived CA
+Node, `tsx`, and OpenSSL must be available. Lighter, ApexOmni, and Bitrue also
+need a C compiler and macOS or Linux for public WebSocket recording.
+The probe creates a short-lived CA
 in a private temporary directory and trusts it **only in its child processes**.
 Its loopback recording proxies terminate HTTPS and forward to literal approved
 exchange REST hosts with normal upstream TLS verification. It changes no OS
@@ -69,8 +71,33 @@ Hyperliquid intentionally rejects `fetchMarkets` and `fetchTickers` in both
 implementations. Its probe uses public `start` and compares the delivered Store
 markets/tickers, with public sockets disabled to preserve the REST snapshot.
 Its keyless `userFees` 422/default-fee fallback remains visible in the report
-and is accepted only during public startup. Other venues without these fetch
-methods are reported as blocked; an API rejection is not a parity pass.
+and is accepted only during public startup. Aster's keyless leverage-bracket
+401/default-leverage and unsupported bulk open-interest 400 fallbacks are
+accepted only in their documented public fetch methods. Their HTTP responses
+and error counts remain recorded. Counters are per operation, so an expected
+earlier warning does not invalidate unrelated later reads. Polymarket
+`POST /midpoints` and DXtrade `POST /marketdata` are classified as reads.
+
+Lighter, ApexOmni and Bitrue hydrate tickers through public startup and their
+actual WebSocket handlers. A small temporary `connect` interposer redirects
+only their child processes' direct TLS sockets into a loopback recorder. It
+does not change the OS routing table, DNS, production code, or global trust.
+The TLS recorder admits only each venue's literal public WS host. TS receives
+one real upstream stream; the recorder freezes it after live prices appear,
+then replays exactly those text/binary messages and arrival delays into the
+native socket. Native commands cross an event-loop barrier before ticker
+values are inspected. If synchronous native processing prevents this barrier
+from completing, the report records `NATIVE_EVENT_LOOP_STALL` and a timeout,
+not a comparison of partially processed ticker values. Zero-price startup
+stubs do not count as live ticker coverage. Lighter's real REST fallback is
+captured too. `--capture-public` retains `.ws.json` message fixtures and
+`.sent.json` subscription traffic, with hashes for both receivers.
+
+The report classifies unavailable data explicitly: Coinbase's zero trading
+INTX perpetuals become `NO_TRADING_MARKETS`; TXFlow's maintained TS scaffold
+becomes `UNSUPPORTED_BY_TS`; BreakoutProp without a test-account row becomes
+`AUTH_REQUIRED`. These are not successful live-data comparisons. See
+[`CLASSIFICATION.md`](CLASSIFICATION.md) for the observed blockers and owners.
 
 Authenticated mode reads credentials into memory **only** through
 `corepack yarn keys list --json --show-secrets` in `~/cs/tealstreet-next`, as
