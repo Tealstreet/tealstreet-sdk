@@ -150,7 +150,9 @@ through `Rc<RefCell<Order>>`. Its native decoder observations inspect fields,
 numeric bits, optional presence and shared-cell mutation before projection.
 The constructed `private_classes` test `native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symbols`
 holds both signed Futures DELETEs, then checks each successful category and the
-untouched symbol in the actual Store. PM/Spot do not use this handle alias.
+untouched symbol in the actual Store. Its source witness constructs the actual
+TS parent, Store and API clients and scripts only terminal Axios I/O. PM/Spot
+do not use this handle alias.
 `scripts/cancel-order-handle-controls.py` breaks the live symbol filter, requires
 that compiled native assertion to fail and restores exact source bytes for GREEN.
 

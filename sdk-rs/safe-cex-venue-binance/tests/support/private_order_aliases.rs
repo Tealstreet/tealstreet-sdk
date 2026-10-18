@@ -200,7 +200,20 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
 fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symbols() {
     use safe_cex_types::{OrderStatus, OrderType};
 
-    for algo_status in [200, 500] {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/cancel-order-handle-source.cjs"
+        ))
+        .output()
+        .expect("constructed TypeScript cancel-symbol witness");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    for (case, algo_status) in [200, 500].into_iter().enumerate() {
         let runtime = Rc::new(Runtime::default());
         let http = Arc::new(Http::default());
         http.response("/fapi/v1/allOpenOrders", 200, json!({}));
@@ -285,6 +298,20 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
             );
         }
         assert_eq!(errors.borrow().len(), 2 * usize::from(algo_status != 200));
+        let mut observed = json!({
+            "ok":result.is_ok(),
+            "orders":rows.iter().map(|row| json!([row.id,row.status])).collect::<Vec<_>>(),
+            "errors":errors.borrow().len(),
+        });
+        if let Err(error) = &result {
+            let response = error.response.as_ref().unwrap();
+            observed["status"] = response["status"].clone();
+            observed["msg"] = response["data"]["msg"].clone();
+        }
+        assert_eq!(
+            observed, source[case],
+            "constructed TypeScript cancel-symbol result"
+        );
         drop(rows);
         owner.dispose().unwrap();
     }
