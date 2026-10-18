@@ -38,15 +38,23 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
             .and_then(|v| safe_cex_exchange::js_runtime::value::to_json(&v).ok())
     };
     native.is_axios_error = e.value.get("isAxiosError").is_ok_and(|v| v.truthy());
-    native.response = field("response");
-    if let Some(response) = native.response.as_mut()
-        && let Some(serde_json::Value::String(raw)) = response.get("data")
-    {
-        response["data"] = safe_cex_exchange::runtime::response_json_view(
-            &safe_cex_transport::RestResponseBody::Transformed(
-                safe_cex_transport::how::big_int_as_string_json_parse(raw),
-            ),
-        );
+    let response = match e.value.get("response") {
+        Ok(value) => value,
+        Err(cause) => return cause.into(),
+    };
+    if !response.is_nullish() {
+        let mut response = match safe_cex_exchange::js_runtime::value::to_retained_input(&response)
+        {
+            Ok(value) => value,
+            Err(cause) => return cause.into(),
+        };
+        if let Some(safe_cex_types::retained_json::RetainedJsonInput::Text(raw)) =
+            response.get("data")
+        {
+            let parsed = safe_cex_transport::how::big_int_as_string_json_parse_utf16(raw);
+            *response.get_mut("data").expect("existing data field") = parsed;
+        }
+        native = native.with_retained_response(response);
     }
     native.config = field("config");
     native.request = field("request");
@@ -193,7 +201,8 @@ impl Host {
         }
     }
     pub fn spawn(&self, future: ExchangeFuture<'static, ()>) {
-        let runtime = self.scope.runtime.clone();
+        let runtime = self.base().runtime.clone();
+        let future = safe_cex_exchange::eager::start_eager(&runtime, future);
         self.scope.runtime.spawn_local(Box::pin(async move {
             if let Err(e) = future.await {
                 runtime.report_exception(

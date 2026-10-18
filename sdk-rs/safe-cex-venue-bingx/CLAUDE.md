@@ -289,3 +289,14 @@ to a captured list, next-frame registry replacement, original parsed payload and
 callback error/code referents. `tests/handler-list-controls.py` replaces the live
 list capture with a copied list; the named native dispatch assertion must fail
 before exact source restoration passes. No probe-family relaxation is used.
+
+
+The typed-native public async family uses shared `eager::start_eager` for all 18
+implemented SDK async methods, retaining the existing runtime and native receiver.
+`tests/divergence_timing.rs` covers call-prefix errors/logs and a held mode-change
+continuation after unpolled waiter drop. The lifecycle child probes cover live
+refresh/recovery and full silent teardown on final exchange-handle drop.
+`scripts/divergence-controls.py` compiles eleven independent production faults,
+requires named failures, restores exact source bytes and replays GREEN. Run it
+serially with no concurrent source edits or Cargo commands. Always run the full
+workspace parity index before marking a PR READY. See DIVERGENCE_TIMING_AUDIT.md.

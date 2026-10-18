@@ -38,12 +38,12 @@ where
     match result {
         Ok(()) => Ok(()),
         Err(error) => {
-            let response = json!({"response":error.response});
+            let response = json!({"response":error.response_json_view()});
             if is_binance_position_mode_already_set_error(Some(&response)) {
                 return apply_confirmed(hedged, symbol);
             }
             let message = error
-                .response
+                .response_json_view()
                 .as_ref()
                 .and_then(|response| response.get("data"))
                 .and_then(|data| data.get("msg"))

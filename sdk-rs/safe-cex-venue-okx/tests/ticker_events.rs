@@ -315,7 +315,7 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
         let mut expected = safe_cex_exchange::runtime::ExchangeError::new("listener rejection");
         expected.name = "TypeError".into();
         expected.store_subscriber_ids = vec![901];
-        expected.response = Some(json!({"subscriber":"original cause"}));
+        expected = expected.with_retained_response(json!({"subscriber":"original cause"}).into());
         let original = expected.clone();
         let unsubscribe =
             Store::subscribe(&store, Box::new(move |_, _| Err(original.clone().into())));

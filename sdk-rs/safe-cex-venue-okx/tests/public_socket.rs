@@ -358,7 +358,7 @@ fn incoming_health_publication_errors_stop_frame_processing() {
         let parent = Parent::new();
         let mut expected = ExchangeError::new("health subscriber failed");
         expected.name = "TypeError".into();
-        expected.response = Some(json!({"cause":"retained"}));
+        expected = expected.with_retained_response(json!({"cause":"retained"}).into());
         let socket = BaseWebSocket::new(1, parent.clone(), runtime.clone(), Rc::new(Protocol));
         if pong {
             socket.track_last_received().unwrap();

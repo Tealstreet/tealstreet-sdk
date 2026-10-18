@@ -90,7 +90,10 @@ fn account_reads_match_actual_typescript() {
                                 if !fault.is_null() {
                                     let mut error =
                                         ExchangeError::new(fault["message"].as_str().unwrap());
-                                    error.response = fault.get("response").cloned();
+                                    if let Some(response) = fault.get("response") {
+                                        error =
+                                            error.with_retained_response(response.clone().into());
+                                    }
                                     return Poll::Ready(Err(error));
                                 }
                                 Poll::Ready(Ok(

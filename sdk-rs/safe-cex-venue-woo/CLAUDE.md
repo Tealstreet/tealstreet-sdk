@@ -1,5 +1,12 @@
 # WOO venue port
 
+`FIX_AUDIT_LEDGER.md` tracks the exact 60-row follow-up cohort. The isolated V3
+orderbook recovery port and its facade-only tests are retired after caller and
+constructed-runtime checks; the live legacy snapshot/delta/cleanup path remains.
+The unused V3 cancel-all-after descriptor/response module is retired too. WOO
+inherits the source BaseExchange.scheduleCancel `Error: Not implemented` rejection;
+the actual signed cancelAllOrders route remains available.
+
 `ASYNC_WRAPPER_REVIEW.md` records the real class's eager public call boundary.
 The common wrappers call the existing member before constructing their waiter
 and await its original Promise; do not wrap that Promise in another spawn.
@@ -280,13 +287,6 @@ explicit enum matches independent of Serde wire attributes. Mapper identity
 uses a separate live pre-serialization numeric capture so JSON.stringify cannot
 erase negative-zero output; the original artifacts remain unchanged.
 
-`cancel_all_after` extracts only the inert limits, parity flags, validators,
-builder and response decoder. It owns no timer or transport. Its JSON outputs
-are explicitly mutable unlike the frozen source descriptors; both output type
-rows stay pending. A live actual-source corpus compares numeric fields before
-serialization, retaining signed zero and validation phase ordering. The module
-uses shared numeric observation; no native Number parser or serde union is added.
-
 `runtime_selector` extracts only inert route lookup, targets and selection using
 the existing migration inventory. No transport, Store writer or gate override is
 accepted. Unknown routes precede mode validation, modes precede lifecycle checks,
@@ -355,24 +355,19 @@ Its identity checks cover every produced object, including indexed algo tails;
 mutable-length and sparse input cases pin the source loops rather than assuming
 array iteration or immutable input.
 
-`v3_request` prepares inert V3 descriptors with shared qs-compatible sorted form
-serialization, JS JSON spelling and shared HMAC signing. It never dispatches a
-request or enables a migration gate. Typed input payload maps retain
-`JsNumberInput` values; their opaque query values deliberately include more than
-TypeScript's declared scalar/array query union. The raw preparation entry keeps
-source validation order, then refuses an unsupported output method only after
-body/signing phases. Prepared headers and descriptors are owned mutable values;
-the source freezes both. Signing uses the existing asynchronous crypto seam.
+`v3_request` retains only WooV3RequestInput for the remaining inert builders.
+The unused auth/prepared descriptors, serializer and preparer are retired after
+production caller checks. The shared ticker fixture retains its input record
+and every unrelated quote/ticker case; FIX_AUDIT_LEDGER.md records rows 1–2.
 
 `v3_ws_quotes` declares BBO/Trade records for the inert `v3_ticker` composer;
 it adds no websocket lifecycle or decoder registration. `v3_ticker` combines the
 existing futures-stat mapper with BBO bid/ask and Trade last, preserving validation
 order, normalized identity checks and native numeric bits. Its owned info copies
 BBO/Trade, while source info keeps their live referents. Its ticker/info records
-are mutable unlike the source's frozen objects. All seven new record decoders
-capture numeric input before private map-only Serde companions. The focused
-source/native target covers all twelve new symbols, with one compiling control
-per family; it performs native field assertions without roundtrip comparisons.
+are mutable unlike the source's frozen objects. The five remaining record
+decoders capture numeric input before private map-only Serde companions. The focused source/native target retains the ticker
+and quote controls and native field assertions without roundtrip comparisons.
 
 `decode_woo_v3_regular_place_response_with` accepts a fallible live Set membership
 call after order-ID validation and before later response fields. Its generic

@@ -239,7 +239,7 @@ impl Client {
     ) -> ExchangeFuture<'static, Value> {
         let client = self.clone();
         let url = url.to_owned();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let lane = if method == "GET" {
                 client.secondary.clone()
             } else {

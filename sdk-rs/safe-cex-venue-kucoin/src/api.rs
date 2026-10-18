@@ -149,18 +149,32 @@ async fn create(
 }
 // ts: isKucoinSignatureRejection, shared with KuCoin spot.
 pub fn is_kucoin_signature_rejection(
-    data: &serde_json::Value,
+    data: &safe_cex_types::retained_json::RetainedJsonInput,
 ) -> Result<bool, safe_cex_num::JsCoercionError> {
-    let field = |key| data.as_object().and_then(|object| object.get(key));
-    if safe_cex_num::js_string(field("code"))? == "400005" {
+    let field = |key| data.get(key);
+    if safe_cex_types::js_coercion::js_retained_string_utf16(
+        field("code").unwrap_or(&safe_cex_types::retained_json::RetainedJsonInput::Undefined),
+    )? == "400005".encode_utf16().collect::<Vec<_>>()
+    {
         return Ok(true);
     }
-    let message = match field("msg").filter(|value| !value.is_null()) {
-        Some(value) => safe_cex_num::js_string(Some(value))?,
-        None => String::new(),
-    };
-    // A non-unicode /i regex never folds a non-ASCII unit onto an ASCII one.
-    Ok(message.to_ascii_lowercase().contains("invalid kc-api-sign"))
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let message =
+        match field("msg").filter(|value| !matches!(value, Input::Null | Input::Undefined)) {
+            Some(value) => safe_cex_types::js_coercion::js_retained_string_utf16(value)?,
+            None => Vec::new(),
+        };
+    let pattern = "invalid kc-api-sign".encode_utf16().collect::<Vec<_>>();
+    Ok(message.windows(pattern.len()).any(|units| {
+        units.iter().zip(&pattern).all(|(unit, expected)| {
+            let folded = if (65..=90).contains(unit) {
+                *unit + 32
+            } else {
+                *unit
+            };
+            folded == *expected
+        })
+    }))
 }
 impl Api {
     // axios-retry (networkErrorOnRead || signatureRejectedResponse) over one attempt.

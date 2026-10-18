@@ -45,11 +45,14 @@ fn rejection(name: &str) -> ExchangeError {
     error.name = "TypeError".into();
     error.context = Some(json!({"original":true}));
     if matches!(name, "sdk-error" | "emit-error") {
-        error.response =
-            Some(json!({"data":{"message":"full message","m":"lite message","code":17,"c":9}}));
+        error = error.with_retained_response(
+            (json!({"data":{"message":"full message","m":"lite message","code":17,"c":9}})).into(),
+        );
     }
     if name == "lite-error" {
-        error.response = Some(json!({"data":{"message":"","m":"lite message","code":0,"c":3}}));
+        error = error.with_retained_response(
+            (json!({"data":{"message":"","m":"lite message","code":0,"c":3}})).into(),
+        );
     }
     error
 }
@@ -242,7 +245,7 @@ fn cancellations(method: &str) {
         assert_error(result.as_ref().err(), &row["error"], "CANCEL");
         if let Err(error) = result {
             assert!(
-                error.response.is_none() && error.context.is_none(),
+                error.response_json_view().is_none() && error.context.is_none(),
                 "CANCEL fresh error metadata"
             );
         }
