@@ -1526,3 +1526,8 @@ steps; no parent path requires real sleep, and timestamp/HMAC assertions remain.
 Strict native and Wasm all-target Clippy pass. Required all-feature inventories
 pass7 cancellation/8 override/25 binding; full parity7459/16625 and extraction
 freshness0 pass. The body carrier remains owned by the parent PR.
+
+The source witness requires the exact SAFE_CEX_TYPESCRIPT_PATH module. A missing
+compiler file beneath an installed TypeScript package previously still passed by
+resolving the nearby package; it now fails with MODULE_NOT_FOUND. The explicitly
+selected compiler passes the maintained-source wire body and HMAC comparison.

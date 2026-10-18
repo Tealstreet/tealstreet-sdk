@@ -3,8 +3,9 @@
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const assert = require('node:assert/strict'), { createRequire } = require('node:module');
 const root = process.argv[2], timestamp = Number(process.argv[3] || 1700000000000);
-const external = createRequire(path.join(process.env.SAFE_CEX_TYPESCRIPT_PATH || path.join(root, 'node_modules/typescript'), 'package.json'));
-const ts = external('typescript'), axios = external('axios');
+assert(process.env.SAFE_CEX_TYPESCRIPT_PATH, 'SAFE_CEX_TYPESCRIPT_PATH is required');
+const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH);
+const external = createRequire(path.join(root, 'package.json')), axios = external('axios');
 const sourceRoot = path.join(root, 'packages/safe-cex/src');
 const cache = new Map();
 const hosts = {
