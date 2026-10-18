@@ -1,8 +1,7 @@
-//! Pure acknowledgement, subscription and sequence operations; no socket/timer ownership.
+//! Pure acknowledgement and subscription operations; no socket/timer ownership.
 use crate::v3_ws_commands::{
     WooV3WsCommand, WooV3WsCommandName, assert_topics_match_channel, build_woo_v3_subscribe,
 };
-use crate::v3_ws_public::WooV3WsOrderBookUpdate;
 use crate::v3_ws_session::{require_boolean, require_integer};
 use crate::v3_ws_topics::{
     WOO_V3_WS_LIMITS, WooV3WsChannel, WooV3WsTopicDescriptor, parse_woo_v3_ws_topic,
@@ -331,76 +330,6 @@ fn true_literal<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error
         Err(serde::de::Error::custom("literal must be true"))
     }
 }
-fn false_literal<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
-    if !bool::deserialize(d)? {
-        Ok(false)
-    } else {
-        Err(serde::de::Error::custom("literal must be false"))
-    }
-}
-fn gap_literal<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    let s = String::deserialize(d)?;
-    if s == "sequence-gap" {
-        Ok(s)
-    } else {
-        Err(serde::de::Error::custom("blocker must be sequence-gap"))
-    }
-}
-// ts: WooV3WsSequenceResult
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum WooV3WsSequenceResult {
-    Accepted {
-        accepted: bool,
-        #[serde(rename = "nextExpectedPreviousTimestamp")]
-        next_expected_previous_timestamp: f64,
-    },
-    Gap {
-        accepted: bool,
-        blocker: String,
-        #[serde(rename = "expectedPreviousTimestamp")]
-        expected_previous_timestamp: f64,
-        #[serde(rename = "actualPreviousTimestamp")]
-        actual_previous_timestamp: f64,
-        #[serde(rename = "requiresFreshSnapshot")]
-        requires_fresh_snapshot: bool,
-    },
-}
-#[derive(Deserialize)]
-#[serde(remote = "WooV3WsSequenceResult", untagged)]
-enum SequenceFields {
-    Accepted {
-        #[serde(deserialize_with = "true_literal")]
-        accepted: bool,
-        #[serde(rename = "nextExpectedPreviousTimestamp")]
-        next_expected_previous_timestamp: f64,
-    },
-    Gap {
-        #[serde(deserialize_with = "false_literal")]
-        accepted: bool,
-        #[serde(deserialize_with = "gap_literal")]
-        blocker: String,
-        #[serde(rename = "expectedPreviousTimestamp")]
-        expected_previous_timestamp: f64,
-        #[serde(rename = "actualPreviousTimestamp")]
-        actual_previous_timestamp: f64,
-        #[serde(rename = "requiresFreshSnapshot", deserialize_with = "true_literal")]
-        requires_fresh_snapshot: bool,
-    },
-}
-impl<'de> Deserialize<'de> for WooV3WsSequenceResult {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        JsNumberInput::deserialize(d)?
-            .decode_with(|d| SequenceFields::deserialize(safe_cex_types::strict_decode::object(d)))
-            .map_err(serde::de::Error::custom)
-    }
-}
-impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3WsSequenceResult {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self,enum{Accepted{accepted,next_expected_previous_timestamp},Gap{accepted,blocker,expected_previous_timestamp,actual_previous_timestamp,requires_fresh_snapshot}});
-    }
-}
-
 fn record(input: Option<&JsNumberInput>, path: &str) -> Result<JsObjectMap<JsNumberInput>, String> {
     input
         .and_then(|v| v.clone().decode::<JsObjectMap<JsNumberInput>>().ok())
@@ -490,37 +419,6 @@ pub fn decode_woo_v3_ws_command_ack(
         }
     }
     Ok(result)
-}
-// ts: advanceWooV3OrderBookSequence
-pub fn advance_woo_v3_order_book_sequence(
-    expected_previous_timestamp: f64,
-    update: &WooV3WsOrderBookUpdate,
-) -> Result<WooV3WsSequenceResult, String> {
-    // The expected timestamp is already a native Number; retain its bits and apply
-    // requireInteger's safe-integer/minimum-zero predicate without a JSON adapter.
-    if !expected_previous_timestamp.is_finite()
-        || expected_previous_timestamp.trunc() != expected_previous_timestamp
-        || expected_previous_timestamp.abs() > 9_007_199_254_740_991.0
-        || expected_previous_timestamp < 0.0
-    {
-        return Err(
-            "WOO V3 orderbook expected previous timestamp must be a safe integer of at least 0"
-                .into(),
-        );
-    }
-    if update.previous_timestamp != expected_previous_timestamp {
-        return Ok(WooV3WsSequenceResult::Gap {
-            accepted: false,
-            blocker: "sequence-gap".into(),
-            expected_previous_timestamp,
-            actual_previous_timestamp: update.previous_timestamp,
-            requires_fresh_snapshot: true,
-        });
-    }
-    Ok(WooV3WsSequenceResult::Accepted {
-        accepted: true,
-        next_expected_previous_timestamp: update.timestamp,
-    })
 }
 // ts: createWooV3WsSubscriptionState
 pub fn create_woo_v3_ws_subscription_state(

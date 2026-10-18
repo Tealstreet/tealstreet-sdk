@@ -8,7 +8,7 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_types::*;
+use safe_cex_types::{Balance, Market, Order, Position, StoreDataLoaded, Ticker};
 use std::{cell::RefCell, rc::Rc};
 #[derive(Clone)]
 pub enum Data {
