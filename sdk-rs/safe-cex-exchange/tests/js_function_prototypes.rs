@@ -1,5 +1,5 @@
 use safe_cex_exchange::js_runtime::value::{Js, Prop, Thrown, arg, utf16};
-use safe_cex_num::PrototypeRealm;
+use safe_cex_num::{BuiltinIdentity, ProtoMember, PrototypeRealm, PrototypeScalar, PrototypeValue};
 use serde_json::{Value, json};
 use std::{cell::RefCell, process::Command, rc::Rc};
 
@@ -73,6 +73,10 @@ fn functions_keep_live_prototypes_receivers_and_bound_inheritance() {
         "FUNCTION_PROTOTYPE legacy setter changes internal parent"
     );
     let receiver = derived.get("receiver").unwrap().same_reference(&derived);
+    assert!(
+        receiver,
+        "FUNCTION_PROTOTYPE inherited getter uses original receiver"
+    );
     derived.set("write", Js::Number(-0.0)).unwrap();
     let written =
         derived.get("written").unwrap().as_f64().unwrap().to_bits() == (-0.0_f64).to_bits();
@@ -172,8 +176,38 @@ fn functions_keep_live_prototypes_receivers_and_bound_inheritance() {
         detached.get("__proto__").unwrap().is_undefined(),
         coercion
     ]);
+    let realm = Rc::new(PrototypeRealm::default());
+    let object = realm.reference(ProtoMember::Prototype);
+    let method = realm.reference(ProtoMember::ToString);
+    let function = method.prototype().unwrap();
+    let PrototypeValue::Reference(constructor) = function.get("constructor") else {
+        unreachable!()
+    };
+    let PrototypeValue::Reference(call) = function.get("call") else {
+        unreachable!()
+    };
+    let metadata: Vec<_> = [object, method, function, constructor, call]
+        .into_iter()
+        .map(|value| {
+            value.set("__proto__", PrototypeScalar::Number(9.0));
+            match value.prototype() {
+                None => "null",
+                Some(parent) => {
+                    assert!(
+                        Rc::ptr_eq(parent.realm(), &realm),
+                        "FUNCTION_PROTOTYPE typed parent keeps original realm"
+                    );
+                    match parent.member() {
+                        BuiltinIdentity::FunctionPrototype => "Function.prototype",
+                        BuiltinIdentity::Object(ProtoMember::Prototype) => "Object.prototype",
+                        _ => panic!("FUNCTION_PROTOTYPE unexpected typed parent"),
+                    }
+                }
+            }
+        })
+        .collect();
     assert_eq!(
-        json!({"inherited":inherited,"receiver":receiver,"written":written,"readonly":readonly,"cycle":cycle,"primitiveIgnored":primitive_ignored,"ownShadow":own_shadow,"trace":*trace.borrow(),"realms":realms,"methods":methods,"binding":binding,"unknownKey":unknown_key,"empty":empty,"detached":detached}),
+        json!({"inherited":inherited,"receiver":receiver,"written":written,"readonly":readonly,"cycle":cycle,"primitiveIgnored":primitive_ignored,"ownShadow":own_shadow,"trace":*trace.borrow(),"realms":realms,"methods":methods,"binding":binding,"unknownKey":unknown_key,"empty":empty,"detached":detached,"metadata":metadata}),
         expected,
         "FUNCTION_PROTOTYPE actual Node language observations"
     );

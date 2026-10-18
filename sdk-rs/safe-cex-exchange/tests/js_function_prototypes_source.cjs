@@ -38,4 +38,11 @@ Detached.__proto__ = null;
 let coercion;
 try { String(Detached); } catch (error) { coercion = error.name; }
 const detached = [Detached.call === undefined, Detached.__proto__ === undefined, coercion];
-console.log(JSON.stringify({inherited,receiver,written,readonly,cycle,primitiveIgnored,ownShadow,trace,realms,methods,binding,unknownKey,empty,detached}));
+const metadata = vm.runInNewContext(`
+  [Object.prototype, Object.prototype.toString, Function.prototype, Function, Function.prototype.call].map(value => {
+    Object.defineProperty(value, '__proto__', {value:9,configurable:true});
+    const parent = Object.getPrototypeOf(value);
+    return parent === null ? 'null' : parent === Function.prototype ? 'Function.prototype' : parent === Object.prototype ? 'Object.prototype' : 'unexpected';
+  })
+`);
+console.log(JSON.stringify({inherited,receiver,written,readonly,cycle,primitiveIgnored,ownShadow,trace,realms,methods,binding,unknownKey,empty,detached,metadata}));
