@@ -1555,9 +1555,14 @@
         "await",
         "await"
       ],
-      "producer_sha256": "03ea500d4e522128d22d529254945ad95ce7dd8713068b51074f3cdc9a75aa45",
-      "classification": "no-owned-latch",
-      "reason": "Chunk/page cursors, deduplication map and delays are caller-owned. Dropping the pager drops the active fetch; tests/income_paging.rs::income_pager_delay_failure_and_cancellation witnesses this."
+      "producer_sha256": "00489fbbdea4abec805036fad4c7dad621e644b765a6dbc3f76235e09fbc976d",
+      "classification": "delegated",
+      "reason": "The required runtime and owned page/delay capabilities delegate the pager and each awaited operation to eager::start_eager. Dropping an unpolled waiter retains the pending fetch and later pages; tests/income_paging.rs compares the actual maintained source with NativeRuntime and checks callback captures release after completion. Fetch rejection marks an incomplete branch; delay rejection preserves original metadata and stops further requests. No pager-local task registry or external reservation.",
+      "delegate": "eager::start_eager",
+      "witnesses": [
+        "tests/income_paging.rs::pager_continues_after_discarding_an_unpolled_waiter",
+        "tests/income_paging.rs::income_pager_delay_failure_and_runtime_ownership"
+      ]
     },
     {
       "owner": "src/journal.rs::fold_closed_position_records",

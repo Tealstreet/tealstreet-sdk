@@ -544,11 +544,12 @@ pub(crate) fn dispatch(
                 from_typed(&result)
             })
         }
-        ("private_accounts", "income_range") => {
-            future(
-                async move { Ok((*private_accounts::income_range(&rt, a0, a1, a2).await?).clone()) },
+        ("private_accounts", "income_range") => future(async move {
+            Ok(
+                (*private_accounts::income_range(std::rc::Rc::new(rt.clone()), a0, a1, a2).await?)
+                    .clone(),
             )
-        }
+        }),
         ("private_accounts", "income_history") => future(async move {
             let opts = if a0.is_undefined() {
                 h(Js::object(vec![]))

@@ -1142,7 +1142,7 @@ impl ExchangeImports for NativeImports {
         let runtime = self.runtime.clone();
         Ok(Box::pin(async move {
             // ts: paginateIncomeRange — the shared pager over this venue's rethrowing page fetch.
-            let mut fetch_page =
+            let fetch_page =
                 move |page: IncomePageParams| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
                     let call = fetch(record([
                         ("startTime", number(page.start_time)),
@@ -1154,10 +1154,16 @@ impl ExchangeImports for NativeImports {
                         crate::exchange_classes::income_records(&rows).map_err(into_exchange)
                     })
                 };
-            let mut delay = move |ms: f64| runtime.sleep(ms.max(0.0) as u64);
-            let result = paginate_income_range(&mut fetch_page, options, &mut delay)
-                .await
-                .map_err(Rc::new)?;
+            let pager_runtime = runtime.clone();
+            let delay = move |ms: f64| runtime.sleep(ms.max(0.0) as u64);
+            let result = paginate_income_range(
+                pager_runtime,
+                Box::new(fetch_page),
+                options,
+                Box::new(delay),
+            )
+            .await
+            .map_err(Rc::new)?;
             Ok(record([
                 (
                     "records",
