@@ -950,3 +950,77 @@ fn placement_dropped_waiter_keeps_late_stop_cancellation() {
 fn completion_dropped_waiter_keeps_fill_reconciliation() {
     timing_profiles("completion", true);
 }
+
+#[test]
+fn manager_module_composition_runs_the_real_engine() {
+    use safe_cex_webworker::chaser_manager::chaser_order_manager_instance;
+    let (host, _, instance) = fixture(ExchangeName::Bybit, false, 3.0);
+    *host.runtime.id.borrow_mut() = Some("composition".into());
+    let instance =
+        Rc::new(ChaserOrderInstance::new(instance.exchange.clone(), instance.options()).unwrap());
+    *host.instance.borrow_mut() = Rc::downgrade(&instance);
+    instance.mark_complete(Some("user"));
+    let singleton = chaser_order_manager_instance();
+    let list = singleton.instances();
+    let empty = list.borrow().is_empty();
+    let fresh = ChaserOrderManager::new();
+    let same_manager = Rc::ptr_eq(&singleton, &chaser_order_manager_instance());
+    let same_list = Rc::ptr_eq(&list, &chaser_order_manager_instance().instances());
+    let independent = !Rc::ptr_eq(&singleton, &fresh)
+        && !Rc::ptr_eq(&list, &fresh.instances())
+        && fresh.instances().borrow().is_empty();
+    assert!(host.events.borrow().is_empty());
+    assert!(host.tasks.borrow().is_empty());
+    assert!(host.places.borrow().is_empty());
+    assert!(host.timers.borrow().is_empty());
+    let engine = ChaserEngine::new(host.clone(), singleton.clone());
+    singleton.add(instance.clone(), engine);
+    let prefix = json!({"count":list.borrow().len(),
+        "sameInstance":Rc::ptr_eq(&list.borrow()[0], &instance),
+        "logs":host.events.borrow().len()});
+    let isolated = std::thread::spawn(|| {
+        let singleton = chaser_order_manager_instance();
+        singleton.instances().borrow().is_empty()
+            && Rc::ptr_eq(&singleton, &chaser_order_manager_instance())
+    })
+    .join()
+    .unwrap();
+    host.drain();
+    host.runtime.advance(0);
+    host.drain();
+    assert!(host.tasks.borrow().is_empty());
+    assert!(host.places.borrow().is_empty());
+    assert!(host.cancels.borrow().is_empty());
+    assert_eq!(
+        host.completes.borrow().len(),
+        1,
+        "MANAGER bound completion count"
+    );
+    let complete = host.completes.borrow()[0].clone();
+    assert_eq!(complete.size.to_bits(), 3.0f64.to_bits());
+    assert_eq!(complete.filled.to_bits(), 0.0f64.to_bits());
+    assert!(complete.client_id.is_none());
+    let actual = json!({"empty":empty,"sameManager":same_manager,"sameList":same_list,
+        "independent":independent,"isolated":isolated,"externalCalls":0,
+        "prefix":prefix,"remaining":list.borrow().len(),
+        "complete":{"id":complete.id,"symbol":complete.symbol,"side":complete.side,
+            "reduceOnly":complete.reduce_only,"sizeBits":format!("{:016x}", complete.size.to_bits()),
+            "filledBits":format!("{:016x}", complete.filled.to_bits()),
+            "stopReason":complete.stop_reason},
+        "logs":host.events.borrow().iter().map(|s|s.strip_prefix("log:").unwrap()).collect::<Vec<_>>()});
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/chaser_manager_dispatch_oracle.mjs"
+        ))
+        .arg("--composition")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(actual, expected, "MANAGER actual engine/module composition");
+}

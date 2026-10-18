@@ -720,6 +720,13 @@ Ready venue futures yield at the source await before replying; synchronous cases
 reply during entry. Dropping a caller waiter leaves the operation and reply owned
 by the runtime. Runtime teardown keeps the existing guarded cancellation report.
 
+Chaser module composition is scoped per host thread, matching independent worker
+module realms. Eager TS construction and lazy native construction only allocate
+an empty live list. The composition witness binds the singleton to the actual
+ChaserEngine and compares registration, cleanup and completion with maintained
+source; terminal host capabilities remain required. This accepts composition,
+not the separately tracked state, carrier, startup or method timing findings.
+
 Worker startup and session listeners own their continuations through canonical
 start_eager. Clock, import, venue-start and startup-race typed results yield at
 their source await boundaries. Discarding a caller waiter cannot cancel startup
