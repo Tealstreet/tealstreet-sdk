@@ -432,3 +432,10 @@ aliases, preserve arguments/results and shared effects, poll each pending future
 and execute production native HTTP factory/install and Date.parse callbacks.
 The finite instantiations do not claim every generic argument or JavaScript
 scheduler behavior.
+
+
+`RoutedClient::clone` shares the configured primary and reader client owners. The
+construction policy records only Clone; it adds no decoder or receiver exemption.
+The native adapter witness checks both Rc counts, shared retry state, primary
+identity and real GET/write routing after the original handle is dropped. A
+compiled swapped-owner Clone control must fail that witness before exact restore.
