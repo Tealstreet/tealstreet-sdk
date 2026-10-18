@@ -345,3 +345,18 @@ The production loop adapter invokes the shared eager helper before queuing its
 error observer, using the owning runtime and retaining the original ExchangeError.
 The source scheduling witness advances virtual time before the first host poll
 and pins the deadline to invocation, including fallback and disabled intervals.
+
+The four FIX-audit class/start/cancel rows distinguish extracted helper futures
+from the constructed Exchange: its existing canonical Promise owns the complete
+startup and cancellation aggregate even after the typed waiter is dropped.
+The three `async_audit_` binding tests hold terminal HTTP only, compare maintained
+whole exchange/polling source classes, exercise all three cancellation lots,
+first/last sibling rejection and later sibling reporting, Store writes, live
+book identity, unsubscribe and disposal. Decision 2 accepts typed owner/input
+snapshots; changing a later source order ID remains an explicit alias difference.
+
+Disposal explicitly settles pending login waiters with AbortError and drops their
+future before waking them. Startup suppresses only its disposed account result;
+it settles without late Store/listener effects. The held-login disposal witness
+fails on the prior production body, drains every native task after repair, and
+matches maintained source completion under the approved native teardown policy.
