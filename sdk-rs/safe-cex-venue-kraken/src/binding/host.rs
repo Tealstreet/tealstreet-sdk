@@ -475,7 +475,7 @@ impl ReadHost for Rt {
     fn trace(&self, error: &Thrown) -> ReadResult<Self, ()> {
         self.shared
             .runtime
-            .console("trace", &error.value.to_display());
+            .console_values("trace", &[error.value.clone()]);
         Ok(())
     }
     // ts: `err?.message || fallback`.
@@ -578,20 +578,22 @@ impl ErrorHost for Rt {
         value.is_string()
     }
     fn lower_method(&self, value: &Js, expression: &str) -> ReadResult<Self, Handle<Self>> {
-        if !value.is_string() {
+        let method = value.get("toLowerCase")?;
+        if !method.is_callable() {
             return Err(Thrown::type_error(&format!(
                 "{expression}.toLowerCase is not a function"
             )));
         }
-        Ok(h(value.call_method("toLowerCase", vec![])?))
+        Ok(h(method.call(value.clone(), vec![])?))
     }
     fn upper_method(&self, value: &Js, expression: &str) -> ReadResult<Self, Handle<Self>> {
-        if !value.is_string() {
+        let method = value.get("toUpperCase")?;
+        if !method.is_callable() {
             return Err(Thrown::type_error(&format!(
                 "{expression}.toUpperCase is not a function"
             )));
         }
-        Ok(h(value.call_method("toUpperCase", vec![])?))
+        Ok(h(method.call(value.clone(), vec![])?))
     }
     fn error_value(&self, error: &Thrown) -> ReadResult<Self, Handle<Self>> {
         Ok(h(error.value.clone()))
@@ -661,16 +663,27 @@ impl TradingHost for Rt {
         Ok(h(Js::str(&id)))
     }
     fn iterable(&self, value: &Js, expression: &str) -> ReadResult<Self, Vec<Handle<Self>>> {
-        match value {
-            Js::Array(_) | Js::String(_) => {
-                Ok(value.iterable_values()?.into_iter().map(h).collect())
-            }
-            _ => Err(Thrown::type_error(&if expression == "txids" {
-                "txids is not iterable".to_owned()
+        // Resolve the protocol method once, retaining the caller's spread diagnostic.
+        let method = if value.is_nullish() {
+            Js::Undefined
+        } else {
+            value.get_property(&Js::SymbolIterator)?
+        };
+        if !method.is_callable() {
+            return Err(Thrown::type_error(if expression == "txids" {
+                "txids is not iterable"
             } else {
-                "Spread syntax requires ...iterable[Symbol.iterator] to be a function".to_owned()
-            })),
+                "Spread syntax requires ...iterable[Symbol.iterator] to be a function"
+            }));
         }
+        let iterator = safe_cex_exchange::js_runtime::iterator::IteratorRecord::from_iterator(
+            method.call(value.clone(), vec![])?,
+        )?;
+        let mut values = Vec::new();
+        while let Some(value) = iterator.step_value()? {
+            values.push(h(value));
+        }
+        Ok(values)
     }
     fn send(
         &self,

@@ -94,7 +94,9 @@ impl Host {
             + 1
     }
     fn add_old_timer(&self) -> LifecycleTimer {
-        let token = Rc::new(RefCell::new(json!({})));
+        let token = Rc::new(RefCell::new(
+            safe_cex_exchange::js_runtime::value::Js::object(vec![]),
+        ));
         self.timers.borrow_mut().push((token.clone(), None));
         token
     }
@@ -187,7 +189,9 @@ impl LifecycleHost for Host {
         delay_ms: f64,
     ) -> Result<LifecycleTimer, PortfolioFailure> {
         self.record("set", args([("delay", json!(delay_ms))]))?;
-        let timer = Rc::new(RefCell::new(json!({})));
+        let timer = Rc::new(RefCell::new(
+            safe_cex_exchange::js_runtime::value::Js::object(vec![]),
+        ));
         self.timers
             .borrow_mut()
             .push((timer.clone(), Some(callback)));

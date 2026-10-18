@@ -18,8 +18,9 @@ export function reviewedInheritedConstantOutput(type, entry, index, context) {
   assert.ok(type.name === spec.owner && type.ident === spec.ident && type.kind === 'record' && type.deserialize === false, `${label}: actual compiled venue owner required`);
   assert.equal(type.rawEntrypoints?.[index], true, `${label}: actual indexed raw method required`);
   assert.deepEqual(entry.api, spec.api, `${label}: exact compiler API changed`);
-  assert.ok(['safe-cex-venue-grvt', 'safe-cex-venue-breakoutprop', 'safe-cex-venue-bitget', 'safe-cex-venue-kucoin'].includes(spec.package), `${label}: unreviewed venue package`);
+  assert.ok(['safe-cex-venue-grvt', 'safe-cex-venue-breakoutprop', 'safe-cex-venue-bitget', 'safe-cex-venue-kucoin', 'safe-cex-venue-binance'].includes(spec.package), `${label}: unreviewed venue package`);
   if (spec.package === 'safe-cex-venue-kucoin') reviewedKucoinInheritance(type, entry, spec);
+  if (spec.package === 'safe-cex-venue-binance') reviewedBinanceInheritance(type, entry, spec);
   assert.ok(context.packageMetadata?.name === spec.package
     && context.packageMetadata.manifest_path === fileURLToPath(new URL(`../../${spec.package}/Cargo.toml`, import.meta.url)), `${label}: actual compiler package required`);
   assert.deepEqual(type.entrypointSources?.[index], { filename: spec.source.file, begin: spec.source.begin, end: spec.source.end }, `${label}: compiler method source changed`);
@@ -36,6 +37,7 @@ export function reviewedInheritedConstantOutput(type, entry, index, context) {
   assert.equal(digest(context.readSource(spec.typescript.venue.file)), spec.typescript.venue.sha256, `${label}: reviewed venue inheritance changed`);
   assert.equal(digest(context.readSource(spec.fixture.file)), spec.fixture.sha256, `${label}: reviewed native fixture changed`);
   if (spec.package === 'safe-cex-venue-kucoin') reviewedKucoinObserver(spec, context, label, 'safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs');
+  if (spec.package === 'safe-cex-venue-binance') reviewedBinanceObserver(spec, context, label);
   assert.deepEqual(entry.call, spec.call, `${label}: reviewed native adapter changed`);
   assert.deepEqual(entry.cases, spec.cases, `${label}: reviewed native witnesses changed`);
   assert.ok(spec.cases.length >= 2 && new Set(spec.cases.map(row => JSON.stringify(row.input))).size >= 2, `${label}: distinct genuine native inputs required`);
@@ -57,4 +59,36 @@ export function reviewedKucoinObserver(spec, context, label, observerFile) {
   assert.equal(spec.fixture.file, 'safe-cex-venue-kucoin/tests/support/exchange_runtime.rs', `${label}: reviewed Kucoin I/O fixture required`);
   assert.equal(spec.additionalNativeFixture?.file, observerFile, `${label}: reviewed native observer required`);
   assert.equal(digest(context.readSource(spec.additionalNativeFixture.file)), spec.additionalNativeFixture.sha256, `${label}: reviewed native observer changed`);
+}
+
+// Binance permission is limited to the eight methods independently observed
+// through maintained TS constructors and actual native Exchange implementations.
+// This does not install a contract or classify any other class entrypoint.
+export function reviewedBinanceInheritance(type, entry, spec) {
+  const methods = {
+    BinanceExchange: ['fetch_symbol_max_leverage'],
+    BinancePMExchange: ['fetch_symbol_max_leverage', 'fetch_public_trades'],
+    BinanceSpotExchange: ['fetch_symbol_max_leverage', 'fetch_public_trades', 'set_leverage', 'change_position_mode', 'change_margin_type'],
+  };
+  const sourceNames = {
+    fetch_symbol_max_leverage: 'fetchSymbolMaxLeverage', fetch_public_trades: 'fetchPublicTrades',
+    set_leverage: 'setLeverage', change_position_mode: 'changePositionMode', change_margin_type: 'changeMarginType',
+  };
+  const venueFiles = { BinanceExchange: 'binance', BinancePMExchange: 'binancepm', BinanceSpotExchange: 'binancespot' };
+  const label = `${type.name}: accepted-set assertion: reviewed Binance inherited refusal`;
+  assert.ok(type.name === `safe_cex_venue_binance::exchange_classes::${type.ident}`
+    && type.name === spec.owner && entry.api.trait === 'safe_cex_exchange::exchange::Exchange'
+    && methods[type.ident]?.includes(entry.api.name), `${label}: unreviewed exact method`);
+  assert.equal(spec.source.file, 'safe-cex-venue-binance/src/exchange_trait.rs', `${label}: actual trait implementation source required`);
+  assert.equal(spec.typescript.base.method, sourceNames[entry.api.name], `${label}: exact base method required`);
+  assert.equal(spec.typescript.venue.file, `../packages/safe-cex/src/exchanges/binance/${venueFiles[type.ident]}.exchange.ts`, `${label}: actual maintained venue required`);
+}
+
+export function reviewedBinanceObserver(spec, context, label) {
+  assert.equal(spec.fixture.file, 'safe-cex-venue-binance/tests/support/inverse_rest_runtime.rs', `${label}: reviewed Binance I/O fixture required`);
+  assert.equal(spec.additionalNativeFixture?.file, 'safe-cex-venue-binance/tests/inherited_refusal_binding.rs', `${label}: reviewed Binance native observer required`);
+  assert.equal(digest(context.readSource(spec.additionalNativeFixture.file)), spec.additionalNativeFixture.sha256, `${label}: reviewed Binance native observer changed`);
+  assert.equal(spec.sourceOracle?.file, 'safe-cex-venue-binance/scripts/inherited-refusal-source.cjs', `${label}: reviewed Binance source oracle required`);
+  assert.equal(digest(context.readSource(spec.sourceOracle.file)), spec.sourceOracle.sha256, `${label}: reviewed Binance source oracle changed`);
+  assert.ok(spec.cases.every(row => row.output.events === 0 && row.output.reports === 0), `${label}: inherited refusal must not emit or report`);
 }

@@ -457,3 +457,32 @@ shared `in_operator`; do not restore an own-key-only lookup.
 `scripts/read-receiver-controls.py` requires seven named compiled runtime failures
 and exact-source restoration. Shared Store array identity is separately owned;
 these receiver tests claim only the facade's current slot/value behavior.
+
+### Native diagnostic receiver boundary
+
+`NATIVE_DIAGNOSTIC_REVIEW.md` records the polling/trace native Error cutover.
+Keep original error values and console argument counts through `console_values`;
+terminal rendering belongs to the host. The actual constructed-Scope witnesses
+live in `tests/support/accepted_diagnostic_receivers.rs`; their two original-body
+regression controls are in `scripts/diagnostic-receiver-controls.py`. Refresh
+reviewed impl/file pins whenever those enclosing bodies change.
+
+### Trading error receiver members
+
+`TRADING_ERROR_RECEIVER_REVIEW.md` covers the three concrete ErrorHost methods.
+Resolve the native case member once and invoke it with its original receiver;
+do not restore the String-only guard or stringify the returned cell. The native
+constructed-Scope witnesses and compiled controls are named
+`accepted_trading_error_receivers` and `trading-error-receiver-controls.py`.
+`trading-error-receiver-source.cjs` executes the live TypeScript callers directly.
+
+### Trading protocol and tick receiver coverage
+
+`RUNTIME_RECEIVER_REVIEW.md` covers TradingHost iterable/send and TickHost's typed
+error emission. Spread must use the native iterator protocol, retaining one
+method lookup and the original values/errors through shared IteratorRecord.
+`tests/support/accepted_runtime_receivers.rs` reaches the constructed Scope;
+`runtime-receiver-source.cjs` executes the live spread/tick source and
+`runtime-receiver-controls.py` compiles one semantic fault per receiver, requiring
+named failures and exact restored passes. Keep limited/unlimited client selection
+observable through the real signed HTTP pipeline.

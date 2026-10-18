@@ -10,7 +10,7 @@ use safe_cex_num::js_truthy;
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc};
 
-pub type LifecycleTimer = Rc<RefCell<Value>>;
+pub type LifecycleTimer = Rc<RefCell<safe_cex_exchange::js_runtime::value::Js>>;
 pub type LifecycleCallback = Rc<dyn Fn() -> Result<(), PortfolioFailure>>;
 pub type LifecycleAsync<T> = Result<Promise<Result<T, PortfolioFailure>>, PortfolioFailure>;
 /// Host updates are native fields with retained value roots, before serialization.

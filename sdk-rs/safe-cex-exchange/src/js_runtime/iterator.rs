@@ -12,7 +12,8 @@ impl IteratorRecord {
     pub fn get(value: &Js) -> Result<Self, Thrown> {
         Self::from_iterator(value.iterator()?)
     }
-    pub(crate) fn from_iterator(iterator: Js) -> Result<Self, Thrown> {
+    /// Capture an already acquired native iterator without repeating GetMethod.
+    pub fn from_iterator(iterator: Js) -> Result<Self, Thrown> {
         if !iterator.is_object() {
             return Err(Thrown::type_error("Iterator result is not an object"));
         }
