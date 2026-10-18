@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::sync_position_mode"
 status = "divergent"
-note = "FIX-AUDIT: Observable Axios name/class/message/code/stack/cause/flag preservation is delivered by #1115. Original JS object identity remains accepted under decision 2. Constructed native evidence: src/fix_audit_tests.rs::native_error_tests::sync_position_mode_retains_native_axios_error_observations; FIX_AUDIT_REVIEW.md. Rename target: `safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::sync_position_mode`."
+note = "FIX-AUDIT: Observable Axios name/class/message/code/stack/cause/flag preservation is delivered by #1115. Original JS object identity remains accepted under decision 2. Constructed native evidence: src/native_error_tests.rs::sync_position_mode_retains_native_axios_error_observations; FIX_AUDIT_REVIEW.md. Rename target: `safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::sync_position_mode`."
 
 [[symbol]]
 ts = "AsterDEXExchange#getAccountPositionMode"
@@ -296,7 +296,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::update_order"
 status = "divergent"
-note = "ACCEPT-AUDIT: The stale missing suppression claim was fixed on master by merged #468 (3f2919767b), with real API response-200/400 cancellation controls and DELETE-before-replacement POST. Required typed argument admission is accepted decision 5. Constructed native evidence: src/fix_audit_tests.rs::tests/exchange_trait.rs::already_gone_cancel_suppresses_success_response_errors; already_gone_cancel_suppresses_http_response_errors; all_sixteen_defaults_are_bound_through_the_constructed_exchange; FIX_AUDIT_REVIEW.md. Rename target: `safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::update_order`."
+note = "ACCEPT-AUDIT: The stale missing suppression claim was fixed on master by merged #468 (3f2919767b), with real API response-200/400 cancellation controls and DELETE-before-replacement POST. Required typed argument admission is accepted decision 5. Constructed native evidence: tests/exchange_trait.rs::already_gone_cancel_suppresses_success_response_errors; already_gone_cancel_suppresses_http_response_errors; all_sixteen_defaults_are_bound_through_the_constructed_exchange; FIX_AUDIT_REVIEW.md. Rename target: `safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::update_order`."
 
 [[symbol]]
 ts = "AsterDEXExchange.cancelOrders"

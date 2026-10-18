@@ -214,7 +214,7 @@ fn constructed_woo_client_keeps_error_fields_through_typed_rest_adapter() {
             .get("method")
             .unwrap()
             .to_display(),
-        "get"
+        "GET"
     );
     let serializer = snapshot
         .get("config")

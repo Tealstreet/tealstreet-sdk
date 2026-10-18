@@ -24,7 +24,7 @@ const axios=require('axios');
       assert.equal(caught.context.method,'GET');assert.equal(caught.context.url,'/v3/accountinfo');assert.equal(caught.context.statusCode,418);
     }
     assert.equal(caught.originalError,caught);assert.equal(caught.originalError.message,caught.message);
-    if(name==='woo'){assert.equal(caught.originalError.config.paramsSerializer.indexes,false);assert.equal(typeof caught.originalError.config.paramsSerializer.serialize,'function');assert.equal(caught.extra.number,Infinity);assert(Object.hasOwn(caught.extra,'missing'));assert.equal(caught.extra.text.charCodeAt(0),0xd800);}
+    if(name==='woo'){assert.equal(caught.originalError.config.method,'GET');assert.equal(caught.originalError.config.paramsSerializer.indexes,false);assert.equal(typeof caught.originalError.config.paramsSerializer.serialize,'function');assert.equal(caught.extra.number,Infinity);assert(Object.hasOwn(caught.extra,'missing'));assert.equal(caught.extra.text.charCodeAt(0),0xd800);}
     assert.equal(caught,original);assert(caught instanceof Error);assert(caught instanceof (name==='asterdex'?axios.AxiosError:TypeError));assert.equal(caught.name,original.name);
     for(const key of ['name','message','code','stack','cause','response','isAxiosError'])assert.equal(caught[key],original[key]);
    }finally{venue.dispose();}
