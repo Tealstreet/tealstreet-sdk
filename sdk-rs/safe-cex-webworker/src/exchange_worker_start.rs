@@ -11,10 +11,13 @@ use crate::{
     postprocessor_registry::PostprocessorRegistry,
     worker_logging::{self, WorkerLogLevel},
 };
-use safe_cex_exchange::js_runtime::value::Js;
+use safe_cex_exchange::{
+    eager::start_eager,
+    js_runtime::{promise::await_js, value::Js},
+};
 use safe_cex_exchange::{
     exchange::Exchange,
-    runtime::{ExchangeError, ExchangeFuture},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
 };
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, ExchangeOptions, StoreSubscriberError};
@@ -92,6 +95,7 @@ pub trait WorkerExchangeConstructor {
     ) -> Result<Rc<dyn Exchange>, ExchangeError>;
 }
 pub trait WorkerBootstrapHost: ExchangeWorkerHost {
+    fn runtime(&self) -> Rc<dyn ExchangeRuntime>;
     fn construct_clock_start(&self) -> ExchangeFuture<'static, ()>;
     fn load_exchange(
         &self,
@@ -163,6 +167,16 @@ impl StartRace {
         }
     }
 }
+async fn await_startup<T>(
+    runtime: &Rc<dyn ExchangeRuntime>,
+    future: ExchangeFuture<'static, T>,
+) -> Result<T, ExchangeError> {
+    let result = future.await;
+    await_js(runtime, Js::Undefined)
+        .await
+        .map_err(|error| error.to_exchange_error())?;
+    result
+}
 impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
     pub fn log_message(
         &self,
@@ -222,9 +236,10 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
         }));
         let clock = self.construction.ctx.construct_clock_start();
         let worker = self.clone();
-        Box::pin(async move {
+        let runtime = self.construction.ctx.runtime();
+        start_eager(&runtime.clone(), async move {
             let result: Result<bool, ExchangeError> = async {
-                clock.await?;
+                await_startup(&runtime, clock).await?;
                 if token != worker.startup_token.get() {
                     return Ok(false);
                 }
@@ -236,7 +251,7 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     .ok_or_else(|| {
                         ExchangeError::new(format!("Unknown exchange: {}", exchange_text(&name)))
                     })?;
-                let constructor = loader.await?;
+                let constructor = await_startup(&runtime, loader).await?;
                 if token != worker.startup_token.get() {
                     return Ok(false);
                 }
@@ -270,11 +285,12 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     .exchange()
                     .ok_or_else(|| ExchangeError::new("Exchange cleared before startup"))?;
                 let starting = worker.construction.ctx.construct_exchange_start(exchange);
+                let start_runtime = runtime.clone();
                 worker
                     .construction
                     .ctx
                     .spawn_start_task(Box::pin(async move {
-                        let r = starting.await;
+                        let r = await_startup(&start_runtime, starting).await;
                         completion.settle(r.map(|_| true));
                         Ok(())
                     }));
@@ -287,17 +303,21 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     }),
                     30_000.,
                 );
-                let race_result = std::future::poll_fn(|cx| {
-                    if let Some(r) = race.result.borrow_mut().take() {
-                        return std::task::Poll::Ready(r);
-                    }
-                    if signal.cancelled.get() {
-                        return std::task::Poll::Ready(Ok(false));
-                    }
-                    *race.waker.borrow_mut() = Some(cx.waker().clone());
-                    *signal.waker.borrow_mut() = Some(cx.waker().clone());
-                    std::task::Poll::Pending
-                })
+                let race_signal = signal.clone();
+                let race_result = await_startup(
+                    &runtime,
+                    Box::pin(std::future::poll_fn(move |cx| {
+                        if let Some(r) = race.result.borrow_mut().take() {
+                            return std::task::Poll::Ready(r);
+                        }
+                        if race_signal.cancelled.get() {
+                            return std::task::Poll::Ready(Ok(false));
+                        }
+                        *race.waker.borrow_mut() = Some(cx.waker().clone());
+                        *race_signal.waker.borrow_mut() = Some(cx.waker().clone());
+                        std::task::Poll::Pending
+                    })),
+                )
                 .await?;
                 if !race_result
                     || token != worker.startup_token.get()

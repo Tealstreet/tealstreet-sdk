@@ -9,7 +9,10 @@ use crate::{
     worker_ports::{WorkerConfigHandler, WorkerMessage, WorkerPort, WorkerPorts},
 };
 use indexmap::IndexMap;
-use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
+use safe_cex_exchange::{
+    eager::start_eager,
+    runtime::{ExchangeError, ExchangeFuture},
+};
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{
@@ -487,7 +490,7 @@ impl<H: WorkerSessionHost> WorkerSession<H> {
             Ok(None)
         })();
         let session = self.clone();
-        Box::pin(async move {
+        start_eager(&self.ctx.runtime(), async move {
             if let Some(init) = prefix? {
                 init.await?;
                 let worker = session.get_worker();
