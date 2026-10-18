@@ -372,3 +372,7 @@ mod eager_binding_tests;
 #[cfg(test)]
 #[path = "../../tests/support/divergence_binding.rs"]
 mod divergence_audit_tests;
+
+#[cfg(test)]
+#[path = "../../tests/support/fix_audit_binding.rs"]
+mod fix_audit_tests;

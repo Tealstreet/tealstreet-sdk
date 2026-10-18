@@ -385,3 +385,17 @@ second carrier. `divergence_timing_binding` compares the actual public mode call
 with the full maintained TS constructor: three log events before return, then
 the success log and confirmed fetched-leverage mode after the actual HTTP reply.
 Its master regression compiled and failed with zero prefix logs versus three.
+
+## Order-family continuation ownership
+
+`fetchOrdersWithRetry` creates three independently owned family operations using
+`BlofinExchangeHost::start_order_read`. The concrete NativeHost delegates to the
+shared typed `start_eager` boundary, retaining `Result<Vec<Order>, ServiceError>`
+as a native value. Its Promise.all-style join owns only the waiters: rejecting
+one family does not cancel successful siblings or their subsequent pages.
+`tests/divergence_timing_binding.rs::rejected_order_family_does_not_cancel_a_sibling_pagination`
+compares the real SDK, signed HTTP and Store against the whole maintained class.
+The failed normal family enters retry backoff while TPSL still requests both
+following cursors. No virtual time advances to complete those sibling pages.
+The generic complete-host fixture checks composition with its bounded executor;
+only the actual NativeHost regression claims scheduler ownership behavior.

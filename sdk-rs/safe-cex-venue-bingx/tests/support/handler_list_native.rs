@@ -1,6 +1,4 @@
-#[path = "binding_harness.rs"]
-#[allow(dead_code)]
-mod harness;
+use super::binding_test_harness as harness;
 use crate::public_stream::{HandlerList, MessageCallback, PublicFrame};
 use safe_cex_exchange::{
     exchange::Exchange, js_runtime::value::Js, runtime::ExchangeError, websocket::WsEvent,
