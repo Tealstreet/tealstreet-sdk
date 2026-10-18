@@ -265,7 +265,7 @@ fn inverse_controls_preserve_native_positions_and_source_mode_policy() {
         "ISOLATED_MARGIN"
     );
     assert_eq!(
-        h.store.positions()[0].margin_type,
+        h.store.positions().unwrap()[0].margin_type,
         Some(MarginType::Isolated)
     );
     h.venue().dispose().unwrap();
@@ -297,7 +297,7 @@ fn inverse_amend_and_cancel_keep_usd_native_remaining() {
         h.wire.calls("/v5/order/amend")[0].body,
         json!({"category":"inverse","orderId":"existing","symbol":"BTCUSD","price":"25000"})
     );
-    let orders = h.store.orders().to_vec();
+    let orders = h.store.orders().unwrap().to_vec();
     assert_eq!(
         orders[0].remaining, 0.02,
         "500 native USD contracts at amended price"
@@ -312,7 +312,7 @@ fn inverse_amend_and_cancel_keep_usd_native_remaining() {
         json!({"category":"inverse","request":[{"symbol":"BTCUSD","orderId":"existing"}]})
     );
     assert!(
-        h.store.orders().is_empty(),
+        h.store.orders().unwrap().is_empty(),
         "Brazil source retires local inverse orders"
     );
     h.venue().dispose().unwrap();
@@ -324,7 +324,7 @@ fn inverse_start_owns_only_dedicated_public_and_authenticated_private_sockets() 
     let h = harness();
     h.drive(h.venue().start()).unwrap();
     h.advance(2000.);
-    let loaded = h.store.loaded().clone();
+    let loaded = h.store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers && loaded.orders && loaded.positions && loaded.balance,
         "inverse snapshot loaded: {loaded:?}; {:?}",
@@ -411,7 +411,7 @@ fn inverse_native_nan_mode_and_strict_not_modified_policy() {
         let venue = h.venue();
         h.drive(Box::pin(venue.base().place_order(venue, opts())))
             .unwrap();
-        let actual = h.store.positions()[0].leverage;
+        let actual = h.store.positions().unwrap()[0].leverage;
         if leverage == "NaN" {
             assert!(actual.is_nan(), "inverse mode publication retains NaN");
         } else {
@@ -473,7 +473,7 @@ fn inverse_public_topics_follow_active_and_market_callbacks_on_the_secondary_slo
     use safe_cex_exchange::socket_lifecycle::SocketSlot;
     let h = harness();
     seed(&h);
-    let mut markets = h.store.markets().to_vec();
+    let mut markets = h.store.markets().unwrap().to_vec();
     let mut second = markets[0].clone();
     second.id = "ETHUSD".into();
     second.symbol = "ETHUSD".into();
@@ -576,8 +576,8 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     fill["avgPrice"] = json!("20000");
     fill["rejectReason"] = json!("EC_NoError");
     feed(json!({"topic":"order","data":[fill.clone()]}));
-    assert_eq!(h.store.orders().len(), 1);
-    assert_eq!(h.store.orders()[0].remaining, 0.025);
+    assert_eq!(h.store.orders().unwrap().len(), 1);
+    assert_eq!(h.store.orders().unwrap()[0].remaining, 0.025);
     assert_eq!(
         fills.borrow().len(),
         1,
@@ -615,7 +615,7 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     );
     feed(json!({"topic":"position","data":[position("NaN")]}));
     assert!(
-        h.store.positions().is_empty(),
+        h.store.positions().unwrap().is_empty(),
         "source updatePositions does not insert before the initial snapshot"
     );
     let positions = h.drive(h.venue().fetch_positions(None)).unwrap();
@@ -629,10 +629,10 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     )
     .unwrap();
     feed(json!({"topic":"position","data":[position("NaN")]}));
-    assert_eq!(h.store.positions().len(), 1);
-    assert!(h.store.positions()[0].leverage.is_nan());
-    assert_eq!(h.store.positions()[0].contracts, 0.05);
-    assert_eq!(h.store.positions()[0].notional, 1000.);
+    assert_eq!(h.store.positions().unwrap().len(), 1);
+    assert!(h.store.positions().unwrap()[0].leverage.is_nan());
+    assert_eq!(h.store.positions().unwrap()[0].contracts, 0.05);
+    assert_eq!(h.store.positions().unwrap()[0].notional, 1000.);
     let count = fills.borrow().len();
     feed(json!({"topic":"execution","data":[{}]}));
     feed(json!({"topic":"wallet","data":[{}]}));

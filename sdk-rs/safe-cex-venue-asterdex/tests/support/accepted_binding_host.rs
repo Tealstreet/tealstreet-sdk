@@ -1,9 +1,9 @@
 use crate::{binding::Rt, native_exchange::AsterDEXDependencies};
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::ExchangeSettings,
     js_runtime::{base_exchange::BaseExchangeParts, client},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{future::Future, rc::Rc, sync::Arc};

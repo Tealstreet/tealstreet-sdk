@@ -57,14 +57,14 @@ pub fn to_number(value: Option<&IncomeInput>) -> Result<f64, JsCoercionError> {
 
 pub fn map_blofin_fill_to_income_records(
     row: &IncomeInput,
-    mut resolve_symbol: impl FnMut(&str) -> Option<String>,
-) -> Result<Vec<IncomeRecord>, JsCoercionError> {
+    mut resolve_symbol: impl FnMut(&str) -> Result<Option<String>, safe_cex_types::StoreReadError>,
+) -> Result<Vec<IncomeRecord>, crate::reads::MappingError> {
     let timestamp = parse_int(&text(row.field("ts")?.as_ref(), "0")?, Some(10));
     let inst_id = text(row.field("instId")?.as_ref(), "")?;
     if timestamp == 0.0 || timestamp.is_nan() || inst_id.is_empty() {
         return Ok(vec![]);
     }
-    let symbol = resolve_symbol(&inst_id)
+    let symbol = resolve_symbol(&inst_id)?
         .filter(|value| !value.is_empty())
         .unwrap_or(inst_id.clone());
     let id = text(
@@ -107,9 +107,9 @@ pub fn map_blofin_fill_to_income_records(
 
 pub fn map_blofin_closed_position(
     row: &IncomeInput,
-    mut resolve_symbol: impl FnMut(&str) -> Option<String>,
+    mut resolve_symbol: impl FnMut(&str) -> Result<Option<String>, safe_cex_types::StoreReadError>,
     account_name: &str,
-) -> Result<Option<ClosedPnlEntry>, JsCoercionError> {
+) -> Result<Option<ClosedPnlEntry>, crate::reads::MappingError> {
     let open_time = parse_int(&text(row.field("createTime")?.as_ref(), "0")?, Some(10));
     let inst_id = text(row.field("instId")?.as_ref(), "")?;
     if open_time == 0.0 || open_time.is_nan() || inst_id.is_empty() {
@@ -118,7 +118,7 @@ pub fn map_blofin_closed_position(
     let close_price = to_number(row.field("closeAveragePrice")?.as_ref())?;
     let contracts = to_number(row.field("closePositions")?.as_ref())?;
     // Preserve source object-initializer evaluation order, including callback effects.
-    let symbol = resolve_symbol(&inst_id)
+    let symbol = resolve_symbol(&inst_id)?
         .filter(|value| !value.is_empty())
         .unwrap_or(inst_id);
     let entry_price = to_number(row.field("openAveragePrice")?.as_ref())?;

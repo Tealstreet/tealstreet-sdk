@@ -221,7 +221,7 @@ impl SpotWsHost for Realm {
         self.get_str(&side, if buy { "Buy" } else { "Sell" })
     }
     fn for_in(&mut self, value: &Value) -> Result<Value, Value> {
-        let keys = self.for_in_keys(value);
+        let keys = self.for_in_keys(value)?;
         Ok(self.iterator_object(IterSource::Keys { keys, index: 0 }))
     }
     fn for_in_next(&mut self, iterator: &Value) -> Result<Option<Value>, Value> {

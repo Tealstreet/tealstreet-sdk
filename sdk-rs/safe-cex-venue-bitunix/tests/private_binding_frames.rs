@@ -2,8 +2,8 @@
 #[path = "support/venue_runtime.rs"]
 #[allow(dead_code)]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::Exchange, socket_lifecycle::SocketSlot, websocket::WsEvent};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::{OrderStatus, PositionSide};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
@@ -133,16 +133,16 @@ fn order(event: &str, status: &str, filled: &str) -> Value {
 fn private_order_frames_create_update_and_cancel_the_real_store_order() {
     let s = Scene::new();
     s.frame("order", order("CREATE", "NEW", "0"));
-    assert_eq!(s.store.orders().len(), 1);
-    assert_eq!(s.store.orders()[0].id, "native-frame-order");
-    assert_eq!(s.store.orders()[0].price, 123.5);
-    assert_eq!(s.store.orders()[0].remaining, 2.0);
+    assert_eq!(s.store.orders().unwrap().len(), 1);
+    assert_eq!(s.store.orders().unwrap()[0].id, "native-frame-order");
+    assert_eq!(s.store.orders().unwrap()[0].price, 123.5);
+    assert_eq!(s.store.orders().unwrap()[0].remaining, 2.0);
     s.frame("order", order("UPDATE", "PARTIALLY_FILLED", "0.5"));
-    assert_eq!(s.store.orders()[0].filled, 0.5);
-    assert_eq!(s.store.orders()[0].remaining, 1.5);
+    assert_eq!(s.store.orders().unwrap()[0].filled, 0.5);
+    assert_eq!(s.store.orders().unwrap()[0].remaining, 1.5);
     s.frame("order", order("CLOSE", "CANCELED", "0.5"));
-    assert_eq!(s.store.orders()[0].status, OrderStatus::Canceled);
-    assert_eq!(s.store.orders()[0].remaining, 0.0);
+    assert_eq!(s.store.orders().unwrap()[0].status, OrderStatus::Canceled);
+    assert_eq!(s.store.orders().unwrap()[0].remaining, 0.0);
     assert_eq!(
         s.fills.get(),
         0,
@@ -154,7 +154,7 @@ fn private_filled_order_frame_closes_store_order_without_inventing_source_fill()
     let s = Scene::new();
     s.frame("order", order("CREATE", "NEW", "0"));
     s.frame("order", order("CLOSE", "FILLED", "2"));
-    let orders = s.store.orders();
+    let orders = s.store.orders().unwrap();
     assert_eq!(orders.len(), 1);
     assert_eq!(orders[0].id, "native-frame-order");
     assert_eq!(orders[0].status, OrderStatus::Closed);
@@ -180,6 +180,7 @@ fn private_position_frame_updates_position_id_then_fetches_authoritative_positio
     let initial = s
         .store
         .positions()
+        .unwrap()
         .iter()
         .find(|p| p.side == PositionSide::Long)
         .unwrap()
@@ -204,6 +205,7 @@ fn private_position_frame_updates_position_id_then_fetches_authoritative_positio
     let actual = s
         .store
         .positions()
+        .unwrap()
         .iter()
         .find(|p| p.side == PositionSide::Long)
         .unwrap()
@@ -212,7 +214,7 @@ fn private_position_frame_updates_position_id_then_fetches_authoritative_positio
     assert_eq!(actual.entry_price, 100.0);
     assert_eq!(actual.leverage, 20.0);
     assert_eq!(actual.unrealized_pnl, 1.0);
-    assert!(s.store.loaded().positions);
+    assert!(s.store.loaded().unwrap().positions);
     assert_eq!(s.fills.get(), 0);
 }
 #[test]
@@ -223,14 +225,14 @@ fn private_balance_frame_debounces_rest_balance_and_retains_positions() {
         json!({"marginCoin":"USDT","available":"7","frozen":"1","margin":"2",
         "positionMode":"HEDGE","crossUnrealizedPNL":"0.5","isolationUnrealizedPNL":"0.25"}),
     );
-    let before = s.store.balance().clone();
-    let positions = s.store.positions().to_vec();
+    let before = s.store.balance().unwrap().clone();
+    let positions = s.store.positions().unwrap().to_vec();
     s.frame(
         "balance",
         json!({"coin":"USDT","available":"999","frozen":"999","margin":"999"}),
     );
     assert_eq!(
-        *s.store.balance(),
+        s.store.balance().unwrap(),
         before,
         "balance frame values are not authoritative"
     );
@@ -238,13 +240,13 @@ fn private_balance_frame_debounces_rest_balance_and_retains_positions() {
     assert_eq!(s.requests(ACCOUNT), 0);
     s.advance(1.0);
     assert_eq!(s.requests(ACCOUNT), 1);
-    let balance = s.store.balance();
+    let balance = s.store.balance().unwrap();
     assert_eq!(
         (balance.total, balance.free, balance.used, balance.upnl),
         (10.0, 7.0, 2.0, 0.75)
     );
-    assert_eq!(s.store.positions().to_vec(), positions);
-    assert!(s.store.loaded().balance && s.store.loaded().positions);
+    assert_eq!(s.store.positions().unwrap().to_vec(), positions);
+    assert!(s.store.loaded().unwrap().balance && s.store.loaded().unwrap().positions);
     assert_eq!(s.fills.get(), 0);
 }
 
@@ -253,7 +255,7 @@ fn private_position_frame_preserves_retained_store_info() {
     use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_types::retained_json::RetainedJsonInput as Input;
     let s = Scene::new();
-    let mut positions = s.store.positions().to_vec();
+    let mut positions = s.store.positions().unwrap().to_vec();
     let position = positions
         .iter_mut()
         .find(|position| position.side == PositionSide::Long)
@@ -279,7 +281,7 @@ fn private_position_frame_preserves_retained_store_info() {
         "position",
         json!({"event":"UPDATE","positionId":"retained-position","symbol":"BTCUSDT","side":"LONG"}),
     );
-    let positions = s.store.positions();
+    let positions = s.store.positions().unwrap();
     let position = positions
         .iter()
         .find(|position| position.side == PositionSide::Long)
@@ -341,7 +343,7 @@ fn private_order_update_retains_utf16_info_client_id_when_cache_misses() {
         .clone();
     let s = Scene::new();
     s.frame("order", order("CREATE", "NEW", "0"));
-    let mut orders = s.store.orders().to_vec();
+    let mut orders = s.store.orders().unwrap().to_vec();
     orders[0].reduce_only = true.into();
     orders[0].info = Some(Input::Object(vec![
         (
@@ -362,7 +364,7 @@ fn private_order_update_retains_utf16_info_client_id_when_cache_misses() {
     )
     .unwrap();
     s.frame("order", rows[0]["fixture"]["json"]["data"].clone());
-    let orders = s.store.orders();
+    let orders = s.store.orders().unwrap();
     for (field, value) in [
         ("price", orders[0].price.to_number()),
         ("amount", orders[0].amount),
@@ -409,7 +411,7 @@ fn private_malformed_json_keeps_source_null_parse_behavior() {
     );
     s.frame("order", order("CREATE", "NEW", "0"));
     assert_eq!(
-        s.store.orders()[0].id,
+        s.store.orders().unwrap()[0].id,
         "native-frame-order",
         "later valid frames still arrive"
     );

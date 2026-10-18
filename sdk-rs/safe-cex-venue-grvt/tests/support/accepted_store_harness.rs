@@ -1,8 +1,9 @@
 // Native values and observers shared by individually reviewed Store/helper adapters.
 // This fixture never invokes or redirects a production function under review.
 use indexmap::IndexMap;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeErrorOrigin, LogSeverity};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     Candle, FetchedLeverage, Market, Order, OrderBook, OrderBookOrders, PlaceOrderOpts, Position,
     StoreSubscriberError, Ticker,
@@ -91,6 +92,7 @@ pub fn view_cache(store: &dyn Store) -> Value {
     Value::Array(
         store
             .fetched_leverage()
+            .unwrap()
             .iter()
             .map(|(key, value)| json!([key, view_leverage(value)]))
             .collect(),
@@ -120,7 +122,7 @@ pub fn view_market(value: &Market) -> Value {
         "taker":value.taker_fee.map(bits),"maker":value.maker_fee.map(bits),"info":value.info.as_ref().map(retained)})
 }
 pub fn view_markets(store: &dyn Store) -> Value {
-    Value::Array(store.markets().iter().map(view_market).collect())
+    Value::Array(store.markets().unwrap().iter().map(view_market).collect())
 }
 pub fn error(name: &str, message: &str) -> ExchangeError {
     let mut error = ExchangeError::new(message);
@@ -243,6 +245,7 @@ pub fn view_positions(store: &dyn Store) -> Value {
     Value::Array(
         store
             .positions()
+            .unwrap()
             .iter()
             .map(|v| json!([v.id, v.symbol, bits(v.leverage)]))
             .collect(),

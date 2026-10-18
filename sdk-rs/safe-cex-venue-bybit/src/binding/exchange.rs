@@ -424,7 +424,7 @@ impl BybitExchange {
             },
             from_typed(&name).map_err(err)?,
             from_typed(&options).map_err(err)?,
-            store::facade(store.clone()),
+            store::facade(store.clone())?,
             |this| {
                 // bybitdemo.exchange.ts initializes this field after super().
                 if name == ExchangeName::Bybitdemo {

@@ -1,13 +1,14 @@
 use safe_cex_crypto::{
     Encoding, PayloadScheme, PayloadSigner, PayloadSignerRequest, PayloadSignerResult,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     http::{HttpClientOptions, HttpFailure, HttpFuture, HttpHost},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     NetworkFailure, RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportFuture, TransportRegistry,

@@ -1,11 +1,11 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use runtime::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_webworker::ui_state::handle_active_symbols_change;
 use serde_json::{Value, json};
@@ -176,7 +176,7 @@ fn leverage_updates_match_source_batch_selection_and_native_numbers() {
                 true,
             )
             .unwrap();
-        let before = exchange.base.store.update_ids().positions;
+        let before = exchange.base.store.update_ids().unwrap().positions;
         let leverage = FetchedLeverage {
             buy_leverage: from_bits(&row["buy"]),
             sell_leverage: from_bits(&row["sell"]),
@@ -188,11 +188,11 @@ fn leverage_updates_match_source_batch_selection_and_native_numbers() {
         assert!(result.is_ok(), "LEVERAGE-NATIVE-PATCH {index}: {result:?}");
         let calls = row["calls"].as_array().unwrap();
         assert_eq!(
-            exchange.base.store.update_ids().positions - before,
+            exchange.base.store.update_ids().unwrap().positions - before,
             calls.len() as f64,
             "LEVERAGE-BATCH {index}"
         );
-        let actual_positions = exchange.base.store.positions();
+        let actual_positions = exchange.base.store.positions().unwrap();
         assert_eq!(
             actual_positions.len(),
             positions.len(),
@@ -219,7 +219,7 @@ fn leverage_updates_match_source_batch_selection_and_native_numbers() {
     }
     assert_eq!(corpus["emptyCalls"], json!([]));
     let exchange = venue();
-    let before = exchange.base.store.update_ids().positions;
+    let before = exchange.base.store.update_ids().unwrap().positions;
     update_positions_with_leverage(
         &exchange,
         "BTC",
@@ -233,7 +233,7 @@ fn leverage_updates_match_source_batch_selection_and_native_numbers() {
     )
     .unwrap();
     assert_eq!(
-        exchange.base.store.update_ids().positions,
+        exchange.base.store.update_ids().unwrap().positions,
         before,
         "LEVERAGE-EMPTY"
     );

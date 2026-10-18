@@ -249,7 +249,7 @@ impl OrderBookSubscriptionsHandler {
         if let Some((ask, bid)) = prices {
             let store = &self.exchange.base().store;
             let ticker = store
-                .tickers()
+                .tickers()?
                 .iter()
                 .find(|t| {
                     Some(t.symbol.as_str())
@@ -273,7 +273,7 @@ impl OrderBookSubscriptionsHandler {
     pub fn handle(self: &Rc<Self>, payload: StoreWorkerPayload) -> Result<(), ExchangeError> {
         match payload.op {
             StoreWorkerOp::SubscribeOrderBook => {
-                if self.base.buffer_until_markets_loaded(payload.clone()) {
+                if self.base.buffer_until_markets_loaded(payload.clone())? {
                     return Ok(());
                 }
                 let Some(data) = payload.data.filter(Value::is_object) else {
@@ -288,7 +288,7 @@ impl OrderBookSubscriptionsHandler {
                     .exchange
                     .base()
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .any(|m| m.symbol == symbol)
                 {
@@ -462,7 +462,7 @@ impl OHLCVSubscriptionsHandler {
     pub fn handle(self: &Rc<Self>, payload: StoreWorkerPayload) -> Result<(), ExchangeError> {
         match payload.op {
             StoreWorkerOp::SubscribeOHLCV => {
-                if self.base.buffer_until_markets_loaded(payload.clone()) {
+                if self.base.buffer_until_markets_loaded(payload.clone())? {
                     return Ok(());
                 }
                 let Some(data) = payload.data.filter(Value::is_object) else {
@@ -479,7 +479,7 @@ impl OHLCVSubscriptionsHandler {
                     .exchange
                     .base()
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .any(|m| m.symbol == symbol)
                 {

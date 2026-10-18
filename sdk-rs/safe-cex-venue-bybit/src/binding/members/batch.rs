@@ -75,11 +75,13 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "_hasFullSizedPositionOppositeSide", |rt, a| {
         let side = to_typed(&arg(&a, 1))?;
-        Ok(Js::Bool(venue(&rt)?.has_full_sized_position_opposite_side(
-            &text(&arg(&a, 0))?,
-            side,
-            arg(&a, 2).to_number()?,
-        )))
+        Ok(Js::Bool(
+            venue(&rt)?.has_full_sized_position_opposite_side(
+                &text(&arg(&a, 0))?,
+                side,
+                arg(&a, 2).to_number()?,
+            )?,
+        ))
     })?;
     method(rt, "formatBybitVenueError", |rt, a| {
         Ok(Js::str(&crate::exchange_errors::format_bybit_venue_error(
@@ -456,7 +458,7 @@ fn format_order_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
                 let market = venue(&rt)?
                     .base
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .find(|m| m.symbol == typed.symbol)
                     .cloned();
@@ -481,7 +483,7 @@ fn format_order_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
                 let ticker = venue(&rt)?
                     .base
                     .store
-                    .tickers()
+                    .tickers()?
                     .iter()
                     .find(|t| t.symbol == typed.symbol)
                     .cloned();

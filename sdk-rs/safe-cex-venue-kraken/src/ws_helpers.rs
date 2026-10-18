@@ -7,7 +7,7 @@ pub fn get_ticker_product_ids(
     store: &dyn Store,
     get_active_symbols: impl FnOnce() -> Result<Vec<String>, ExchangeError>,
 ) -> Result<Vec<String>, ExchangeError> {
-    let product_ids: Vec<String> = store.markets().iter().map(|m| m.symbol.clone()).collect();
+    let product_ids: Vec<String> = store.markets()?.iter().map(|m| m.symbol.clone()).collect();
     let active_symbols = get_active_symbols()?;
     if active_symbols.is_empty() {
         return Ok(product_ids);

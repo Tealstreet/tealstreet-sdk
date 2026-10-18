@@ -7,12 +7,9 @@ use safe_cex_store::{
 };
 use safe_cex_types::*;
 use serde_json::{Map, Value};
-use std::{
-    cell::{Cell, Ref},
-    rc::Rc,
-};
+use std::{cell::Cell, rc::Rc};
 pub(super) struct ReadTrace {
-    inner: Rc<safe_cex_store::store::DefaultStore>,
+    inner: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub(super) position_reads: Cell<usize>,
     pub(super) ticker_reads: Cell<usize>,
 }
@@ -124,75 +121,77 @@ impl safe_cex_store::Store for ReadTrace {
     fn update_user_data(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::update_user_data(self.inner.as_ref(), data)
     }
-    fn latency(&self) -> f64 {
+    fn latency(&self) -> Result<f64, StoreReadError> {
         safe_cex_store::Store::latency(self.inner.as_ref())
     }
-    fn balance(&self) -> Ref<'_, Balance> {
+    fn balance(&self) -> Result<Balance, StoreReadError> {
         safe_cex_store::Store::balance(self.inner.as_ref())
     }
-    fn balance_handle(&self) -> std::sync::Arc<Balance> {
+    fn balance_handle(&self) -> Result<safe_cex_store::BalanceHandle, StoreReadError> {
         safe_cex_store::Store::balance_handle(self.inner.as_ref())
     }
-    fn markets(&self) -> Ref<'_, [Market]> {
+    fn markets(&self) -> Result<Vec<Market>, StoreReadError> {
         safe_cex_store::Store::markets(self.inner.as_ref())
     }
-    fn tickers(&self) -> Ref<'_, [Ticker]> {
+    fn tickers(&self) -> Result<Vec<Ticker>, StoreReadError> {
         safe_cex_store::Store::tickers(self.inner.as_ref())
     }
-    fn orders(&self) -> Ref<'_, [Order]> {
+    fn orders(&self) -> Result<Vec<Order>, StoreReadError> {
         safe_cex_store::Store::orders(self.inner.as_ref())
     }
-    fn orders_risk(&self) -> Ref<'_, IndexMap<String, Vec<OrderRiskProfile>>> {
+    fn orders_risk(&self) -> Result<IndexMap<String, Vec<OrderRiskProfile>>, StoreReadError> {
         safe_cex_store::Store::orders_risk(self.inner.as_ref())
     }
-    fn positions(&self) -> Ref<'_, [Position]> {
+    fn positions(&self) -> Result<Vec<Position>, StoreReadError> {
         self.position_reads.set(self.position_reads.get() + 1);
         safe_cex_store::Store::positions(self.inner.as_ref())
     }
-    fn displayed_positions(&self) -> Ref<'_, [DisplayedPosition]> {
+    fn displayed_positions(&self) -> Result<Vec<DisplayedPosition>, StoreReadError> {
         safe_cex_store::Store::displayed_positions(self.inner.as_ref())
     }
-    fn displayed_margin(&self) -> Option<Ref<'_, DisplayedMargin>> {
+    fn displayed_margin(&self) -> Result<Option<DisplayedMargin>, StoreReadError> {
         safe_cex_store::Store::displayed_margin(self.inner.as_ref())
     }
-    fn active_chasers(&self) -> Ref<'_, [ActiveChaser]> {
+    fn active_chasers(&self) -> Result<Vec<ActiveChaser>, StoreReadError> {
         safe_cex_store::Store::active_chasers(self.inner.as_ref())
     }
-    fn active_twaps(&self) -> Ref<'_, [ActiveTWAP]> {
+    fn active_twaps(&self) -> Result<Vec<ActiveTWAP>, StoreReadError> {
         safe_cex_store::Store::active_twaps(self.inner.as_ref())
     }
-    fn loaded(&self) -> Ref<'_, StoreDataLoaded> {
+    fn loaded(&self) -> Result<StoreDataLoaded, StoreReadError> {
         safe_cex_store::Store::loaded(self.inner.as_ref())
     }
-    fn update_ids(&self) -> Ref<'_, StoreUpdateIds> {
+    fn update_ids(&self) -> Result<StoreUpdateIds, StoreReadError> {
         safe_cex_store::Store::update_ids(self.inner.as_ref())
     }
-    fn options(&self) -> Ref<'_, StoreOptions> {
+    fn options(&self) -> Result<StoreOptions, StoreReadError> {
         safe_cex_store::Store::options(self.inner.as_ref())
     }
-    fn message_handler_stats(&self) -> Option<Ref<'_, Value>> {
+    fn message_handler_stats(&self) -> Result<Option<Value>, StoreReadError> {
         safe_cex_store::Store::message_handler_stats(self.inner.as_ref())
     }
-    fn stark_config(&self) -> Option<Ref<'_, Value>> {
+    fn stark_config(&self) -> Result<Option<Value>, StoreReadError> {
         safe_cex_store::Store::stark_config(self.inner.as_ref())
     }
-    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
+    fn zk_link_config(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError> {
         safe_cex_store::Store::zk_link_config(self.inner.as_ref())
     }
-    fn user_data(&self) -> Option<Ref<'_, Value>> {
+    fn user_data(&self) -> Result<Option<Value>, StoreReadError> {
         safe_cex_store::Store::user_data(self.inner.as_ref())
     }
-    fn tickers_by_id(&self) -> Ref<'_, IndexMap<String, Ticker>> {
+    fn tickers_by_id(&self) -> Result<IndexMap<String, Ticker>, StoreReadError> {
         safe_cex_store::Store::tickers_by_id(self.inner.as_ref())
     }
-    fn markets_by_id(&self) -> Ref<'_, IndexMap<String, Market>> {
+    fn markets_by_id(&self) -> Result<IndexMap<String, Market>, StoreReadError> {
         safe_cex_store::Store::markets_by_id(self.inner.as_ref())
     }
-    fn tickers_by_symbol(&self) -> Ref<'_, IndexMap<String, Ticker>> {
+    fn tickers_by_symbol(&self) -> Result<IndexMap<String, Ticker>, StoreReadError> {
         self.ticker_reads.set(self.ticker_reads.get() + 1);
         safe_cex_store::Store::tickers_by_symbol(self.inner.as_ref())
     }
-    fn markets_by_symbol(&self) -> Ref<'_, IndexMap<String, Market>> {
+    fn markets_by_symbol(&self) -> Result<IndexMap<String, Market>, StoreReadError> {
         safe_cex_store::Store::markets_by_symbol(self.inner.as_ref())
     }
     fn get_markets_version(&self) -> f64 {
@@ -201,22 +200,31 @@ impl safe_cex_store::Store for ReadTrace {
     fn get_tickers_version(&self) -> f64 {
         safe_cex_store::Store::get_tickers_version(self.inner.as_ref())
     }
-    fn fetched_leverage(&self) -> Ref<'_, IndexMap<String, FetchedLeverage>> {
+    fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
         safe_cex_store::Store::fetched_leverage(self.inner.as_ref())
     }
-    fn socket_health(&self) -> Option<Ref<'_, Value>> {
+    fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
         safe_cex_store::Store::socket_health(self.inner.as_ref())
     }
     fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::update_socket_health(self.inner.as_ref(), data)
     }
-    fn request_stats(&self) -> Option<Ref<'_, RequestOutcomeCounts>> {
+    fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError> {
         safe_cex_store::Store::request_stats(self.inner.as_ref())
     }
-    fn record_request_outcome(&self, outcome: RequestOutcome) {
+    fn record_request_outcome(&self, outcome: RequestOutcome) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::record_request_outcome(self.inner.as_ref(), outcome)
     }
-    fn serialize(&self) -> StoreData {
+    fn serialize(&self) -> Result<StoreData, StoreReadError> {
         safe_cex_store::Store::serialize(self.inner.as_ref())
+    }
+    fn native_owner(&self) -> Rc<dyn std::any::Any> {
+        safe_cex_store::Store::native_owner(self.inner.as_ref())
+    }
+    fn lookup_ticker_by_symbol(
+        &self,
+        symbol: &str,
+    ) -> Result<Rc<dyn safe_cex_store::ticker_lookup::TickerLookup>, StoreReadError> {
+        safe_cex_store::Store::lookup_ticker_by_symbol(self.inner.as_ref(), symbol)
     }
 }

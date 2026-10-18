@@ -32549,7 +32549,7 @@
       }
     },
     "evidence": "Reviewed symbol truthiness/alias selection, existing ticker lookup, separate update builder, native patch application and Store error propagation. Observe actual stored field bits after invoking the handler. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners.",
-    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }use safe_cex_store::Store;let store=safe_cex_store::store::DefaultStore::new();Store::update(&store,safe_cex_store::StoreUpdate{tickers:Some(vec![fx::ticker()]),..Default::default()},false).unwrap();$type(&store,Some($value)).unwrap();let rows=store.tickers();let t=&rows[0];serde_json::json!({\"id\":t.id,\"bidBits\":format!(\"{:016x}\",t.bid.to_bits()),\"lastBits\":format!(\"{:016x}\",t.last.to_bits()),\"percentageBits\":format!(\"{:016x}\",t.percentage.to_bits())})}",
+    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }use safe_cex_store::Store;let store=safe_cex_exchange::native_store::DefaultStore::new();Store::update(&store,safe_cex_store::StoreUpdate{tickers:Some(vec![fx::ticker()]),..Default::default()},false).unwrap();$type(&store,Some($value)).unwrap();let rows=store.tickers();let t=&rows[0];serde_json::json!({\"id\":t.id,\"bidBits\":format!(\"{:016x}\",t.bid.to_bits()),\"lastBits\":format!(\"{:016x}\",t.last.to_bits()),\"percentageBits\":format!(\"{:016x}\",t.percentage.to_bits())})}",
     "cases": [
       {
         "input": {

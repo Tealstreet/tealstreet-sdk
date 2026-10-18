@@ -371,7 +371,7 @@ fn interval_reports_callback_error_and_retains_next_tick() {
 #[test]
 fn exchange_owned_sibling_survives_outer_handle_and_disposal_releases_it() {
     use crate::exchange::{BaseExchange, ExchangeSettings};
-    use safe_cex_store::store::DefaultStore;
+    use crate::native_store::DefaultStore;
     use safe_cex_types::ExchangeName;
     let runtime = Rc::new(Runtime::default());
     let base = BaseExchange::new(
@@ -428,7 +428,7 @@ fn exchange_owned_sibling_survives_outer_handle_and_disposal_releases_it() {
 #[test]
 fn exchange_dispose_error_still_cancels_every_owned_task_and_rejects_new_work() {
     use crate::exchange::{BaseExchange, ExchangeSettings};
-    use safe_cex_store::store::DefaultStore;
+    use crate::native_store::DefaultStore;
     use safe_cex_types::ExchangeName;
     use std::sync::Arc;
     for poll_before_dispose in [false, true] {
@@ -515,7 +515,7 @@ fn exchange_dispose_error_still_cancels_every_owned_task_and_rejects_new_work() 
 #[test]
 fn exchange_listener_error_rearms_interval_and_releases_timeout() {
     use crate::exchange::{BaseExchange, ExchangeSettings};
-    use safe_cex_store::store::DefaultStore;
+    use crate::native_store::DefaultStore;
     use safe_cex_types::ExchangeName;
     for repeat in [false, true] {
         let runtime = Rc::new(Runtime::default());

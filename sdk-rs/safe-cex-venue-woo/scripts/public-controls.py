@@ -11,8 +11,6 @@ add('feff-trim','safe_cex_num::js_trim(s).is_empty()','s.trim().is_empty()')
 add('smallest-positive','f64::from_bits(1)','f64::MIN_POSITIVE')
 add('book-sort','safe_cex_store::orderbook::sort_order_book(&mut book);','')
 add('book-total','safe_cex_store::orderbook::calc_order_book_total(&mut book);','')
-add('candle-ms','row.start_timestamp / 1000.0','row.start_timestamp / 1.0')
-add('candle-sort','sorted(&mut result);','sorted(&mut result); result.reverse();')
 add('minimum','result < minimum','result < f64::NEG_INFINITY')
 add('kline-order','end_timestamp < start_timestamp','false')
 pattern=r'let map = serde_json::Map::<String, serde_json::Value>::deserialize\(deserializer\)\?;\s*(\w+)Wire::deserialize\(serde_json::Value::Object\(map\)\)'
