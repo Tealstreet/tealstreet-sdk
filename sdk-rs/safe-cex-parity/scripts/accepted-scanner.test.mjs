@@ -54,9 +54,17 @@ test('module alias local and birth scans reuse artifact-selected scanners', () =
   const runner = fs.readFileSync(new URL('./accepted-set.mjs', import.meta.url), 'utf8');
   const births = fs.readFileSync(new URL('./accepted-births.mjs', import.meta.url), 'utf8');
   assert.equal((runner.match(/const scanner = buildScanner\(jobs\);/g) ?? []).length, 1);
-  assert.equal((runner.match(/spawnSync\(scanner,/g) ?? []).length, 4);
-  for (const mode of ['--doc-guards', '--binary-entry-json', '--alias-claims-json', '--macro-origins-json']) {
-    assert.equal(runner.split(`spawnSync(scanner, ['${mode}'`).length - 1, 1, `${mode}: one artifact-selected scanner call`);
+  assert.equal((runner.match(/spawnSync\(scanner,/g) ?? []).length, 7);
+  // Local scopes and dependency-provider effects each use the macro-origin scan.
+  for (const [mode, count] of Object.entries({
+    '--doc-guards': 1,
+    '--binary-entry-json': 1,
+    '--alias-claims-json': 1,
+    '--dependency-globs-json': 1,
+    '--guarded-sources-json': 1,
+    '--macro-origins-json': 2,
+  })) {
+    assert.equal(runner.split(`spawnSync(scanner, ['${mode}'`).length - 1, count, `${mode}: artifact-selected scanner call count`);
   }
   assert.match(births, /scanner \?\?= buildScanner\(\);/);
   for (const source of [runner, births]) assert.doesNotMatch(source, /target\/debug\/accepted-source/);
