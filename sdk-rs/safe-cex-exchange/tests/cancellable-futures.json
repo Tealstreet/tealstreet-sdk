@@ -2123,9 +2123,9 @@
         "opaque-macro-review",
         "opaque-macro-review"
       ],
-      "producer_sha256": "542a891214b85f33c698db044dd22e14b8682fc1be2d725603fc1739bd390c2d",
+      "producer_sha256": "ef1cb21876349ceb29f12be82bb148129577d178a22a9e9eb5615d14d81b41b5",
       "classification": "immediate",
-      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added. Reviewed well-known SymbolIterator arm: the additional write! only formats the fixed Symbol(Symbol.iterator) text synchronously; no task, waiter, future or cancellation latch is constructed."
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added. Reviewed well-known SymbolIterator arm: the additional write! only formats the fixed Symbol(Symbol.iterator) text synchronously; no task, waiter, future or cancellation latch is constructed. Reviewed accessor storage: the tuple-to-named-field match still formats only the fixed accessor marker; it neither invokes getters nor creates asynchronous work."
     },
     {
       "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",
