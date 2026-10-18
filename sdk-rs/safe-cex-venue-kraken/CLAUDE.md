@@ -507,6 +507,15 @@ script executes the live utility and exact Spot retry arrow. The three serial
 `api-receiver-controls.py` faults must fail named compiled witnesses and restore
 exactly. Array.join UTF16 behavior is shared-owned and repaired separately in #1037.
 
+### Public async wrapper timing
+
+The shared `invoke`/`invoke_unit` helpers must invoke the assembled member before
+returning a Rust waiter. That member already starts a canonical eager Promise;
+keep its existing runtime-owned continuation and do not wrap it in another spawn.
+`EAGER_WRAPPER_REVIEW.md` describes the real HTTP/drop/rejection regressions and
+live-source witness. Pumping physical Axios interceptor jobs is separate from
+polling the returned SDK waiter.
+
 
 The three `rest_account` aliases have finite profiles at the actual constructed
 `binding::rt::Rt` host (and explicit `bool` payload for ReadResult), with native
