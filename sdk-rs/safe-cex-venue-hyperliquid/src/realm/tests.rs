@@ -217,17 +217,38 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
         rt,
         safe_cex_exchange::exchange::ExchangeSettings::default(),
     ));
+    use safe_cex_exchange::js_runtime::{globals::stringify_json, value::Js};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/realm_emitter_source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["rows"].as_array().unwrap().len(), 5);
+    assert_eq!(source["sourceIdentity"], true);
     let seen = Rc::new(RefCell::new(Vec::new()));
-    for event in ["arity", "warning", "log"] {
+    let second = Rc::new(RefCell::new(Vec::new()));
+    for event in ["arity", "warning", "log", "numbers"] {
         let seen = seen.clone();
         base.on_args(
             event,
             Rc::new(move |event, args| {
-                let args: Vec<serde_json::Value> = args
-                    .iter()
-                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
-                    .collect();
                 seen.borrow_mut().push((event.to_owned(), args.to_vec()));
+                Ok(())
+            }),
+        );
+        let second = second.clone();
+        base.on_args(
+            event,
+            Rc::new(move |_, args| {
+                second.borrow_mut().push(args.to_vec());
                 Ok(())
             }),
         );
@@ -257,28 +278,50 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
         &[Value::str("native log"), Value::str("Warning")],
     )
     .unwrap();
+    let numbers = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0, 7.0, 42.0];
+    let mut args = vec![Value::str("numbers")];
+    args.extend(numbers.into_iter().map(Value::Number));
+    r.call_method(&emitter, "emit", &args).unwrap();
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 5, "production emitter event count");
+    assert_eq!(second.borrow().len(), 5, "second native listener count");
     assert_eq!(
-        *seen.borrow(),
-        vec![
-            ("arity".into(), vec![]),
-            ("arity".into(), vec![serde_json::json!([7, "eight"])]),
-            (
-                "warning".into(),
-                vec![
-                    serde_json::json!("venue warning"),
-                    serde_json::json!({"code":42})
-                ]
-            ),
-            (
-                "log".into(),
-                vec![
-                    serde_json::json!("[hyperliquid] native log"),
-                    serde_json::json!("Warning")
-                ]
-            ),
-        ],
-        "the production facade must retain the emitter's actual argument list"
+        seen.iter().map(|(_, args)| args.len()).collect::<Vec<_>>(),
+        vec![0, 1, 2, 2, 6]
     );
+    let array_number = seen[1].1[0].get("0").unwrap();
+    let code = seen[2].1[1].get("code").unwrap();
+    let numeric_values = [array_number, code]
+        .into_iter()
+        .chain(seen[4].1.iter().cloned());
+    assert_eq!(source["bits"].as_array().unwrap().len(), 8);
+    for (index, value) in numeric_values.enumerate() {
+        let Js::Number(value) = value else {
+            panic!("native emitter numeric type {index}");
+        };
+        assert_eq!(
+            format!("{:016x}", value.to_bits()),
+            source["bits"][index].as_str().unwrap(),
+            "native emitter bits {index}"
+        );
+    }
+    for (index, (event, args)) in seen.iter().enumerate() {
+        assert_eq!(event, source["rows"][index]["event"].as_str().unwrap());
+        for (left, right) in args.iter().zip(&second.borrow()[index]) {
+            assert!(
+                left.same_reference(right)
+                    || left.strict_equals(right)
+                    || matches!((left,right),(Js::Number(a),Js::Number(b)) if a.to_bits()==b.to_bits()),
+                "both listeners receive original native argument {index}"
+            );
+        }
+        let units = stringify_json(&Js::array(args.clone())).unwrap().unwrap();
+        assert_eq!(
+            String::from_utf16(&units).unwrap(),
+            source["rows"][index]["json"].as_str().unwrap(),
+            "real JS stringify emitter arguments {index}"
+        );
+    }
 }
 
 #[test]

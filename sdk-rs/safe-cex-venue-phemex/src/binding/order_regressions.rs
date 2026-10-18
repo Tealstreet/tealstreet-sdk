@@ -207,3 +207,111 @@ fn binding_place_orders_rejects_duplicate_ids_before_any_http() {
         "whole batch must reject before any request"
     );
 }
+
+#[test]
+fn daily_candles_normalize_real_offset_dates_before_utc_midnight() {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let cases = json!([
+        {"to":1700000000123u64,"offset":null,"interval":"1d"},
+        {"to":1700000000123u64,"offset":8,"interval":"1d"},
+        {"to":1700000000123u64,"offset":-5,"interval":"1d"},
+        {"to":1700000000123u64,"offset":5.75,"interval":"1d"},
+        {"to":1700000000123u64,"offset":-9.5,"interval":"1d"},
+        {"to":1700000000123u64,"offset":8,"interval":"1w"},
+        {"to":1700000000123u64,"offset":8,"interval":"1M"},
+        {"to":1700000000123u64,"offset":8,"interval":"1m"}
+    ]);
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 8);
+    let mut child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/daily-candle-source.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(cases).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected.len(), 8);
+    for index in 0..8 {
+        let input = &cases[index];
+        let h = venue();
+        h.http.ok(
+            "GET",
+            "/exchange/public/md/v2/kline/list",
+            json!({"data":{"rows":[[1,86400,0,"10","15","9","12","3"]]}}),
+        );
+        let to = if input["offset"].is_null() {
+            from_json(&input["to"])
+        } else {
+            h.exchange
+                .rt
+                .global("dayjs")
+                .unwrap()
+                .call(Js::Undefined, vec![from_json(&input["to"])])
+                .unwrap()
+                .call_method("utcOffset", vec![from_json(&input["offset"])])
+                .unwrap()
+        };
+        // Call the assembled receiver with a real shared Dayjs instance; no date stub.
+        let opts = Js::object(vec![
+            ("symbol", Js::str("BTCUSDT")),
+            ("interval", from_json(&input["interval"])),
+            ("limit", Js::Number(2.0)),
+            ("to", to),
+        ]);
+        let candles: Vec<Candle> = h
+            .drive(h.exchange.invoke("fetchOHLCV", vec![opts]))
+            .unwrap();
+        let calls = h.http.calls("/exchange/public/md/v2/kline/list");
+        assert_eq!(calls.len(), 1, "daily case {index} reaches real HTTP");
+        let wanted = &expected[index]["requests"][0]["params"];
+        assert_eq!(calls[0].params.as_object().unwrap().len(), 4);
+        for field in ["symbol", "resolution"] {
+            assert_eq!(
+                calls[0].params[field], wanted[field],
+                "case {index} {field}"
+            );
+        }
+        for field in ["from", "to"] {
+            assert_eq!(
+                calls[0].params[field].as_f64(),
+                wanted[field].as_f64(),
+                "daily UTC request must match actual TypeScript case {index} {field}: {input}"
+            );
+        }
+        assert_eq!(candles.len(), 1);
+        for (field, value) in [
+            ("timestamp", candles[0].timestamp),
+            ("open", candles[0].open),
+            ("high", candles[0].high),
+            ("low", candles[0].low),
+            ("close", candles[0].close),
+            ("volume", candles[0].volume),
+        ] {
+            assert_eq!(
+                Some(value),
+                expected[index]["candles"][0][field].as_f64(),
+                "daily mapped candles case {index} {field}"
+            );
+        }
+    }
+}

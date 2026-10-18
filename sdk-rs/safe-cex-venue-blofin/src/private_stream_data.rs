@@ -5,10 +5,13 @@ use crate::{
     private_stream_control as core,
 };
 use safe_cex_num::{
-    js_number, js_truthy, math_max, multiply, numeric_ingress::js_from_value, parse_float,
-    round_usd, subtract,
+    js_number, js_truthy, multiply, numeric_ingress::js_from_value, parse_float, round_usd,
+    subtract,
 };
-use safe_cex_store::{Store, StoreMutationError, StoreUpdate};
+use safe_cex_store::{
+    Store, StoreMutationError, StoreUpdate,
+    incremental_fills::{IncrementalFill, clean_float, create_incremental_fills},
+};
 use safe_cex_types::{
     Order, OrderSide, OrderStatus, Position,
     js_coercion::{JsCoercionError, js_string},
@@ -16,7 +19,6 @@ use safe_cex_types::{
 use serde_json::Value;
 use std::{
     cell::RefCell,
-    collections::HashMap,
     rc::{Rc, Weak},
 };
 
@@ -56,9 +58,17 @@ pub struct PrivateFill {
     pub amount: f64,
     pub timestamp: f64,
 }
-#[derive(Default)]
 pub struct PrivateTopicState {
-    pub last_filled_size_by_order_id: RefCell<HashMap<String, f64>>,
+    /// ts: incrementalFills. Cumulative filledSize and filledSize x averagePrice
+    /// become this execution's quantity and value.
+    pub incremental_fills: RefCell<Box<dyn FnMut(&str, f64, Option<f64>) -> IncrementalFill>>,
+}
+impl Default for PrivateTopicState {
+    fn default() -> Self {
+        Self {
+            incremental_fills: RefCell::new(Box::new(create_incremental_fills(500.0))),
+        }
+    }
 }
 
 pub trait PrivateDataHost: core::PrivateStreamHost {
@@ -176,38 +186,32 @@ pub fn handle_order_topic<H: PrivateDataHost>(
                 {
                     size
                 } else {
-                    float(
-                        truth_or([market
+                    safe_cex_num::js_retained_parse_float(
+                        market
                             .as_ref()
                             .and_then(|m| m.info.as_ref())
-                            .and_then(|i| i.get("contractValue"))])
-                        .or(Some(&Value::String("1".into()))),
+                            .and_then(|i| i.get("contractValue"))
+                            .filter(|v| v.is_truthy())
+                            .or(Some(
+                                &safe_cex_types::retained_json::RetainedJsonInput::Text(
+                                    "1".encode_utf16().collect(),
+                                ),
+                            )),
                     )?
                 };
                 let filled = float(
                     truth_or([field(row, "filledSize")?]).or(Some(&Value::String("0".into()))),
                 )?;
-                let previous = if order_id.is_empty() {
-                    0.0
-                } else {
-                    state
-                        .last_filled_size_by_order_id
-                        .borrow()
-                        .get(&order_id)
-                        .copied()
-                        .filter(|v| num_truth(*v))
-                        .unwrap_or(0.0)
-                };
-                let delta = math_max(filled - previous, 0.0);
-                if !order_id.is_empty() && filled.is_finite() && filled >= previous {
-                    state
-                        .last_filled_size_by_order_id
-                        .borrow_mut()
-                        .insert(order_id.clone(), filled);
-                }
-                if market.is_some() {
-                    let price = float(field(row, "averagePrice")?)?;
-                    if price.is_finite() && price > 0.0 && delta > 0.0 {
+                let average = float(field(row, "averagePrice")?)?;
+                if market.is_some() && filled.is_finite() && average.is_finite() && average > 0.0 {
+                    // The borrow ends before emission, so an emitter re-entering this
+                    // body sees the committed cumulative fill.
+                    let fill = (state.incremental_fills.borrow_mut())(
+                        &order_id,
+                        filled,
+                        Some(filled * average),
+                    );
+                    if fill.qty > 0.0 {
                         let time = match truth_or([
                             field(row, "fillTime")?,
                             field(row, "uTime")?,
@@ -221,30 +225,22 @@ pub fn handle_order_topic<H: PrivateDataHost>(
                         } else {
                             time.floor()
                         };
-                        let id = if order_id.is_empty() {
-                            orders[0].id.clone()
-                        } else {
-                            order_id.clone()
-                        };
                         host.emit_fill(PrivateFill {
-                            id: id.clone(),
-                            order_id: id,
+                            id: order_id.clone(),
+                            order_id: order_id.clone(),
                             side: orders[0].side,
                             symbol: orders[0].symbol.clone(),
-                            price,
-                            amount: multiply(delta, contract),
+                            // This execution's own price, not the order's running average.
+                            price: fill
+                                .value
+                                .map_or(average, |value| clean_float(value / fill.qty)),
+                            amount: multiply(fill.qty, contract),
                             timestamp,
                         })
                         .map_err(PrivateDataError::Host)?;
                     }
                 }
             }
-        }
-        if !order_id.is_empty() && matches!(raw_state, Some("filled" | "canceled")) {
-            state
-                .last_filled_size_by_order_id
-                .borrow_mut()
-                .remove(&order_id);
         }
     }
     throttle().map_err(PrivateDataError::Host)
@@ -303,7 +299,7 @@ pub fn handle_account_topic<H: PrivateDataHost>(
     let mut balance = host.store().balance().clone();
     balance.free = subtract(total, host.store().balance().used);
     balance.total = subtract(total, host.store().balance().upnl);
-    balance.info = Some(data.clone());
+    balance.info = Some(data.clone().into());
     host.store()
         .update(
             StoreUpdate {

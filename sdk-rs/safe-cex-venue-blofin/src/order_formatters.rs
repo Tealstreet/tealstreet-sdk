@@ -3,10 +3,12 @@ use crate::order_services::ServiceError;
 use crate::{
     modes::{PositionSideOptions, get_position_side},
     types::{BROKER_ID, REVERSE_ORDER_TYPE},
-    utility::UtilityInput,
 };
-use safe_cex_num::{adjust, js_number, js_number_string, js_string, js_truthy, parse_float};
+use safe_cex_num::{
+    adjust, js_number_string, js_retained_number as js_number, js_retained_parse_float,
+};
 use safe_cex_store::Store;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     MarginType, Market, Order, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
     OrderType, PreparedOrderOpts,
@@ -65,18 +67,23 @@ fn market<E>(opts: &PreparedOrderOpts, store: &dyn Store) -> Result<Market, Serv
         .cloned()
         .ok_or_else(|| ServiceError::Input(format!("Market {} not found on Blofin", opts.symbol)))
 }
-fn lot_value<E>(market: &Market) -> Result<Option<&Value>, ServiceError<E>> {
+fn lot_value<E>(market: &Market) -> Result<Option<&Input>, ServiceError<E>> {
     let info = market.info.as_ref().ok_or_else(|| {
         ServiceError::Input("Cannot read properties of undefined (reading 'lotSize')".into())
     })?;
-    if info.is_null() {
+    if info.is_nullish() {
         return Err(ServiceError::Input(
-            "Cannot read properties of null (reading 'lotSize')".into(),
+            if info.is_null() {
+                "Cannot read properties of null (reading 'lotSize')"
+            } else {
+                "Cannot read properties of undefined (reading 'lotSize')"
+            }
+            .into(),
         ));
     }
     Ok(info
         .get("lotSize")
-        .filter(|value| js_truthy(Some(value)))
+        .filter(|value| value.is_truthy())
         .or_else(|| info.get("minSize")))
 }
 fn generated_id<E>(host: &FormatHost<'_, E>) -> Result<String, ServiceError<E>> {
@@ -121,7 +128,7 @@ fn order_type_key(value: safe_cex_types::ModelField<OrderType>) -> &'static str 
 }
 pub async fn format_trigger_order<E>(
     opts: &PreparedOrderOpts,
-    source: Option<&UtilityInput>,
+    source: Option<&Input>,
     store: &dyn Store,
     host: &FormatHost<'_, E>,
 ) -> Result<OrderPayload, ServiceError<E>> {
@@ -156,38 +163,58 @@ pub async fn format_trigger_order<E>(
             opts.symbol
         )));
     }
-    let source = source.map(UtilityInput::json);
-    if source.is_some_and(|value| js_truthy(Some(value)))
-        && source.and_then(|s| s.get("instId")).and_then(Value::as_str) != Some(&market.id)
+    if source.is_some_and(Input::is_truthy)
+        && !source
+            .and_then(|s| s.get("instId"))
+            .is_some_and(|v| v.text_equals(&market.id))
     {
         return Err(ServiceError::Input(
             "Cannot replace a BloFin trigger whose instrument identity changed".into(),
         ));
     }
-    let margin_mode = match source
+    let margin_mode = if source
         .and_then(|s| s.get("marginMode"))
-        .and_then(Value::as_str)
+        .is_some_and(|v| v.text_equals("cross"))
     {
-        Some("cross") => "cross",
-        Some("isolated") => "isolated",
-        _ => margin((host.get_margin_type)(&market.symbol).await?),
+        "cross"
+    } else if source
+        .and_then(|s| s.get("marginMode"))
+        .is_some_and(|v| v.text_equals("isolated"))
+    {
+        "isolated"
+    } else {
+        margin((host.get_margin_type)(&market.symbol).await?)
     };
-    let position_side = match source
+    let position_side = if source
         .and_then(|s| s.get("positionSide"))
-        .and_then(Value::as_str)
+        .is_some_and(|v| v.text_equals("net"))
     {
-        Some("net") => "net",
-        Some("long") => "long",
-        Some("short") => "short",
-        _ => position_side(opts, host).await?,
+        "net"
+    } else if source
+        .and_then(|s| s.get("positionSide"))
+        .is_some_and(|v| v.text_equals("long"))
+    {
+        "long"
+    } else if source
+        .and_then(|s| s.get("positionSide"))
+        .is_some_and(|v| v.text_equals("short"))
+    {
+        "short"
+    } else {
+        position_side(opts, host).await?
     };
-    let trigger_price_type = match source
+    let trigger_price_type = if source
         .and_then(|s| s.get("triggerPriceType"))
-        .and_then(Value::as_str)
+        .is_some_and(|v| v.text_equals("mark"))
     {
-        Some("mark") => "mark",
-        Some("index") => "index",
-        _ => "last",
+        "mark"
+    } else if source
+        .and_then(|s| s.get("triggerPriceType"))
+        .is_some_and(|v| v.text_equals("index"))
+    {
+        "index"
+    } else {
+        "last"
     };
     let mut attached = Map::new();
     if let Some(price) = optional_truthy(opts.take_profit) {
@@ -247,7 +274,7 @@ pub async fn format_algo_order<E>(
     host: &FormatHost<'_, E>,
 ) -> Result<OrderPayload, ServiceError<E>> {
     let market = market(opts, store)?;
-    let lot = parse_float(&js_string(lot_value(&market)?).map_err(ServiceError::Coercion)?);
+    let lot = js_retained_parse_float(lot_value(&market)?).map_err(ServiceError::Coercion)?;
     let amount = adjust(opts.amount, lot);
     let price = optional_truthy(opts.price).map(|price| adjust(price, market.precision.price));
     let position_side = position_side(opts, host).await?;
@@ -338,7 +365,7 @@ pub async fn format_normal_order<E>(
 ) -> Result<Vec<OrderPayload>, ServiceError<E>> {
     let market = market(opts, store)?;
     let max_size = market.limits.amount.max;
-    let lot = parse_float(&js_string(lot_value(&market)?).map_err(ServiceError::Coercion)?);
+    let lot = js_retained_parse_float(lot_value(&market)?).map_err(ServiceError::Coercion)?;
     let amount = adjust(opts.amount, lot);
     let price = optional_truthy(opts.price).map(|price| adjust(price, market.precision.price));
     let margin_mode = (host.get_margin_type)(&market.symbol).await?;

@@ -85,18 +85,18 @@ note = "Live TypeScript oracle runs under cargo test; adapted Rust representatio
 [[symbol]]
 ts = "HYROTRADER_PROD_URL"
 kind = "const"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/types.rs::HYROTRADER_PROD_URL"
+status = "ported"
+note = "Same normalized build-time origin and optional REST-derived WS defaults as bundled TS. Rebuild on environment changes. Live all-export source oracle and actual signed REST/socket routing exercise the production family."
 
 [[symbol]]
 ts = "HYROTRADER_PROD_WS_URL"
 kind = "const"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/types.rs::HYROTRADER_PROD_WS_URL"
+status = "ported"
+note = "Same normalized build-time origin and optional REST-derived WS defaults as bundled TS. Rebuild on environment changes. Live all-export source oracle and actual signed REST/socket routing exercise the production family."
 
 [[symbol]]
 ts = "ENDPOINTS"

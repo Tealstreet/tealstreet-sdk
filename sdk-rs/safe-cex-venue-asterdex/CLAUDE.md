@@ -68,11 +68,19 @@ retain the separate obligations of lexical ordinary `Wire` decoders.
 `RECORD_CONTRACT_REVIEW.md` records twenty ordinary wire record contracts,
 184 native fields, 707 shape/field observations and a complete-array control.
 
+`DECODER_CONTRACT_REVIEW.md` reviews eleven remaining wire/workflow decoders,
+their direct native fields, per-field TS runtime null behavior, and the measured
+workflow object-shape and flattened numeric-ingress repairs.
+
 `ENUM_CONTRACT_REVIEW.md` records eleven string/position-mode enum contracts,
 their 173 raw-text/native observations and grouped String-frontdoor control.
 
 `DECISION_CONTRACT_REVIEW.md` records eight account/exchange decision contracts,
 their 98 fixed TS/native observations and five isolated compiled controls.
+
+`EXCHANGE_HELPER_CONTRACT_REVIEW.md` records twelve further production helper
+contracts, direct native fields/effects and the source checks for their 48 cases.
+The selected runner covers those twelve owners; the other full-matrix obligations remain.
 
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
@@ -153,6 +161,16 @@ REST candles map raw shared Js rows by the six fields actually read by TS.
 The declared twelve-column tuple does not gate runtime response admission.
 The real V1/V3 binding regression checks short rows, numeric prices, opaque unused
 columns and missing-volume NaN against the maintained fetchOHLCV method.
+
+
+The constructed ticker census in `tests/exchange_trait.rs::production_ticker_coercion_matches_constructed_typescript`
+uses the maintained TS exchange and DefaultStore via `parity/scripts/ticker-strict-source.cjs`.
+252 cases / 372 frames cover bare and wrapped ticker/mark batches, trade last and every validated depth price/amount input. The copied fundingTime field has twelve complete-row refusals; falsey times retain source omission.
+The corpus includes null, strings, NaN-producing inputs, objects, booleans, missing
+fields, raw numeric overflow and signed zero. It compares all eleven native number
+fields before JSON; approved decision-3 refusal preserves the entire bad row.
+`parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
+behavior, requiring a compiled native failure and exact restored pass.
 
 `WIRE_CONTRACT_REVIEW.md` records the 42 private module-scope Deserialize
 companions and their direct shape/native-value witnesses. The focused

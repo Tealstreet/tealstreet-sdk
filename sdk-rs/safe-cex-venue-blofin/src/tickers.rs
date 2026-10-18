@@ -83,7 +83,7 @@ fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoerc
             volume: number(row.get("volCurrency24h"))?,
             quote_volume: number(row.get("vol24h"))?,
             open_interest: 0.0,
-            info: Some(row.clone()),
+            info: Some(row.clone().into()),
         });
     }
     Ok(tickers)

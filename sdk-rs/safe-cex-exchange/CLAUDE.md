@@ -955,6 +955,14 @@ The exchanges-level audit and retained options gap are tracked in
 entrypoints execute their initial source calls before returning their futures;
 caller-drop and reporting choices cite MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 
+The shared function `call` member invokes the original target with the supplied
+strict receiver and remaining arguments. It preserves native values, returned
+references/promises and arbitrary thrown values without awaiting or JSON.
+Non-callable receivers reject before reading conversion hooks. Own function
+`call` properties/getters retain precedence. The native/Node witness
+is `tests/js_function_call.rs`; function construction and prototype metadata
+remain separate capabilities in the Hyperliquid shared-runtime consolidation.
+
 The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
 retaining the target receiver and prepending bound arguments even when the result
 is rebound or called by an array helper. Own function properties take precedence.
@@ -1378,6 +1386,13 @@ truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+The receive loop polls the open callback's synchronous prefix before dispatching
+a buffered first message, for direct and relay transports. A pending callback
+continues in the existing socket-owned task registry; the receive loop does not
+wait for its authentication or other asynchronous completion. The native TCP
+`js_socket_open_order` witness coalesces the upgrade and first frame and compares
+synchronous and asynchronous listener traces with Node.
 
 The shared JS facade's async snapshot/order/position methods return rejected
 Promises for preparation errors, including errors before their first await.

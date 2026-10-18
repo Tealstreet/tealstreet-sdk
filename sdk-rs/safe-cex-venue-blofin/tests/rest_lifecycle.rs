@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use safe_cex_num::numeric_ingress::{js_from_value, js_value_as_f64};
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{
@@ -140,7 +142,7 @@ fn market(a: &Market, e: &Value) {
     num(a.limits.leverage.min, &e["limits"]["leverage"]["min"]);
     num(a.limits.leverage.max, &e["limits"]["leverage"]["max"]);
     num(a.contract_size.unwrap(), &e["contractSize"]);
-    plain(a.info.as_ref().unwrap(), &e["info"]);
+    retained_assert::assert_value(a.info.as_ref().unwrap(), &e["info"]);
     assert!(
         a.pretty_symbol.is_none()
             && a.is_expiring.is_none()
@@ -181,7 +183,7 @@ fn position(a: &Position, e: &Value) {
     if e.get("info").is_none() || e["info"].get("undefined") == Some(&Value::Bool(true)) {
         assert!(a.info.is_none())
     } else {
-        plain(a.info.as_ref().unwrap(), &e["info"]);
+        retained_assert::assert_value(a.info.as_ref().unwrap(), &e["info"]);
     }
     if let Some(v) = e.get("marginSize") {
         num(a.margin_size.unwrap(), v)
@@ -408,9 +410,17 @@ fn read_cases(method: &str, expected_count: usize) {
                         market(a, e)
                     }
                     if c["fallbackAlias"] == true {
-                        actual[0].info.as_mut().unwrap()["stored"] = json!(false);
+                        *actual[0].info.as_mut().unwrap().get_mut("stored").unwrap() =
+                            json!(false).into();
                         assert_eq!(
-                            s.markets()[0].info.as_ref().unwrap()["stored"],
+                            s.markets()[0]
+                                .info
+                                .as_ref()
+                                .unwrap()
+                                .get("stored")
+                                .unwrap()
+                                .as_bool()
+                                .unwrap(),
                             true,
                             "native fallback snapshots independent"
                         )
@@ -1238,7 +1248,17 @@ fn native_rest_boundaries() {
             let actual = ready(fetch_markets(&s, &adapter, &h, || "cache-id".into())).unwrap();
             assert_eq!(actual.len(), 1);
             assert_eq!(actual[0].id, models["market"]["id"]);
-            assert_eq!(actual[0].info.as_ref().unwrap()["stored"], true);
+            assert_eq!(
+                actual[0]
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("stored")
+                    .unwrap()
+                    .as_bool()
+                    .unwrap(),
+                true
+            );
         } else {
             let opts: OHLCVOptions =
                 serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m","to":9e15}))

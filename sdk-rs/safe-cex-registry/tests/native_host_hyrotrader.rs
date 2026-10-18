@@ -12,9 +12,12 @@ fn hyrotrader_native_registry_preserves_configuration_and_signed_reads() {
     let host = native_host::native_venue_host(native_host::hyperliquid_rate_limiter());
     let constructor =
         rust_constructor(&name, host).expect("live HyroTrader has a Rust registry constructor");
-    if safe_cex_venue_bybit::types::HYROTRADER_SIMULATOR_URL["livenet"]
-        .as_str()
-        .is_none_or(str::is_empty)
+    if [
+        &*safe_cex_venue_bybit::types::HYROTRADER_PROD_URL,
+        &*safe_cex_venue_bybit::types::HYROTRADER_SIMULATOR_URL,
+    ]
+    .iter()
+    .all(|urls| urls["livenet"].as_str().is_none_or(str::is_empty))
     {
         let result = constructor.construct(
             name,
@@ -28,7 +31,7 @@ fn hyrotrader_native_registry_preserves_configuration_and_signed_reads() {
         };
         assert_eq!(
             error.message,
-            "HyroTrader simulator REST URL is not configured"
+            "HyroTrader production REST URL is not configured. Set NEXT_PUBLIC_HYROTRADER_PROD_REST_URL, or NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL while v1 is simulator-backed."
         );
         return;
     }
@@ -46,7 +49,7 @@ fn hyrotrader_native_registry_preserves_configuration_and_signed_reads() {
         )
         .await;
         assert_eq!(h.exchange.class_name(), "HyrotraderExchange");
-        assert!(h.exchange.base().is_demo);
+        assert!(!h.exchange.base().is_demo);
         let orders = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             h.exchange.fetch_orders(None),
