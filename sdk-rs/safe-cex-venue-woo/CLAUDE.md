@@ -3,6 +3,9 @@
 `FIX_AUDIT_LEDGER.md` tracks the exact 60-row follow-up cohort. The isolated V3
 orderbook recovery port and its facade-only tests are retired after caller and
 constructed-runtime checks; the live legacy snapshot/delta/cleanup path remains.
+The unused V3 cancel-all-after descriptor/response module is retired too. WOO
+inherits the source BaseExchange.scheduleCancel `Error: Not implemented` rejection;
+the actual signed cancelAllOrders route remains available.
 
 `ASYNC_WRAPPER_REVIEW.md` records the real class's eager public call boundary.
 The common wrappers call the existing member before constructing their waiter
@@ -283,13 +286,6 @@ Contract identity checks read all 82 native fields across 12 records, with
 explicit enum matches independent of Serde wire attributes. Mapper identity
 uses a separate live pre-serialization numeric capture so JSON.stringify cannot
 erase negative-zero output; the original artifacts remain unchanged.
-
-`cancel_all_after` extracts only the inert limits, parity flags, validators,
-builder and response decoder. It owns no timer or transport. Its JSON outputs
-are explicitly mutable unlike the frozen source descriptors; both output type
-rows stay pending. A live actual-source corpus compares numeric fields before
-serialization, retaining signed zero and validation phase ordering. The module
-uses shared numeric observation; no native Number parser or serde union is added.
 
 `runtime_selector` extracts only inert route lookup, targets and selection using
 the existing migration inventory. No transport, Store writer or gate override is
