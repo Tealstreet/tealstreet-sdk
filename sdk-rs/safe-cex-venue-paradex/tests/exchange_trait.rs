@@ -1914,3 +1914,28 @@ fn undefined_order_side_matches_maintained_source_presence_and_errors() {
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "12");
 }
+
+#[test]
+fn retained_info_order_rest_keeps_opaque_native_fields() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut row: Input = json!({"id":"opaque-order","market":"BTC-USD-PERP","side":"BUY","type":"LIMIT","status":"OPEN","price":"101.5","size":"2","remaining_size":"1","created_at":1700000000000f64,"reduce_only":false}).into();
+    let opaque = Input::Object(vec![
+        ("text".encode_utf16().collect(),Input::Text(vec![0xd800])),
+        ("missing".encode_utf16().collect(),Input::Undefined),
+        ("number".encode_utf16().collect(),Input::Float(f64::NAN)),
+        ("negativeZero".encode_utf16().collect(),Input::Float(-0.)),
+    ]);
+    row.as_object_mut().unwrap().push(("opaque".encode_utf16().collect(),opaque));
+    wire.retained_responses.borrow_mut().insert("/orders".into(),Input::Object(vec![("results".encode_utf16().collect(),Input::Array(vec![row]))]));
+    let orders = drive(&runtime, venue.fetch_orders(None)).expect("native opaque order read");
+    assert_eq!(orders.len(),1,"opaque siblings cannot hide valid order");
+    store.add_or_update_order(orders[0].clone()).unwrap();
+    let orders = store.orders();
+    let opaque = orders[0].info.as_ref().unwrap().get("opaque").unwrap();
+    assert_eq!(opaque.get("text").unwrap().as_text(),Some([0xd800].as_slice()));
+    assert!(matches!(opaque.get("missing"),Some(Input::Undefined)));
+    assert!(opaque.get("number").unwrap().as_f64().unwrap().is_nan());
+    assert_eq!(opaque.get("negativeZero").unwrap().as_f64().unwrap().to_bits(),(-0f64).to_bits());
+}

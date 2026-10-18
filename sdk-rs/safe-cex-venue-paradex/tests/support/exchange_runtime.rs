@@ -210,6 +210,7 @@ pub struct Wire {
     pub sequence: RefCell<BTreeMap<String, VecDeque<(u16, Value)>>>,
     pub requests: RefCell<Vec<RestRequest>>,
     pub responses: RefCell<BTreeMap<String, Value>>,
+    pub retained_responses: RefCell<BTreeMap<String, safe_cex_types::retained_json::RetainedJsonInput>>,
     pub statuses: RefCell<BTreeMap<String, u16>>,
 }
 impl RestAdapter for Wire {
@@ -231,6 +232,7 @@ impl RestAdapter for Wire {
             .get_mut(path)
             .and_then(VecDeque::pop_front)
             .unwrap_or((status, data));
+        let data = self.retained_responses.borrow().get(path).cloned().unwrap_or_else(|| data.into());
         self.requests.borrow_mut().push(request);
         Box::pin(async move {
             Ok(RestResponse {
@@ -238,7 +240,7 @@ impl RestAdapter for Wire {
                 reason: None,
                 headers: BTreeMap::new(),
                 body: RestResponseBody::Untransformed(
-                    safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap(),
+                    data,
                 ),
             })
         })
