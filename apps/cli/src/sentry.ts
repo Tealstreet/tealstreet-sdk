@@ -6,7 +6,7 @@ import * as Sentry from '@sentry/bun';
 import { RESTRICTIVE_SENTRY_DATA_COLLECTION } from '@tealstreet/service-telemetry/src/dataCollection';
 import { OUTGOING_REQUEST_BREADCRUMB_INTEGRATIONS } from '@tealstreet/service-telemetry/src/integrations';
 import { scrub, scrubString } from '@tealstreet/service-telemetry/src/scrub';
-import { BRAND } from './brand';
+import { BRAND, brandEnv } from './brand';
 
 const DSN = 'https://dc80fdcd175badb5f3da861273c46f93@o815347.ingest.us.sentry.io/4511874153709568';
 
@@ -16,7 +16,7 @@ const MAX_EVENTS_PER_KEY_PER_WINDOW = 2;
 const seen = new Map<string, { count: number; firstSeen: number }>();
 
 function isTelemetryEnabled(): boolean {
-  const optOut = process.env.TEALSTREET_TELEMETRY;
+  const optOut = brandEnv('TELEMETRY');
   if (optOut === '0' || optOut === 'false' || optOut === 'off') return false;
   // Only released binaries report. `bun run src/index.ts` leaves this undefined.
   return Boolean(process.env.TEALSTREET_CLI_VERSION) || process.env.TEALSTREET_FORCE_SENTRY === '1';

@@ -16,9 +16,9 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { BRAND } from './brand';
+import { BRAND, brandEnv } from './brand';
 
-const CONFIG_DIR = process.env.TEALSTREET_CONFIG_DIR || join(homedir(), BRAND.configDirName);
+const CONFIG_DIR = brandEnv('CONFIG_DIR') || join(homedir(), BRAND.configDirName);
 const HEARTBEAT_FILE = join(CONFIG_DIR, 'cross-trade-running.json');
 
 export const HEARTBEAT_INTERVAL_MS = 5_000;

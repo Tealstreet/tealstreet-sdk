@@ -38,6 +38,59 @@ Files excluded from the published site (via `docs.exclude` in `apps/documentatio
 
 See [`apps/documentation/cli/CLAUDE.md`](../documentation/cli/CLAUDE.md) if one exists for the authoring convention; the dedicated `/cli/` plugin instance and its sidebar live in `apps/documentation/sidebarsCli.js`.
 
+## Brands — one source, two binaries
+
+`src/brand.ts` is the only place a product name, executable name, config
+directory, web-app URL, docs URL or release repo is spelled. `scripts/build.sh
+<brand>` inlines `TEALSTREET_BRAND` with `--define`; dev runs and tests carry no
+define and resolve to `tealstreet`, so every pinned `~/.tealstreet` and
+`tealstreet-*` expectation in the suite stays valid. The `disrupt` brand logs in
+through `https://app.disrupt.trade` (the apex is a landing page and 404s on `/api/cli/*`), stores under `~/.disrupt/`, and self-updates
+from `DisruptTrade/cli`.
+
+**That URL is the entire auth change.** The web app picks the Auth0 tenant from
+the request host (`tenantFromHost` in `apps/web/src/utils/auth/auth0.ts`), so
+`/api/cli/login` on `disrupt.trade` returns a proxy token whose `userId` is
+already `disrupt:<sub>`. The relay, tradetunnel and `/api/cli/*` routes are
+shared and verify the shared `privateProxyKey`; do not add a brand switch to
+any of them. **Infrastructure names are NOT branded** — `TEALSTREET_*` env vars,
+`--tealstreet-proxy`/`--tealstreet-tunnel` flags, the relay URLs and the HoW
+`Origin: https://preview.tealstreet.io` header (a WAF requirement) stay the
+same on every brand. Renaming them would break docs and scripts for nothing.
+
+Adding a config-dir or display-name literal anywhere under `src/` is a brand
+leak: route it through `BRAND`. One known limit, accepted for v1: both brands
+bind the listener on `127.0.0.1:53219`, so they cannot run at the same time.
+**The disrupt build must never print a tealstreet.io URL** — its `docsUrl` is
+the `DisruptTrade/cli` README, and `src/brand.test.ts` greps the disrupt brand
+for `tealstreet.io`. The internal HoW `Origin` header and the listener's origin
+allowlist are not user-visible and are exempt.
+
+**Docs for a whitelabel are GENERATED, never hand-maintained.**
+`scripts/brand-docs.mjs <brand> <out>` rebrands `apps/documentation/cli` (drops
+front matter and `:::` admonitions so GitHub renders it, rewrites binary name,
+config dir, env prefix, release repo, hosts and the routing flags, writes a
+`README.md` index in sidebar order) and REFUSES if any page still names the
+source brand. Pages whose content genuinely differs — install channels — are
+whole-file overrides in `docs-brands/<brand>/`; keep them in step with the
+source page when it changes. The release workflow pushes the result to the
+brand's release repo under `docs/` on every `<brand>-cli-v*` tag, authored as
+the token's owner, and `BRAND.docsUrl` points there. This is also why the REPL
+and `account add` help on a whitelabel show `--proxy` / `--tunnel` /
+`--ws-route`: both spellings are accepted on every brand (`cli-core`'s
+`getCliBrand().flags` picks which one help shows), so the docs never have to
+print a `--tealstreet-*` flag.
+
+**Release:** `BRAND=disrupt yarn release:patch` pushes `disrupt-cli-vX.Y.Z`.
+`cli-release.yml` derives brand, binary name and repo from the tag prefix and
+skips the npm and Homebrew steps for anything but tealstreet; the Windows smoke
+job skips disrupt tags because its install path is npm. Both brands share
+`package.json`'s version. The release step publishes with
+`DISRUPT_CLI_RELEASE_TOKEN` for disrupt and `TEALSTREET_CLI_RELEASE_TOKEN`
+for tealstreet: the latter is scoped to the Tealstreet org and 403s on
+`DisruptTrade/cli`, which is how v0.10.17 ended up published by hand from a
+local `build.sh disrupt` of the tagged commit.
+
 ## Runtime
 
 **Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.
@@ -392,6 +445,7 @@ count moves. See the root CLAUDE.md rule on `setInterval`.
 yarn dev           # Run with bun
 yarn build         # Build cross-platform binaries (scripts/build.sh)
 yarn release       # Bump + tag + push; tag fires .github/workflows/cli-release.yml (binaries, npm, homebrew).
+                   # BRAND=disrupt yarn release:patch tags disrupt-cli-vX.Y.Z → DisruptTrade/cli, binaries only.
                    # Variants: yarn release:patch | :minor | :major.
                    # NO-ARG DOES NOT BUMP — release.sh only runs `yarn version` when
                    # given an argument, so a bare `yarn release` re-tags the current
