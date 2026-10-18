@@ -371,3 +371,7 @@ mod retained_order_info_binding;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../tests/support/payload_signer_binding.rs"]
 mod payload_signer_binding;
+
+#[cfg(test)]
+#[path = "../tests/support/sort_binding.rs"]
+mod sort_binding;

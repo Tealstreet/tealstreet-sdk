@@ -983,3 +983,12 @@ recovery decisions and catches; a later source failure must still discard the
 recovery prefix before any new refusal diagnostic. Keep the original 380 mapper
 cases and 16 typed-refusal guards. `DELEGATED_HISTORY_FIX_AUDIT.md` and the compiled
 production controls document this boundary.
+
+Position-index audit rows 9/10/11/20/21 use constructed native receivers in
+`binding/receiver_tests.rs`. Stop-index dispatch is installed once in batch.rs;
+placement/amendment call the same replaceable members. The existing native omit
+facade uses canonical ForInRecord to preserve inherited enumerable aliases, and
+getter failures reject the original Promise. Position-mode mapping binds the
+mapper once and uses native Array.map with row/index/original-array arguments.
+Run the receiver tests, execution_guards source target and
+`scripts/position-index-controls.py`; the latter restores every compiled fault.

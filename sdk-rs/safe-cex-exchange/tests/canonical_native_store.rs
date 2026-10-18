@@ -30,6 +30,109 @@ fn source() -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[test]
+fn facade_reuses_identity_descriptors_and_releases_its_graph() {
+    use safe_cex_exchange::js_runtime::store::facade;
+    use safe_cex_store::Store;
+    use std::sync::Arc;
+
+    let lifetime = Arc::new(());
+    let weak_graph = Arc::downgrade(&lifetime);
+    let mut store = DefaultStore::new();
+    store.now = Arc::new(move || {
+        let _keep_graph_alive = &lifetime;
+        42.0
+    });
+    let store = Rc::new(store);
+    let first = facade(store.clone()).unwrap();
+    let method = first.get("updateTicker").unwrap();
+    let runtime = Js::object(vec![]);
+    globals::install_builtins::<()>(&runtime, Weak::new());
+    runtime
+        .get("Object")
+        .unwrap()
+        .call_method(
+            "defineProperty",
+            vec![
+                first.clone(),
+                Js::str("custom"),
+                Js::object(vec![
+                    ("value", Js::utf16(&[0xd800])),
+                    ("writable", Js::Bool(false)),
+                    ("enumerable", Js::Bool(false)),
+                    ("configurable", Js::Bool(false)),
+                ]),
+            ],
+        )
+        .unwrap();
+    let custom_key: Vec<u16> = "custom".encode_utf16().collect();
+    for _ in 0..3 {
+        let again = facade(store.clone()).unwrap();
+        assert!(
+            first.same_reference(&again),
+            "facade allocation must be reused"
+        );
+        assert!(method.same_reference(&again.get("updateTicker").unwrap()));
+        assert!(
+            again
+                .get("custom")
+                .unwrap()
+                .strict_equals(&Js::utf16(&[0xd800]))
+        );
+        assert!(store.facade().unwrap().same_reference(&first));
+        assert!(
+            !again
+                .own_keys()
+                .iter()
+                .any(|key| key.as_ref() == custom_key.as_slice())
+        );
+        assert!(again.set("custom", Js::Undefined).is_err());
+    }
+    let old_map = first.get("marketsById").unwrap();
+    first.call_method("reset", vec![]).unwrap();
+    assert!(first.same_reference(&facade(store.clone()).unwrap()));
+    assert!(!old_map.same_reference(&first.get("marketsById").unwrap()));
+    assert!(
+        first
+            .get("custom")
+            .unwrap()
+            .strict_equals(&Js::utf16(&[0xd800]))
+    );
+    let owner = store.native_owner();
+    let weak_owner = Rc::downgrade(&owner);
+    drop(owner);
+    drop(store);
+    assert!(
+        weak_owner.upgrade().is_none(),
+        "facade must not retain its cache owner"
+    );
+    first
+        .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
+        .unwrap();
+    assert!(
+        first
+            .get("options")
+            .unwrap()
+            .get("isHedged")
+            .unwrap()
+            .truthy()
+    );
+    assert!(
+        weak_graph.upgrade().is_some(),
+        "retained facade must keep graph alive"
+    );
+    drop(first);
+    assert!(
+        weak_graph.upgrade().is_some(),
+        "retained method must keep graph alive"
+    );
+    drop(method);
+    assert!(
+        weak_graph.upgrade().is_none(),
+        "no graph/facade ownership cycle"
+    );
+}
+
 fn fixture() -> (Rc<DefaultStore>, Js) {
     let native = Rc::new(DefaultStore::new());
     let facade = safe_cex_exchange::js_runtime::store::facade(native.clone()).unwrap();

@@ -279,3 +279,11 @@ and original fetchOHLCV method. Both failing endpoints still lead to a poll at
 3000ms, unchanged candles stay suppressed, and one listener cleanup preserves
 the other until its own cleanup cancels polling. This extra report is the
 authorized no-silent-failure residual; it is not a source parity claim.
+
+
+Order-book sorting uses the canonical fallible JS merge sorter. NaN comparisons
+mean equality and do not require a Rust total order; a throwing price getter
+stops comparison immediately and reaches the original catch/log path. The full
+maintained public class, real socket frames and constructed retained getter
+witnesses cover both sides. The shared TimSort scheduler also preserves the
+maintained 264-case ticker corpus, including finite levels separated by NaN.
