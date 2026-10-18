@@ -28,7 +28,7 @@ export function featurePlan(packages, contracts, metadata, configuration) {
       const features = [...new Set([...pkg.features, ...required])].sort();
       const key = JSON.stringify([pkg.package, features]);
       const group = groups.get(key) ?? { package: pkg.package, features, owners: [] };
-      group.owners.push(owner.name);
+      if (!group.owners.includes(owner.name)) group.owners.push(owner.name);
       groups.set(key, group);
       deferred.add(owner.name);
       gated.push({name: owner.name, classificationOnly: true, category: 'native-gated',

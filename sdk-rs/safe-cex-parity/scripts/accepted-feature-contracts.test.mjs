@@ -36,6 +36,10 @@ test('feature planning preserves ordinary locals and visibly gates owners until 
   assert.deepEqual(active.ordinary, [native]);
   assert.deepEqual(active.groups, []);
   assert.deepEqual(active.gated, []);
+  const converging = featurePlan([{...pkg, features: ['native']}, {...pkg, features: ['health']}],
+    {[name]: {...contract, requiredFeatures: ['native', 'health']}}, metadata, configuration);
+  assert.deepEqual(converging.groups, [{package: 'control', features: ['health', 'native'], owners: [name]}]);
+  assert.equal(converging.gated.length, 2, 'each default feature inventory keeps its explicit gate');
 });
 
 test('default measurements and required native observations cannot be replaced by classification or missing receipts', () => {
