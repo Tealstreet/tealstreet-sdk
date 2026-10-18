@@ -223,3 +223,13 @@ request-params parser. `exchange_trait` compares twelve actual constructed TS
 and Rust socket cases (twenty frames), including whole batches with lone units
 in an unused nested value/key, ordinary siblings and native numeric bits. The
 private stream's Value callback/info seam remains a separate migration.
+
+REST depth sorting delegates both source subtraction comparators to canonical
+CI V8 TimSort. `native_exchange::fix_audit_tests::rest_book_*` calls the actual
+constructed fetchOrderBook member, factory, HTTP response path and mapper against
+maintained TS over ten NaN-containing depth profiles, preserving every price,
+amount and cumulative quote-total bit. The previous Rust sort panicked for both
+sides; the bounded native witnesses catch that panic without hanging.
+PnL grouping sanitizes time/id keys and uses the original index to break ties;
+public depth admission rejects nonfinite prices, and API signing sorts UTF-16
+strings. Those remaining crate comparators have a total order.
