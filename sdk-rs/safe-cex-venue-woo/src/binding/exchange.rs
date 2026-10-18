@@ -364,3 +364,7 @@ mod live_order_mapping_tests;
 #[cfg(test)]
 #[path = "../../tests/support/iterable_binding.rs"]
 mod iterable_binding_tests;
+
+#[cfg(test)]
+#[path = "../../tests/support/structural_aliases.rs"]
+mod structural_alias_tests;
