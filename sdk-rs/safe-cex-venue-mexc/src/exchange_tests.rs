@@ -171,7 +171,7 @@ fn cancel_order(raw: &Value) -> Order {
     }));
     order.amount = raw["amount"].as_f64().unwrap();
     order.remaining = raw["remaining"].as_f64().unwrap();
-    order.info = raw.get("info").cloned().into();
+    order.info = raw.get("info").cloned().map(Into::into).into();
     order
 }
 fn pairs_object(pairs: &[(String, f64)]) -> Value {
@@ -844,7 +844,10 @@ fn mexc_fetch_markets_matches_live_source() {
                 .find(|row| row["symbol"] == market.id)
                 .unwrap();
             let info = market.info.as_mut().unwrap();
-            info["__from_market"] = json!("market");
+            info.as_object_mut().unwrap().push((
+                "__from_market".encode_utf16().collect(),
+                json!("market").into(),
+            ));
             assert_ne!(raw["__from_market"], json!("market"));
             let mut source_payload = case["payload"].clone();
             let source_rows = if let Some(rows) = source_payload.as_array_mut() {
@@ -857,7 +860,11 @@ fn mexc_fetch_markets_matches_live_source() {
                 .find(|row| row["symbol"] == market.id)
                 .unwrap();
             source_raw["__from_input"] = json!("input");
-            assert_ne!(info["__from_input"], json!("input"));
+            assert_ne!(
+                info.get("__from_input")
+                    .is_some_and(|value| value.text_equals("input")),
+                true
+            );
             assert_eq!(case["alias"]["returnMutatesInput"], true);
             assert_eq!(case["alias"]["inputMutatesReturn"], true);
         }
@@ -1480,10 +1487,17 @@ fn mexc_fetch_tickers_matches_live_source() {
     let mut parsed_source = case["raw"].clone();
     if let Some(ticker) = tickers.first_mut() {
         let info = ticker.info.as_mut().unwrap();
-        info["__from_ticker"] = json!("ticker");
+        info.as_object_mut().unwrap().push((
+            "__from_ticker".encode_utf16().collect(),
+            json!("ticker").into(),
+        ));
         assert_ne!(parsed_source[2]["__from_ticker"], json!("ticker"));
         parsed_source[2]["__from_input"] = json!("input");
-        assert_ne!(info["__from_input"], json!("input"));
+        assert_ne!(
+            info.get("__from_input")
+                .is_some_and(|value| value.text_equals("input")),
+            true
+        );
     }
     let actual: Vec<Value> = tickers
         .iter()
@@ -1598,10 +1612,21 @@ fn mexc_fetch_balance_matches_live_source() {
     );
     assert_eq!(rust_currencies, case["expected"]["currencies"]);
     let info = balance.info.as_mut().unwrap();
-    info[0]["__from_result"] = json!("result");
+    info.as_array_mut().unwrap()[0]
+        .as_object_mut()
+        .unwrap()
+        .push((
+            "__from_result".encode_utf16().collect(),
+            json!("result").into(),
+        ));
     assert_ne!(raw[0]["__from_result"], json!("result"));
     raw[0]["__from_input"] = json!("input");
-    assert_ne!(info[0]["__from_input"], json!("input"));
+    assert_ne!(
+        info.as_array().unwrap()[0]
+            .get("__from_input")
+            .is_some_and(|value| value.text_equals("input")),
+        true
+    );
     assert_eq!(response.1.borrow()[0].url, "/api/v1/private/account/assets");
     let timing_response = Rc::new(StaticResponse(
         serde_json::to_vec(&json!([raw[0].clone(), null])).unwrap(),
@@ -2106,11 +2131,18 @@ fn mexc_fetch_positions_matches_live_source() {
         native_position_comparisons += positions.len();
         if let Some(position) = positions.iter_mut().find(|p| p.id == "BTCUSDT:short") {
             let info = position.info.as_mut().unwrap();
-            info["__fetchPositionsAlias"] = json!(true);
+            info.as_object_mut().unwrap().push((
+                "__fetchPositionsAlias".encode_utf16().collect(),
+                json!(true).into(),
+            ));
             let mut response_payload = case["raw"].clone();
             assert_ne!(response_payload[0]["__fetchPositionsAlias"], json!(true));
             response_payload[0]["__responseAlias"] = json!(true);
-            assert_ne!(info["__responseAlias"], json!(true));
+            assert_ne!(
+                info.get("__responseAlias")
+                    .and_then(|value| value.as_bool()),
+                Some(true)
+            );
             assert_eq!(case["alias"], true);
         }
         let actual: Vec<Value> = positions

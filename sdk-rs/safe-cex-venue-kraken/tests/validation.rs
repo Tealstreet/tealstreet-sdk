@@ -56,7 +56,7 @@ fn balance(free: f64) -> Balance {
                     used: 41.5,
                     total: 43.75,
                     upnl: -47.125,
-                    info: Some(json!({"tag":"currency"})),
+                    info: Some(json!({"tag":"currency"}).into()),
                     currencies: None,
                     coins: None,
                 }
@@ -65,7 +65,7 @@ fn balance(free: f64) -> Balance {
             .into_iter()
             .collect(),
         ),
-        info: Some(json!({"tag":"balance"})),
+        info: Some(json!({"tag":"balance"}).into()),
         coins: None,
     }
 }
@@ -85,7 +85,7 @@ fn assert_balance(value: &Balance, expected: &Value) {
     }
     assert_eq!(
         value.info.as_ref().unwrap(),
-        &expected["info"],
+        &expected["info"].clone().into(),
         "VALIDATION native balance info"
     );
     assert!(value.coins.is_none(), "VALIDATION absent coins");
@@ -108,7 +108,7 @@ fn assert_balance(value: &Balance, expected: &Value) {
     }
     assert_eq!(
         currency.info.as_ref().unwrap(),
-        &expected["currencies"]["USD"]["info"]
+        &expected["currencies"]["USD"]["info"].clone().into()
     );
     assert!(currency.coins.is_none() && currency.currencies.is_none());
 }

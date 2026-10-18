@@ -552,7 +552,7 @@ fn refusal_fixture(input: &Value) -> Fixture {
                     free: 3.5,
                     total: 4.75,
                     upnl: -0.0,
-                    info: Some(json!({"refusal":"retained-info"})),
+                    info: Some(json!({"refusal":"retained-info"}).into()),
                     currencies: None,
                     coins: None,
                 }),
@@ -1221,7 +1221,7 @@ fn ticker_reads_ignore_missing_unused_declaration_fields() {
         (rows[0].bid, rows[0].ask, rows[0].last),
         (91.25, 94.5, 91.25)
     );
-    assert_eq!(rows[0].info, Some(row));
+    assert_eq!(rows[0].info, Some(row.into()));
 }
 
 #[test]
@@ -1236,7 +1236,7 @@ fn ticker_reads_ignore_malformed_unused_declaration_fields() {
         (rows[0].bid, rows[0].ask, rows[0].mark),
         (81.25, 84.5, 81.25)
     );
-    assert_eq!(rows[0].info, Some(row));
+    assert_eq!(rows[0].info, Some(row.into()));
 }
 
 fn malformed_ticker_fallback(prefix: Value) {
@@ -1366,7 +1366,7 @@ fn portfolio_orders_ignore_unused_declaration_fields_and_unread_collections() {
     assert_eq!(orders[0].price.value(), Some(&101.25));
     assert_eq!(
         orders[0].info.value(),
-        Some(&data["portfolios"][0]["orders"][0])
+        Some(&data["portfolios"][0]["orders"][0].clone().into())
     );
 }
 #[test]
@@ -1385,7 +1385,7 @@ fn portfolio_positions_ignore_unused_declaration_fields_and_unread_collections()
     assert_eq!(positions[0].margin_size.value(), Some(&10.0));
     assert_eq!(
         positions[0].info.value(),
-        Some(&data["portfolios"][0]["positions"][0])
+        Some(&data["portfolios"][0]["positions"][0].clone().into())
     );
 }
 #[test]
@@ -1402,7 +1402,7 @@ fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
     assert_eq!(balance.upnl, -2.0);
     assert_eq!(balance.used, 10.0);
     assert_eq!(balance.free, 38.25);
-    assert_eq!(balance.info, Some(data));
+    assert_eq!(balance.info, Some(data.into()));
     f.exchange.dispose().unwrap();
 }
 
@@ -1417,7 +1417,7 @@ fn portfolio_array_like_root_retains_order_and_position_info() {
     assert_eq!(orders.len(), 1);
     assert_eq!(
         orders[0].info.value(),
-        Some(&data["portfolios"]["0"]["orders"][0])
+        Some(&data["portfolios"]["0"]["orders"][0].clone().into())
     );
     queue_portfolio(&f, data.clone());
     let positions = f
@@ -1426,7 +1426,7 @@ fn portfolio_array_like_root_retains_order_and_position_info() {
     assert_eq!(positions.len(), 1);
     assert_eq!(
         positions[0].info.value(),
-        Some(&data["portfolios"]["0"]["positions"][0])
+        Some(&data["portfolios"]["0"]["positions"][0].clone().into())
     );
 }
 

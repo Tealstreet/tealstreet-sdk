@@ -725,7 +725,7 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
     fn measure<T: DeserializeOwned + Serialize + JsNumberOutput>(
         raw: &str,
         bits: u64,
-        info: fn(&T) -> Option<&Value>,
+        info: fn(&T) -> Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) {
         let value: Value = serde_json::from_str(raw).unwrap();
         for result in [
@@ -735,7 +735,13 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
         ] {
             let output = result.unwrap();
             assert_eq!(
-                js_value_as_f64(&info(&output).unwrap()["nested"][0])
+                info(&output)
+                    .unwrap()
+                    .get("nested")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_f64()
                     .unwrap()
                     .to_bits(),
                 bits,
@@ -752,7 +758,13 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
         ] {
             let SharedInfoTagged::Data { value: output } = result.unwrap();
             assert_eq!(
-                js_value_as_f64(&info(&output).unwrap()["nested"][0])
+                info(&output)
+                    .unwrap()
+                    .get("nested")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_f64()
                     .unwrap()
                     .to_bits(),
                 bits,
@@ -767,7 +779,11 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
                 absent["info"] = Value::Null;
             }
             let raw = serde_json::to_string(&absent).unwrap();
-            let expected = if present { Some(Value::Null) } else { None };
+            let expected = if present {
+                Some(safe_cex_types::retained_json::RetainedJsonInput::Null)
+            } else {
+                None
+            };
             for output in [
                 js_from_str::<T>(&raw).unwrap(),
                 js_from_value(absent.clone()).unwrap(),

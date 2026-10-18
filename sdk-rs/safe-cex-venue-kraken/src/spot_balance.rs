@@ -87,7 +87,7 @@ where
                     used: 0.0,
                     total: amount,
                     upnl: 0.0,
-                    info: Some(json!({"raw":asset,"balance":balance})),
+                    info: Some(json!({"raw":asset,"balance":balance}).into()),
                     currencies: None,
                     coins: None,
                 },
@@ -127,7 +127,7 @@ where
                     .collect(),
             ),
             coins: None,
-            info: Some(balances),
+            info: Some(balances.into()),
         })
     }
     .await;

@@ -61,7 +61,7 @@ fn positions(rows: &Value) -> Vec<Position> {
             position.symbol = row["symbol"].as_str().unwrap().into();
             position.side = serde_json::from_value(row["side"].clone()).unwrap();
             position.contracts = decode_number(&row["contracts"]);
-            position.info = (row.get("info").map(decoded)).into();
+            position.info = (row.get("info").map(decoded).map(Into::into)).into();
             position
         })
         .collect()
@@ -128,7 +128,7 @@ fn mexc_exchange_helpers_live_typescript() {
                         &|ms| ms,
                     )?
                     .unwrap();
-                    p.info = (raw.as_ref().unwrap().get("info").cloned()).into();
+                    p.info = (raw.as_ref().unwrap().get("info").cloned().map(Into::into)).into();
                     encode(&native_position_id(&p)?)
                 }
                 "planOrderTriggerType" | "stopOrderTrend" | "isRegularPlaceOrder" => {
@@ -167,7 +167,7 @@ fn mexc_exchange_helpers_live_typescript() {
                             *target = decode_number(number);
                         }
                     }
-                    order.info = (value.get("info").cloned()).into();
+                    order.info = (value.get("info").cloned().map(Into::into)).into();
                     if let Some(number) = args[0]
                         .get("extra")
                         .and_then(|v| v.get("remainingNative"))

@@ -63,18 +63,20 @@ fn mexc_mapper_owned_snapshot_vs_live_alias() {
                     .unwrap()
                     .info
                     .clone();
-                balance.info.unwrap()[0].clone()
+                balance.info.unwrap().as_array().unwrap()[0].clone()
             }
             _ => panic!("unexpected mapper {name}"),
         };
         raw["probe"] = json!(2);
         raw["nested"]["probe"] = json!(2);
         assert_eq!(
-            info["probe"], 1,
+            info.get("probe").unwrap().as_f64(),
+            Some(1.0),
             "{name}: input mutation must leave owned output unchanged"
         );
         assert_eq!(
-            info["nested"]["probe"], 1,
+            info.get("nested").unwrap().get("probe").unwrap().as_f64(),
+            Some(1.0),
             "{name}: nested input mutation must leave owned output unchanged"
         );
         let spread = matches!(name, "normalizePlanOrder" | "normalizeStopOrder");
@@ -89,8 +91,8 @@ fn mexc_mapper_owned_snapshot_vs_live_alias() {
             case["afterInput"]["outputNested"], 2,
             "{name}: source nested alias"
         );
-        info["probe"] = json!(3);
-        info["nested"]["probe"] = json!(3);
+        info.get("probe").unwrap() = json!(3);
+        info.get("nested").unwrap().get("probe").unwrap() = json!(3);
         assert_eq!(
             raw["probe"], 2,
             "{name}: output mutation must leave owned input unchanged"
@@ -99,8 +101,11 @@ fn mexc_mapper_owned_snapshot_vs_live_alias() {
             raw["nested"]["probe"], 2,
             "{name}: nested output mutation must leave owned input unchanged"
         );
-        assert_eq!(info["probe"], 3);
-        assert_eq!(info["nested"]["probe"], 3);
+        assert_eq!(info.get("probe").unwrap().as_f64(), Some(3.0));
+        assert_eq!(
+            info.get("nested").unwrap().get("probe").unwrap().as_f64(),
+            Some(3.0)
+        );
         assert_eq!(
             case["afterOutput"]["input"],
             if spread { 2 } else { 3 },
@@ -115,10 +120,19 @@ fn mexc_mapper_owned_snapshot_vs_live_alias() {
         if name == "normalizeBalance" {
             let currency = currency_info.unwrap();
             assert_eq!(
-                currency["probe"], 1,
+                currency.get("probe").unwrap().as_f64(),
+                Some(1.0),
                 "Rust currency info is an owned snapshot"
             );
-            assert_eq!(currency["nested"]["probe"], 1);
+            assert_eq!(
+                currency
+                    .get("nested")
+                    .unwrap()
+                    .get("probe")
+                    .unwrap()
+                    .as_f64(),
+                Some(1.0)
+            );
             assert_eq!(case["afterInput"]["currency"], 2);
             assert_eq!(case["afterOutput"]["currency"], 3);
             assert_eq!(case["afterInput"]["currencyNested"], 2);

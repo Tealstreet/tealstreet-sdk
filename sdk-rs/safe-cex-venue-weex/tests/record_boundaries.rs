@@ -519,7 +519,7 @@ fn fake_positions_keep_native_symbols_and_price_market_admission() {
                     assert_eq!(position.side, side, "WEEX native fake position side");
                     assert_eq!(
                         position.info.as_ref().unwrap(),
-                        &json!({}),
+                        &json!({}).into(),
                         "WEEX native fake fresh info"
                     );
                     compared += 1;
@@ -569,7 +569,7 @@ fn market_strings_and_info_are_native_before_whole_record_refusal() {
             assert_eq!(native.symbol, word, "WEEX native market symbol");
             assert_eq!(native.id, word, "WEEX native market id");
             assert_eq!(
-                native.info.as_ref().unwrap()["extra"],
+                native.info.as_ref().unwrap().get("extra").unwrap(),
                 word,
                 "WEEX native market retained info"
             );

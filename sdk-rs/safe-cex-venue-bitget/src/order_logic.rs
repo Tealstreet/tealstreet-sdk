@@ -285,10 +285,10 @@ pub fn get_cancel_plan_type(
     amount_step: Option<f64>,
     emit_and_log_error: impl FnMut(String),
 ) -> Result<safe_cex_num::TableHit<&'static str>, ExchangeError> {
-    use safe_cex_num::{TableHit, js_string, js_table_lookup, js_truthy};
+    use safe_cex_num::{TableHit, js_table_lookup};
     let raw = order.info.as_ref().and_then(|info| info.get("planType"));
-    if js_truthy(raw) {
-        let key = js_string(raw).map_err(|error| ExchangeError {
+    if raw.is_some_and(|value| value.is_truthy()) {
+        let key = safe_cex_num::js_retained_string(raw).map_err(|error| ExchangeError {
             name: error.name.into(),
             message: error.message.into(),
             metadata: Box::default(),

@@ -133,7 +133,7 @@ pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionEr
         contract_size: Some(contract_size),
         maker_fee: Some(to_number(raw.get("makerFeeRate"), None)?),
         taker_fee: Some(to_number(raw.get("takerFeeRate"), None)?),
-        info: Some(Value::Object(raw.clone())),
+        info: Some(Value::Object(raw.clone()).into()),
         is_expiring: None,
         is_inverse: None,
         is_spot: None,
@@ -336,7 +336,7 @@ pub fn normalize_balance(raw_rows: &Value) -> Result<safe_cex_types::Balance, Js
             total,
             upnl,
             used: math_max(math_max(total - free, frozen), 0.0),
-            info: Some(Value::Object(row.clone())),
+            info: Some(Value::Object(row.clone()).into()),
             currencies: None,
             coins: None,
         })
@@ -398,7 +398,7 @@ pub fn normalize_balance(raw_rows: &Value) -> Result<safe_cex_types::Balance, Js
             }
         }
     }
-    balance.info = Some(Value::Array(rows.to_vec()));
+    balance.info = Some(Value::Array(rows.to_vec()).into());
     balance.currencies = Some(currencies);
     Ok(balance)
 }
@@ -465,7 +465,7 @@ fn fake_position(
         contracts: 0.0,
         liquidation_price: 0.0,
         margin_size: (Some(0.0)).into(),
-        info: (Some(Value::Object(Map::new()))).into(),
+        info: (Some(Value::Object(Map::new()).into())).into(),
         extra: (Some(safe_cex_types::PositionExtra {
             contracts_native: Some(0.0),
             unrealized_pnl_native: Some(0.0),
@@ -540,7 +540,7 @@ pub fn normalize_ticker(
         )?,
         volume: native_volume_to_amount(pick(raw, &["volume24", "volume"]), Some(market))?,
         quote_volume: to_number(pick(raw, &["amount24", "quoteVolume"]), None)?,
-        info: Some(Value::Object(raw.clone())),
+        info: Some(Value::Object(raw.clone()).into()),
     })
 }
 
@@ -717,7 +717,7 @@ pub fn normalize_position(
             ),
         )?))
         .into(),
-        info: (Some(Value::Object(raw.clone()))).into(),
+        info: (Some(Value::Object(raw.clone()).into())).into(),
         extra: (Some(safe_cex_types::PositionExtra {
             contracts_native: Some(to_number(volume, None)?),
             unrealized_pnl_native: Some(unrealized_pnl),
@@ -823,7 +823,7 @@ pub fn normalize_order(
         pick(raw, &["updateTime", "modifyTime", "createTime"]),
         local_to_utc,
     )?;
-    order.info = (Some(Value::Object(raw.clone()))).into();
+    order.info = (Some(Value::Object(raw.clone()).into())).into();
     order.extra = (Some(order_extra(
         math_max(amount_native - filled_native, 0.0),
         Some(filled_native),
@@ -862,7 +862,7 @@ pub fn normalize_plan_order(
         normalize_timestamp_to_ms(pick(raw, &["updateTime", "createTime"]), local_to_utc)?;
     let mut info = raw.clone();
     info.insert("__mexcPlanOrder".into(), Value::Bool(true));
-    order.info = (Some(Value::Object(info))).into();
+    order.info = (Some(Value::Object(info).into())).into();
     order.extra = (Some(order_extra(to_number(volume, None)?, None))).into();
     Ok(Some(order))
 }
@@ -920,7 +920,7 @@ pub fn normalize_stop_order(
         normalize_timestamp_to_ms(pick(raw, &["updateTime", "createTime"]), local_to_utc)?;
     let mut info = raw.clone();
     info.insert("__mexcStopOrder".into(), Value::Bool(true));
-    order.info = (Some(Value::Object(info))).into();
+    order.info = (Some(Value::Object(info).into())).into();
     order.extra = (Some(order_extra(
         if full_position { 0.0 } else { native_amount },
         None,

@@ -291,7 +291,11 @@ impl crate::order_models::OrderModelHost for OrderFrame {
         let trigger = trigger
             .filter(|t| !t.is_null())
             .and_then(|t| serde_json::from_value::<OrderStopTriggerType>(t.clone()).ok());
-        Ok(crate::tpsl_helpers::get_bitunix_trigger_type(trigger, raw)?.into())
+        Ok(crate::tpsl_helpers::get_bitunix_trigger_type(
+            trigger,
+            raw.map(|value| value.clone().into()).as_ref(),
+        )?
+        .into())
     }
     fn update_standalone(
         &mut self,

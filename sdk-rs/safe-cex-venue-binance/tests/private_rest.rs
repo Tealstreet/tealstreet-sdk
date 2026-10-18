@@ -406,7 +406,8 @@ impl SnapshotBindings for Bind {
     fn carries_client_id(&mut self, o: &EventValue, id: &str) -> Result<bool, Failure> {
         self.0.t(json!(["carries", id]));
         let order: Order = serde_json::from_value(wire(o)).expect("authored typed Store order");
-        Ok(order_carries_client_order_id(&order, id))
+        order_carries_client_order_id(&order, id)
+            .map_err(|error| Rc::new(safe_cex_exchange::runtime::ExchangeError::from(error)))
     }
     fn map_history(&mut self, data: EventValue) -> Result<EventValue, Failure> {
         let s = &self.0;

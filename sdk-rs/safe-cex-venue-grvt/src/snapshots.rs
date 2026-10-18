@@ -224,7 +224,7 @@ pub fn fetch_tickers(
             funding_time: 0.0,
             volume: 0.0,
             quote_volume: 0.0,
-            info: Some(json!({})),
+            info: Some(json!({}).into()),
         })
         .collect();
     if let Err(error) = log(

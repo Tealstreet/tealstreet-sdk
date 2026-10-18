@@ -135,7 +135,7 @@ pub(crate) fn map_market(
         is_perpetual: None,
         taker_fee,
         maker_fee,
-        info: Some(raw.clone()),
+        info: Some(raw.clone().into()),
         pretty_symbol: None,
         contract_size: None,
         is_read_only: None,

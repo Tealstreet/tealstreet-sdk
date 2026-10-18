@@ -27,7 +27,7 @@ pub fn fetch_positions(store: &dyn Store, symbols: Option<&[String]>) -> Vec<Pos
             liquidation_price: 0.0,
             margin_type: (Some(MarginType::Isolated)).into(),
             position_mode: (Some(PositionMode::OneWay)).into(),
-            info: (Some(serde_json::json!({"spot":true}))).into(),
+            info: (Some(serde_json::json!({"spot":true}).into())).into(),
             realized_pnl: (None).into(),
             margin_size: (None).into(),
             extra: (None).into(),

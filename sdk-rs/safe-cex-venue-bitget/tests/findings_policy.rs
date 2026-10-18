@@ -88,7 +88,15 @@ fn inherited_order_fields_and_native_info_input_have_separate_prices() {
         .unwrap();
         assert_eq!(records.len(), 1, "ordinary record positive control");
         assert!(
-            records[0].info.as_ref().unwrap()["nested"]["amount"].is_null(),
+            records[0]
+                .info
+                .as_ref()
+                .unwrap()
+                .get("nested")
+                .unwrap()
+                .get("amount")
+                .unwrap()
+                .is_null(),
             "this is an input-domain cost, not a mapper numeric repair"
         );
         for row in reference["utf16"].as_array().unwrap() {

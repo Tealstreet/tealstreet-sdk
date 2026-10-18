@@ -164,7 +164,7 @@ pub fn fetch_spot_positions(store: &dyn Store) -> Vec<Position> {
                 liquidation_price: 0.0,
                 margin_type: (Some(MarginType::Isolated)).into(),
                 position_mode: (Some(PositionMode::OneWay)).into(),
-                info: (Some(serde_json::json!({}))).into(),
+                info: (Some(serde_json::json!({}).into())).into(),
                 realized_pnl: (None).into(),
                 margin_size: (None).into(),
                 extra: (None).into(),
