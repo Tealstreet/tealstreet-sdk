@@ -199,3 +199,11 @@ wrapper. Read numbers and UTF-16 fields directly before any JSON report; source
 computed numbers use `Float`. Consumer coercion uses the shared retained Number,
 parseFloat and String helpers. JSON rendering belongs at the explicit output
 boundary, with no alternate model-info carrier.
+
+The public SDK invoke/unit helpers call the actual JS member before returning
+the typed waiter and await its existing runtime-owned Promise. Do not wrap that
+Promise in another task. `tests/eager_sdk_binding.rs` compares the maintained
+whole TS class with NativeRuntime and signed reqwest loopback requests: missing
+credentials log before polling; discarded getAccount/changePositionMode waiters
+retain their held HTTP continuation and Store effect. This family proof does
+not resolve the separate socket or validateAccount error-envelope findings.

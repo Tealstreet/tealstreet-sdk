@@ -1,5 +1,9 @@
 # WOO venue port
 
+`FIX_AUDIT_LEDGER.md` tracks the exact 60-row follow-up cohort. The isolated V3
+orderbook recovery port and its facade-only tests are retired after caller and
+constructed-runtime checks; the live legacy snapshot/delta/cleanup path remains.
+
 `ASYNC_WRAPPER_REVIEW.md` records the real class's eager public call boundary.
 The common wrappers call the existing member before constructing their waiter
 and await its original Promise; do not wrap that Promise in another spawn.
