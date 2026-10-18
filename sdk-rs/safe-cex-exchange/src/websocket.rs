@@ -4651,9 +4651,9 @@ mod tests {
                 c.set(c.get() + 1);
                 Ok(())
             }));
-        s.dispatch_message("book.ETH", &Value::Null.into()).unwrap();
+        s.dispatch_message("book.ETH", &Value::Null).unwrap();
         assert_eq!(calls.get(), 0);
-        s.dispatch_message("book.BTC", &Value::Null.into()).unwrap();
+        s.dispatch_message("book.BTC", &Value::Null).unwrap();
         assert_eq!(calls.get(), 2);
         assert_eq!(
             s.message_handlers_stats.borrow()["book.BTC"].had_handlers,
@@ -4745,16 +4745,10 @@ mod tests {
             .message_handlers
             .borrow_mut()
             .insert("empty".into(), Rc::new(RefCell::new(vec![])));
-        assert_eq!(
-            socket.dispatch_message("absent", &Value::Null.into()),
-            Ok(())
-        );
-        assert_eq!(
-            socket.dispatch_message("empty", &Value::Null.into()),
-            Ok(())
-        );
+        assert_eq!(socket.dispatch_message("absent", &Value::Null), Ok(()));
+        assert_eq!(socket.dispatch_message("empty", &Value::Null), Ok(()));
         assert!(socket.message_handlers_stats.borrow().is_empty());
-        let result = socket.dispatch_message("ticker", &Value::Null.into());
+        let result = socket.dispatch_message("ticker", &Value::Null);
         assert_eq!(
             later_calls.get(),
             0,
@@ -4819,7 +4813,7 @@ mod tests {
             .borrow_mut()
             .insert("__proto__".into(), Rc::new(RefCell::new(vec![handler])));
         let error = socket
-            .dispatch_message("__proto__", &Value::Null.into())
+            .dispatch_message("__proto__", &Value::Null)
             .unwrap_err();
         assert_eq!(
             error.name, "TypeError",
