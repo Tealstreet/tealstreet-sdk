@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { fork, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,6 +72,7 @@ const report = {
   requests: [],
   limitations: [],
 };
+report.addonSha256 = hash(readFileSync(report.addon));
 const directory = mkdtempSync(join(tmpdir(), 'safe-cex-live-diff-'));
 const cache = new Map(),
   records = [],
@@ -350,7 +351,6 @@ try {
       throw error;
     }
   } else if (exchange === 'hyperliquid') await check('$startPublic', [], 'public startup');
-  else if (exchange === 'txflow') await check('start', [], 'scaffold startup');
   else await check('refreshMarkets');
   const useStore = Boolean(streamHosts) || exchange === 'hyperliquid';
   const markets = earlyMarkets ?? (await check(useStore ? '$markets' : 'fetchMarkets', [], 'markets'));

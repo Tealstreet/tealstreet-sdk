@@ -20,11 +20,32 @@ contains hashes and representative differences.
 | Bitget       | Native ticker processing times out after identical recorded HTTP 200 input.                                                                                                                                                                                                                                                                                          | `codex-0w5ohi`, [#1017](https://github.com/Tealstreet/tealstreet-sdk/pull/1017).                                                                               |
 | Phemex       | Native ticker processing times out after identical recorded HTTP 200 input.                                                                                                                                                                                                                                                                                          | `codex-0w5ohi`, [#1017](https://github.com/Tealstreet/tealstreet-sdk/pull/1017).                                                                               |
 
-Candidate [#1044](https://github.com/Tealstreet/tealstreet-sdk/pull/1044) was also
-checked with its separately built addon against fresh identical HTTP bodies:
-Backpack's 188 markets and Crypto.com's 404 markets match TS completely. Their
-remaining ticker ID differences depend on uncontrolled wall-clock input.
-Paradex's general market properties now survive, but its nested `fees` object
-was still absent in that candidate and was routed back to the fixing lane.
-Bitunix's maximum-size string/number difference remains pending its own fix.
-These candidate observations do not claim that the PR has merged.
+Merged [#1044](https://github.com/Tealstreet/tealstreet-sdk/pull/1044) was rebuilt
+in this worktree at `33c2ae3eed` and checked against fresh identical HTTP bodies.
+Backpack's 188 markets and Crypto.com's 404 markets match TS completely. Both
+compiled recorded-market regressions also pass. Their remaining ticker ID
+differences depend on uncontrolled wall-clock input and remain reported.
+Paradex's 66 markets still lose their nested `fees` objects. Bitunix's 697
+markets still convert `limits.amount.max` from a string to a number; its 697
+tickers pass. Both remaining market defects were routed back to `codex-wdtab1`.
+
+The requested [#1017](https://github.com/Tealstreet/tealstreet-sdk/pull/1017)
+candidate was independently exercised using the owner-provided addon and revision
+`0d9632aca90b99c708178554af614152cacb8151`. The observed binary SHA-256 is
+`1129c766c0d0d31394960064e968245ee25f0480aaf72c85528415f07d0bc796`.
+
+- ApexOmni: all 89 markets pass; both receivers get the same three WS frames.
+  The native barrier still exceeds 60 seconds after partial ticker delivery.
+- Lighter: all 213 markets pass; both receive the same connection greeting and
+  `exchangeStats` response. This run exceeds the native barrier deadline too.
+  Earlier baseline runs did finish with exact complete ticker parity, so this
+  remains a latency/stall observation rather than a claimed permanent deadlock.
+- Bitrue: all 779 markets pass; both receive the same 126 gzip binary frames.
+  After a successful barrier, TS has 126 live tickers and native has zero, with
+  repeated `Unknown data [object]` diagnostics. `codex-wdtab1` acknowledged this
+  projection defect independently of the old Store facade.
+
+Reports and hashes are retained in
+[`evidence/confirmations-2026-10-18.json`](evidence/confirmations-2026-10-18.json).
+Results were sent to `codex-0w5ohi`, `codex-dwfl8p`, and `codex-wdtab1`; no new
+root cause is asserted for the ApexOmni/Lighter stalls.

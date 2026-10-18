@@ -65,7 +65,8 @@ exit nonzero. Equal errors and empty public market/ticker results never pass.
 `<response-hash>.request.json`; `requests[].fixture` links them from the report.
 Capture runs reject `--row`. To validate a separately built fix, pass
 `--addon /absolute/path/safe_cex_ffi.node --rust-revision <commit>`; the report
-records the TS checkout revision and the supplied Rust artifact revision.
+records the TS checkout revision, supplied Rust artifact revision, and addon
+SHA-256 so a separately built artifact is distinguishable from its source label.
 
 Hyperliquid intentionally rejects `fetchMarkets` and `fetchTickers` in both
 implementations. Its probe uses public `start` and compares the delivered Store
