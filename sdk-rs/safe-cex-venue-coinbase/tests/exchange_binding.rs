@@ -304,19 +304,26 @@ fn edits_only_a_proven_reconciled_native_spot_order() {
         );
     });
     let mut markets = h.drive(h.venue().fetch_markets()).unwrap();
-    *markets[0]
+    markets[0]
         .info
         .as_mut()
         .unwrap()
-        .get_mut("product_type")
-        .unwrap() = json!("SPOT").into();
+        .as_object_mut()
+        .unwrap()
+        .push(("product_type".encode_utf16().collect(), json!("SPOT").into()));
     let mut canonical = order();
     let info = canonical.info.as_mut().unwrap();
-    *info.get_mut("order_id").unwrap() = json!("order-synthetic").into();
-    *info.get_mut("status").unwrap() = json!("OPEN").into();
-    *info.get_mut("order_type").unwrap() = json!("LIMIT").into();
-    *info.get_mut("order_side").unwrap() = json!("BUY").into();
-    *info.get_mut("filled_size").unwrap() = json!("0").into();
+    info.as_object_mut().unwrap().extend(
+        [
+            ("order_id", "order-synthetic"),
+            ("status", "OPEN"),
+            ("order_type", "LIMIT"),
+            ("order_side", "BUY"),
+            ("filled_size", "0"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.encode_utf16().collect(), json!(value).into())),
+    );
     Store::update(
         h.store.as_ref(),
         StoreUpdate {
