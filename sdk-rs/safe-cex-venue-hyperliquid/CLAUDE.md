@@ -299,6 +299,13 @@ outside the object's borrow. The scripted legacy-account test covers user,
 vault, agent and subAccount roles against both native options and privacy checks.
 Native identity strings retain the shared scalar-Unicode boundary.
 
+The native emitter regression keeps shared Js arguments through its observations,
+checks binary64 bits and listener reference identity, then compares the actual
+shared JS stringify output with the maintained BaseExchange emitter/log source.
+Serde's numeric token representation is not a JS wire-output assertion. Original
+Realm object aliases still cross the existing DTO snapshot bridge; the approved
+shared-Js consolidation owns its independent mutation-visibility regression.
+
 Declared realm choices: promise reactions run as runtime tasks, not a V8
 microtask queue; store reads are snapshots (writes go through Store methods);
 the cross cache is per realm and memory-only (no BroadcastChannel or

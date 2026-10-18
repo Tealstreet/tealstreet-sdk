@@ -293,3 +293,8 @@ structured options/arguments/results through the actual addon.
 Native metadata updates share CallMethodHandler's symbol_metadata_throttler
 constructor, acknowledge without awaiting venue work, and clear keyed trailing
 calls on disposal/deactivation. Keep watch references to that manager weak.
+
+Native account notifications use `native_account_event` for the outbound packet.
+The worker's `ws-reconnected` notification has no `data` property; other events
+retain their scalar/variadic NativeValue payload. The MEXC native-host socket
+witness exercises its source `onOpen` notification and packet construction.
