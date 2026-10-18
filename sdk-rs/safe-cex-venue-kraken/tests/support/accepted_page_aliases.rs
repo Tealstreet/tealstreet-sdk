@@ -77,7 +77,10 @@ fn page_future_keeps_held_native_http_completion_and_exact_wire_params() {
         requests[0].params.is_null(),
         "terminal adapter has serialized params into the URL"
     );
-    h.http.release_responses();
+    h.http.hold_responses.set(false);
+    for waker in h.http.response_wakers.borrow_mut().drain(..) {
+        waker.wake();
+    }
     let value = settle(&h, page).unwrap();
     let rows = value.array_values().expect("native page array");
     assert_eq!(

@@ -246,15 +246,9 @@ pub struct Http {
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
     pub hold_responses: Rc<Cell<bool>>,
-    response_wakers: Rc<RefCell<Vec<Waker>>>,
+    pub response_wakers: Rc<RefCell<Vec<Waker>>>,
 }
 impl Http {
-    pub fn release_responses(&self) {
-        self.hold_responses.set(false);
-        for waker in self.response_wakers.borrow_mut().drain(..) {
-            waker.wake();
-        }
-    }
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
         self.route_native(method, path, status, from_json(&body));
     }

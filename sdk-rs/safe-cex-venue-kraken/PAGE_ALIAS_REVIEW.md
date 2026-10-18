@@ -43,9 +43,21 @@ RUSTC_BOOTSTRAP=1 node safe-cex-venue-kraken/scripts/page-alias-contracts.mjs --
 cargo test --locked -p safe-cex-venue-kraken --jobs 1 --lib accepted_page_aliases
 python3 safe-cex-venue-kraken/scripts/page-alias-controls.py
 RUSTC_BOOTSTRAP=1 node safe-cex-venue-kraken/scripts/page-alias-contracts.mjs
-RUSTC_BOOTSTRAP=1 node safe-cex-parity/scripts/accepted-set.mjs --package=safe-cex-venue-kraken --inventory --jobs=1
+RUSTC_BOOTSTRAP=1 CARGO_TARGET_DIR="$PWD/target/accepted-inventory" node safe-cex-parity/scripts/accepted-set.mjs --package=safe-cex-venue-kraken --inventory --jobs=1
 ```
 
 Rustdoc/check discovery stays in `target/accepted-inventory`, separate from the
 ordinary native builds. The full parity index and all-features cancellation
 inventory are separate readiness gates.
+
+The selected alias replay reports two explicit classifications, zero failed
+owners and zero decoder runtime results. All three constructed-binding tests
+pass. Both semantic faults compile and fail their named assertions; each exact
+source restoration passes. The two original missing-contract receipts remain
+independent of the semantic fault controls.
+
+The full canonical Kraken inventory clears both page profiles and advances to
+`construction::Factory`, which still requires its own finite generic profile.
+It remains an explicit following-cohort obligation; no full-Kraken inventory
+pass is claimed here. Nineteen of the original 24 aliases remain after this
+cohort and the three earlier `rest_account` aliases.
