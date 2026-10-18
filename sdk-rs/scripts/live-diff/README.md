@@ -280,6 +280,12 @@ JSON summaries are not the value oracle. Capture/replay equality and both
 native repeatability checks gate each mapper claim. Source hashes identify the
 runner, worker, planner, host inventory and transport used by each report.
 
+Each replay run also records `timings` with method names and monotonic wall
+milliseconds. These cover the complete operation, including HTTP, native decoding,
+Store updates and returned IPC values. They exclude the preceding replay-clock
+advance and stay outside SDK value comparisons. For an options-enabled Bybit run,
+`refreshMarkets` measures bootstrap rather than an isolated decoder call.
+
 Native controlled WS replay also requires `rawTasks.version === 1` with scope
 `exchange-runtime`. Unknown, finite, unpolled or awakened runtime work blocks the
 receipt, even when frame counters match and `pendingJobs` is zero. Only reviewed
