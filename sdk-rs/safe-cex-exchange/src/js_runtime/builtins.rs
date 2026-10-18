@@ -365,6 +365,39 @@ pub(crate) fn array_member(this: Js, name: &str) -> Option<Js> {
             this.set("length", Js::Number(len as f64))?;
             Ok(Js::Number(len as f64))
         }),
+        "splice" => method(name, move |args| {
+            // Length precedes argument coercion and every deleted-slot getter.
+            let len = array_length(&this)?;
+            let relative = arg(&args, 0).to_number()?.trunc();
+            let start = if relative.is_nan() {
+                0
+            } else if relative < 0.0 {
+                (len as f64 + relative).max(0.0) as usize
+            } else {
+                relative.min(len as f64) as usize
+            };
+            let count = if args.is_empty() {
+                0
+            } else if args.len() == 1 {
+                len - start
+            } else {
+                let requested = arg(&args, 1).to_number()?.trunc();
+                if requested.is_nan() {
+                    0
+                } else {
+                    requested.clamp(0.0, (len - start) as f64) as usize
+                }
+            };
+            let removed = Js::array(vec![]);
+            removed.set("length", Js::Number(count as f64))?;
+            for index in 0..count {
+                if let Some(value) = indexed(&this, start + index)? {
+                    removed.define(&index.to_string(), value)?;
+                }
+            }
+            this.splice_array(len, start, count, args.into_iter().skip(2).collect())?;
+            Ok(removed)
+        }),
         "pop" => method(name, move |_| {
             let len = array_length(&this)?;
             if len == 0 {

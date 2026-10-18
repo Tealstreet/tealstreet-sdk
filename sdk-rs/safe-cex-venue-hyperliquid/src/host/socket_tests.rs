@@ -1,8 +1,6 @@
 //! Exercise the source private class through the production realm/socket bridge.
 use safe_cex_exchange::js_runtime::value::Js;
-#[allow(dead_code)]
-#[path = "../../tests/support/binding_runtime.rs"]
-mod host;
+use crate::binding_test_runtime as host;
 
 use crate::{
     binding::{HyperliquidDependencies, RuntimeClock},

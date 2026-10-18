@@ -704,6 +704,12 @@ its original 354 comparisons. Actual maintained worker execution observes an
 updated null baseline without a packed null value; null-to-number emits the
 numeric index delta. This preserves the source typeof-number filter.
 
+The browser DATA materializer retains array holes plus enumerable named string
+properties from the canonical ArrayData owner. It caches the destination array
+before evaluating children/getters, preserving cycles and repeated references.
+The worker_data_host example compares the actual Wasm result and structuredClone
+for hole/undefined distinction, named getter receiver, aliases and numeric bits.
+
 TWAP resume/terminate keep their synchronous state/timer prefix and return the
 canonical eager Promise waiter, so even ready/no-op/error results yield before
 an awaiting caller continues. Posting failures preserve earlier state commits
@@ -732,3 +738,14 @@ start_eager. Clock, import, venue-start and startup-race typed results yield at
 their source await boundaries. Discarding a caller waiter cannot cancel startup
 or failed-worker table cleanup; token/disposal suppression and retained startup
 losers remain unchanged. Raw session/config admission is a separate audit row.
+
+WorkerModule owns its installed sessions; the returned session is an optional
+handle, not the listener lifetime owner. The reverse module link is weak. Module
+destruction unregisters listeners, clears ports/maps, disposes workers through
+canonical native teardown, and asks each context to release its runtime/replay
+work. Context shutdown must stop only work belonging to this worker module and
+must be idempotent for shared contexts; errors are reported while other contexts
+continue closing. Session ingress/config/replay/perf/opaque dispatch use native
+Js directly. Decode shared models only at their actual consumers, and keep
+buffered message identity. Separate ordinary output/report DTO findings remain
+tracked in the worker FIX-audit ledger.

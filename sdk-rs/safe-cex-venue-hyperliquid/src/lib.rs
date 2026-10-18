@@ -1,4 +1,9 @@
 //! Hyperliquid types and REST API; exchange/WS implementations remain pending.
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/support/binding_runtime.rs"]
+pub(crate) mod binding_test_runtime;
+
 pub mod agent;
 pub mod balance_state;
 pub mod binding;
