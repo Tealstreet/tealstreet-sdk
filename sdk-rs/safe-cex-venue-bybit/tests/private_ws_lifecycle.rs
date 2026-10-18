@@ -57,7 +57,9 @@ fn errors() -> BTreeMap<&'static str, Rc<ExchangeError>> {
     .map(|phase| {
         let mut error = ExchangeError::new(format!("{phase} failed"));
         error.name = format!("{phase}Error");
-        error.code = Some(serde_json::json!(17));
+        error.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+            &serde_json::json!(17),
+        ));
         (phase, Rc::new(error))
     })
     .collect()
@@ -90,7 +92,7 @@ fn outcome(
             "LIFECYCLE native error message"
         );
         assert_eq!(
-            error.code.as_ref(),
+            observed_error_code(&error.code).as_ref(),
             expected.get("code"),
             "LIFECYCLE native error code"
         );
@@ -464,7 +466,7 @@ fn private_ws_lifecycle_native_source_parity() {
                 "LIFECYCLE native logged message"
             );
             assert_eq!(
-                actual.code.as_ref(),
+                observed_error_code(&actual.code).as_ref(),
                 expected.get("code"),
                 "LIFECYCLE native logged code"
             );
@@ -484,4 +486,17 @@ fn private_ws_lifecycle_native_source_parity() {
             assert_eq!(actual, expected.as_str().unwrap(), "LIFECYCLE wire frame");
         }
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

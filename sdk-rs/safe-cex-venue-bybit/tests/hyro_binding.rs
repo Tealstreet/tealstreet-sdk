@@ -636,10 +636,11 @@ fn hyro_rejected_and_timed_out_auth_close_the_session_without_subscription() {
             "HyroTrader private auth acknowledgement timed out"
         };
         assert!(
-            errors
-                .borrow()
-                .iter()
-                .any(|value| value.to_string().contains(expected)),
+            errors.borrow().iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|text| String::from_utf16_lossy(text).contains(expected))
+            }),
             "{:?}",
             errors.borrow()
         );
@@ -714,7 +715,7 @@ fn hyro_private_reconciliation_retries_changed_revision_and_publishes_atomically
         return;
     }
     let (h, private, core) = start_private();
-    let gate = std::rc::Rc::new(std::cell::Cell::new(false));
+    let gate = std::rc::Rc::new(support::release::Release::default());
     h.wire
         .response_gates
         .borrow_mut()
@@ -897,7 +898,6 @@ fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() 
     }
     use safe_cex_exchange::exchange::Exchange;
     use std::{
-        cell::Cell,
         collections::VecDeque,
         future::Future,
         rc::Rc,
@@ -912,7 +912,7 @@ fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() 
         500,
         json!({"retCode":10016,"retMsg":"unconfirmed"}),
     );
-    let gate = Rc::new(Cell::new(false));
+    let gate = Rc::new(support::release::Release::default());
     h.wire
         .response_gates
         .borrow_mut()
@@ -1110,7 +1110,6 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
     }
     use safe_cex_exchange::exchange::Exchange;
     use std::{
-        cell::Cell,
         future::Future,
         rc::Rc,
         task::{Context, Poll, Waker},
@@ -1128,7 +1127,7 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
         "/v5/order/create",
         json!({"orderId":"hyro-batch-second"}),
     );
-    let gate = Rc::new(Cell::new(false));
+    let gate = Rc::new(support::release::Release::default());
     h.wire
         .response_gates
         .borrow_mut()
@@ -1382,7 +1381,12 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     feed(json!({"topic":"order","data":[order.clone()]}));
     feed(json!({"topic":"order","data":[order.clone()]}));
     assert_eq!(
-        *fills.borrow(),
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Hyro fill fixture"),
         vec![
             json!({"id":"hyro-frame","side":"buy","symbol":"BTCUSDT","price":25000.0,"amount":0.004})
         ]

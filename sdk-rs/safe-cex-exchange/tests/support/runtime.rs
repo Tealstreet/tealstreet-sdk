@@ -1,10 +1,16 @@
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::runtime::*;
 use std::{
     cell::{Cell, RefCell},
     future::{Future, poll_fn},
     pin::Pin,
     rc::Rc,
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
 
 pub struct Task {
@@ -19,6 +25,7 @@ impl ExchangeTask for Handle {
 }
 #[derive(Default)]
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     pub id: RefCell<Option<String>>,
     pub now: Rc<Cell<u64>>,
     pub tasks: RefCell<Vec<Task>>,
@@ -28,20 +35,29 @@ pub struct Runtime {
 impl Runtime {
     pub fn advance(&self, now: u64) {
         self.now.set(now);
-        let tasks = std::mem::take(&mut *self.tasks.borrow_mut());
-        let mut pending = Vec::new();
-        for mut task in tasks {
-            if !task.cancelled.get()
-                && task
-                    .future
-                    .as_mut()
-                    .poll(&mut Context::from_waker(Waker::noop()))
-                    .is_pending()
-            {
-                pending.push(task);
+        self.sleep_wakers.wake_due(now as f64);
+        for _ in 0..64 {
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
+            let tasks = std::mem::take(&mut *self.tasks.borrow_mut());
+            let mut pending = Vec::new();
+            for mut task in tasks {
+                if !task.cancelled.get()
+                    && task
+                        .future
+                        .as_mut()
+                        .poll(&mut Context::from_waker(&waker))
+                        .is_pending()
+                {
+                    pending.push(task);
+                }
+            }
+            let added = !self.tasks.borrow().is_empty();
+            self.tasks.borrow_mut().extend(pending);
+            if !added && !signal.take() {
+                return;
             }
         }
-        self.tasks.borrow_mut().extend(pending);
     }
 }
 impl ExchangeRuntime for Runtime {
@@ -55,10 +71,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let deadline = now.get() + delay;
-        Box::pin(poll_fn(move |_| {
+        let sleeper = self.sleep_wakers.register(deadline as f64);
+        Box::pin(poll_fn(move |cx| {
             if now.get() >= deadline {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -99,4 +117,53 @@ impl ExchangeRuntime for Runtime {
     ) -> ExchangeFuture<'static, serde_json::Value> {
         Box::pin(async { unreachable!() })
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.now.set(runtime.now.get() + 9);
+    runtime.advance(runtime.now.get());
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.now.set(runtime.now.get() + 1);
+    runtime.advance(runtime.now.get());
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.now.set(runtime.now.get() + 10);
+    runtime.advance(runtime.now.get());
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

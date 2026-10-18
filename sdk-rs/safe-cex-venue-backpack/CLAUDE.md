@@ -367,3 +367,8 @@ native numeric-bit expectations. Fresh TS receivers and advancing native clocks
 isolate numeric mapping from throttle timing. `ticker-native-controls.py backpack`
 compiles a live publication fault, requires a native assertion failure, then
 restores exact source bytes and requires the named test to pass.
+
+The concrete leverage catch emits the helper-created native Error value rather
+than its message string. The constructed Exchange regression drives a successful
+account PATCH followed by a malformed position refresh, checks the committed
+leverage and single refresh, and inspects Error name/message before projection.
