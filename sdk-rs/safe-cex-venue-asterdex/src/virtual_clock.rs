@@ -1,9 +1,10 @@
 //! Source clock lifecycle, with an explicit native realm and HTTP capability.
-//! The supplied BaseExchange owns detached promises and monotonic intervals;
-//! disposing it cancels this realm's work. A realm must outlive its clock use.
+//! The runtime owns pending completions; the exchange owns monotonic intervals.
+//! Stopping a generation suppresses late state writes without stranding waiters.
 use crate::{clock_helpers, tables::ASTERDEX_ENDPOINTS, types::AsterDEXAPIVersion};
 use safe_cex_exchange::{
     OwnedOperation,
+    eager::start_eager,
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
@@ -28,8 +29,7 @@ struct Completion<T> {
 }
 /// A shareable completion, like a JS Promise: dropping a waiter does not abort
 /// the operation, and each waiter receives the same result.
-/// Disposing the supplied BaseExchange cancels its work without settling these
-/// waiters; unlike the JS module singleton, a native realm requires a live owner.
+/// A stopped generation still settles its existing waiters.
 pub struct ClockOperation<T>(Rc<Completion<T>>);
 impl<T> Clone for ClockOperation<T> {
     fn clone(&self) -> Self {
@@ -96,11 +96,14 @@ impl AsterDEXVirtualClock {
     }
     fn launch<T: Clone + 'static>(&self, work: ExchangeFuture<'static, T>) -> ClockOperation<T> {
         let operation = ClockOperation::pending();
-        let completion = operation.clone();
-        self.owner.start_owned_operation(async move {
-            completion.finish(work.await);
-        });
+        self.complete(operation.clone(), work);
         operation
+    }
+    fn complete<T: 'static>(&self, operation: ClockOperation<T>, work: ExchangeFuture<'static, T>) {
+        drop(start_eager(&self.owner.runtime, async move {
+            operation.finish(work.await);
+            Ok(())
+        }));
     }
     // ts: AsterDEXVirtualClock.start
     pub fn start(
@@ -161,12 +164,14 @@ impl AsterDEXVirtualClock {
         *self.sync_in_flight.borrow_mut() = Some(operation.clone());
         let work = self.sync_client_server_time_inner(testnet, preferred, generation);
         let clock = self.clone();
-        let completion = operation.clone();
-        self.owner.start_owned_operation(async move {
-            let result = work.await;
-            clock.sync_in_flight.borrow_mut().take();
-            completion.finish(result);
-        });
+        self.complete(
+            operation.clone(),
+            Box::pin(async move {
+                let result = work.await;
+                clock.sync_in_flight.borrow_mut().take();
+                result
+            }),
+        );
         operation
     }
     // ts: AsterDEXVirtualClock.syncClientServerTimeInner
