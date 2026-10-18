@@ -76,3 +76,7 @@ Rows 19/20 stay OPEN: this bounded repair does not clear the retained row/string
 option, parser-member or output representation obligations. The retained reporter
 repair is covered by #1089. No existing corpus case or assertion is
 removed, and the full public-history API is unchanged.
+
+HISTORY_OUTPUT_REVIEW.md records the closing follow-up for rows 19/20: source
+option coercion, row-local strict asset admission and approved typed text handling.
+The original query/signature/error witnesses above remain in the native suite.
