@@ -204,3 +204,43 @@ fn native_connecting_waker_replacement_can_reenter_close() {
         ));
     });
 }
+
+#[test]
+fn replay_connecting_reader_is_not_a_drained_receive_wait() {
+    let host = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&host, async {
+        let runtime = native_replay_runtime(1_800_000_000_000.0);
+        let dynamic: Rc<dyn ExchangeRuntime> = runtime.clone();
+        let drops = Rc::new(Cell::new(0));
+        let socket = pending_socket(&dynamic, drops.clone());
+        let next = socket.next_event();
+        let reader = runtime.spawn_classified(
+            RuntimeTaskKind::SocketReader,
+            Box::pin(async move {
+                let _ = next.await;
+            }),
+        );
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        let receipt = replay_raw_tasks(&runtime);
+        assert_eq!(
+            receipt["waitingSockets"], 0,
+            "CONNECTING is not the actual receive leaf"
+        );
+        assert!(
+            receipt["blocking"].as_u64().unwrap() > 0,
+            "pending handshake cannot establish drain"
+        );
+        reader.cancel();
+        drop(socket);
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(drops.get(), 1);
+        assert_eq!(replay_raw_tasks(&runtime)["blocking"], 0);
+    });
+}

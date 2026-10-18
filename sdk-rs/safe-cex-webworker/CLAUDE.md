@@ -36,8 +36,10 @@ never manufactures success from a resolved void future. Missing/rejected executo
 emit exec-log, with exec-result only for a supplied reqId (including an empty one).
 
 Full account position refreshes use the full Store mutator even for empty
-results; scoped refreshes remain partial. Cancelling an in-flight Rust refresh
-releases its own pending markers and reports cancellation to the waiting bridge.
+results; scoped refreshes remain partial. Position refresh uses the canonical eager Promise driver: fetch/locks start
+during helper or dispatch entry, and even ready fetches yield before Store/reply
+work. Dropping a caller waiter does not cancel the request; runtime abandonment
+releases its pending markers and reports cancellation to the bridge.
 
 Market-load buffering uses separate 500ms self-rescheduling checks and a 30s
 deadline. Timeout reports are cooled down for five minutes and contain only
