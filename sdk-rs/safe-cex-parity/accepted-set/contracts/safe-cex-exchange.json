@@ -11432,6 +11432,29 @@
             }
           }
         ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::store_access::StoreReadError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Converts an already typed StoreReadError, retaining its opaque original cause and phase. No raw input is parsed. The canonical_native_store original-throw identity regression exercises the native conversion."
       }
     ]
   },
@@ -26699,6 +26722,29 @@
         },
         "input": "typed",
         "reason": "Constructs from already typed native Js, ExchangeError or JsCoercionError values; no serialized representation is decoded by these exact conversions."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::store_access::StoreReadError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Converts an already typed StoreReadError, retaining its opaque original cause and phase. No raw input is parsed. The canonical_native_store original-throw identity regression exercises the native conversion."
       }
     ]
   },
@@ -31148,8 +31194,8 @@
     ]
   },
   "safe_cex_exchange::js_runtime::native_store::DefaultStore": {
-    "shape": "typed",
-    "evidence": "The sole canonical Js graph owner is constructed natively; actual facade mutation/alias/generation/getter/subscriber witnesses execute this constructor in tests/canonical_native_store.rs. Typed construction is distinct from raw native property operations.",
+    "shape": "observed",
+    "evidence": "Actual DefaultStore constructor/raw lookup/typed optional readers execute on the one material graph. Full original-cause, own-undefined, arbitrary config and owner lifetime source/native witnesses are in canonical_native_store.",
     "entrypoints": [
       {
         "api": {
@@ -31164,7 +31210,3625 @@
           }
         },
         "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "reason": "No raw input: fresh construction or typed empty delta drain."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "native_value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"latency\",Js::Number(n))]),false).unwrap(); serde_json::json!(store.native_value(\"latency\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "message_handler_stats",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"messageHandlerStats\",Js::Number(n))]),false).unwrap(); let v=store.message_handler_stats().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "stark_config",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"starkConfig\",Js::Number(n))]),false).unwrap(); let v=store.stark_config().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "zk_link_config",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"zkLinkConfig\",Js::Number(n))]),false).unwrap(); let v=store.zk_link_config().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "user_data",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"userData\",Js::Number(n))]),false).unwrap(); let v=store.user_data().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "socket_health",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"socketHealth\",Js::Number(n))]),false).unwrap(); let v=store.socket_health().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "consume_ticker_deltas",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": [
+                            {
+                              "primitive": "f64"
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "serde_json::map::Map",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "serde_json::value::Value",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "No raw input: fresh construction or typed empty delta drain."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "set_setting",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::set_setting(&store,\"witness\",n==7.0).unwrap(); serde_json::json!(store.native_value(\"options\").unwrap().get(\"witness\").unwrap().truthy()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": true
+          },
+          {
+            "input": 19,
+            "output": false
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "remove_order",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let id=n.to_string(); store.update_native(&Js::object(vec![(\"orders\",Js::array(vec![Js::object(vec![(\"id\",Js::str(\"A\"))]),Js::object(vec![(\"id\",Js::str(&id))])]))]),false).unwrap(); Store::remove_order(&store,\"A\").unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"id\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "remove_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "ids",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let id=n.to_string(); store.update_native(&Js::object(vec![(\"orders\",Js::array(vec![Js::object(vec![(\"id\",Js::str(\"A\"))]),Js::object(vec![(\"id\",Js::str(&id))])]))]),false).unwrap(); Store::remove_orders(&store,&[\"A\"]).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"id\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_order_status",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "status",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::OrderStatus",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::update_order_status(&store,\"A\",status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": true
+          },
+          {
+            "input": 19,
+            "output": false
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_orders_status",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "ids",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "status",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::OrderStatus",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::update_orders_status(&store,&[\"A\"],status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": true
+          },
+          {
+            "input": 19,
+            "output": false
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "mark_orders_terminal",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "ids",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "status",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::OrderStatus",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::mark_orders_terminal(&store,&[\"A\"],status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": true
+          },
+          {
+            "input": 19,
+            "output": false
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_order",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "changes",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_store::model_patch::PatchSource",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"amount\",n); Store::update_order(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"amount\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_position",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "changes",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_store::model_patch::PatchSource",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"entryPrice\",n); Store::update_position(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"positions\").unwrap().get(\"0\").unwrap().get(\"entryPrice\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_ticker",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "changes",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_store::model_patch::PatchSource",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"last\",n); Store::update_ticker(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"tickers\").unwrap().get(\"0\").unwrap().get(\"last\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_market",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "changes",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_store::model_patch::PatchSource",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"contractSize\",n); Store::update_market(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"markets\").unwrap().get(\"0\").unwrap().get(\"contractSize\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_positions",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "updates",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "tuple": [
+                          {
+                            "resolved_path": {
+                              "path": "core::option::Option",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::string::String",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "resolved_path": {
+                              "path": "safe_cex_store::model_patch::ModelPatch",
+                              "args": null
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"entryPrice\",n); Store::update_positions(&store,&[(Some(\"A\".into()),patch)]).unwrap(); serde_json::json!(store.native_value(\"positions\").unwrap().get(\"0\").unwrap().get(\"entryPrice\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "set_orders_for_symbol",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "orders",
+                {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Order",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let order=serde_json::from_value(serde_json::json!({\"id\":\"N\",\"symbol\":\"S\",\"amount\":n,\"filled\":0,\"remaining\":n,\"lastUpdate\":0})).unwrap(); Store::set_orders_for_symbol(&store,\"S\",vec![order]).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"amount\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_stark_config",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_stark_config(&store,Some(serde_json::json!(n))).unwrap(); serde_json::json!(store.native_value(\"starkConfig\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_zk_link_config",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_zk_link_config(&store,Some(safe_cex_types::retained_json::RetainedJsonInput::Float(n))).unwrap(); serde_json::json!(store.native_value(\"zkLinkConfig\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_user_data",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_user_data(&store,Some(serde_json::json!(n))).unwrap(); serde_json::json!(store.native_value(\"userData\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "update_socket_health",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::map::Map",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_store::notification::StoreMutationError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_socket_health(&store,&serde_json::json!({\"witness\":n}).as_object().unwrap().clone()).unwrap(); serde_json::json!(store.native_value(\"socketHealth\").unwrap().get(\"witness\").unwrap().to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "message_handler_stats",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"messageHandlerStats\",Js::Number(n))]),false).unwrap(); let v=Store::message_handler_stats(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "stark_config",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"starkConfig\",Js::Number(n))]),false).unwrap(); let v=Store::stark_config(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "zk_link_config",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"zkLinkConfig\",Js::Number(n))]),false).unwrap(); let v=Store::zk_link_config(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "user_data",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"userData\",Js::Number(n))]),false).unwrap(); let v=Store::user_data(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "socket_health",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"socketHealth\",Js::Number(n))]),false).unwrap(); let v=Store::socket_health(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::contract::Store",
+          "name": "lookup_ticker_by_symbol",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "dyn_trait": {
+                                        "traits": [
+                                          {
+                                            "trait": {
+                                              "path": "safe_cex_store::ticker_lookup::TickerLookup",
+                                              "args": null
+                                            },
+                                            "generic_params": []
+                                          }
+                                        ],
+                                        "lifetime": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::store_access::StoreReadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); store.native_value(\"tickersBySymbol\").unwrap().set(\"W\",Js::object(vec![(\"id\",Js::str(&n.to_string()))])).unwrap(); let found=Store::lookup_ticker_by_symbol(&store,\"W\").unwrap(); serde_json::json!(found.update_id().unwrap().unwrap().parse::<f64>().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::native_store::selector": {
+    "api": {
+      "kind": "function",
+      "name": "selector",
+      "signature": {
+        "inputs": [
+          [
+            "id",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Canonical Store typed admission helper; actual facade selector/loop regressions exercise its consumers.",
+    "reason": "Constructs an own id property from the already admitted typed identifier; does not parse or decode the identifier."
+  },
+  "safe_cex_exchange::js_runtime::native_store::selectors": {
+    "api": {
+      "kind": "function",
+      "name": "selectors",
+      "signature": {
+        "inputs": [
+          [
+            "ids",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Canonical Store typed admission helper; actual facade selector/loop regressions exercise its consumers.",
+    "reason": "Constructs selector records from admitted identifier references; no serialized input is parsed."
+  },
+  "safe_cex_exchange::js_runtime::native_store::project": {
+    "api": {
+      "kind": "function",
+      "name": "project",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::store_access::StoreReadError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Executes the production preserving-undefined projection / typed patch admission directly, before observing native number bits and changed own fields. Full model/undefined/getter cases remain in canonical_native_store.",
+    "call": "{ use crate::js_runtime::value::Js; let n=$value.as_f64().unwrap(); let v: f64=$type(&Js::Number(n)).unwrap(); serde_json::json!({\"bits\":v.to_bits().to_string()}) }",
+    "cases": [
+      {
+        "input": 7.5,
+        "output": {
+          "bits": "4620130267728707584"
+        }
+      },
+      {
+        "input": -0.0,
+        "output": {
+          "bits": "9223372036854775808"
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::native_store::admitted_patch": {
+    "api": {
+      "kind": "function",
+      "name": "admitted_patch",
+      "signature": {
+        "inputs": [
+          [
+            "target",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "changes",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_store::model_patch::PatchSource",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_store::notification::StoreMutationError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  },
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::ser::Serialize",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  },
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  },
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_store::model_patch::PatchModel",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Executes the production preserving-undefined projection / typed patch admission directly, before observing native number bits and changed own fields. Full model/undefined/getter cases remain in canonical_native_store.",
+    "call": "{ use crate::js_runtime::value::{Js,from_typed}; use safe_cex_store::model_patch::ModelPatch; let row=from_typed(&safe_cex_types::Ticker {id:\"A\".into(),symbol:\"A\".into(),bid:0.0,ask:0.0,last:0.0,mark:0.0,index:0.0,mid_price:None,percentage:0.0,open_interest:0.0,funding_rate:0.0,funding_time:0.0,volume:0.0,quote_volume:0.0,timestamp:None,info:None}).unwrap(); let mut patch=ModelPatch::default(); patch.set_number(\"last\",$value.as_f64().unwrap()); let v=$type::<safe_cex_types::Ticker>(&row,&patch).unwrap(); serde_json::json!({\"bits\":v.get(\"last\").unwrap().to_number().unwrap().to_bits().to_string(),\"freeOwn\":v.has_own(\"bid\")}) }",
+    "cases": [
+      {
+        "input": 7.5,
+        "output": {
+          "bits": "4620130267728707584",
+          "freeOwn": false
+        }
+      },
+      {
+        "input": -0.0,
+        "output": {
+          "bits": "9223372036854775808",
+          "freeOwn": false
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::native_store::graph::Graph": {
+    "shape": "observed",
+    "evidence": "Production canonical graph operations, direct native input and observed reached properties. tests/canonical_native_store.rs additionally pins alias generations, descriptors, original errors, partial writes and subscriber ordering against maintained TS.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Allocates a fresh default graph without taking raw data."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "invoke",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "method",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "args",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "resolved_path": {
+                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.invoke(\"update\",&[Js::object(vec![(\"latency\",Js::Number(n))])]).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.replace_field(\"latency\",Js::Number(n)).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "find_row",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "update_one",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "selector",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "changes",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();graph.update_one(\"orders\",&Js::object(vec![(\"id\",Js::str(\"A\"))]),&Js::object(vec![(\"amount\",Js::Number(n+1.0))])).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 8
+          },
+          {
+            "input": 19,
+            "output": 20
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "replace_field",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.replace_field(\"latency\",Js::Number(n)).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "record_request_outcome",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); for _ in 0..($value.as_u64().unwrap()){ graph.record_request_outcome(\"ok\").unwrap(); } let v=graph.get(\"requestStats\").unwrap().get(\"ok\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "add_one",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "upsert",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "upsert_many",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "incoming",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "full",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
+        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.upsert_many(\"orders\",&Js::array(vec![row]),true).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "cases": [
+          {
+            "input": 7,
+            "output": 7
+          },
+          {
+            "input": 19,
+            "output": 19
+          }
+        ]
       }
     ]
   }
