@@ -12111,6 +12111,1344 @@
       }
     ]
   },
+"safe_cex_venue_binance::request_weight::get_response_header": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_response_header",
+      "signature": {
+        "inputs": [
+          [
+            "has_headers",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "get_member",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::HeaderGetMember",
+                                          "args": null
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "property",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "core::option::Option",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "serde_json::value::Value",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut() -> Result<HeaderGetMember, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::HeaderGetMember",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Result<Option<Value>, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "serde_json::value::Value",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Finite production output/effect observations of the actual request-weight function; preserve presence, binary64 duration bits, callback order, and original Rc error identity before observation encoding. The separate native signed HTTP witness constructs actual Futures/PM/Spot owners and reads their pause state. No arbitrary callback or raw HTTP object admission claim.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/request-weight-observers.rs\")); } witness::header($value, |has,name,get,property| $type(has,name,get,property)) }",
+    "cases": [
+      {
+        "input": {
+          "has": false,
+          "mode": "member-error"
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "call",
+          "answer": "literal"
+        },
+        "output": {
+          "result": {
+            "some": "literal"
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "get",
+              2
+            ],
+            [
+              "call",
+              "X-Test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "call",
+          "answer": null
+        },
+        "output": {
+          "result": {
+            "some": null
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "get",
+              2
+            ],
+            [
+              "call",
+              "X-Test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "flip"
+        },
+        "output": {
+          "result": {
+            "name": "TypeError",
+            "message": "headers.get is not a function",
+            "original": false
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "get",
+              2
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-Test": 0
+          }
+        },
+        "output": {
+          "result": {
+            "some": {
+              "bits": "0000000000000000"
+            }
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-Test": null,
+            "x-test": false
+          }
+        },
+        "output": {
+          "result": {
+            "some": false
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-TEST": "upper"
+          }
+        },
+        "output": {
+          "result": {
+            "some": "upper"
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ],
+            [
+              "property",
+              "X-TEST"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-TEST": null
+          }
+        },
+        "output": {
+          "result": {
+            "some": null
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ],
+            [
+              "property",
+              "X-TEST"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {}
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ],
+            [
+              "property",
+              "X-TEST"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "member-error"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "header failure",
+            "original": true
+          },
+          "events": [
+            [
+              "get",
+              1
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "property-error"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "header failure",
+            "original": true
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::request_weight::observe_request_weight": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "observe_request_weight",
+      "signature": {
+        "inputs": [
+          [
+            "status",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "header",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "core::option::Option",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "serde_json::value::Value",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "pause",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "f64"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&str) -> Result<Option<Value>, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "serde_json::value::Value",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(f64) -> Result<(), Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "f64"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Finite production output/effect observations of the actual request-weight function; preserve presence, binary64 duration bits, callback order, and original Rc error identity before observation encoding. The separate native signed HTTP witness constructs actual Futures/PM/Spot owners and reads their pause state. No arbitrary callback or raw HTTP object admission claim.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/request-weight-observers.rs\")); } witness::weight($value, |status,header,pause| $type(status,header,pause)) }",
+    "cases": [
+      {
+        "input": {
+          "value": "2",
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "409f400000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "status": 418
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity",
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": [],
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 1919,
+          "status": 200
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 1920,
+          "status": 200
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "1921",
+          "status": 200
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 2,
+          "status": "429"
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "nonsense"
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "status": 429,
+          "value": 3,
+          "fail": "header"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "weight failure",
+            "original": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "status": 429,
+          "value": 3,
+          "fail": "pause"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "weight failure",
+            "original": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40a7700000000000"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::request_weight::type_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "type_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_binance::request_weight::Failure",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Finite production output/effect observations of the actual request-weight function; preserve presence, binary64 duration bits, callback order, and original Rc error identity before observation encoding. The separate native signed HTTP witness constructs actual Futures/PM/Spot owners and reads their pause state. No arbitrary callback or raw HTTP object admission claim.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/request-weight-observers.rs\")); } witness::diagnostic($value, |message| $type(message)) }",
+    "cases": [
+      {
+        "input": "",
+        "output": {
+          "name": "TypeError",
+          "units": []
+        }
+      },
+      {
+        "input": "header failure",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            104,
+            101,
+            97,
+            100,
+            101,
+            114,
+            32,
+            102,
+            97,
+            105,
+            108,
+            117,
+            114,
+            101
+          ]
+        }
+      },
+      {
+        "input": "é漢😀",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            233,
+            28450,
+            55357,
+            56832
+          ]
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            110,
+            117,
+            108,
+            108
+          ]
+        }
+      },
+      {
+        "input": "\u0000literal",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            0,
+            108,
+            105,
+            116,
+            101,
+            114,
+            97,
+            108
+          ]
+        }
+      }
+    ]
+  },
   "safe_cex_venue_binance::request_weight::ObserveGetter": {
     "category": "non-decoder",
     "evidence": "The production ExchangeState::install_guards constructs this zero-argument getter and resolves its weak owner at each interceptor invocation. The actual NativeImports request pipeline success/rejection cases exercise that resolution and the returned Observer before observing pause state.",
@@ -15170,6 +16508,561 @@
     },
     "evidence": "Source-role review: safe-cex-venue-binance/src/lifecycle.rs::TickTimer; actual consumers are exchange_classes.rs/native_host.rs. Native compiler Deserialize and conversion detectors execute on the exact authenticated production alias. Independently, tests/private_classes.rs::lifecycle_aliases::native_lifecycle_aliases_publish_store_then_resolve_tick_again_at_timer_fire uses native_dependencies, actual owner/HTTP or socket/signing bindings and native field/effect assertions; scripts/lifecycle-alias-controls.py disconnects the reachable production dataflow with a named compiled refusal then exact restoration. This finite scope does not grant arbitrary callback implementations or a feature-matrix exemption.",
     "reason": "Scheduled zero-input continuation resolving and invoking the current tick after the source interval. The real native timer dispatches a second account request while independently respecting the risk interval; this is a capability, not timer-data parsing."
+  },
+  "safe_cex_venue_binance::api_factory::QuerySerializer": {
+    "shape": "observed",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "serialize",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "params",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Native outbound repeat-array query encoding over this finite JSON corpus, with returned string observed directly."
+      }
+    ],
+    "call": "serde_json::Value::String($type::Repeat.serialize($value))",
+    "cases": [
+      {
+        "input": {},
+        "output": ""
+      },
+      {
+        "input": {
+          "symbol": "BTC USDT",
+          "ids": [
+            1,
+            2
+          ]
+        },
+        "output": "symbol=BTC%20USDT&ids=1&ids=2"
+      },
+      {
+        "input": {
+          "value": "é&=",
+          "missing": null
+        },
+        "output": "value=%C3%A9%26%3D&missing="
+      },
+      {
+        "input": {
+          "nested": {
+            "a": "x"
+          },
+          "flag": false
+        },
+        "output": "nested%5Ba%5D=x&flag=false"
+      }
+    ]
+  },
+  "safe_cex_venue_binance::api_factory::RetryRead": {
+    "shape": "observed",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "matches_read",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "method",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Native predicate over finite method/URL profiles and both concrete policies; the Boolean is observed directly."
+      }
+    ],
+    "call": "{ let policy=if $value[\"policy\"]==\"path\" { $type::ReadsAndPath(\"/listen\") } else { $type::Reads }; serde_json::Value::Bool(policy.matches_read($value[\"method\"].as_str(),$value[\"url\"].as_str())) }",
+    "cases": [
+      {
+        "input": {
+          "policy": "reads",
+          "method": "GET",
+          "url": "/private"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "reads",
+          "method": "HeAd",
+          "url": null
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "reads",
+          "method": "POST",
+          "url": "/listen"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": "POST",
+          "url": "/listen?x=1"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": "DELETE",
+          "url": "/listen"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": null,
+          "url": null
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "policy": "path",
+          "method": "post",
+          "url": "/listen/extra"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "policy": "reads",
+          "method": null,
+          "url": "/listen"
+        },
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_binance::api_factory::optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/api-factory-observers.rs\")); } witness::optional($value, |value,key| $type(value,key)) }",
+    "cases": [
+      {
+        "input": {
+          "profile": "undefined",
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": false,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": false,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "selected": false
+          },
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "bool": false
+          },
+          "own": true,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "selected": null
+          },
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "null"
+          },
+          "own": true,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "profile": "own-undefined",
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": true,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "undefined"
+          },
+          "own": false,
+          "retained": false
+        }
+      },
+      {
+        "input": {
+          "profile": "identity",
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "kind": "object"
+          },
+          "own": true,
+          "retained": true
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "selected": "literal"
+          },
+          "key": "selected"
+        },
+        "output": {
+          "value": {
+            "units": [
+              108,
+              105,
+              116,
+              101,
+              114,
+              97,
+              108
+            ]
+          },
+          "own": true,
+          "retained": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::api_factory::endpoint": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "table",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Selects a generated static path from a typed slice using internal literal keys; it parses no response or typed wire record.",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile."
+  },
+  "safe_cex_venue_binance::api_factory::utf8_hmac_sha256_hex": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "utf8_hmac_sha256_hex",
+      "signature": {
+        "inputs": [
+          [
+            "secret",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outbound authentication codec over a UTF8 secret and already assembled signing payload. It computes the HMAC-SHA256 hex string for transmission; no wire response or model is decoded. Buffer/key-object coercions remain outside this boundary.",
+    "evidence": "Actual production factory binding: native_dependencies and ExchangeOwner retry a native network-failed listen-key POST, retain unsigned bypass, and percent-encode a signed income query. Actual native Spot authentication observes the parent secret/clock and sent socket signature; the real leveraged-order error binding observes failure interception. These finite witnesses do not claim arbitrary executable graphs or every factory/HTTP profile."
   },
   "safe_cex_venue_binance::api_factory::ApiFuture": {
     "category": "non-decoder",

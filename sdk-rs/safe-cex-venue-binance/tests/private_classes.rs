@@ -1,3 +1,6 @@
+#[cfg(feature = "native")]
+#[path = "support/api_factory_binding.rs"]
+mod api_factory_binding;
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
 #[cfg(feature = "native")]
@@ -18,6 +21,9 @@ mod public_frame_guard;
 #[cfg(feature = "native")]
 #[path = "support/public_subscription_receipts.rs"]
 mod public_subscription_receipts;
+#[cfg(feature = "native")]
+#[path = "support/request_weight_binding.rs"]
+mod request_weight_binding;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{

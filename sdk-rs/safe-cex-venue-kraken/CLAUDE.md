@@ -475,3 +475,14 @@ do not restore the String-only guard or stringify the returned cell. The native
 constructed-Scope witnesses and compiled controls are named
 `accepted_trading_error_receivers` and `trading-error-receiver-controls.py`.
 `trading-error-receiver-source.cjs` executes the live TypeScript callers directly.
+
+### Trading protocol and tick receiver coverage
+
+`RUNTIME_RECEIVER_REVIEW.md` covers TradingHost iterable/send and TickHost's typed
+error emission. Spread must use the native iterator protocol, retaining one
+method lookup and the original values/errors through shared IteratorRecord.
+`tests/support/accepted_runtime_receivers.rs` reaches the constructed Scope;
+`runtime-receiver-source.cjs` executes the live spread/tick source and
+`runtime-receiver-controls.py` compiles one semantic fault per receiver, requiring
+named failures and exact restored passes. Keep limited/unlimited client selection
+observable through the real signed HTTP pipeline.

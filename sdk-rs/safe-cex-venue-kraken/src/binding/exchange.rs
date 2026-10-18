@@ -6,6 +6,9 @@ mod accepted_diagnostic_receivers;
 #[path = "../../tests/support/accepted_read_receivers.rs"]
 mod accepted_read_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_runtime_receivers.rs"]
+mod accepted_runtime_receivers;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_trading_error_receivers.rs"]
 mod accepted_trading_error_receivers;
 use super::{

@@ -472,6 +472,11 @@ an own balance property (None is undefined); Invalid has error only. Concrete
 class/client/fetch composition and arbitrary executable callback behaviors remain
 outside these extractions; preserve this boundary when wiring the classes.
 
+The three request-weight function contracts execute actual header presence/order,
+rate-limit coercion/effect and native error outputs. Keep all seven alias reviews
+separate. `REQUEST_WEIGHT_REVIEW.md` records the finite profiles, real signed HTTP
+Futures pause witness, PM/Spot no-guard controls and independent compiled faults
+with exact restoration. No receiver/local-function/cancellation pin is widened.
 
 ## Concrete class closure
 
@@ -518,6 +523,13 @@ and income dispatch. A hosted remote signer arrives through `native_dependencies
 clients get it as the HTTP signer (the venue interceptor leaves requests unsigned
 when `options.remoteSigner` is set) and `remote_sign` relays ws-auth to it; the
 options token is stripped before typed decoding, since typed options cannot hold it.
+
+The API factory cohort retains executed native query/retry/property outputs and
+individual static-endpoint/outbound-HMAC role classifications. Preserve the four
+existing aliases and raw nominal method observations.
+`API_FACTORY_CONTRACT_REVIEW.md` records the actual native listen-key retry,
+signed income query, Spot authentication and failure-report bindings plus five
+independent compiled faults with byte-exact restoration.
 
 `ExchangeImports::request` args are the query params for GET/DELETE and the body
 for POST/PUT — never an axios config object; every call site passes that shape.

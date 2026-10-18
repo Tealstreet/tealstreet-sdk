@@ -128,6 +128,8 @@ test('invoked local macros cannot hide global decoders while private helpers rem
     baseline();
     for (const [label, recipe] of [
       ['local macro unconditional global impl', `macro_rules! install_raw { () => { ${implementation} }; } install_raw!();`],
+      ['local literal-expression macro transcriber global impl', `macro_rules! install_raw { ($label:literal,$rows:expr) => { ${implementation} let _ = ($label, $rows); }; } install_raw!("inert impl text", 1);`],
+      ['local literal-expression macro argument global impl', `macro_rules! install_raw { ($label:literal,$rows:expr) => { let _ = ($label, $rows); }; } install_raw!("inert impl text", { ${implementation} 1 });`],
       ['local macro doc-hidden global impl', `macro_rules! install_raw { () => { #[cfg(not(doc))] ${implementation} }; } install_raw!();`],
       ['local macro doc-hidden forwarded impl', `macro_rules! install_raw { ($item:item) => { $item }; } install_raw! { #[cfg(not(doc))] ${implementation} }`],
       ['local macro cfg-disabled shadow', `macro_rules! install_raw { () => { #[cfg(not(doc))] ${implementation} }; } #[cfg(any())] macro_rules! install_raw { () => { let _ = 1; }; } install_raw!();`],
@@ -146,6 +148,8 @@ test('invoked local macros cannot hide global decoders while private helpers rem
     for (const recipe of [
       'macro_rules! make_helper { () => { #[allow(dead_code)] #[derive(serde::Deserialize)] struct Hidden { value: bool } }; } make_helper!();',
       'macro_rules! make_helper { () => { fn helper(value: &str) -> bool { value == "buy" } }; } make_helper!(); let _ = helper("buy");',
+      'macro_rules! make_entries { ($label:literal,$rows:expr) => { let _ = ($label, $rows); }; } make_entries!("impl is inert text", (1 + 2));',
+      'macro_rules! make_entries { ($label:literal,$unused:expr) => { let _ = $label; }; } make_entries!("inert", 1);',
       `#[allow(unused_macros)] macro_rules! never_called { () => { #[cfg(not(doc))] ${implementation} }; }`,
     ]) {
       fs.writeFileSync(sourcePath, `${source}\npub fn private_macro_helper() { ${recipe} }\n`);
