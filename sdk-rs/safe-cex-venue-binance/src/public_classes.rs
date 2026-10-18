@@ -72,6 +72,12 @@ pub struct PublicState {
     operations: Rc<dyn ListenerHost>,
 }
 struct Protocol(Rc<PublicState>);
+struct FrameGuard<'a>(&'a RefCell<Vec<(EventValue, Option<Failure>)>>);
+impl Drop for FrameGuard<'_> {
+    fn drop(&mut self) {
+        self.0.borrow_mut().pop();
+    }
+}
 fn failure(message: impl Into<String>) -> Failure {
     Rc::new(ExchangeError::new(message))
 }
@@ -253,13 +259,7 @@ impl PublicState {
     }
     fn invoke_core(&self, callback: MessageHandler, events: EventValue) -> Result<(), Failure> {
         self.frames.borrow_mut().push((events, None));
-        struct Guard<'a>(&'a RefCell<Vec<(EventValue, Option<Failure>)>>);
-        impl Drop for Guard<'_> {
-            fn drop(&mut self) {
-                self.0.borrow_mut().pop();
-            }
-        }
-        let guard = Guard(&self.frames);
+        let guard = FrameGuard(&self.frames);
         let is_native = self.bridges.borrow().iter().any(|(_, core)| {
             core.upgrade()
                 .is_some_and(|core| Rc::ptr_eq(&core, &callback))

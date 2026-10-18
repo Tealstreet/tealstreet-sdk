@@ -421,7 +421,23 @@ impl PatchModel for safe_cex_types::Ticker {
         field: &str,
         value: PatchValueRef<'_>,
     ) -> Result<(), StorePatchError> {
-        if matches!(value, PatchValueRef::Undefined) && field != "info" {
+        if matches!(value, PatchValueRef::Undefined)
+            && !matches!(
+                field,
+                "info"
+                    | "bid"
+                    | "ask"
+                    | "last"
+                    | "mark"
+                    | "index"
+                    | "percentage"
+                    | "openInterest"
+                    | "fundingRate"
+                    | "fundingTime"
+                    | "volume"
+                    | "quoteVolume"
+            )
+        {
             return Ok(());
         }
         match field {

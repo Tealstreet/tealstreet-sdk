@@ -91,12 +91,16 @@ impl OrderlyExchange {
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
-        Box::pin(async move { Ok(to_typed(&await_js(this.call_method(name, args)?).await?)?) })
+        Box::pin(async move {
+            Ok(to_typed(
+                &await_js(&self.rt.exchange_runtime(), this.call_method(name, args)?).await?,
+            )?)
+        })
     }
     fn unit(&self, name: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(name, args)?).await?;
+            await_js(&self.rt.exchange_runtime(), this.call_method(name, args)?).await?;
             Ok(())
         })
     }

@@ -107,9 +107,15 @@ fn actual_account_read() {
         let input = js_from_str::<JsNumberInput>(c["raw"].as_str().unwrap());
         if *name == "surrogate" {
             assert_eq!(c["expected"]["ok"], "default:321");
-            assert!(input.is_err(), "ACCOUNT-UTF8 shared refusal");
-            comparisons += 1;
-            continue;
+            let retained: safe_cex_types::retained_json::RetainedJsonInput =
+                input.as_ref().unwrap().clone().decode().unwrap();
+            assert_eq!(
+                retained.get("userDetails").unwrap().as_array().unwrap()[0]
+                    .get("fullName")
+                    .unwrap()
+                    .as_text(),
+                Some([0xd800].as_slice())
+            );
         }
         let cache = RefCell::new(c["cache"].as_str().map(str::to_owned));
         let errors = RefCell::new(Vec::<Value>::new());

@@ -55,9 +55,13 @@ fn native_open_positions(
                 }
             };
             let symbol = position.get("symbol")?;
-            let symbol_key = to_typed::<String>(&Js::String(symbol.to_js_string()?))?;
+            let symbol_key = symbol.to_js_string()?;
             let open_price = position.get("openPrice")?;
-            let ticker = tickers.get(&symbol_key);
+            let ticker = tickers.iter().find_map(|(key, ticker)| {
+                key.encode_utf16()
+                    .eq(symbol_key.iter().copied())
+                    .then_some(ticker)
+            });
             let mark_price = ticker
                 .map(|t| t.mark)
                 .filter(|n| truthy(*n))

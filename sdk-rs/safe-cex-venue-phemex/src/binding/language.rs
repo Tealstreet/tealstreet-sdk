@@ -201,7 +201,7 @@ impl OrderHost for Host {
             ));
         }
         let pending = Host::call(self, name, args)?;
-        Ok(Box::pin(await_js(pending)))
+        Ok(Box::pin(await_js(&self.rt.exchange_runtime(), pending)))
     }
     fn error(&mut self, message: Js) -> Result<Thrown, Thrown> {
         Ok(Thrown::error("Error", &text(&message)?))

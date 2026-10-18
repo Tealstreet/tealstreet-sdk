@@ -74,8 +74,13 @@ fn live_algo_fetch_keeps_partial_stop_and_both_bracket_children() {
         .call_method("fetchAlgoOrders", vec![])
         .unwrap();
     let result = h
-        .drive(Box::pin(async move {
-            await_js(value).await.map_err(|e| e.to_exchange_error())
+        .drive(Box::pin({
+            let await_runtime = h.exchange.rt.exchange_runtime();
+            async move {
+                await_js(&await_runtime, value)
+                    .await
+                    .map_err(|e| e.to_exchange_error())
+            }
         }))
         .unwrap();
     let rows = result.array_values().unwrap();
@@ -331,10 +336,13 @@ fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
                     .call_method("fetchOrders", vec![])
                     .unwrap();
                 let rows = h
-                    .drive(Box::pin(async move {
-                        await_js(pending)
-                            .await
-                            .map_err(|error| error.to_exchange_error())
+                    .drive(Box::pin({
+                        let await_runtime = h.exchange.rt.exchange_runtime();
+                        async move {
+                            await_js(&await_runtime, pending)
+                                .await
+                                .map_err(|error| error.to_exchange_error())
+                        }
                     }))
                     .unwrap();
                 h.exchange

@@ -6,6 +6,12 @@ mod lifecycle_aliases;
 #[cfg(feature = "native")]
 #[path = "support/private_order_aliases.rs"]
 mod private_order_aliases;
+#[cfg(feature = "native")]
+#[path = "support/public_frame_guard.rs"]
+mod public_frame_guard;
+#[cfg(feature = "native")]
+#[path = "support/public_subscription_receipts.rs"]
+mod public_subscription_receipts;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -42,6 +48,7 @@ struct Runtime {
     sleep_clock: Rc<Cell<f64>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
+    console_frames: RefCell<Vec<(String, Vec<EventValue>)>>,
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     dial_socket: RefCell<Option<Rc<dyn WsSocket>>>,
 }
@@ -82,7 +89,11 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(f);
         Box::new(Task)
     }
-    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
+    fn console_values(&self, level: &str, values: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_frames
+            .borrow_mut()
+            .push((level.into(), values.to_vec()));
+    }
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -5359,6 +5370,10 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
 #[path = "support/order_throttle_binding.rs"]
 mod order_throttle_binding;
 
+#[cfg(feature = "native")]
+#[path = "support/snapshot_call_binding.rs"]
+mod snapshot_call_binding;
+
 #[test]
 #[cfg(feature = "native")]
 fn production_native_private_clones_share_settlement_and_captured_receiver() {
@@ -5466,5 +5481,281 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
 }
 
 #[cfg(feature = "native")]
+#[path = "support/snapshot_future_binding.rs"]
+mod snapshot_future_binding;
+
+#[cfg(feature = "native")]
 #[path = "support/public_listener_aliases.rs"]
 mod public_listener_aliases;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_leverage_aliases_update_account_market_overlay() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{Arc, Mutex};
+    struct Brackets(Arc<Mutex<Vec<RestRequest>>>);
+    impl RestAdapter for Brackets {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.lock().unwrap().push(request);
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: None,
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(
+                    serde_json::to_vec(&json!([
+                        {"symbol":"BTCUSDT","brackets":[{"initialLeverage":"125"}]},
+                        {"symbol":"ETHUSDT","brackets":[{"initialLeverage":0}]}
+                    ]))
+                    .unwrap(),
+                ),
+            })))
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM] {
+        let runtime = Rc::new(Runtime::default());
+        let calls = Arc::<Mutex<Vec<RestRequest>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Brackets(calls.clone())),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let markets: Vec<safe_cex_types::Market> = ["BTCUSDT", "ETHUSDT", "SOLUSDT"].into_iter().map(|symbol|
+            serde_json::from_value(json!({"id":symbol,"symbol":symbol,"base":symbol.trim_end_matches("USDT"),"quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.01},"limits":{"amount":{"min":0.01,"max":9},"leverage":{"min":1,"max":3},"price":{"min":0.1,"max":999999}}})).unwrap()
+        ).collect();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(if venue == Venue::PM {
+                "binancepm"
+            } else {
+                "binance"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store,
+            dependencies,
+        )
+        .unwrap();
+        let publications = Rc::new(Cell::new(0));
+        let notifications = publications.clone();
+        let unsubscribe = owner.base.store.subscribe(Box::new(move |_, from_worker| {
+            assert!(!from_worker);
+            notifications.set(notifications.get() + 1);
+            Ok(())
+        }));
+        let operation = owner.invoke(Method::Overlay, vec![]);
+        run(
+            &runtime,
+            safe_cex_venue_binance::class_jobs::reaction(operation),
+        )
+        .unwrap();
+        let observed = owner.base.store.markets();
+        assert_eq!(
+            observed.len(),
+            markets.len(),
+            "overlay preserves market count {venue:?}"
+        );
+        assert_eq!(
+            observed[0].limits.leverage.max, 125.0,
+            "the actual leverage future publishes its account-specific maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[1].limits.leverage.max, 3.0,
+            "zero bracket leaves the original maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[2].limits.leverage.max, 3.0,
+            "absent bracket leaves the original maximum {venue:?}"
+        );
+        for (actual, seed) in observed.iter().zip(&markets) {
+            let mut expected = seed.clone();
+            if expected.symbol == "BTCUSDT" {
+                expected.limits.leverage.max = 125.0;
+            }
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(expected).unwrap(),
+                "overlay preserves every other market field {venue:?}"
+            );
+        }
+        drop(observed);
+        assert_eq!(
+            publications.get(),
+            1,
+            "one live Store publication {venue:?}"
+        );
+        unsubscribe();
+        let requests = calls.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "the actual leverage loader starts exactly one native request {venue:?}"
+        );
+        let (path, query) = requests[0].url.split_once('?').unwrap();
+        assert_eq!(
+            path,
+            if venue == Venue::PM {
+                "/papi/v1/um/leverageBracket"
+            } else {
+                "/fapi/v1/leverageBracket"
+            }
+        );
+        assert!(query.contains("timestamp="));
+        assert!(query.contains("signature="));
+        assert!(runtime.reported.borrow().is_empty());
+        drop(requests);
+        owner.dispose().unwrap();
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    struct CandleSocket {
+        events: Rc<RefCell<std::collections::VecDeque<WsEvent>>>,
+        sent: RefCell<Vec<String>>,
+    }
+    impl WsSocket for CandleSocket {
+        fn ready_state(&self) -> u8 {
+            1
+        }
+        fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+            let events = self.events.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                events
+                    .borrow_mut()
+                    .pop_front()
+                    .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+            }))
+        }
+        fn send(&self, text: &str) -> Result<(), ExchangeError> {
+            self.sent.borrow_mut().push(text.into());
+            Ok(())
+        }
+        fn close(&self) {}
+        fn terminate(&self) {}
+        fn reconnect(&self) {}
+        fn is_reconnecting(&self) -> bool {
+            false
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let runtime = Rc::new(Runtime::default());
+        let socket = Rc::new(CandleSocket {
+            events: Rc::new(RefCell::new(std::collections::VecDeque::from([
+                WsEvent::Open,
+            ]))),
+            sent: RefCell::default(),
+        });
+        *runtime.dial_socket.borrow_mut() = Some(socket.clone());
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            std::sync::Arc::new(IdOnlyAdapter),
+            Rc::new(|_, _| panic!("no external candle provider configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(match venue {
+                Venue::Futures => "binance",
+                Venue::PM => "binancepm",
+                Venue::Spot => "binancespot",
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            dependencies,
+        )
+        .unwrap();
+        let receiver = owner.public.market_websocket.get().unwrap_or(&owner.public);
+        receiver.connect_and_subscribe().unwrap();
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::Candle>::new()));
+        let capture = seen.clone();
+        let cleanup = owner
+            .public
+            .listen_ohlcv(
+                EventValue::from_json(json!({"symbol":"BTCUSDT","interval":"1m"})),
+                Rc::new(move |candle| {
+                    capture.borrow_mut().push(candle);
+                    Ok(())
+                }),
+            )
+            .unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("SUBSCRIBE") && wire.contains("btcusdt@kline_1m"))
+        );
+        let wire = r#"{"e":"kline","s":"BTCUSDT","k":{"s":"BTCUSDT","i":"1m","t":120000,"o":"-0","h":"9.5","l":"-2","c":"4.25","v":"3.125"}}"#;
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(wire.into())));
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        {
+            let rows = seen.borrow();
+            assert_eq!(rows.len(), 1, "native candle delegation callback {venue:?}");
+            let c = &rows[0];
+            for (key, actual, expected) in [
+                ("timestamp", c.timestamp, 120.0_f64),
+                ("open", c.open, -0.0),
+                ("high", c.high, 9.5),
+                ("low", c.low, -2.0),
+                ("close", c.close, 4.25),
+                ("volume", c.volume, 3.125),
+            ] {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "native candle {venue:?} {key}"
+                );
+            }
+            assert!(c.last_side.is_none());
+        }
+        cleanup().unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("UNSUBSCRIBE") && wire.contains("btcusdt@kline_1m"))
+        );
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(wire.into())));
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "native candle cleanup removes parser {venue:?}"
+        );
+        owner.dispose().unwrap();
+    }
+}
