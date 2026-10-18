@@ -408,13 +408,21 @@ impl RateLimitClock for Clock {
 #[test]
 fn limiter_counts_failed_requests_and_secondary_limits_are_independent() {
     let venue = Arc::new(Venue::default());
-    let clock = Arc::new(Clock::default());
+    let clock = Arc::new(HeldClock(Mutex::new(0)));
     let limited = RateLimitedAdapter::new(venue.clone(), clock.clone(), 2, 1000);
     venue.replies.lock().unwrap().push_back(Err(reset()));
     assert!(run(limited.execute(req("POST", "/orders"))).is_err());
     run(limited.execute(req("GET", "/positions"))).unwrap();
     assert_eq!(clock.now_ms(), 0);
-    run(limited.execute(req("GET", "/balance"))).unwrap();
+    let mut balance = limited.execute(req("GET", "/balance"));
+    assert!(
+        balance
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    *clock.0.lock().unwrap() = 1000;
+    run(balance).unwrap();
     assert_eq!(clock.now_ms(), 1000);
     // Exhaust the primary's current window before using the fresh secondary.
     run(limited.execute(req("GET", "/positions"))).unwrap();
@@ -1517,10 +1525,20 @@ fn limiter_preserves_inner_effective_receipt_and_admission() {
         requests: Mutex::new(Vec::new()),
         fail_first: false,
     });
-    let clock = Arc::new(Clock::default());
+    let clock = Arc::new(HeldClock(Mutex::new(0)));
     let limiter = RateLimitedAdapter::new(venue.clone(), clock.clone(), 1, 1000);
     for expected_time in [0, 1000] {
-        let execution = run(limiter.execute_with_receipt(req("GET", "/input"))).unwrap();
+        let mut request = limiter.execute_with_receipt(req("GET", "/input"));
+        if expected_time > 0 {
+            assert!(
+                request
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            );
+            *clock.0.lock().unwrap() = expected_time;
+        }
+        let execution = run(request).unwrap();
         assert_eq!(
             execution.config.url, "/effective-returned",
             "receipt_limiter_native_config"
@@ -1858,4 +1876,55 @@ fn try_parse_json(value: Value) -> Value {
     ))
     .json_value()
     .unwrap()
+}
+
+#[test]
+fn limiter_resets_from_timer_completion_with_frozen_now_and_idle_windows() {
+    struct Clock {
+        elapsed: Mutex<u64>,
+    }
+    impl RateLimitClock for Clock {
+        fn now_ms(&self) -> u64 {
+            0
+        }
+        fn sleep_ms(&self, ms: u64) -> TransportFuture<'_, ()> {
+            let deadline = *self.elapsed.lock().unwrap() + ms;
+            Box::pin(std::future::poll_fn(move |_| {
+                if *self.elapsed.lock().unwrap() >= deadline {
+                    Poll::Ready(Ok(()))
+                } else {
+                    Poll::Pending
+                }
+            }))
+        }
+    }
+    let clock = Arc::new(Clock {
+        elapsed: Mutex::new(0),
+    });
+    let limiter = RateLimiter::new(clock.clone(), 3, 1000);
+    for _ in 0..3 {
+        run(limiter.acquire()).unwrap();
+    }
+    let mut cancelled = Box::pin(limiter.acquire());
+    let mut pending = Box::pin(limiter.acquire());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(cancelled.as_mut().poll(&mut cx).is_pending());
+    assert!(pending.as_mut().poll(&mut cx).is_pending());
+    drop(cancelled);
+    *clock.elapsed.lock().unwrap() = 1000;
+    run(pending).unwrap();
+    run(limiter.acquire()).unwrap();
+    run(limiter.acquire()).unwrap();
+    let mut blocked = Box::pin(limiter.acquire());
+    assert!(blocked.as_mut().poll(&mut cx).is_pending());
+    drop(blocked);
+    *clock.elapsed.lock().unwrap() = 4000;
+    for _ in 0..3 {
+        run(limiter.acquire()).unwrap();
+    }
+    assert_eq!(
+        clock.now_ms(),
+        0,
+        "timer completion does not advance Date/performance"
+    );
 }
