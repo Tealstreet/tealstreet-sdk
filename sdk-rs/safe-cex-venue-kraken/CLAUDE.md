@@ -439,3 +439,10 @@ before any UTF-8 String admission. The actual-source and HTTP binding regression
 a numeric prefix followed by a lone surrogate; independent compiled ticker and
 order controls fail before their respective cutovers. Symbol and ID Strings keep
 their explicit final shared output admission.
+
+The retained input admits lone UTF-16 surrogates. The read/utility boundary
+witnesses inspect those units before invoking the existing consumers: token and
+leverage wire conversion, fill/income model conversion, and scalar String
+admission still refuse their closed representations. Leverage reports that
+refusal once before any cache mutation. Depth and numeric-query refusals remain
+separate; all twelve utility source boundary cases are retained.
