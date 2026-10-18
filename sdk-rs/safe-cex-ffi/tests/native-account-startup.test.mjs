@@ -65,7 +65,10 @@ async function opening(t, options = {}, sign) {
   started.catch(() => {});
   await within(connected, 2000, 'real native gateway connection did not open');
   await delay(30);
-  return { id, call, started, events, stores, release(channels = ['market', 'tickers']) {
+  return { id, call, started, events, stores, async close() {
+    await native.nativeAccountClose(id);
+    id = undefined;
+  }, release(channels = ['market', 'tickers']) {
     for (const socket of sockets) {
       for (const [channel, data] of [['market', market], ['tickers', ticker]]) {
         if (channels.includes(channel)) socket.write(textFrame({ type: 'data', exchangeId: 'binance', channel, data: [data] }));
@@ -76,7 +79,7 @@ async function opening(t, options = {}, sign) {
 
 for (const method of ['dispose', 'close']) test(`${method} settles pending startup as false without a late full snapshot`, { timeout: 5000 }, async t => {
   const h = await opening(t);
-  if (method === 'close') await native.nativeAccountClose(h.id);
+  if (method === 'close') await h.close();
   else await h.call('dispose');
   assert.equal(await within(h.started, 500, 'disposed startup remained pending'), false);
   const count = h.stores.length;
