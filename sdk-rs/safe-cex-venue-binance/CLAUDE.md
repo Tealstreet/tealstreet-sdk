@@ -874,6 +874,11 @@ public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
 
+PM stale-snapshot warnings retain source template units through SnapshotCall into
+the canonical Base log_value path. The native private_rest_native repeated-error
+witness compares signed HTTP rejection/Store fallback, console arguments and log
+event units against both maintained PM fetchOrders and BaseExchange.log bodies.
+
 ### Canonical private socket construction
 
 ExchangeOwner constructs PrivateSocket directly for Futures, PM and Spot. The
@@ -956,3 +961,14 @@ keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell'
 immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
 requires four independent compiled faults to fail actual constructed native
 socket/HTTP tests, with exact source restoration and a passing rerun after each.
+
+The nine public listener functions have individual typed capability role reviews
+in PUBLIC_LISTENER_FUNCTION_REVIEW.md. Their classification receipts do not
+execute decoders. The native two-subscription witness constructs the actual
+Futures/PM/Spot owner and inspects the live ListenerHost handler accessor, parser
+identity/order, independent books, native topic counts and sibling-safe cleanup.
+Outbound fields are checked on the real socket wire. Keep all nine independent
+production-body controls in scripts/public-listener-function-controls.py, with
+named native failures and byte-exact restoration passes. The canonical scoped
+runner is scripts/public-listener-function-contracts.mjs; the seven existing
+alias reviews and separate Book decoder remain unchanged.
