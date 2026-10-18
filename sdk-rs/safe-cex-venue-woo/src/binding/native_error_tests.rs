@@ -106,6 +106,11 @@ fn constructed_woo_client_keeps_error_fields_through_typed_rest_adapter() {
     .unwrap_err();
     let native = ExchangeError::from(failure);
     let error = Thrown::from(native);
+    assert_eq!(
+        error.value.has_own("name"),
+        original.has_own("name"),
+        "native TypeError name remains inherited"
+    );
     for field in ["name", "message", "code", "stack", "isAxiosError"] {
         assert!(
             error

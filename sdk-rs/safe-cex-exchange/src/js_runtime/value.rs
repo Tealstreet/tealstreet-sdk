@@ -194,6 +194,7 @@ impl From<ExchangeError> for Thrown {
             if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
                 for (field, projected) in [("name", &error.name), ("message", &error.message)] {
                     if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                        && String::from_utf16(units).is_err()
                         && String::from_utf16_lossy(units) == *projected
                     {
                         value
