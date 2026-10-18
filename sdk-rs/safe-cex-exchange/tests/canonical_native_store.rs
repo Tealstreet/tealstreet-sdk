@@ -46,13 +46,24 @@ fn facade_reuses_identity_descriptors_and_releases_its_graph() {
     let store = Rc::new(store);
     let first = facade(store.clone()).unwrap();
     let method = first.get("updateTicker").unwrap();
-    first.define("custom", Js::utf16(&[0xd800])).unwrap();
+    let runtime = Js::object(vec![]);
+    globals::install_builtins::<()>(&runtime, Weak::new());
+    runtime.get("Object").unwrap().call_method("defineProperty", vec![
+        first.clone(), Js::str("custom"), Js::object(vec![
+            ("value", Js::utf16(&[0xd800])),
+            ("writable", Js::Bool(false)),
+            ("enumerable", Js::Bool(false)),
+            ("configurable", Js::Bool(false)),
+        ])
+    ]).unwrap();
     for _ in 0..3 {
         let again = facade(store.clone()).unwrap();
         assert!(first.same_reference(&again), "facade allocation must be reused");
         assert!(method.same_reference(&again.get("updateTicker").unwrap()));
         assert!(again.get("custom").unwrap().strict_equals(&Js::utf16(&[0xd800])));
         assert!(store.facade().unwrap().same_reference(&first));
+        assert!(!again.own_keys().iter().any(|key| key == &"custom".encode_utf16().collect::<Vec<_>>()));
+        assert!(again.set("custom", Js::Undefined).is_err());
     }
     let old_map = first.get("marketsById").unwrap();
     first.call_method("reset", vec![]).unwrap();
