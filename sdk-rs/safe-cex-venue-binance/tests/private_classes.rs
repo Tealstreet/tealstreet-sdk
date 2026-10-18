@@ -5387,3 +5387,7 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
     owner.dispose().unwrap();
     assert!(runtime.reported.borrow().is_empty());
 }
+
+#[cfg(feature = "native")]
+#[path = "support/private_action_key_binding.rs"]
+mod private_action_key_binding;
