@@ -376,3 +376,12 @@ Input through the final row info clone. The real native exchange regression in
 reads.rs exercises encoded and both native response phases, observing D800 text,
 DC00 keys, Infinity, negative zero, NaN and own undefined before JSON. Its
 maintained full-class source capture uses only terminal Axios responses.
+
+All 26 boxed async SDK returns use shared `eager::start_eager` with the existing
+Rc-owned inner exchange. The source synchronous prefix therefore runs when the
+public method is called, before its returned waiter is polled. The runtime owns
+the continuation; native DTOs and placement tokens are not serialized through a
+second carrier. `divergence_timing_binding` compares the actual public mode call
+with the full maintained TS constructor: three log events before return, then
+the success log and confirmed fetched-leverage mode after the actual HTTP reply.
+Its master regression compiled and failed with zero prefix logs versus three.

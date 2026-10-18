@@ -1,5 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_grvt::records::*;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -11,7 +12,40 @@ use record_identity::NativeIdentity;
 
 fn decode<T: DeserializeOwned + Serialize + NativeIdentity>(
     raw: &str,
+    boundary: bool,
 ) -> Result<Value, serde_json::Error> {
+    if boundary {
+        let input = Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>())?;
+        let actual = input.clone().decode_native::<T>(false)?;
+        actual.assert_retained(&input, std::any::type_name::<T>());
+        // Keep the original direct qualified trait route as an independent
+        // observation; only the eight numeric roots capture canonical text.
+        let mut decoder = serde_json::Deserializer::from_str(raw);
+        let bare = <T as serde::Deserialize>::deserialize(&mut decoder);
+        let captured = matches!(
+            std::any::type_name::<T>().rsplit("::").next().unwrap(),
+            "GrvtTriggerMetadata"
+                | "GrvtInstrumentLite"
+                | "GrvtSignature"
+                | "OrderPayload"
+                | "GrvtBuilderCheckResult"
+                | "GrvtBuilderInfo"
+                | "GrvtWebSocketSubscription"
+                | "GrvtWebSocketMessage"
+        );
+        assert_eq!(
+            bare.is_ok(),
+            captured,
+            "GRVT direct Serde capture route {}",
+            std::any::type_name::<T>()
+        );
+        if let Ok(actual) = bare {
+            decoder.end()?;
+            actual.assert_retained(&input, std::any::type_name::<T>());
+        }
+        // No wire value is claimed: all boundary fields were inspected above.
+        return Ok(Value::Null);
+    }
     // Qualified trait call prevents a permissive inherent decoder hiding the gate.
     let mut decoder = serde_json::Deserializer::from_str(raw);
     let value = <T as serde::Deserialize>::deserialize(&mut decoder)?;
@@ -20,31 +54,31 @@ fn decode<T: DeserializeOwned + Serialize + NativeIdentity>(
     serde_json::to_value(value)
 }
 
-fn record(name: &str, raw: &str) -> Result<Value, serde_json::Error> {
+fn record(name: &str, raw: &str, boundary: bool) -> Result<Value, serde_json::Error> {
     match name {
-        "GrvtTriggerMetadata" => decode::<GrvtTriggerMetadata>(raw),
-        "GrvtInstrument" => decode::<GrvtInstrument>(raw),
-        "GrvtInstrumentLite" => decode::<GrvtInstrumentLite>(raw),
-        "GrvtTicker" => decode::<GrvtTicker>(raw),
-        "GrvtOrderBookLevel" => decode::<GrvtOrderBookLevel>(raw),
-        "GrvtOrderBook" => decode::<GrvtOrderBook>(raw),
-        "GrvtTrade" => decode::<GrvtTrade>(raw),
-        "GrvtKline" => decode::<GrvtKline>(raw),
-        "GrvtPosition" => decode::<GrvtPosition>(raw),
-        "GrvtBalance" => decode::<GrvtBalance>(raw),
-        "GrvtAccountSummary" => decode::<GrvtAccountSummary>(raw),
-        "GrvtOrder" => decode::<GrvtOrder>(raw),
-        "GrvtAuthRequest" => decode::<GrvtAuthRequest>(raw),
-        "GrvtAuthResponse" => decode::<GrvtAuthResponse>(raw),
-        "GrvtFill" => decode::<GrvtFill>(raw),
-        "OrderLeg" => decode::<OrderLeg>(raw),
-        "GrvtBuilderAuthorizationResult" => decode::<GrvtBuilderAuthorizationResult>(raw),
-        "GrvtSignature" => decode::<GrvtSignature>(raw),
-        "OrderPayload" => decode::<OrderPayload>(raw),
-        "GrvtBuilderCheckResult" => decode::<GrvtBuilderCheckResult>(raw),
-        "GrvtBuilderInfo" => decode::<GrvtBuilderInfo>(raw),
-        "GrvtWebSocketSubscription" => decode::<GrvtWebSocketSubscription>(raw),
-        "GrvtWebSocketMessage" => decode::<GrvtWebSocketMessage>(raw),
+        "GrvtTriggerMetadata" => decode::<GrvtTriggerMetadata>(raw, boundary),
+        "GrvtInstrument" => decode::<GrvtInstrument>(raw, boundary),
+        "GrvtInstrumentLite" => decode::<GrvtInstrumentLite>(raw, boundary),
+        "GrvtTicker" => decode::<GrvtTicker>(raw, boundary),
+        "GrvtOrderBookLevel" => decode::<GrvtOrderBookLevel>(raw, boundary),
+        "GrvtOrderBook" => decode::<GrvtOrderBook>(raw, boundary),
+        "GrvtTrade" => decode::<GrvtTrade>(raw, boundary),
+        "GrvtKline" => decode::<GrvtKline>(raw, boundary),
+        "GrvtPosition" => decode::<GrvtPosition>(raw, boundary),
+        "GrvtBalance" => decode::<GrvtBalance>(raw, boundary),
+        "GrvtAccountSummary" => decode::<GrvtAccountSummary>(raw, boundary),
+        "GrvtOrder" => decode::<GrvtOrder>(raw, boundary),
+        "GrvtAuthRequest" => decode::<GrvtAuthRequest>(raw, boundary),
+        "GrvtAuthResponse" => decode::<GrvtAuthResponse>(raw, boundary),
+        "GrvtFill" => decode::<GrvtFill>(raw, boundary),
+        "OrderLeg" => decode::<OrderLeg>(raw, boundary),
+        "GrvtBuilderAuthorizationResult" => decode::<GrvtBuilderAuthorizationResult>(raw, boundary),
+        "GrvtSignature" => decode::<GrvtSignature>(raw, boundary),
+        "OrderPayload" => decode::<OrderPayload>(raw, boundary),
+        "GrvtBuilderCheckResult" => decode::<GrvtBuilderCheckResult>(raw, boundary),
+        "GrvtBuilderInfo" => decode::<GrvtBuilderInfo>(raw, boundary),
+        "GrvtWebSocketSubscription" => decode::<GrvtWebSocketSubscription>(raw, boundary),
+        "GrvtWebSocketMessage" => decode::<GrvtWebSocketMessage>(raw, boundary),
         _ => panic!("unclassified record {name}"),
     }
 }
@@ -66,12 +100,12 @@ fn protocol_records_match_typescript_accepted_sets() {
     for row in rows {
         let name = row["name"].as_str().unwrap();
         let raw = row["raw"].as_str().unwrap();
-        let actual = record(name, raw);
+        let actual = record(name, raw, row["boundary"] == true);
         if row["boundary"].as_bool().unwrap() {
             boundary_count += 1;
             assert!(
-                actual.is_err(),
-                "shared UTF-8 representation refusal: {name} {raw}"
+                actual.is_ok(),
+                "canonical typed String admission: {name} {raw}: {actual:?}"
             );
             continue;
         }
@@ -90,7 +124,10 @@ fn protocol_records_match_typescript_accepted_sets() {
         }
     }
     assert_eq!(count, 1782, "record corpus census");
-    assert_eq!(boundary_count, 264, "lone-surrogate refusal corpus");
+    assert_eq!(
+        boundary_count, 264,
+        "unchanged lone-surrogate boundary corpus"
+    );
 }
 
 #[test]
@@ -164,7 +201,7 @@ fn collection_cardinality_supplement() {
             "GRVT-CARDINALITY source field {name}.{field}"
         );
         values.push(values[0].clone());
-        let actual = record(name, &serde_json::to_string(&input).unwrap()).unwrap();
+        let actual = record(name, &serde_json::to_string(&input).unwrap(), false).unwrap();
         assert_eq!(
             actual[field].as_array().unwrap().len(),
             2,
@@ -189,6 +226,7 @@ fn opaque_collection_cardinality_supplement() {
         let actual = record(
             "GrvtWebSocketMessage",
             &serde_json::to_string(&input).unwrap(),
+            false,
         )
         .unwrap();
         for pointer in ["/params", "/result", "/error/data"] {

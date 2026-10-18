@@ -17,7 +17,8 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
         if let Poll::Ready(v) = f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
             return v;
         }
-        rt.now.set(rt.now.get() + 1000.0);
+        // Promise/microtask progress does not advance wall time. Advancing a
+        // full second on every poll also fires unrelated account-refresh timers.
         rt.pump();
     }
     panic!("scripted call must settle");

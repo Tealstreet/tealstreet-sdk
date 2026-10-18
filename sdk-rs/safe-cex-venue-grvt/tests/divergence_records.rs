@@ -1,4 +1,5 @@
 #![cfg(not(target_arch = "wasm32"))]
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_grvt::records::*;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -23,11 +24,39 @@ fn check<T: DeserializeOwned>(row: &Value, field: impl Fn(T) -> String) {
         2,
         "GRVT AUDIT refusal input count"
     );
-    for index in 0..2 {
-        assert!(
-            serde_json::from_str::<T>(row["negatives"][index].as_str().unwrap()).is_err(),
-            "GRVT AUDIT native whole-record refusal"
+    for (index, expected_unit) in [0xd800_u16, 0xdc00].into_iter().enumerate() {
+        let raw = row["negatives"][index].as_str().unwrap();
+        let retained = Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
+        let mut selected = &retained;
+        for key in row["field"].as_str().unwrap().split('.') {
+            selected = selected.get(key).expect("source selected string path");
+        }
+        assert_eq!(
+            selected,
+            &Input::Text(vec![expected_unit]),
+            "GRVT AUDIT exact retained raw unit"
         );
+        let native = retained
+            .decode_native::<T>(false)
+            .expect("canonical typed decoder keeps record");
+        assert_eq!(
+            field(native),
+            "\u{fffd}",
+            "GRVT AUDIT canonical typed String replacement"
+        );
+        let bare = serde_json::from_str::<T>(raw);
+        if row["captured"] == true {
+            assert_eq!(
+                field(bare.expect("captured numeric decoder keeps record")),
+                "\u{fffd}",
+                "GRVT AUDIT captured typed String replacement"
+            );
+        } else {
+            assert!(
+                bare.is_err(),
+                "GRVT AUDIT direct Serde parser still has a separate String boundary"
+            );
+        }
     }
     if row["captured"] == true {
         let mut value: Value = serde_json::from_str(row["positives"][0].as_str().unwrap()).unwrap();

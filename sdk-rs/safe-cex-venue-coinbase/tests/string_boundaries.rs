@@ -7,7 +7,9 @@ use std::process::Command;
 mod capture_metadata;
 
 // Standalone Value still rejects in its JSON string parser. Typed numeric roots
-// first retain UTF-16, then reject at their explicit Rust String projection.
+// first retain UTF-16, then replace isolated units at typed String views.
+// The source oracle keeps its historical `refuses` flag as an input identity
+// pin; it no longer describes the approved native decoder policy.
 fn value_lone_unit_diagnostic(id: &str) -> &'static str {
     match id {
         "high" => "unexpected end of hex escape",
@@ -86,37 +88,25 @@ fn probe<T: DeserializeOwned + Serialize + JsNumberOutput>(
         ["raw str", "raw slice", "shared raw str"],
         "independent native route content pin"
     );
-    let (mut refused_count, mut positive_count) = (0, 0);
+    let (mut replacement_count, mut positive_count) = (0, 0);
     for (route, decoded) in routes {
+        let record = decoded.unwrap_or_else(|error| {
+            panic!(
+                "native string decode {route} {} {}: {error}",
+                case["root"], case["id"]
+            )
+        });
+        let typed_units = if refuses { vec![0xfffd] } else { units.clone() };
+        assert_eq!(
+            read(&record).encode_utf16().collect::<Vec<_>>(),
+            typed_units,
+            "native typed string units {route} {} {}",
+            case["root"],
+            case["id"]
+        );
         if refuses {
-            assert!(
-                decoded.is_err(),
-                "whole record refusal {route} {} {}",
-                case["root"],
-                case["id"]
-            );
-            let error = decoded.err().expect("whole record refused").to_string();
-            assert!(
-                error.starts_with("invalid utf-16: lone surrogate found"),
-                "whole record surrogate refusal attribution {route} {} {}: {error}",
-                case["root"],
-                case["id"]
-            );
-            refused_count += 1;
+            replacement_count += 1;
         } else {
-            let record = decoded.unwrap_or_else(|error| {
-                panic!(
-                    "positive native string decode {route} {} {}: {error}",
-                    case["root"], case["id"]
-                )
-            });
-            assert_eq!(
-                read(&record).encode_utf16().collect::<Vec<_>>(),
-                units,
-                "native returned string units {route} {} {}",
-                case["root"],
-                case["id"]
-            );
             positive_count += 1;
         }
     }
@@ -131,16 +121,15 @@ fn probe<T: DeserializeOwned + Serialize + JsNumberOutput>(
             case["id"]
         );
     }
-    (refused_count, positive_count)
+    (replacement_count, positive_count)
 }
 #[test]
-fn three_declared_string_fields_refuse_whole_records_for_each_lone_unit_and_keep_scalar_positives()
-{
+fn three_declared_string_fields_replace_lone_units_and_keep_scalar_positives() {
     let capture = source();
     let cases = capture["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 24, "independent string witness floor");
     let mut identities = Vec::new();
-    let (mut refused, mut positive) = (0, 0);
+    let (mut lone_cases, mut positive) = (0, 0);
     for case in cases {
         identities.push((case["root"].as_str().unwrap(), case["id"].as_str().unwrap()));
         let counts = match case["root"].as_str().unwrap() {
@@ -157,7 +146,7 @@ fn three_declared_string_fields_refuse_whole_records_for_each_lone_unit_and_keep
             }
             unexpected => panic!("unexpected string witness root {unexpected}"),
         };
-        refused += counts.0;
+        lone_cases += counts.0;
         positive += counts.1;
     }
     let expected: Vec<_> = [
@@ -186,8 +175,8 @@ fn three_declared_string_fields_refuse_whole_records_for_each_lone_unit_and_keep
         "independent string witness content pin"
     );
     assert_eq!(
-        refused, 18,
-        "six whole records refused through three raw routes"
+        lone_cases, 18,
+        "six records replace isolated units through three raw routes"
     );
     assert_eq!(
         positive, 54,
@@ -329,31 +318,22 @@ fn ignored_string_probe<T: DeserializeOwned + Serialize + JsNumberOutput>(
         ["raw str", "raw slice", "shared raw str"],
         "independent ignored string route floor"
     );
-    let (mut refused, mut positive) = (0, 0);
+    let (mut lone_cases, mut positive) = (0, 0);
     for (route, result) in routes {
+        let record =
+            result.unwrap_or_else(|error| panic!("ignored string native decode {route}: {error}"));
+        assert_eq!(
+            read(&record),
+            "kept-field",
+            "native declared field survives ignored string {route}"
+        );
         if case["id"] == "ascii" {
-            let record = result.unwrap_or_else(|error| {
-                panic!("positive ignored string native decode {route}: {error}")
-            });
-            assert_eq!(
-                read(&record),
-                "kept-field",
-                "native declared field survives ignored ASCII string"
-            );
             positive += 1;
         } else {
-            let error = result.err().unwrap_or_else(|| {
-                panic!("expected retained-capture refusal for ignored lone unit {route}")
-            });
-            let message = error.to_string();
-            assert!(
-                message.starts_with("invalid utf-16: lone surrogate found"),
-                "ignored string refusal attribution {route}: {message}"
-            );
-            refused += 1;
+            lone_cases += 1;
         }
     }
-    (refused, positive)
+    (lone_cases, positive)
 }
 #[test]
 fn ignored_string_capture_policy_is_measured_separately_from_materialized_string_fields() {
@@ -381,7 +361,7 @@ fn ignored_string_capture_policy_is_measured_separately_from_materialized_string
         ],
         "independent ignored string witness content floor"
     );
-    let (mut refused, mut positive) = (0, 0);
+    let (mut lone_cases, mut positive) = (0, 0);
     for case in cases {
         let counts = match case["root"].as_str().unwrap() {
             "MARKET_RESPONSE" => {
@@ -397,12 +377,12 @@ fn ignored_string_capture_policy_is_measured_separately_from_materialized_string
             >(case, |r| &r.breakdown.portfolio.name),
             other => panic!("unreviewed ignored string root {other}"),
         };
-        refused += counts.0;
+        lone_cases += counts.0;
         positive += counts.1;
     }
     assert_eq!(
-        refused, 18,
-        "six ignored-lone-unit records refused through three routes"
+        lone_cases, 18,
+        "six ignored-lone-unit records accepted through three routes"
     );
     assert_eq!(
         positive, 9,

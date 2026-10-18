@@ -366,3 +366,8 @@ mod sdk_quantum_probe;
 #[cfg(test)]
 #[path = "../tests/support/retained_order_info_binding.rs"]
 mod retained_order_info_binding;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../tests/support/payload_signer_binding.rs"]
+mod payload_signer_binding;
