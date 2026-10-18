@@ -2089,15 +2089,6 @@
       "reason": "Emits the open event synchronously, then returns a ready future carrying its result."
     },
     {
-      "owner": "src/js_runtime/sockets.rs::binary_data",
-      "boundaries": [
-        "opaque-macro-review"
-      ],
-      "producer_sha256": "72f1243b1a76497f8fc93a0b7ccda13213bf74ace64bccaf5184401e99419807",
-      "classification": "immediate",
-      "reason": "Reviewed binary host factory: cfg! selects the native Buffer/browser Blob branch synchronously; the macro constructs no future. The stored arrayBuffer/text accessors return Promise::settled, which initializes its result immediately with no spawned task or registered waiter. Object/byte allocation and Buffer text conversion own no pending latch or cancellation cleanup."
-    },
-    {
       "owner": "src/js_runtime/sockets.rs::create_websocket",
       "boundaries": [
         "async-block"

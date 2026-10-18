@@ -647,7 +647,7 @@ fn client_ids_fail_closed_for_single_and_whole_batch_before_writes() {
 }
 
 #[test]
-fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_plain_json() {
+fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_gzip_blob() {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
     let runtime = Rc::new(support::Runtime::default());
@@ -705,16 +705,19 @@ fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_p
         .events
         .borrow_mut()
         .push_back(WsEvent::Message(SocketFrame::Binary(
-            br#"{"ping":9007199254740993}"#.to_vec(),
+            b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff\xab\x56\x2a\xc8\xcc\x4b\x57\xb2\xb2\x34\x30\x30\x37\xb4\xb4\x34\x32\x35\x31\x37\x31\xb0\xb4\x34\xae\x05\x00\xe1\x6d\x06\xae\x19\x00\x00\x00".to_vec(),
         )));
-    runtime.pump();
+    // Blob.arrayBuffer/readBlob resume through the shared Promise jobs.
+    for _ in 0..4 {
+        runtime.pump();
+    }
     assert!(
         public
             .sent
             .borrow()
             .iter()
             .any(|s| s == "{\"pong\":9007199254740992}"),
-        "PUBLIC binary Buffer coerces through plain jsonParse: {:?}",
+        "PUBLIC gzip Blob inflates before plain jsonParse: {:?}",
         public.sent.borrow()
     );
     venue.dispose().unwrap();
