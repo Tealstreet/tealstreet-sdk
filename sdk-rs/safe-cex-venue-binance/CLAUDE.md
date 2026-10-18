@@ -135,6 +135,12 @@ Public websocket subscription helpers snapshot shared JS own-key order and read
 each count immediately before sending. Native-count callbacks preserve NaN and
 infinities; nonnumeric counts are None. Bind the fallible send callback to the
 core socket when composing classes. Send errors abort the remaining keys.
+All five concrete PublicState kinds use subscribe_binance_public and its private
+encoder. Keep the live-source cases on that actual shared route; do not recreate
+unused family-named forwarding wrappers. The native subscription receipt test
+opens every kind with native_dependencies and checks outgoing bytes, reentry and
+send failure. See PUBLIC_SUBSCRIPTION_REVIEW.md for individual classifications
+and compiled body controls.
 
 Public onOpen bodies use BaseWebSocket send/reset rather than local socket or
 orderbook replicas. Market variants keep their books; public/Spot variants reset
@@ -703,6 +709,21 @@ holds a listen-key request, drops the original settlement and observes both
 clones before invoking a cloned reconnect arrow. These reviews do not classify
 raw-input decoders or widen accepted representations.
 
+
+The private REST continuation aliases have finite native evidence in
+`tests/support/snapshot_future_binding.rs`. The actual PM exchange starts the
+regular signed request, awaits its member result before invoking the conditional
+member, and keeps the aggregate pending until that second HTTP response settles.
+The witness reads ordered native fields, signed-zero/NaN bits and own-undefined
+from both results, and separately checks rejected conditional settlement against
+the source Store fallback and Base error emitter. Only terminal HTTP is held.
+`scripts/snapshot-future-controls.py` independently corrupts member order and
+request-result forwarding, requires successful compilation plus the named native
+failure, restores exact production bytes and requires GREEN after each fault.
+`scripts/snapshot-future-alias-contracts.mjs` authenticates compiler artifacts and
+classifies only `SnapshotFuture`/`SnapshotRequestFuture`; those classification
+receipts are distinct from executing the real continuations and do not classify
+the response payloads or unrelated aliases.
 The seven `public_listeners` aliases have a finite compiler-authenticated review
 in `scripts/public-listener-alias-contracts.mjs`. `Book` is an actual map decoder,
 with native per-level binary64 observations and Rc identity; the six callable,
@@ -715,6 +736,13 @@ flat query, then checks one retained book through live updates and cleanup.
 the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
+
+The snapshot rejection fixture settles rejected HTTP through `RestFailure`, not
+a fulfilled response with status 400. Its exact Base-formatted emitter assertion
+distinguishes transport rejection from malformed fulfilled-body validation.
+`scripts/snapshot-rejection-fixture-control.py` compiles the old fulfilled fixture,
+requires that assertion to fail and restores the genuine rejection path. This is
+a fixture-semantics check, separate from the two production continuation controls.
 
 LiveFlag constructor receipts classify typed callback/Cell state. Native retry
 proofs live in tests/support/live_flag_binding.rs; live-flag-controls.py requires
