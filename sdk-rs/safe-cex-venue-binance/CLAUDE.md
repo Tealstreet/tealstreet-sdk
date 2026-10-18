@@ -472,6 +472,11 @@ an own balance property (None is undefined); Invalid has error only. Concrete
 class/client/fetch composition and arbitrary executable callback behaviors remain
 outside these extractions; preserve this boundary when wiring the classes.
 
+The three request-weight function contracts execute actual header presence/order,
+rate-limit coercion/effect and native error outputs. Keep all seven alias reviews
+separate. `REQUEST_WEIGHT_REVIEW.md` records the finite profiles, real signed HTTP
+Futures pause witness, PM/Spot no-guard controls and independent compiled faults
+with exact restoration. No receiver/local-function/cancellation pin is widened.
 
 ## Concrete class closure
 
@@ -1012,3 +1017,9 @@ compare the full maintained TS constructors; `scripts/sdk-call-controls.py`
 requires compiled named result/metadata failures and byte-exact restoration.
 Shared terminal I/O setup lives in `scripts/exchange-native-runtime.rs`; private
 context observers retain their original visibility and independent receipts.
+
+Four unused ExchangeState forwarding methods are retired; source rows now map
+only to the canonical order_logic/request_weight helpers. The actual interceptor
+and post-only classifier bindings already call those helpers directly. Keep the
+native signed-client and batch-rejection canaries in DEAD_STATE_FORWARDER_REVIEW.md
+when changing either live binding. The complete State receipt remains separate.

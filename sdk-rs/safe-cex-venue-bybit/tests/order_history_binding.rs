@@ -145,7 +145,7 @@ fn order_history_cap_warns_and_keeps_first_seen_ids() {
     let rows = h.drive(h.venue().fetch_historical_orders(None)).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(h.wire.calls("/v5/order/history").len(), 20);
-    assert!(h.runtime.logs.borrow().iter().any(|m|m=="warning: fetchHistoricalOrders stopped at the 20-page cap; older orders were not fetched"));
+    assert!(h.runtime.logs.borrow().iter().any(|m|m=="warning: fetchHistoricalOrders stopped at the 20-page cap; older orders were not fetched warning"));
     h.venue().dispose().unwrap();
 }
 

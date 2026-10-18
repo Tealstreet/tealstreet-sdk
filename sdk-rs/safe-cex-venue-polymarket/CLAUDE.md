@@ -278,3 +278,13 @@ restores exact source bytes and requires the named test to pass.
 Last-trade updates pass `{ id: tokenId }` as the Store selector. Passing the
 raw token string silently leaves existing prices unchanged. The constructed
 corpus fails with that old binding and passes with the object selector.
+
+`exchange::PinTask<V,E>` is a live owned asynchronous result capability. Its
+exact registered compiler probe fixes `bool,bool`; it is not a raw decoder or
+a proof over arbitrary generic arguments. `scripts/task-alias-contracts.mjs`
+measures the actual alias with the canonical compiler/artifact pipeline.
+`native_pin_task_settlement_preserves_arguments_and_original_values` constructs
+the production exchange and exercises the actual ExchangeHost async wrapper over
+NativeRuntime, including pending/ready polling and original JS value/cause
+identity. `tests/task-alias-controls.py` proves that dropping the forwarded
+arguments fails that native witness, then restores the exact production body.

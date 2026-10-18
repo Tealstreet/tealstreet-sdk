@@ -16,7 +16,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex/src/factory.rs::ExchangeFactory::create_exchange"
 status = "divergent"
-note = "CHOSEN: native runtime-owned factory awaits VirtualClock.start before loading/constructing, while TS starts its asynchronous sync without awaiting; a browser clock with a pending server-time hook delays construction. Host loaders replace dynamic imports; supplied Store identity and default creation are retained. Explicit rename: `safe-cex/src/factory.rs::ExchangeFactory::create_exchange` mirrors createExchange."
+note = "CHOSEN: host loaders replace dynamic imports; supplied Store identity and default creation are retained. Clock startup runs eagerly to its first suspension without blocking loader errors or construction; the existing clock host scheduler retains a pending startup independently of the caller. The real factory/VirtualClock/BaseExchange/DefaultStore regression holds server time pending and compares construction, caching and later clock continuation with maintained TS declarations. Explicit rename: `safe-cex/src/factory.rs::ExchangeFactory::create_exchange` mirrors createExchange."
 
 [[symbol]]
 ts = "buildPublicExchangeOptions"
