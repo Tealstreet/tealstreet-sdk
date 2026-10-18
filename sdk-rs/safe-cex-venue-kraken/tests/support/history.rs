@@ -81,12 +81,12 @@ impl JournalFolder for Folder {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        settle: Box<dyn Fn(&str) -> String + 'a>,
+        settle: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         self.calls.borrow_mut().push(
             json!({"account":account,"from":number(from),"to":number(to),
             "symbolScoped":symbol_scoped,"sameVenue":std::ptr::eq(venue.base(),self.expected_base),
-            "settles":[settle("PF_XBTUSD"),settle("EMPTY"),settle("MISSING")]}),
+            "settles":[settle("PF_XBTUSD").unwrap(),settle("EMPTY").unwrap(),settle("MISSING").unwrap()]}),
         );
         Box::pin(async move {
             if let Some(error) = self.error.borrow_mut().take() {

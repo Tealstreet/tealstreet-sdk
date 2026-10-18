@@ -182,7 +182,7 @@ impl KrakenExchange {
         };
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         let h = |v| Rc::new(v);
         let receiver = match venue {
             Venue::Futures => {

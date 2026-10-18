@@ -19,7 +19,7 @@ pub trait JournalFolder {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        resolve_settle_currency: Box<dyn Fn(&str) -> String + 'a>,
+        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
     ) -> ExchangeFuture<'a, Vec<Value>>;
 }
 pub async fn fold_closed_position_records(
@@ -50,12 +50,13 @@ pub async fn fold_closed_position_records(
             to,
             symbol_scoped,
             Box::new(|symbol| {
-                base.store
-                    .markets_by_symbol()
+                Ok(base
+                    .store
+                    .markets_by_symbol()?
                     .get(symbol)
                     .map(|m| m.quote.clone())
                     .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "USDT".into())
+                    .unwrap_or_else(|| "USDT".into()))
             }),
         )
         .await

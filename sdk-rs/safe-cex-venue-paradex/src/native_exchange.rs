@@ -317,7 +317,7 @@ impl safe_cex_exchange::journal::JournalFolder for NativeJournal {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        resolve_settle_currency: Box<dyn Fn(&str) -> String + 'a>,
+        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
     ) -> ExchangeFuture<'a, Vec<serde_json::Value>> {
         Box::pin(async move {
             use safe_cex_exchange::build_records::{

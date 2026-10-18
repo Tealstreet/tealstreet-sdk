@@ -187,7 +187,8 @@ fn account_helpers_match_typescript() {
 #[test]
 #[ignore = "requires live isolated TypeScript oracle"]
 fn production_store_currency_order_selects_first_margin_asset() {
-    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::{Store, StoreUpdate};
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -215,6 +216,7 @@ fn production_store_currency_order_selects_first_margin_asset() {
         .expect("account helper store setup update");
         let mut keys: Vec<String> = store
             .balance()
+            .unwrap()
             .currencies
             .as_ref()
             .unwrap()
@@ -224,9 +226,12 @@ fn production_store_currency_order_selects_first_margin_asset() {
         if std::env::var("ASTERDEX_STORE_ORDER_CONTROL").as_deref() == Ok("sort") {
             keys.sort();
         }
-        let actual =
-            get_account_update_upnl_deltas(Some(&case["input"]), &Store::positions(&store), &keys)
-                .unwrap();
+        let actual = get_account_update_upnl_deltas(
+            Some(&case["input"]),
+            &Store::positions(&store).unwrap(),
+            &keys,
+        )
+        .unwrap();
         let expected: Vec<(String, f64)> =
             serde_json::from_value(case["output"]["value"].clone()).unwrap();
         assert_eq!(

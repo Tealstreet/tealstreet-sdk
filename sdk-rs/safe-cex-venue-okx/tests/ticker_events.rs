@@ -1,6 +1,7 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Ticker;
 use safe_cex_venue_okx::public_socket::{
     handle_funding_rate_events, handle_index_ticker_events, handle_mark_price_events,
@@ -196,7 +197,7 @@ fn maintained_typescript_first_ticker_update_numeric_bits() {
         );
         if case["error"].is_null() {
             result.unwrap();
-            let tickers = store.tickers();
+            let tickers = store.tickers().unwrap();
             assert_eq!(tickers.len(), 2, "TICKER-CARDINALITY native stored records");
             let fields: &[&str] = match case["method"].as_str().unwrap() {
                 "handleTickerEvents" => {
@@ -370,6 +371,7 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
             "notification later subscriber stop {method}"
         );
         let ticker = Store::tickers(&store)
+            .unwrap()
             .iter()
             .find(|ticker| ticker.id == "BTC")
             .unwrap()

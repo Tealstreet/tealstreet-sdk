@@ -1,3 +1,4 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -6,7 +7,7 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, ExchangeOptions, Market};
 use safe_cex_venue_coinbase::{
     CoinbaseDependencies, CoinbaseExchange, cdp_signing::CdpSigningCache,
@@ -161,7 +162,7 @@ fn native_http_and_store_keep_opaque_coinbase_info() {
             false,
         )
         .unwrap();
-        let stored = from_typed(&store.markets()[0]).unwrap();
+        let stored = from_typed(&store.markets().unwrap()[0]).unwrap();
         let info = to_retained_input(&stored.get("info").unwrap()).unwrap();
         observation::assert_info(Some(&info), &expected, "native Coinbase opaque info");
         venue.dispose().unwrap();

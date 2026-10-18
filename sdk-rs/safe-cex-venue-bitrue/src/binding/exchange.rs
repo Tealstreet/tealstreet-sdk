@@ -95,7 +95,7 @@ impl BitrueExchange {
         };
         let receiver = crate::composition::construct_exchange(
             &rt,
-            vec![js(&name)?, js(&options)?, store::facade(store)],
+            vec![js(&name)?, js(&options)?, store::facade(store)?],
         )
         .map_err(err)?;
         // Source base.ts getAccount, fetchTickers, changePositionMode,

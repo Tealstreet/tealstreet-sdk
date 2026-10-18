@@ -50,7 +50,7 @@ fn native_response_weight_pauses_actual_owner_at_threshold() {
                 },
                 serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
                     .unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 dependencies,
             )
             .unwrap();

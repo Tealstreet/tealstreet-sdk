@@ -460,7 +460,7 @@ fn start_loads_markets_tickers_account_and_sockets() {
     h.drive(h.venue().start()).expect("start");
     h.runtime.advance(50.0);
     {
-        let loaded = h.store.loaded();
+        let loaded = h.store.loaded().unwrap();
         assert!(loaded.markets && loaded.tickers);
         assert!(loaded.positions && loaded.orders && loaded.balance);
     }
@@ -574,7 +574,7 @@ fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snap
         let h = private_topic_scene(&name);
         h.drive(h.venue().start()).unwrap();
         h.runtime.advance(50.);
-        let stale = h.store.orders().to_vec();
+        let stale = h.store.orders().unwrap().to_vec();
         assert_eq!(stale.len(), 1, "OKX private initial order floor");
         assert_eq!(stale[0].status, OrderStatus::Open);
         let fills = record_private_fills(&h);
@@ -593,7 +593,9 @@ fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snap
         h.venue().base().on(
             "fill",
             std::rc::Rc::new(move |_, _| {
-                observed.borrow_mut().push(store.orders()[0].status);
+                observed
+                    .borrow_mut()
+                    .push(store.orders().unwrap()[0].status);
                 Ok(())
             }),
         );
@@ -606,13 +608,13 @@ fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snap
         row["fillTime"] = json!("1700000000001");
         private_frame(&h, "orders", json!([row.clone()]));
         assert_eq!(
-            h.store.orders().len(),
+            h.store.orders().unwrap().len(),
             1,
             "OKX private terminal order retained"
         );
-        assert_eq!(h.store.orders()[0].id, "o1");
+        assert_eq!(h.store.orders().unwrap()[0].id, "o1");
         assert_eq!(
-            h.store.orders()[0].status,
+            h.store.orders().unwrap()[0].status,
             status,
             "OKX private terminal frame commits native status {state}; errors={:?}",
             errors.borrow()
@@ -651,7 +653,7 @@ fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snap
         )
         .unwrap();
         assert_eq!(
-            h.store.orders()[0].status,
+            h.store.orders().unwrap()[0].status,
             status,
             "OKX private terminal memory refuses stale open REST snapshot {state}"
         );
@@ -694,7 +696,7 @@ fn private_positions_frame_updates_native_position_and_balance_without_a_fill_fo
     row["mmr"] = json!("7.25");
     row["imr"] = json!("75");
     private_frame(&h, "positions", json!([row]));
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     assert_eq!(positions.len(), 1, "OKX private position floor");
     let p = &positions[0];
     assert_eq!(p.symbol, "BTCUSDT");
@@ -713,12 +715,12 @@ fn private_positions_frame_updates_native_position_and_balance_without_a_fill_fo
         "OKX private position native PnL rounded to price tick"
     );
     assert_eq!(
-        h.store.balance().used,
+        h.store.balance().unwrap().used,
         7.25,
         "OKX private position updates used margin"
     );
     assert_eq!(
-        h.store.balance().upnl,
+        h.store.balance().unwrap().upnl,
         1.8,
         "OKX private position updates balance PnL"
     );
@@ -743,7 +745,7 @@ fn private_account_frame_updates_balance_and_emits_no_fill_for_name(name: Exchan
     h.drive(h.venue().start()).unwrap();
     h.runtime.advance(50.);
     let fills = record_private_fills(&h);
-    let mut seed = h.store.balance().clone();
+    let mut seed = h.store.balance().unwrap().clone();
     seed.used = 7.25;
     seed.upnl = 1.75;
     Store::update(
@@ -760,7 +762,7 @@ fn private_account_frame_updates_balance_and_emits_no_fill_for_name(name: Exchan
         "account",
         json!([{"totalEq":"1200.25"},{"totalEq":"9.75"}]),
     );
-    let balance = h.store.balance();
+    let balance = h.store.balance().unwrap();
     assert_eq!(
         balance.free, 1202.75,
         "OKX private account free after used margin"
@@ -1067,7 +1069,7 @@ fn public_market_data_frames_reach_real_book_ticker_and_candle_bindings() {
             "instId":"BTC-USDT-SWAP","last":"50000","open24h":"40000", "bidPx":"49998", "askPx":"50002", "volCcy24h":"12", "vol24h":"34"
         }]}),
     );
-    let ticker = h.store.tickers_by_symbol()["BTCUSDT"].clone();
+    let ticker = h.store.tickers_by_symbol().unwrap()["BTCUSDT"].clone();
     assert_eq!(
         (
             ticker.bid,
@@ -1358,7 +1360,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                     .unwrap();
                 h.runtime.pump();
             }
-            ticker_coercion::assert_native(&h.store.tickers(), case);
+            ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
         }
         assert!(
             h.runtime.reports.borrow().is_empty(),

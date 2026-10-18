@@ -674,10 +674,10 @@ fn map_inverse_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
         input.as_ref(),
         &product,
         |symbol| {
-            store
-                .markets_by_symbol()
+            Ok(store
+                .markets_by_symbol()?
                 .get(symbol)
-                .and_then(|m| m.is_inverse)
+                .and_then(|m| m.is_inverse))
         },
         || safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
     )?;

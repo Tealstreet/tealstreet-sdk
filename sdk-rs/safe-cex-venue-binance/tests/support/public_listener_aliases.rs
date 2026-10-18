@@ -92,7 +92,7 @@ fn production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe()
             venue,
             serde_json::from_value(json!(name)).unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();
@@ -261,7 +261,7 @@ fn native_depth_overflow_case(venue: Venue, buffered: bool, previous: Option<&st
         venue,
         serde_json::from_value(json!(name)).unwrap(),
         serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -399,7 +399,7 @@ fn production_native_public_listener_functions_preserve_two_subscriptions() {
             venue,
             serde_json::from_value(json!(name)).unwrap(),
             serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();

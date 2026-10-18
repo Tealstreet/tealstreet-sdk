@@ -384,7 +384,7 @@ impl<H: PublicDataHost> BlofinPublicWebsocket<H> {
         callback: CandleCallback<H::Error>,
     ) -> Result<PublicCleanup<H::Error>, PublicDataError<H::Error>> {
         let timeout = Rc::new(RefCell::new(None));
-        if !self.host.store().loaded().markets {
+        if !self.host.store().loaded()?.markets {
             let stream = self.clone();
             self.schedule(
                 Rc::new(move || {
@@ -399,7 +399,7 @@ impl<H: PublicDataHost> BlofinPublicWebsocket<H> {
         let market = self
             .host
             .store()
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == opts.symbol)
             .cloned();
@@ -505,7 +505,7 @@ impl<H: PublicDataHost> BlofinPublicWebsocket<H> {
         callback: BookCallback<H::Error>,
     ) -> Result<PublicCleanup<H::Error>, PublicDataError<H::Error>> {
         let timeout = Rc::new(RefCell::new(None));
-        if !self.host.store().loaded().markets {
+        if !self.host.store().loaded()?.markets {
             let stream = self.clone();
             self.schedule(
                 Rc::new(move || {
@@ -520,7 +520,7 @@ impl<H: PublicDataHost> BlofinPublicWebsocket<H> {
         let market = self
             .host
             .store()
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == symbol)
             .cloned();
@@ -589,7 +589,7 @@ impl<H: PublicDataHost> BlofinPublicWebsocket<H> {
             drop(state);
             let last = host
                 .store()
-                .tickers_by_symbol()
+                .tickers_by_symbol()?
                 .get(&ticker_symbol)
                 .map(|t| t.last);
             let mut book = retained.borrow_mut();
@@ -925,4 +925,10 @@ fn iterable_error(v: Option<&Value>) -> Result<String, JsCoercionError> {
     Ok(format!(
         "{kind} is not iterable (cannot read property Symbol(Symbol.iterator))"
     ))
+}
+
+impl<E> From<safe_cex_types::StoreReadError> for PublicDataError<E> {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error.into())
+    }
 }

@@ -1339,7 +1339,7 @@ fn actual_order_actions_native_floor() {
         assert_eq!(counts[name], n, "independent method floor");
     }
     assert_eq!(
-        corpus["contentHash"], "782623b877da5ef581bfd2d741fdd1321135586603e6dc1f15604638f6bdb90c",
+        corpus["contentHash"], "9786fe5d07878aff50bb990f5c44a15e9aa9701af1cc869753b838bfbc93384e",
         "actual source/import pin after native assertions"
     );
     eprintln!(

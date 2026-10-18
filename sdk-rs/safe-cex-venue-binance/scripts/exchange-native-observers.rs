@@ -4,7 +4,8 @@ pub mod host;
 use crate::exchange_classes::{ExchangeDependencies, ExchangeOwner};
 use crate::private_session::Venue;
 use safe_cex_exchange::js_runtime::value::Js;
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use serde_json::{Value, json};
 use std::{

@@ -169,3 +169,26 @@ frame/subscription diagnostics (`grafana-pws`, `grafana-pws-sub`) use this same
 bridge. `tests/native-account-events.test.mjs` drives a real Binance preflight
 error and checks its metadata argument; registry event tests cover emitter arity
 and both diagnostic channels through a real native account.
+
+For keyless deterministic replay, an isolated Node process may open one account
+with `replayEpochMs` on the init object. `nativeAccountReplay(id, request)` accepts
+`{op: 'begin'}`, `{op: 'advance', atMs}` and `{op: 'receipt'}`. Ordinary accounts
+refuse this diagnostic API; a replay host refuses every subsequent account open,
+even after close, because VirtualClock's host time is thread-local. Replay also
+refuses credentials, signing callbacks and proxy-token callbacks.
+
+Replay fixes Date/VirtualClock host readings and performance time during startup,
+while allowing real startup scheduling. `begin` cancels the startup Store throttle
+tail and switches pending native timers to their original logical deadlines.
+`advance` runs deadlines in registration order, preserving integer Date timestamps
+and fractional performance time. It rejects rollback and concurrent advances.
+The receipt contains `atMs`, per-dial `sockets` (`url`, `generation`, `consumed`,
+`processed`, `errors`, `closeConsumed`, `closeProcessed`) and physical `transport` frame counts. Processed counts
+include handlers that threw, with errors counted separately. Ready source Promise
+jobs are checkpointed before receipt. `pendingJobs` includes outstanding source
+Promise work; the probe refuses drain while those continuations are unfinished. The live probe requires identical within-side
+repeats before attributing any output comparison.
+
+Run `node --test sdk-rs/safe-cex-ffi/tests/native-account-replay.test.mjs` after
+building the node addon. The live replay workflow and limits are documented in
+[`scripts/live-diff`](../scripts/live-diff/README.md).

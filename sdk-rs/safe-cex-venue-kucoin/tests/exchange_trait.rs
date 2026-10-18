@@ -82,12 +82,19 @@ fn futures_binds_all_sixteen_defaults() {
     ] {
         assert!(sent(&log, m, p), "start sends {m} {p}: {log:?}");
     }
-    let loaded = f.store.loaded().clone();
+    let loaded = f.store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers && loaded.positions && loaded.orders && loaded.balance
     );
-    assert_eq!(f.store.balance().total.to_bits(), 100.0f64.to_bits());
-    assert_eq!(f.store.orders().len(), 1, "start stores the open order");
+    assert_eq!(
+        f.store.balance().unwrap().total.to_bits(),
+        100.0f64.to_bits()
+    );
+    assert_eq!(
+        f.store.orders().unwrap().len(),
+        1,
+        "start stores the open order"
+    );
 
     // 2 fetch_markets
     let markets = drive(rt, venue.fetch_markets()).unwrap();
@@ -422,16 +429,16 @@ fn spot_binds_all_sixteen_defaults() {
     ] {
         assert!(sent(&log, m, p), "start sends {m} {p}: {log:?}");
     }
-    let loaded = f.store.loaded().clone();
+    let loaded = f.store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers && loaded.positions && loaded.orders && loaded.balance
     );
     assert_eq!(
-        f.store.balance().total.to_bits(),
+        f.store.balance().unwrap().total.to_bits(),
         200.0f64.to_bits(),
         "USDT 100 + 1 BTC at 100"
     );
-    assert_eq!(f.store.orders().len(), 1);
+    assert_eq!(f.store.orders().unwrap().len(), 1);
 
     // 2 fetch_markets
     let markets = drive(rt, venue.fetch_markets()).unwrap();
@@ -547,7 +554,13 @@ fn spot_binds_all_sixteen_defaults() {
 
     // 11 set_leverage: store-only fetchedLeverage write
     drive(rt, venue.set_leverage("BTC-USDT".into(), 5.0, None)).unwrap();
-    let leverage = f.store.fetched_leverage().get("BTC-USDT").cloned().unwrap();
+    let leverage = f
+        .store
+        .fetched_leverage()
+        .unwrap()
+        .get("BTC-USDT")
+        .cloned()
+        .unwrap();
     assert_eq!((leverage.buy_leverage, leverage.sell_leverage), (1.0, 1.0));
 
     // 12-13 fixed modes resolve without a request
@@ -763,14 +776,14 @@ fn private_topic_fixture(spot: bool) -> (Rc<dyn Exchange>, support::Fixture, Rc<
     drive(&f.runtime, venue.start()).unwrap();
     f.runtime.pump();
     for _ in 0..40 {
-        let loaded = f.store.loaded().clone();
+        let loaded = f.store.loaded().unwrap().clone();
         if loaded.orders && loaded.positions && loaded.balance {
             break;
         }
         f.runtime.now.set(f.runtime.now.get() + 100.0);
         f.runtime.pump();
     }
-    let loaded = f.store.loaded().clone();
+    let loaded = f.store.loaded().unwrap().clone();
     assert!(
         loaded.orders && loaded.positions && loaded.balance,
         "startup settled: {loaded:?}"
@@ -794,7 +807,7 @@ fn private_topic_fixture(spot: bool) -> (Rc<dyn Exchange>, support::Fixture, Rc<
         })
         .expect("production private subscription")
         .clone();
-    assert_eq!(f.store.orders().len(), 1);
+    assert_eq!(f.store.orders().unwrap().len(), 1);
     assert!(
         f.runtime.errors.borrow().is_empty(),
         "{:?}",
@@ -843,7 +856,7 @@ fn private_topic_orders_update_real_store_for_both_families() {
         let mut frame = private_order_topic(spot, "update");
         frame["data"].as_object_mut().unwrap().remove("matchSize");
         private_topic_frame(&f, &socket, frame);
-        let orders = f.store.orders().to_vec();
+        let orders = f.store.orders().unwrap().to_vec();
         assert_eq!(orders.len(), 1);
         assert_eq!(orders[0].symbol, if spot { "BTC-USDT" } else { "BTCUSDT" });
         assert_eq!(orders[0].price.to_number(), 96.0);
@@ -858,7 +871,7 @@ fn private_topic_orders_update_real_store_for_both_families() {
         );
         private_topic_frame(&f, &socket, private_order_topic(spot, "canceled"));
         assert_eq!(
-            f.store.orders()[0].status,
+            f.store.orders().unwrap()[0].status,
             safe_cex_types::OrderStatus::Canceled
         );
     }
@@ -898,7 +911,10 @@ fn private_topic_fills_emit_incremental_amount_and_update_real_orders() {
                 json!({"id":id,"side":"buy","symbol":symbol,"price":97.5,"amount":amount})
             );
         }
-        assert_eq!(f.store.orders()[0].filled, if spot { 0.2 } else { 0.002 });
+        assert_eq!(
+            f.store.orders().unwrap()[0].filled,
+            if spot { 0.2 } else { 0.002 }
+        );
         let mut terminal = private_order_topic(spot, "filled");
         terminal["data"]
             .as_object_mut()
@@ -906,7 +922,7 @@ fn private_topic_fills_emit_incremental_amount_and_update_real_orders() {
             .remove("matchSize");
         private_topic_frame(&f, &socket, terminal);
         assert_eq!(
-            f.store.orders()[0].status,
+            f.store.orders().unwrap()[0].status,
             safe_cex_types::OrderStatus::Closed
         );
         assert_eq!(
@@ -921,8 +937,8 @@ fn private_topic_fills_emit_incremental_amount_and_update_real_orders() {
 fn private_topic_futures_account_frames_follow_source_orders_only_snapshot() {
     for topic in ["/contract/positionAll", "/contractAccount/wallet"] {
         let (_venue, f, socket) = private_topic_fixture(false);
-        let positions = f.store.positions().to_vec();
-        let balance = f.store.balance().clone();
+        let positions = f.store.positions().unwrap().to_vec();
+        let balance = f.store.balance().unwrap().clone();
         f.wire
             .script("GET", "/api/v1/orders", ok(json!({"items":[]})));
         f.wire.take();
@@ -932,10 +948,10 @@ fn private_topic_futures_account_frames_follow_source_orders_only_snapshot() {
             json!({"type":"message","topic":topic,
             "data":{"symbol":"XBTUSDTM","currentQty":999,"balance":999}}),
         );
-        assert_eq!(f.store.orders().len(), 1);
+        assert_eq!(f.store.orders().unwrap().len(), 1);
         f.runtime.now.set(f.runtime.now.get() + 499.0);
         f.runtime.pump();
-        assert_eq!(f.store.orders().len(), 1, "source500ms debounce");
+        assert_eq!(f.store.orders().unwrap().len(), 1, "source500ms debounce");
         f.runtime.now.set(f.runtime.now.get() + 1.0);
         f.runtime.pump();
         assert!(
@@ -943,14 +959,14 @@ fn private_topic_futures_account_frames_follow_source_orders_only_snapshot() {
             "snapshot starts at500ms"
         );
         for _ in 0..40 {
-            if f.store.orders().is_empty() {
+            if f.store.orders().unwrap().is_empty() {
                 break;
             }
             f.runtime.now.set(f.runtime.now.get() + 100.0);
             f.runtime.pump();
         }
         assert!(
-            f.store.orders().is_empty(),
+            f.store.orders().unwrap().is_empty(),
             "{topic} refreshes real order Store; requests {:?}; errors {:?}; console {:?}",
             f.wire.requests.lock().unwrap(),
             f.runtime.errors.borrow(),
@@ -960,8 +976,8 @@ fn private_topic_futures_account_frames_follow_source_orders_only_snapshot() {
         assert!(sent(&log, "GET", "/api/v1/stopOrders"), "{log:?}");
         assert!(!sent(&log, "GET", "/api/v1/positions"));
         assert!(!sent(&log, "GET", "/api/v1/account-overview"));
-        assert_eq!(&*f.store.positions(), positions.as_slice());
-        assert_eq!(&*f.store.balance(), &balance);
+        assert_eq!(&f.store.positions().unwrap(), positions.as_slice());
+        assert_eq!(&f.store.balance().unwrap(), &balance);
     }
 }
 
@@ -975,7 +991,7 @@ fn private_topic_spot_balance_refreshes_authoritative_real_store() {
             {"currency":"USDT","available":"260","holds":"40","balance":"300"}
         ])),
     );
-    let before = f.store.balance().total;
+    let before = f.store.balance().unwrap().total;
     private_topic_frame(
         &f,
         &socket,
@@ -983,17 +999,20 @@ fn private_topic_spot_balance_refreshes_authoritative_real_store() {
         "data":{"balance":999}}),
     );
     assert_eq!(
-        f.store.balance().total,
+        f.store.balance().unwrap().total,
         before,
         "partial wire balance waits for REST"
     );
     f.runtime.now.set(f.runtime.now.get() + 249.0);
     f.runtime.pump();
-    assert_eq!(f.store.balance().total, before);
+    assert_eq!(f.store.balance().unwrap().total, before);
     f.runtime.now.set(f.runtime.now.get() + 1.0);
     f.runtime.pump();
     assert_eq!(
-        (f.store.balance().free, f.store.balance().total),
+        (
+            f.store.balance().unwrap().free,
+            f.store.balance().unwrap().total
+        ),
         (260.0, 300.0)
     );
 }
@@ -1001,9 +1020,9 @@ fn private_topic_spot_balance_refreshes_authoritative_real_store() {
 #[test]
 fn private_topic_spot_positions_preserve_real_synthetic_store_without_fill() {
     let (venue, f, socket) = private_topic_fixture(true);
-    let positions = f.store.positions().to_vec();
-    let orders = f.store.orders().to_vec();
-    let balance = f.store.balance().clone();
+    let positions = f.store.positions().unwrap().to_vec();
+    let orders = f.store.orders().unwrap().to_vec();
+    let balance = f.store.balance().unwrap().clone();
     assert!(!positions.is_empty());
     f.wire.take();
     let fills = Rc::new(std::cell::Cell::new(0));
@@ -1023,9 +1042,9 @@ fn private_topic_spot_positions_preserve_real_synthetic_store_without_fill() {
     );
     f.runtime.now.set(f.runtime.now.get() + 500.0);
     f.runtime.pump();
-    assert_eq!(&*f.store.positions(), positions.as_slice());
-    assert_eq!(&*f.store.orders(), orders.as_slice());
-    assert_eq!(&*f.store.balance(), &balance);
+    assert_eq!(&f.store.positions().unwrap(), positions.as_slice());
+    assert_eq!(&f.store.orders().unwrap(), orders.as_slice());
+    assert_eq!(&f.store.balance().unwrap(), &balance);
     assert_eq!(fills.get(), 0);
     assert!(
         f.wire.take().is_empty(),
@@ -1080,7 +1099,7 @@ fn native_ticker_coercion(spot: bool) {
                 )));
             f.runtime.pump();
         }
-        ticker_coercion::assert_native(&f.store.tickers(), case);
+        ticker_coercion::assert_native(&f.store.tickers().unwrap(), case);
     }
     assert!(
         f.runtime.errors.borrow().is_empty(),

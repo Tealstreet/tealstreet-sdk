@@ -293,7 +293,7 @@ fn fixture() -> Fixture {
     runtime.now.set(1_000_000.0);
     let options: ExchangeOptions =
         serde_json::from_value(json!({"key": "k", "secret": "s"})).unwrap();
-    let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let deps = LighterDependencies {
         runtime: runtime.clone(),
         http: Rc::new(Http(runtime.clone())),

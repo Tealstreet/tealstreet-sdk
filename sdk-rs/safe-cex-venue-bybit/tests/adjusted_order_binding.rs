@@ -143,7 +143,7 @@ fn nan_adjusted_trigger_omits_direction_and_preserves_source_error_priority() {
     for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
         for kind in ["limit", "conditional", "stop_market", "take_profit_market"] {
             let h = fixture(name.clone());
-            let mut markets = h.store.markets().to_vec();
+            let mut markets = h.store.markets().unwrap().to_vec();
             markets[0].precision.price = 0.;
             Store::update(
                 h.store.as_ref(),
