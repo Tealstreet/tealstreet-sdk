@@ -369,10 +369,9 @@ pub(crate) fn position_response_meta(rt: &Rt, data: &Js) -> Result<Js, Thrown> {
             for key in ["retMsg", "ret_msg", "message", "msg"] {
                 let value = candidate.get(key)?;
                 if matches!(value, Js::String(_)) {
-                    let value = text(&value)?;
-                    let trimmed = safe_cex_num::js_trim(&value);
-                    if !trimmed.is_empty() {
-                        message = Js::str(trimmed);
+                    let trimmed = value.call_method("trim", vec![])?;
+                    if trimmed.truthy() {
+                        message = trimmed;
                         break;
                     }
                 }

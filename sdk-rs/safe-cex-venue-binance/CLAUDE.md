@@ -658,6 +658,11 @@ compiler contracts and actual native binding/fault witnesses. See
 wrappers. Keep the live receiver's native key future, retry/refresh methods and
 single shared detach helper; do not restore parallel helpers for the census.
 
+Keep production imports explicit. The canonical accepted-set scanner must prove
+macro provenance across each source scope; wildcard imports can hide that proof
+even when the current business logic compiles. Import changes also require review
+of any affected source pins; nested helper bodies keep their existing contracts.
+
 The private-construction Clone reviews in the Binance construction policy cover
 three reusable capabilities: the inverse listener retry context, shared class
 settlement observations and captured private arrows with their receiver/base

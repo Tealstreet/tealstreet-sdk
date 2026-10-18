@@ -3,7 +3,7 @@
 //! imported-helper/base/socket wiring and discarded-job/drop/unwind ownership remain
 //! caller integrations. Dense arrays, immutable Error rejections, no executable getters.
 use crate::{
-    private_event_value::*,
+    private_event_value::{EventOps, EventValue, PrivateEnum, number, string},
     request_weight::{Failure, type_error},
 };
 use safe_cex_exchange::runtime::LogSeverity;
