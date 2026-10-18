@@ -11501,7 +11501,7 @@
     },
     "category": "decoder",
     "evidence": "Retained response-body capture: encoded text passes through the existing UTF16 JSON parser, invalid JSON remains original Text, and native phase payloads are cloned without JSON projection. Native kind, keys and numeric bits are observed before encoding.",
-    "call": "{let body=if $value[\"phase\"]==\"encoded\"{crate::RestResponseBody::Encoded($value[\"raw\"].as_str().expect(\"raw body\").as_bytes().to_vec())}else{crate::RestResponseBody::Transformed(safe_cex_types::retained_json::RetainedJsonInput::from_value($value[\"body\"].clone()).unwrap())};let response=crate::RestResponse{status:200,reason:None,headers:Default::default(),body};let actual=$type(&response);let bits=actual.get(\"number\").map(|v|safe_cex_num::js_retained_number(Some(v)).expect(\"numeric field\").to_bits().to_string());serde_json::json!({\"kind\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Object(_)=>\"object\",safe_cex_types::retained_json::RetainedJsonInput::Array(_)=>\"array\",safe_cex_types::retained_json::RetainedJsonInput::Null=>\"null\",_=>\"scalar\"},\"keys\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Object(fields)=>fields.iter().map(|(key,_)|String::from_utf16(key).expect(\"authored key\")).collect::<Vec<_>>(),_=>Vec::new()},\"bits\":bits})}",
+    "call": "{let body=if $value[\"phase\"]==\"encoded\"{crate::RestResponseBody::Encoded($value[\"raw\"].as_str().expect(\"raw body\").as_bytes().to_vec())}else{crate::RestResponseBody::Transformed(safe_cex_types::retained_json::RetainedJsonInput::from_value($value[\"body\"].clone()).unwrap())};let response=crate::RestResponse{status:200,reason:None,headers:Default::default(),body};let actual=$type(&response);let bits=actual.get(\"number\").map(|v|safe_cex_num::js_retained_number(Some(v)).expect(\"numeric field\").to_bits().to_string());serde_json::json!({\"kind\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Object(_)=>\"object\",safe_cex_types::retained_json::RetainedJsonInput::Array(_)=>\"array\",safe_cex_types::retained_json::RetainedJsonInput::Null=>\"null\",_=>\"scalar\"},\"keys\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Object(fields)=>fields.iter().map(|(key,_)|String::from_utf16(key).expect(\"authored key\")).collect::<Vec<_>>(),_=>Vec::new()},\"bits\":bits,\"text\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Text(units)=>Some(units.clone()),_=>None}})}",
     "cases": [
       {
         "input": {
@@ -11514,7 +11514,8 @@
             "number",
             "other"
           ],
-          "bits": "9223372036854775808"
+          "bits": "9223372036854775808",
+          "text": null
         }
       },
       {
@@ -11529,7 +11530,8 @@
           "keys": [
             "number"
           ],
-          "bits": "4623085754984169472"
+          "bits": "4623085754984169472",
+          "text": null
         }
       },
       {
@@ -11540,7 +11542,17 @@
         "output": {
           "kind": "scalar",
           "keys": [],
-          "bits": null
+          "bits": null,
+          "text": [
+            110,
+            111,
+            116,
+            45,
+            106,
+            115,
+            111,
+            110
+          ]
         }
       },
       {
@@ -11554,7 +11566,8 @@
         "output": {
           "kind": "array",
           "keys": [],
-          "bits": null
+          "bits": null,
+          "text": null
         }
       }
     ]
