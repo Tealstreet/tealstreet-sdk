@@ -21,6 +21,12 @@ source/native cohorts with their refreshed hashes.
 
 A complete scan of all 39 literal corpus guards found one additional stale
 order-mapping pin, whose oracle uses `pin` instead of the original cohort's
-`contentHash` key. Its
-100 native cases passed before the old guard failed. Its complete source graph
+`contentHash` key. Its 100 native cases passed before the old guard failed.
+Its complete source graph
 has the same type-only barrel delta and unchanged lodash version.
+
+The signing capture has a separate source-map guard. Its reviewed `types.ts`
+override is the eighteenth refreshed expectation, with the same type-only delta.
+The other ten source hashes match. Its archived 92-case fixture stays immutable;
+the test compares every signed payload, preimage, output and wire request before
+the source-map assertion. The old override fails that assertion after all cases.
