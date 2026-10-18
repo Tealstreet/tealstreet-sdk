@@ -292,9 +292,10 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                 let items = match r.host.get(INSTRUMENTS, None).await {
                     Ok(reply) => Ok(reply.items),
                     Err(err) => {
-                        let response = err.value.as_ref().and_then(|v| v.get("response"));
+                        let rejection = err.value.clone().map(Input::from);
+                        let response = prop(rejection.as_ref(), "response")?;
                         let data = response.and_then(|v| v.get("data"));
-                        if data.is_some_and(Value::is_array) {
+                        if data.is_some_and(|value| value.as_array().is_some()) {
                             let items = r
                                 .host
                                 .error_response_items(&err)
@@ -303,7 +304,7 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                                 return Err(err);
                             }
                             Ok(items)
-                        } else if has_length(data.cloned().map(Input::from).as_ref()) {
+                        } else if has_length(data) {
                             // Source adopts this body before evaluating .filter.
                             Err(error("TypeError", "data.filter is not a function"))
                         } else {
