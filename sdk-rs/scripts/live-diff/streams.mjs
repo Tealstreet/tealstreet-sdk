@@ -314,10 +314,12 @@ try {
       label: replaySessions[i].label,
       markets: value.state.markets?.length ?? 0,
       tickers: value.state.tickers?.length ?? 0,
-      liveTickers: value.state.tickers?.filter(t => t.last > 0 || t.bid > 0 || t.ask > 0).length ?? 0,
+      liveTickers: value.state.tickers?.filter((t) => t.last > 0 || t.bid > 0 || t.ask > 0).length ?? 0,
       startMs: replaySessions[i].startMs,
     }));
-    report.limitations.push('Recorded startup proof only: final Store state and per-dial drain are retained; no book/candle or 60-second live-window coverage claim.');
+    report.limitations.push(
+      'Recorded startup proof only: final Store state and per-dial drain are retained; no book/candle or 60-second live-window coverage claim.',
+    );
   }
   report.coverage = Object.fromEntries(
     ['store:tickers', 'orderbook', 'candles'].map((channel) => [
