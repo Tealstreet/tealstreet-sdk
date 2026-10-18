@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { deserialize } from 'node:v8';
+import { createHash } from 'node:crypto';
+import { assertOutputIdentity, runIdentityGuardControls } from '../../scripts/live-diff/observable-output-identity.mjs';
 
 const paths = process.argv.slice(2);
 assert(
@@ -38,6 +40,9 @@ assert.equal(runs(before, 'ts').length, before.length * 2);
 assert.equal(runs(after, 'ts').length, after.length * 2);
 const expectedBytes = readFileSync(baseline[0].fixture);
 const expected = deserialize(expectedBytes);
+const identityGuardControls = runIdentityGuardControls();
+const identityObservations = [];
+const fixtureSha256s = [];
 for (const run of [...baseline, ...candidate]) {
   assert.equal(run.receipt.delivered, 285713);
   assert.equal(run.receipt.dropped, 0);
@@ -46,15 +51,10 @@ for (const run of [...baseline, ...candidate]) {
   assert.equal(run.receipt.applicationDrainVerified, true);
   assert.equal(run.receipt.nativeTransportVerified, true);
   const actualBytes = readFileSync(run.fixture);
-  assert.deepStrictEqual(
-    deserialize(actualBytes),
-    expected,
-    run.label + ' complete retained output/state must equal baseline without normalization',
-  );
-  assert(
-    actualBytes.equals(expectedBytes),
-    run.label + ' serialized property order and reference structure must be identical',
-  );
+  const sha256 = createHash('sha256').update(actualBytes).digest('hex');
+  assert.equal(run.outputHash, sha256, 'Fixture bytes must match the reported integrity hash');
+  fixtureSha256s.push({ label: run.label, sha256 });
+  identityObservations.push(assertOutputIdentity(expected, deserialize(actualBytes)));
 }
 for (const report of reports) {
   for (const run of report.runs) {
@@ -93,7 +93,12 @@ console.log(
   JSON.stringify(
     {
       identicalCompleteNativeOutput: true,
-      identicalSerializedNativeOutput: true,
+      identicalObservableNativeGraph: true,
+      identicalSerializedNativeOutput: fixtureSha256s.every(fixture => fixture.sha256 === fixtureSha256s[0].sha256),
+      representationFinding: 'Unchanged OKX control can encode identical positive zero as Smi or HeapNumber; full observable graph remains exact, without normalization.',
+      identityGuardControls,
+      identityObservations,
+      fixtureSha256s,
       inputHash: baseline[0].receipt.inputHash,
       interleavedReportPaths: paths,
       control,
