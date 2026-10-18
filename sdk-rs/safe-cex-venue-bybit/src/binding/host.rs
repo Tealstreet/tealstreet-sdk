@@ -388,7 +388,7 @@ impl SnapshotHost for Rt {
             }
             "Promise.all" => {
                 let values = self.values(&arg(&args, 0))?;
-                Ok(self.spawn(Box::pin(all(values))))
+                Ok(Js::Promise(all(&self.exchange_runtime(), values)))
             }
             "mapSeries" => self.global("mapSeries")?.call(Js::Undefined, args),
             "loop" => schedule_loop(self, arg(&args, 0), &arg(&args, 1)),

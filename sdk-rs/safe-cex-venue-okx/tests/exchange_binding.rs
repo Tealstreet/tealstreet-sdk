@@ -347,7 +347,7 @@ fn change_margin_type_reports_cross_only_without_a_request() {
     h.venue().base().on(
         "error",
         std::rc::Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.to_string());
+            sink.borrow_mut().push(data.to_display());
             Ok(())
         }),
     );
@@ -520,7 +520,10 @@ fn record_private_fills(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value
     h.venue().base().on(
         "fill",
         std::rc::Rc::new(move |_, payload| {
-            sink.borrow_mut().push(payload.clone());
+            sink.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(payload)
+                    .expect("finite fixture fill"),
+            );
             Ok(())
         }),
     );
@@ -755,7 +758,7 @@ fn record_errors(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
     h.venue().base().on(
         "error",
         std::rc::Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.to_string());
+            sink.borrow_mut().push(data.to_display());
             Ok(())
         }),
     );
@@ -912,7 +915,6 @@ fn business_socket_reopen_alone_resyncs_the_private_snapshot() {
 #[test]
 fn eu_order_reads_start_both_instruments_before_first_reply() {
     use std::{
-        cell::Cell,
         rc::Rc,
         task::{Context, Poll, Waker},
     };
@@ -940,7 +942,7 @@ fn eu_order_reads_start_both_instruments_before_first_reply() {
         });
         loaded(&h);
         h.http.requests.borrow_mut().clear();
-        let gate = Rc::new(Cell::new(false));
+        let gate = Rc::new(harness::release::Release::default());
         *h.http.held_instrument.borrow_mut() = Some((path.into(), "SWAP".into(), gate.clone()));
         let mut future = h.venue().fetch_orders(None);
         assert!(matches!(

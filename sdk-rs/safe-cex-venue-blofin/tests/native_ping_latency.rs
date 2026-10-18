@@ -155,6 +155,7 @@ fn private_fill_frame_updates_order_and_emits_original_fill_fields() {
     live.venue.base().on(
         "fill",
         std::rc::Rc::new(move |_, data| {
+            let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
             saved.borrow_mut().push(data.clone());
             Ok(())
         }),
@@ -197,5 +198,51 @@ fn private_account_frame_updates_balance() {
     assert_eq!(
         (b.total, b.free, b.used, b.upnl),
         (123.45, 123.45, 0.0, 0.0)
+    );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("blofin");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 64);
+    let live = Live::new();
+    let index = live
+        .rt
+        .dials
+        .borrow()
+        .iter()
+        .position(|url| url.contains("/public"))
+        .expect("production public socket");
+    let socket = live.rt.opened.borrow()[index].clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            live.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("blofin")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            live.rt.pump();
+        }
+        ticker_coercion::assert_native(&live.store.tickers(), case);
+    }
+    assert!(
+        live.rt.errors.borrow().is_empty(),
+        "{:?}",
+        live.rt.errors.borrow()
     );
 }

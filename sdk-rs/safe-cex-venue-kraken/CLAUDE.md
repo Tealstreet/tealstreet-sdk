@@ -409,6 +409,12 @@ A compiled xhr-assignment mutation fails the production startup regression;
 exact restoration passes. Retained composition tests cover live class factories
 and polling rather than the deleted wrappers.
 
+Spot websocket candle dates use shared ToPrimitive before choosing UTF-16 date
+parsing or numeric TimeClip, matching the one-argument Date constructor. The
+constructed candle binding test compares eleven raw JSON input shapes to the
+maintained handleOHLC body, including array dates, invalid dates and fractional
+milliseconds; output timestamps and all price/volume fields are checked natively.
+
 The concrete book host uses the shared Js iterator after the source falsy-to-empty
 fallback. String sides are iterable: Futures/Spot snapshots skip their NaN quantities
 and emit an empty side, while Spot deltas retain a NaN level. The constructed

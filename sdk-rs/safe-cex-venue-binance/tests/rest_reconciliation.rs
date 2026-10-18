@@ -26,7 +26,9 @@ fn run<F: Future>(f: F) -> F::Output {
 fn error() -> Failure {
     let mut e = ExchangeError::new("rest fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!("original-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "original-code"
+    )));
     Rc::new(e)
 }
 fn fields(r: &Result<(), Failure>, e: &Failure) -> Value {
@@ -36,7 +38,7 @@ fn fields(r: &Result<(), Failure>, e: &Failure) -> Value {
             let original = Rc::ptr_eq(f, e);
             if original {
                 assert_eq!(
-                    f.code,
+                    observed_error_code(&f.code),
                     Some(json!("original-code")),
                     "REST native original error metadata"
                 );
@@ -70,7 +72,7 @@ fn assert_error(
                 "{label} native error message"
             );
             assert_eq!(
-                error.code,
+                observed_error_code(&error.code),
                 Some(json!("original-code")),
                 "{label} native error code"
             );
@@ -1405,4 +1407,17 @@ fn futures_leverage_overlay() {
 #[ignore = "live source oracle"]
 fn pm_leverage_overlay() {
     overlay("overlay_pm");
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

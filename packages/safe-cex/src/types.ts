@@ -152,6 +152,8 @@ export type ExchangeOptions = {
     lighterIntegratorAccountIndex?: string;
     // Lighter TP/SL allowed execution slippage, as a percentage from trigger price.
     lighterStopSlippagePct?: number;
+    // HyroTrader uses the same connector for the shared simulator demo and real user-pasted challenge keys.
+    hyrotraderMode?: 'demo' | 'production';
     /**
      * KuCoin broker attribution config.
      *
@@ -322,6 +324,13 @@ export interface ExchangeAccountConfig {
   tealstreetTunnel?: boolean;
   tealstreetWsRoute?: boolean;
   proxyRegion?: string;
+
+  /**
+   * True only for the bundled shared /hyrotrader-demo account. Real HyroTrader
+   * accounts use user-pasted challenge API keys and should behave as live
+   * accounts even though the connector reuses simulator-compatible endpoints.
+   */
+  hyrotraderDemo?: boolean;
 
   /** When set, and the Tealstreet browser extension is present, this account
    *  connects directly to the exchange (no proxy/tunnel) — the extension's

@@ -298,7 +298,9 @@ fn api_validation_native_source_parity() {
         let balance = Rc::new(serde_json::json!({"marker":"HYRO-29"}));
         let mut error = ExchangeError::new(input["message"].as_str().unwrap_or("hyro failed"));
         error.name = "BalanceError".into();
-        error.code = Some(serde_json::json!(17));
+        error.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+            &serde_json::json!(17),
+        ));
         let original = Rc::new(error);
         let mut e = ExchangeError::new("log failed");
         e.name = "LogError".into();
