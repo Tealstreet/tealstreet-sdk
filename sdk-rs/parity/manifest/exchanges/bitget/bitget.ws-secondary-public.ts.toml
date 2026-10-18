@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bitget/bitget.ws-secondary-public.ts"
-rust_files = [ "safe-cex-venue-bitget/src/secondary_public.rs", "safe-cex-venue-bitget/src/ticker.rs", "safe-cex-venue-bitget/src/socket_ping.rs" ]
+rust_files = [ "safe-cex-exchange/src/owned_tasks.rs", "safe-cex-venue-bitget/src/secondary_public.rs", "safe-cex-venue-bitget/src/ticker.rs", "safe-cex-venue-bitget/src/socket_ping.rs" ]
 
 [[symbol]]
 ts = "BitgetSecondaryPublicWebsocket"
@@ -38,9 +38,9 @@ note = "CHOSEN: constructs real BaseWebSocket plus registered WsProtocol with or
 ts = "BitgetSecondaryPublicWebsocket.connectAndSubscribe"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bitget/src/secondary_public.rs::BitgetSecondaryPublicWebsocket::connect_and_subscribe"
+rs = [ "safe-cex-venue-bitget/src/secondary_public.rs::BitgetSecondaryPublicWebsocket::connect_and_subscribe", "safe-cex-exchange/src/owned_tasks.rs::OwnedTasks::start_eager" ]
 status = "divergent"
-note = "MIXED: preserves index-modulo-three selection, previous/current message counts, fallback attempt threshold two, best-effort diagnostic and real routing. CHOSEN core-owned asynchronous dial means no host ws is installed before polling, while source installs the wrapper synchronously; pending dial cancellation is exercised. FORCED shared UTF-8 market symbols exclude lone surrogates. Target safe-cex-venue-bitget/src/secondary_public.rs::BitgetSecondaryPublicWebsocket::connect_and_subscribe."
+note = "MIXED: preserves index-modulo-three selection, previous/current message counts, fallback attempt threshold two, best-effort diagnostic and real routing. FIX-audit OPEN: the shared registry now uses canonical eager::start_eager to start preparation/dial before runtime polling; ready hosts install the socket at call time. Bitget secondary and Backpack public real-binding probes compile RED on the lazy path and GREEN on this shared repair, with pending I/O dropped immediately on disposal. Split native scheduling target: `safe-cex-exchange/src/owned_tasks.rs::OwnedTasks::start_eager` is the shared registration/scheduling split implementing this call prefix, not a second venue algorithm. A held native handshake still lacks the source CONNECTING wrapper: that independent compiled presence RED remains open for a second shared repair. See safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md. Existing pending-dial cancellation remains pinned. FORCED shared UTF-8 market symbols exclude lone surrogates. Target safe-cex-venue-bitget/src/secondary_public.rs::BitgetSecondaryPublicWebsocket::connect_and_subscribe."
 
 [[symbol]]
 ts = "BitgetSecondaryPublicWebsocket.onOpen"

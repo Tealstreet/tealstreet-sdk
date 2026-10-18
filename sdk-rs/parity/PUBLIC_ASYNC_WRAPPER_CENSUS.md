@@ -63,3 +63,11 @@ Counts are implementation counts: seven typed-async implementations, sixteen def
 Backpack creates some HTTP operations before returning its task; Coinbase has its own already-created Promise family; MEXC mixes direct typed readers with `exchange_binding::{typed,unit}`. Their exact deeper files are recorded in the table. Hyperliquid’s two implementations share the async Realm invoke boundary and must preserve its driver/identity semantics. The three Binance linear-family implementations share `exchange_trait::{call,unit,income_call}`; Binance inverse uses a separate in-family binding that already calls the member synchronously. TxFlow’s phase-zero preflight refusal is synchronous and does not establish coverage for unimplemented future REST methods.
 
 Refresh this snapshot only after reviewing changed wrapper bodies. Its hashes identify the inspected baseline; they are not an allowlist or a policy exemption. Source drift alone must not silently turn a candidate into an executed verdict.
+
+Shared socket entrypoints also require an eager prefix. BaseWebSocket now starts
+preparation/dial through the existing OwnedTasks registry and canonical
+`eager::start_eager`; Bitget secondary and Backpack public prove the real ready
+host prefix. This is a core dial boundary, not a new venue SDK wrapper family.
+It does not close native CONNECTING-handle presence during a held handshake;
+that independently compiled Bitget finding remains open. See
+`safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md` for scope and controls.
