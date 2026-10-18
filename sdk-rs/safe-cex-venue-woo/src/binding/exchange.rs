@@ -378,6 +378,10 @@ mod divergence_audit_tests;
 mod fix_audit_tests;
 
 #[cfg(test)]
+#[path = "../../tests/support/heartbeat_binding.rs"]
+mod heartbeat_binding_tests;
+
+#[cfg(test)]
 #[path = "../../tests/support/history_row_binding.rs"]
 mod history_row_tests;
 
