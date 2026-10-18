@@ -29,7 +29,7 @@ function aliasBody(type, targetType, contract) {
     : '';
   // Dyn, tuple and function-pointer type names include nested signatures. Obtain
   // the compared prefix from the independently authored expected compiler type.
-  const canonical = unsized || ['reviewed-hosted-signer-tuple', 'reviewed-function-pointer', 'reviewed-weex-kline-tuple', 'reviewed-woo-book-level-array'].includes(contract.aliasProbeKind)
+  const canonical = unsized || ['reviewed-hosted-signer-tuple', 'reviewed-cryptocom-prepared', 'reviewed-function-pointer', 'reviewed-weex-kline-tuple', 'reviewed-woo-book-level-array'].includes(contract.aliasProbeKind)
     ? `std::any::type_name::<${contract.aliasProbeExpected}>().split('<').next().expect("reviewed unsized alias identity")`
     : literal(contract.canonical);
   const alternate = `|value| { let alternate = crate::__accepted_set_runtime::AliasAlternate::<${targetType}>(std::marker::PhantomData); let mut paths: Vec<_> = [${aliasTraitMethods.map(([, method, name]) => `(${literal(name)}, (&&alternate).${method}(value))`).join(',')}].into_iter().filter_map(|(name, accepted)| accepted.map(|accepted| (name, accepted))).collect(); if (&&alternate).has_static_from() && (&&alternate).probe_from_str_ref(value).is_none() { paths.push(("unsupported From<&'static str>", false)); } if (&&alternate).has_static_try() && (&&alternate).probe_try_str_ref(value).is_none() { paths.push(("unsupported TryFrom<&'static str>", false)); } paths }`;

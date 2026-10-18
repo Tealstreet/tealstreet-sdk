@@ -976,3 +976,14 @@ are read before projection. inherited-refusal-controls.py independently faults
 each actual Exchange method and requires a named runtime failure plus exact
 restoration. The exact-method constant-output gate support is preparatory: no
 partial class contract or Binance constant-policy permission is installed.
+
+The nine public listener functions have individual typed capability role reviews
+in PUBLIC_LISTENER_FUNCTION_REVIEW.md. Their classification receipts do not
+execute decoders. The native two-subscription witness constructs the actual
+Futures/PM/Spot owner and inspects the live ListenerHost handler accessor, parser
+identity/order, independent books, native topic counts and sibling-safe cleanup.
+Outbound fields are checked on the real socket wire. Keep all nine independent
+production-body controls in scripts/public-listener-function-controls.py, with
+named native failures and byte-exact restoration passes. The canonical scoped
+runner is scripts/public-listener-function-contracts.mjs; the seven existing
+alias reviews and separate Book decoder remain unchanged.
