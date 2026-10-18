@@ -338,7 +338,7 @@ fn run(c: &Value) {
         .collect();
     let clock = oracle_clock::ClockWindow::start();
     let result: Result<Value, ExchangeError> = match method {
-        "mapOrder" => map_order(&input["wireOrder"], &store.orders(), 5678.0)
+        "mapOrder" => map_order(&input["wireOrder"].clone().into(), &store.orders(), 5678.0)
             .map(|o| o.as_ref().map_or(json!({"undefined":true}), order)),
         "normalizeSymbol" => v
             .normalize_symbol(Some(&input["symbol"].clone().into()))
@@ -593,7 +593,7 @@ fn typed_order_and_snapshot_boundaries_are_explicit() {
     let (_, store, _) = fixture(input);
     let mut o = input["wireOrder"].clone();
     o["timeInForce"] = json!("constructor");
-    let e = map_order(&o, &store.orders(), 1234.0).unwrap_err();
+    let e = map_order(&o.clone().into(), &store.orders(), 1234.0).unwrap_err();
     assert!(e.message.contains("inherited callable"));
     assert!(
         corpus()["boundary"]["inherited"]["output"]["ok"]["timeInForce"]
@@ -603,7 +603,9 @@ fn typed_order_and_snapshot_boundaries_are_explicit() {
     );
     o["timeInForce"] = json!("GTC");
     o["o"] = json!("STOP_MARKET");
-    let mapped = map_order(&o, &store.orders(), 1234.0).unwrap().unwrap();
+    let mapped = map_order(&o.clone().into(), &store.orders(), 1234.0)
+        .unwrap()
+        .unwrap();
     assert!(mapped.sl_trigger_type.is_none());
     assert_eq!(
         corpus()["boundary"]["undefinedTrigger"]["output"]["ok"]["slTriggerType"],

@@ -22,7 +22,7 @@ use std::{
 #[path = "retained_info.rs"]
 mod observation;
 
-const PRODUCTS: &str = r#"{"products":[{"product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","price_increment":"0.01","base_increment":"0.001","base_min_size":"0.001","base_max_size":"100","trading_disabled":false,"view_only":false,"price":"123.5","price_percentage_change_24h":"2.5","volume_24h":"1000","opaque":{"positive":1e999,"negative":-1e999,"zero":-0,"text":"\ud800","array":[1e999,-0,"\udfff"]}}]}"#;
+const PRODUCTS: &str = r#"{"products":[{"product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","price_increment":"0.01","base_increment":"0.001","base_min_size":"0.001","base_max_size":"100","trading_disabled":false,"view_only":false,"price":"123.5","price_percentage_change_24h":"2.5","volume_24h":"1000","opaque":{"\ud801":{"v":"\udc00"},"positive":1e999,"negative":-1e999,"zero":-0,"text":"\ud800","array":[1e999,-0,"\udfff"]}}]}"#;
 
 #[test]
 fn native_http_and_store_keep_opaque_coinbase_info() {

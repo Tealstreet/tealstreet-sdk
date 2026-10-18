@@ -173,6 +173,7 @@ fn assert_number(actual: f64, expected: &Value, label: &str) {
 }
 fn assert_frame(actual: &Frame, expected: &Value, label: &str) {
     match actual {
+        Frame::Undefined => assert_eq!(expected["$undefined"], true, "native undefined"),
         Frame::Null => assert!(expected.is_null(), "{label}: native null"),
         Frame::Bool(v) => assert_eq!(Some(*v), expected.as_bool(), "{label}: native bool"),
         Frame::Number(v) => assert_number(*v, expected, label),

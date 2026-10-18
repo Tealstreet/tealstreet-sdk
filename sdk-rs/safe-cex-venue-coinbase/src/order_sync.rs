@@ -259,7 +259,7 @@ impl PrivateOrderScalar for crate::starbase_public_frames::CoinbaseStarbaseFrame
     fn truthy(&self) -> bool {
         use crate::starbase_public_frames::CoinbaseStarbaseFrameValue as F;
         match self {
-            F::Null => false,
+            F::Null | F::Undefined => false,
             F::Bool(v) => *v,
             F::Number(v) => *v != 0.0 && !v.is_nan(),
             F::String(v) => !v.is_empty(),
@@ -407,7 +407,7 @@ pub fn handle_user_event_orders<I: PrivateOrderInfo, E: PrivateOrderEventInput<I
             market
                 .borrow()
                 .contract_size
-                .and_then(|v| normalize_cfm_contract_size(&json!(v)))
+                .and_then(|v| normalize_cfm_contract_size(&Input::Float(v)))
         } else {
             Some(1.0)
         };

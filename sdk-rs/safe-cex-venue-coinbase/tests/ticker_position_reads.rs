@@ -219,7 +219,7 @@ fn assert_json(actual: Option<&Value>, e: &Value, label: &str) {
         assert!(actual.is_none(), "{label}: native undefined");
         return;
     }
-    let actual = actual.expect("expected native field");
+    let actual = actual.unwrap_or_else(|| panic!("{label}: expected native field {e:?}"));
     if e.get("$bits").is_some() {
         assert_number(actual.as_f64().unwrap(), e, label);
     } else {

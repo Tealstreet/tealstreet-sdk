@@ -106,8 +106,7 @@ pub fn timeframe_name(t: safe_cex_types::AnyTimeframe) -> &'static str {
     }
 }
 
-pub fn candle<I: Clone + Into<Input>>(row: &I) -> Result<Candle, ExchangeError> {
-    let row = row.clone().into();
+pub fn candle(row: &Input) -> Result<Candle, ExchangeError> {
     if row.is_null() {
         return Err(error("Cannot read properties of null (reading 'time')"));
     }
@@ -253,7 +252,7 @@ impl BingxReadHistory {
             }
             let field = |key| response.get(key);
             // Strict `code !== undefined && code !== 0`: "0" and null are failures.
-            if let Some(code) = field("code")
+            if let Some(code) = field("code").filter(|value| !matches!(value, Input::Undefined))
                 && code.as_f64() != Some(0.0)
             {
                 let msg = field("msg");
