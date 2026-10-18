@@ -83,7 +83,8 @@ fn handle_alias_retains_constructed_scope_values_identity_and_effects() {
 fn read_result_alias_keeps_typed_success_and_original_thrown_value() {
     use crate::rest_account::ReadResult;
     let h = harness(ExchangeName::Kraken, options(), |_| {});
-    let success: ReadResult<Rt, bool> = Ok(true);
+    let success: ReadResult<Rt, bool> =
+        ReadHost::includes(&h.exchange.rt, &Js::str("native result"), "result");
     assert!(success.unwrap());
     let error = Js::object(vec![("marker", Js::utf16(&[0xdc00]))]);
     let original = error.clone();

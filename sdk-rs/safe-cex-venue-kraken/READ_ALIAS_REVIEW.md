@@ -21,3 +21,13 @@ error identity, UTF-16 units, signed zero and infinity, own-key order and getter
 counts. Named semantic controls alter one concrete ReadHost consumer at a time
 and require a compiled assertion failure followed by exact-restored success.
 No callback mock or trait implementation replaces the host under test.
+
+The existing `binding::rt` module becomes visible only within this crate so the
+canonical alias probes in the declaration module can name the actual production
+host. No SDK-public type, constructor or behavior is added for the probe.
+
+The missing-contract replay produced three actual named runtime failures before
+classification. All three constructed-Scope tests pass; Handle/keyed,
+ReadResult/field and Entries/entries semantic faults each produced a named
+compiled assertion failure and an exact-restored pass. No compile failure was
+counted as a negative control.
