@@ -242,11 +242,20 @@ pub struct Request {
 /// Scripted HTTP: (method, path without query) -> queue of responses; the last repeats.
 #[derive(Default)]
 pub struct Http {
+    /// Tests may hold physical responses while the runtime owns their continuations.
+    pub hold_responses: Rc<Cell<bool>>,
+    response_wakers: Rc<RefCell<Vec<Waker>>>,
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
 }
 impl Http {
+    pub fn release_responses(&self) {
+        self.hold_responses.set(false);
+        for waker in self.response_wakers.take() {
+            waker.wake();
+        }
+    }
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
         self.route_native(method, path, status, from_json(&body));
     }
@@ -316,7 +325,20 @@ impl JsHttpHost for Http {
                 &format!("unscripted request {method} {url}"),
             )),
         };
-        Box::pin(async move { result })
+        let held = self.hold_responses.clone();
+        let wakers = self.response_wakers.clone();
+        let mut result = Some(result);
+        Box::pin(std::future::poll_fn(move |cx| {
+            if held.get() {
+                let mut wakers = wakers.borrow_mut();
+                if !wakers.iter().any(|waker| waker.will_wake(cx.waker())) {
+                    wakers.push(cx.waker().clone());
+                }
+                Poll::Pending
+            } else {
+                Poll::Ready(result.take().expect("response settles once"))
+            }
+        }))
     }
 }
 

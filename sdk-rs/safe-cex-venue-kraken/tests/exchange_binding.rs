@@ -1732,3 +1732,126 @@ fn retained_numeric_prefixes_match_source_before_utf8_string_admission() {
         );
     }
 }
+
+#[test]
+fn eager_typed_wrapper_starts_futures_request_before_the_waiter_is_polled() {
+    let h = futures(|_| {});
+    let waiter = h.venue().fetch_markets();
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls("/v3/instruments").len(),
+        1,
+        "runtime sends the request without polling the returned waiter"
+    );
+    let markets = h.drive(waiter).unwrap();
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].symbol, SYMBOL);
+    assert_eq!(
+        h.http.calls("/v3/instruments").len(),
+        1,
+        "polling the waiter must not restart the body"
+    );
+}
+
+#[test]
+fn eager_typed_wrapper_starts_spot_request_before_the_waiter_is_polled() {
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok("GET", "/0/public/OHLC", json!({"error":[],"result":{}}));
+    });
+    let waiter = h
+        .venue()
+        .fetch_ohlcv(serde_json::from_value(json!({"symbol":"BTC/USD","interval":"1m"})).unwrap());
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls("/0/public/OHLC").len(),
+        1,
+        "Spot request starts without polling the returned waiter"
+    );
+    let candles = h.drive(waiter).unwrap();
+    assert!(candles.is_empty());
+    assert_eq!(h.http.calls("/0/public/OHLC").len(), 1);
+}
+
+#[test]
+fn eager_unit_wrapper_continues_after_an_unpolled_waiter_is_dropped() {
+    let h = futures(|http| {
+        http.ok(
+            "PUT",
+            "/v3/leveragepreferences",
+            json!({"result":"success"}),
+        );
+    });
+    loaded(&h);
+    h.http.hold_responses.set(true);
+    let waiter = h.venue().set_leverage(SYMBOL.into(), 500.0, None);
+    h.runtime.pump();
+    assert_eq!(
+        h.http.calls("/v3/leveragepreferences").len(),
+        1,
+        "unit wrapper starts signed request without polling the waiter"
+    );
+    h.runtime.pump();
+    assert!(
+        !h.runtime
+            .console
+            .borrow()
+            .iter()
+            .any(|(_, message)| message.contains("Leverage set to")),
+        "response is still held"
+    );
+    drop(waiter);
+    h.http.release_responses();
+    h.runtime.pump();
+    assert!(
+        h.runtime
+            .console
+            .borrow()
+            .iter()
+            .any(|(level, message)| level == "info"
+                && message.contains("Leverage set to 50x for PF_XBTUSD")),
+        "runtime must finish the real body after its waiter is dropped"
+    );
+    assert_eq!(h.http.calls("/v3/leveragepreferences").len(), 1);
+}
+
+#[test]
+fn eager_unit_wrapper_preserves_rejection_instead_of_throwing_from_the_trait_call() {
+    let h = futures(|_| {});
+    let waiter = h.venue().set_leverage("UNKNOWN".into(), 2.0, None);
+    assert!(
+        h.runtime
+            .console
+            .borrow()
+            .iter()
+            .any(|(_, message)| message.contains("Market UNKNOWN not found")),
+        "source rejection reporting runs before its Promise returns"
+    );
+    let error = h.drive(waiter).unwrap_err();
+    assert!(
+        error.message.contains("Market UNKNOWN not found"),
+        "{}",
+        error.message
+    );
+    assert!(h.http.calls("/v3/leveragepreferences").is_empty());
+}
+
+#[test]
+fn eager_wrapper_live_source_prefix_and_detached_continuation() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/eager-wrapper-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["receipts"].as_array().unwrap().len(), 3);
+    assert_eq!(receipt["synchronousHttpPrefixes"], 3);
+    assert_eq!(receipt["detachedContinuation"], true);
+    assert_eq!(receipt["rejectionPrefix"], true);
+}
