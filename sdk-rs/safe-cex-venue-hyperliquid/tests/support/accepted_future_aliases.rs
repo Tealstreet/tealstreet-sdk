@@ -1,11 +1,11 @@
 //! Fixed production Js monomorphizations only; no decoder or other-host claim.
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use crate::{
-    income::IncomeFuture,
     host::{Host, test_runtime::TestRuntime},
+    income::IncomeFuture,
     spot_account_reads::AccountFuture,
     startup_timeout::TimeoutCallback,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::{
     any::TypeId,
     cell::{Cell, RefCell},

@@ -1,13 +1,10 @@
 //! Hyperliquid module helpers the class bodies import, bound to their ports.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-    host_core::js,
-};
+use super::{Host, host_core::js};
 use crate::{
     constants, exchange_helpers, income, json_boundaries, market_helpers, order_inference,
     rate_limit,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::borrow::Cow;
 
 fn arg(args: &[Js], i: usize) -> Js {
@@ -36,11 +33,16 @@ pub(super) fn signing_error(
     let restore = |r: &mut Host| -> Result<Thrown, Thrown> {
         let name = properties.get("name")?.to_js_string()?;
         let message = properties.get("message")?.to_js_string()?;
-        let error = safe_cex_exchange::js_runtime::value::error_object(&String::from_utf16_lossy(&name), "");
+        let error = safe_cex_exchange::js_runtime::value::error_object(
+            &String::from_utf16_lossy(&name),
+            "",
+        );
         r.define_hidden(&error, Js::str("name"), Js::String(name));
         r.define_hidden(&error, Js::str("message"), Js::String(message));
         for (key, value) in properties.own_entries()? {
-            if key.as_ref() != "name".encode_utf16().collect::<Vec<_>>() && key.as_ref() != "message".encode_utf16().collect::<Vec<_>>() {
+            if key.as_ref() != "name".encode_utf16().collect::<Vec<_>>()
+                && key.as_ref() != "message".encode_utf16().collect::<Vec<_>>()
+            {
                 error.define_key(&key, value)?;
             }
         }
@@ -169,9 +171,7 @@ pub(crate) fn bind(realm: &Host) {
         "HyperliquidUnreadableOrderResponseError",
         unreadable_error_class(realm),
     );
-    let b = |name: &'static str,
-             length: u8,
-             body: fn(&mut Host, &[Js]) -> Result<Js, Thrown>| {
+    let b = |name: &'static str, length: u8, body: fn(&mut Host, &[Js]) -> Result<Js, Thrown>| {
         realm.bind_import(name, realm.native(name, length, move |r, _, a| body(r, a)));
     };
     b("isOnlyHyperliquidTerminalCancelError", 1, |_, a| {
@@ -194,7 +194,7 @@ pub(crate) fn bind(realm: &Host) {
             .ok_or_else(|| r.type_error("historical order rows must be an array"))?;
         let collapsed = crate::order_history::collapse_hyperliquid_order_history(rows)
             .map_err(|error| r.error_of(&error.name, &error.message))?;
-        Ok(r.from_serde(&serde_json::Value::Array(collapsed)))
+        Ok(r.encode_json(&serde_json::Value::Array(collapsed)))
     });
     b("mapHyperliquidHistoricalOrder", 2, |r, a| {
         let row = r.to_serde(&arg(a, 0))?;
@@ -221,7 +221,7 @@ pub(crate) fn bind(realm: &Host) {
             return Err(error);
         }
         let mapped = mapped.map_err(|error| r.error_of(&error.name, &error.message))?;
-        r.from_typed(&mapped)
+        r.encode_typed(&mapped)
     });
     b("mapHyperliquidFillToIncomeRecords", 2, |r, a| {
         income::map_hyperliquid_fill_to_income_records(r, &arg(a, 0), &arg(a, 1))
@@ -314,7 +314,7 @@ pub(crate) fn bind(realm: &Host) {
     b("parseHyperliquidOrderTimeInForce", 1, |r, a| {
         let v = r.to_serde(&arg(a, 0))?;
         match order_inference::parse_hyperliquid_order_time_in_force(Some(&v)) {
-            Some(tif) => r.from_typed(&tif),
+            Some(tif) => r.encode_typed(&tif),
             None => Ok(Js::Undefined),
         }
     });
@@ -322,7 +322,7 @@ pub(crate) fn bind(realm: &Host) {
         let v = r.to_serde(&arg(a, 0))?;
         let out = order_inference::infer_hyperliquid_order_type_and_price(&v)
             .map_err(|e| r.error_of(&e.name.clone(), &e.message))?;
-        let kind = r.from_typed(&out.r#type)?;
+        let kind = r.encode_typed(&out.r#type)?;
         use order_inference::HyperliquidOrderInferenceSource as S;
         let source = match out.source {
             S::OrderTypeLimit => "orderType=Limit",
@@ -341,9 +341,7 @@ pub(crate) fn bind(realm: &Host) {
         ]))
     });
     b("getBuilderAddress", 1, |_, a| {
-        Ok(Js::str(constants::get_builder_address(
-            arg(a, 0).truthy(),
-        )))
+        Ok(Js::str(constants::get_builder_address(arg(a, 0).truthy())))
     });
     b("builderFeeRateFromTenthsBps", 1, |r, a| {
         let n = num(r, &arg(a, 0))?;
@@ -418,11 +416,7 @@ pub(crate) fn bind(realm: &Host) {
         let signer = safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&key)
             .map_err(|e| r.error(&e))?;
         let wallet = r.host_object(std::rc::Rc::new(WalletKey(key)));
-        r.define_str(
-            &wallet,
-            "address",
-            Js::str(&signer.address().to_string()),
-        )?;
+        r.define_str(&wallet, "address", Js::str(&signer.address().to_string()))?;
         Ok(wallet)
     });
     b("orderRequestToOrderWire", 2, |r, a| {
@@ -466,7 +460,7 @@ pub(crate) fn bind(realm: &Host) {
         let result =
             crate::signing::sign_l1_action(&wallet.0, &action, vault.as_deref(), &nonce, mainnet)
                 .map_err(|cause| signing_error(r, cause))
-                .and_then(|sig| r.from_typed(&sig));
+                .and_then(|sig| r.encode_typed(&sig));
         Ok(r.settled_promise(result))
     });
     b("parseHyperliquidOrderResponse", 1, |r, a| {
@@ -474,7 +468,7 @@ pub(crate) fn bind(realm: &Host) {
         let data = r.to_serde(&arg(a, 0))?;
         match crate::order_response::parse_hyperliquid_order_response(&data) {
             Ok(parsed) => {
-                let ids = r.from_typed(&parsed.order_ids)?;
+                let ids = r.encode_typed(&parsed.order_ids)?;
                 Ok(r.object_from(vec![
                     ("orderIds", ids),
                     ("waitingForTrigger", Js::Bool(parsed.waiting_for_trigger)),
@@ -482,7 +476,11 @@ pub(crate) fn bind(realm: &Host) {
             }
             Err(E::Unreadable(e)) => {
                 let class = unreadable_error_class(r);
-                Err(Thrown::new(r.construct(&class, &[Js::str(&e.message)], None)?))
+                Err(Thrown::new(r.construct(
+                    &class,
+                    &[Js::str(&e.message)],
+                    None,
+                )?))
             }
             Err(E::Venue(message)) => Err(r.error(&message)),
             Err(E::Coercion(e)) => Err(r.error_of(e.name, e.message)),

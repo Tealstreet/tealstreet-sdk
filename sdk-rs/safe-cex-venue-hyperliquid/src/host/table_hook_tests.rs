@@ -1,8 +1,6 @@
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{ facade_rest, test_runtime::TestRuntime};
-use safe_cex_exchange::{
-    runtime::{ExchangeError, ExchangeErrorOrigin},
-};
+use super::{facade_rest, test_runtime::TestRuntime};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::runtime::{ExchangeError, ExchangeErrorOrigin};
 use std::{cell::Cell, fmt, rc::Rc};
 
 #[test]
@@ -156,7 +154,7 @@ fn legacy_native_error_keeps_original_origin_without_reading_the_cause() {
 
 #[test]
 fn common_error_delegate_retains_native_response_and_opaque_origin() {
-        use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     let mut realm = crate::host::test_runtime::host(Rc::new(TestRuntime::default()));
     let response = Input::Object(vec![
         (vec![0xd800], Input::Float(-0.0)),
@@ -173,9 +171,7 @@ fn common_error_delegate_retains_native_response_and_opaque_origin() {
         panic!("retained response number")
     };
     assert_eq!(number.to_bits(), (-0.0f64).to_bits());
-    assert!(
-        projected.has_own("ownUndefined")
-    );
+    assert!(projected.has_own("ownUndefined"));
     assert!(matches!(
         realm.get_str(&projected, "ownUndefined").unwrap(),
         Js::Undefined

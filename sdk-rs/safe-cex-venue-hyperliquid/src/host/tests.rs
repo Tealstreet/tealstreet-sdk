@@ -1,5 +1,5 @@
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use super::{Host, test_runtime::TestRuntime};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::rc::Rc;
 
 fn realm() -> (Host, Rc<TestRuntime>) {
@@ -18,11 +18,7 @@ fn message(r: &mut Host, e: &Thrown) -> String {
 fn property_reads_follow_the_prototype_chain_and_nullish_reads_throw() {
     let (mut r, _) = realm();
     let o = r.object_from(vec![("a", Js::Number(1.0))]);
-    assert!(
-        r.get_str(&o, "a")
-            .unwrap()
-            .strict_equals(&Js::Number(1.0))
-    );
+    assert!(r.get_str(&o, "a").unwrap().strict_equals(&Js::Number(1.0)));
     let e = r.get_str(&Js::Undefined, "x").unwrap_err();
     assert_eq!(
         message(&mut r, &e),
@@ -35,11 +31,7 @@ fn property_reads_follow_the_prototype_chain_and_nullish_reads_throw() {
 #[test]
 fn array_methods_and_exotic_length() {
     let (mut r, _) = realm();
-    let a = r.new_array(vec![
-        Js::Number(3.0),
-        Js::Number(1.0),
-        Js::Number(2.0),
-    ]);
+    let a = r.new_array(vec![Js::Number(3.0), Js::Number(1.0), Js::Number(2.0)]);
     let doubled = r.native("", 1, |r, _, args| {
         r.binary("*", &args[0], &Js::Number(2.0))
     });
@@ -53,11 +45,7 @@ fn array_methods_and_exotic_length() {
     let s = r.call_method(&a, "toString", &[]).unwrap();
     assert_eq!(text(&mut r, &s), "3");
     let parts = r
-        .call_method(
-            &Js::str("15m"),
-            "split",
-            &[r.regexp(r"/(\d+)/").unwrap()],
-        )
+        .call_method(&Js::str("15m"), "split", &[r.regexp(r"/(\d+)/").unwrap()])
         .unwrap();
     let joined = r.call_method(&parts, "join", &[Js::str("|")]).unwrap();
     assert_eq!(text(&mut r, &joined), "|15|m");
@@ -115,7 +103,9 @@ fn promises_adopt_and_then_chains_settle_on_the_runtime() {
     let chained = r.call_method(&inner, "then", &[add]).unwrap();
     let outer = r.spawn_value(r.await_value(chained));
     rt.drain();
-    let Js::Promise(cell) = outer else { panic!("expected promise") };
+    let Js::Promise(cell) = outer else {
+        panic!("expected promise")
+    };
     match cell.result() {
         Some(Ok(v)) => assert_eq!(v.as_f64(), Some(42.0)),
         _ => panic!("promise did not fulfil"),
@@ -151,9 +141,7 @@ fn timers_fire_on_the_virtual_clock_and_clear_cancels() {
 #[test]
 fn operators_follow_abstract_semantics() {
     let (mut r, _) = realm();
-    let sum = r
-        .binary("+", &Js::str("a"), &Js::Number(1.0))
-        .unwrap();
+    let sum = r.binary("+", &Js::str("a"), &Js::Number(1.0)).unwrap();
     assert_eq!(text(&mut r, &sum), "a1");
     assert!(
         r.binary("<", &Js::str("10"), &Js::Number(9.0))
@@ -172,7 +160,6 @@ fn operators_follow_abstract_semantics() {
 
 #[test]
 fn number_to_string_with_radix_matches_v8() {
-    
     // Values printed by Node v24.20.0 (`v.toString(r)`).
     for (v, radix, expected) in [
         (0.5, 36, "0.i"),
@@ -189,7 +176,9 @@ fn number_to_string_with_radix_matches_v8() {
         (std::f64::consts::PI, 16, "3.243f6a8885a3"),
     ] {
         let mut host = realm().0;
-        let value = host.call_method(&Js::Number(v), "toString", &[Js::Number(radix as f64)]).unwrap();
+        let value = host
+            .call_method(&Js::Number(v), "toString", &[Js::Number(radix as f64)])
+            .unwrap();
         assert_eq!(text(&mut host, &value), expected, "{v}.toString({radix})");
     }
 }
@@ -323,7 +312,11 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
     let Js::Number(number) = seen[1].1[0].get("0").unwrap() else {
         panic!("HL_REALM_ORIGINAL_ARRAY_IDENTITY native number type");
     };
-    assert_eq!(number.to_bits(), 8.0_f64.to_bits(), "HL_REALM_ORIGINAL_ARRAY_IDENTITY source mutation remains visible");
+    assert_eq!(
+        number.to_bits(),
+        8.0_f64.to_bits(),
+        "HL_REALM_ORIGINAL_ARRAY_IDENTITY source mutation remains visible"
+    );
 }
 
 #[test]
@@ -434,7 +427,9 @@ fn production_import_map_series_awaits_values_and_callbacks_and_reads_live_lengt
         .call(&series, &Js::Undefined, &[input, callback, receiver])
         .unwrap();
     rt.drain();
-    let Js::Promise(cell) = output else { panic!("expected promise") };
+    let Js::Promise(cell) = output else {
+        panic!("expected promise")
+    };
     let result = match cell.result() {
         Some(Ok(v)) => v.clone(),
         _ => panic!("serial result must fulfill"),
@@ -469,16 +464,19 @@ fn production_import_map_series_retains_module_receiver_and_original_rejection()
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = calls.clone();
     let callback = r.native("reject", 1, move |r, this, _| {
-        assert!(r.get_str(this, "mapSeries")?.strict_equals(&expected_series));
+        assert!(
+            r.get_str(this, "mapSeries")?
+                .strict_equals(&expected_series)
+        );
         observed.set(observed.get() + 1);
         Ok(r.settled_promise(Err(thrown.clone())))
     });
     let input = r.new_array(vec![Js::Number(1.0), Js::Number(2.0)]);
-    let output = r
-        .call(&series, &Js::Undefined, &[input, callback])
-        .unwrap();
+    let output = r.call(&series, &Js::Undefined, &[input, callback]).unwrap();
     rt.drain();
-    let Js::Promise(cell) = output else { panic!("expected promise") };
+    let Js::Promise(cell) = output else {
+        panic!("expected promise")
+    };
     match cell.result() {
         Some(Err(error)) => assert!(error.value.strict_equals(&original.value)),
         _ => panic!("serial error must reject"),
@@ -527,7 +525,9 @@ fn production_import_map_series_resolves_callback_call_before_awaited_item() {
         *trace.borrow(),
         ["get callback.call", "get item", "own call"]
     );
-    let Js::Promise(cell) = output else { panic!("expected promise") };
+    let Js::Promise(cell) = output else {
+        panic!("expected promise")
+    };
     let result = match cell.result() {
         Some(Ok(v)) => v.clone(),
         _ => panic!("own call result must fulfill"),
@@ -570,7 +570,7 @@ fn production_seam_history_mapper_preserves_the_throw_without_inspecting_it() {
             invoked.set(invoked.get() + 1);
             Err(Thrown::new(thrown.clone()))
         });
-        let row=r.from_serde(&serde_json::json!({"order":{"oid":1,"coin":"BTC","timestamp":123,"side":"B","origSz":"1","sz":"0","orderType":"Limit","limitPx":"10"},"status":"filled","statusTimestamp":124}));
+        let row=r.encode_json(&serde_json::json!({"order":{"oid":1,"coin":"BTC","timestamp":123,"side":"B","origSz":"1","sz":"0","orderType":"Limit","limitPx":"10"},"status":"filled","statusTimestamp":124}));
         let mapper = r.global_binding("mapHyperliquidHistoricalOrder").unwrap();
         let error = r
             .call(&mapper, &Js::Undefined, &[row, resolver])
@@ -592,7 +592,7 @@ fn production_seam_history_mapper_preserves_the_throw_without_inspecting_it() {
 fn production_seam_history_imports_execute_the_maintained_helpers() {
     let (mut r, _) = production_realm();
     let make_row = |status: &str, sz: &str, time: u64| serde_json::json!({"order":{"oid":77,"coin":"BTC","timestamp":1699999998000u64,"side":"B","origSz":"0.25","sz":sz,"orderType":"Limit","limitPx":"60000"},"status":status,"statusTimestamp":time});
-    let input = r.from_serde(&serde_json::json!([
+    let input = r.encode_json(&serde_json::json!([
         make_row("open", "0.25", 1699999998000),
         make_row("filled", "0", 1699999999000)
     ]));
@@ -614,7 +614,7 @@ fn production_seam_history_imports_execute_the_maintained_helpers() {
     assert_eq!(order.symbol, "BTC-PERP");
     assert_eq!(order.filled, 0.25);
     assert_eq!(order.status, safe_cex_types::OrderStatus::Closed);
-    let fills=r.from_serde(&serde_json::json!([{"coin":"BTC","time":1699999999000u64,"dir":"Close Long","px":"62000","sz":"0.25","closedPnl":"125","fee":"2"}]));
+    let fills=r.encode_json(&serde_json::json!([{"coin":"BTC","time":1699999999000u64,"dir":"Close Long","px":"62000","sz":"0.25","closedPnl":"125","fee":"2"}]));
     let derive = r
         .global_binding("deriveHyperliquidClosedPositions")
         .unwrap();
@@ -625,10 +625,7 @@ fn production_seam_history_imports_execute_the_maintained_helpers() {
             &[fills, resolve, Js::str("authored-account")],
         )
         .unwrap();
-    assert_eq!(
-        r.get_str(&derived, "length").unwrap().as_f64(),
-        Some(1.0)
-    );
+    assert_eq!(r.get_str(&derived, "length").unwrap().as_f64(), Some(1.0));
     let entry = r.get_str(&derived, "0").unwrap();
     for (key, expected) in [
         ("notional", 15500.0),
@@ -716,10 +713,7 @@ fn production_seam_timeout_leads_are_actual_class_properties() {
 #[test]
 fn production_seam_browser_window_guards_refuse_before_browser_globals() {
     let (mut r, rt) = production_realm();
-    for name in [
-        "window",
-        "switchToCorrectNetwork",
-    ] {
+    for name in ["window", "switchToCorrectNetwork"] {
         assert!(
             r.global_binding(name).is_err(),
             "native does not invent an ambient browser/module binding: {name}"
@@ -731,9 +725,7 @@ fn production_seam_browser_window_guards_refuse_before_browser_globals() {
             use crate::browser_approval_flows as browser;
             match mode {
                 0 => browser::agent_switch_to_correct_network(&mut host, &Js::Bool(false)).await,
-                1 => {
-                    browser::builder_switch_to_correct_network(&mut host, &Js::Bool(false)).await
-                }
+                1 => browser::builder_switch_to_correct_network(&mut host, &Js::Bool(false)).await,
                 2 => {
                     browser::create_agent_wallet_with_browser_wallet(
                         &mut host,
@@ -756,7 +748,9 @@ fn production_seam_browser_window_guards_refuse_before_browser_globals() {
             }
         }));
         rt.drain();
-        let Js::Promise(cell) = output else { panic!("expected promise") };
+        let Js::Promise(cell) = output else {
+            panic!("expected promise")
+        };
         let result = match cell.result() {
             Some(Ok(v)) => v.clone(),
             _ => panic!(
@@ -823,34 +817,95 @@ fn market_host_iterator_rejects_primitive_iterator_before_first_step() {
 
 #[test]
 fn native_module_imports_match_the_maintained_browser_guard_and_signature_bodies() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let output = std::process::Command::new("node")
         .arg("sdk-rs/safe-cex-venue-hyperliquid/tests/native-imports-source.cjs")
-        .current_dir(root).output().expect("maintained module source");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .current_dir(root)
+        .output()
+        .expect("maintained module source");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let (mut host, runtime) = production_realm();
-    for (name, field) in [("TEALSTREET_BUILDER_FEE", "fee"), ("DEFAULT_BUILDER_FEE_TENTHS_BPS", "tenths"), ("DEFAULT_BUILDER_FEE_RATE", "rate")] {
+    for (name, field) in [
+        ("TEALSTREET_BUILDER_FEE", "fee"),
+        ("DEFAULT_BUILDER_FEE_TENTHS_BPS", "tenths"),
+        ("DEFAULT_BUILDER_FEE_RATE", "rate"),
+    ] {
         let value = host.global_binding(name).unwrap();
         assert_eq!(source_json(&mut host, &value), source["constants"][field]);
     }
     let ethers = host.global_binding("ethers").unwrap();
     assert!(ethers.get("BrowserProvider").unwrap().is_undefined());
     let signature = ethers.get("Signature").unwrap();
-    for (index, row) in source["signatureCases"].as_array().unwrap().iter().enumerate() {
-        let input = host.from_serde(&row["input"]);
+    for (index, row) in source["signatureCases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let input = host.encode_json(&row["input"]);
         let parsed = signature.call_method("from", vec![input]);
-        let projected = parsed.and_then(|value| Ok(Js::object(vec![("r", value.get("r")?), ("s", value.get("s")?), ("v", value.get("v")?)])));
+        let projected = parsed.and_then(|value| {
+            Ok(Js::object(vec![
+                ("r", value.get("r")?),
+                ("s", value.get("s")?),
+                ("v", value.get("v")?),
+            ]))
+        });
         match projected {
-            Ok(value) => assert_eq!(source_json(&mut host, &value), row["result"], "Signature.from case {index}"),
+            Ok(value) => assert_eq!(
+                source_json(&mut host, &value),
+                row["result"],
+                "Signature.from case {index}"
+            ),
             Err(error) => {
                 let fields = Js::object(vec![]);
-                for name in ["name", "message", "code", "shortMessage", "argument", "value"] {
+                for name in [
+                    "name",
+                    "message",
+                    "code",
+                    "shortMessage",
+                    "argument",
+                    "value",
+                ] {
                     let mut value = error.value.get(name).unwrap();
-                    if matches!(value, Js::BigInt(_)) { value = Js::String(value.to_js_string().unwrap()); }
+                    if matches!(value, Js::BigInt(_)) {
+                        value = Js::String(value.to_js_string().unwrap());
+                    }
                     fields.define(name, value).unwrap();
                 }
-                assert_eq!(source_json(&mut host, &fields), row["error"], "Signature.from case {index}");
+                assert_eq!(
+                    source_json(&mut host, &fields),
+                    row["error"],
+                    "Signature.from case {index}"
+                );
+                let descriptors = Js::object(vec![]);
+                let object = host.global_binding("Object").unwrap();
+                for name in ["message", "code", "shortMessage", "argument", "value"] {
+                    let descriptor = object
+                        .call_method(
+                            "getOwnPropertyDescriptor",
+                            vec![error.value.clone(), Js::str(name)],
+                        )
+                        .unwrap();
+                    descriptor
+                        .delete(&"value".encode_utf16().collect::<Vec<_>>())
+                        .unwrap();
+                    descriptors.define(name, descriptor).unwrap();
+                }
+                assert_eq!(
+                    source_json(&mut host, &descriptors),
+                    row["descriptors"],
+                    "Signature.from error descriptors {index}"
+                );
             }
         }
     }
@@ -858,18 +913,48 @@ fn native_module_imports_match_the_maintained_browser_guard_and_signature_bodies
     let receiver = supplied.clone();
     let calls = Rc::new(std::cell::RefCell::new(Vec::new()));
     let seen = calls.clone();
-    supplied.define("signTypedData", host.native("signTypedData", 3, move |_, this, args| {
-        assert!(this.same_reference(&receiver));
-        seen.borrow_mut().push(args[2].clone());
-        Ok(Js::str(&format!("0x{}{}1b", "11".repeat(32), "22".repeat(32))))
-    })).unwrap();
+    supplied
+        .define(
+            "signTypedData",
+            host.native("signTypedData", 3, move |_, this, args| {
+                assert!(this.same_reference(&receiver));
+                seen.borrow_mut().push(args[2].clone());
+                Ok(Js::str(&format!(
+                    "0x{}{}1b",
+                    "11".repeat(32),
+                    "22".repeat(32)
+                )))
+            }),
+        )
+        .unwrap();
     let sign = host.global_binding("signBuilderFeeApproval").unwrap();
-    let pending = sign.call(Js::Undefined, vec![supplied, Js::str(crate::constants::TEALSTREET_BUILDER_ADDRESS_MAINNET), Js::Undefined, Js::Bool(false), Js::Number(42.0)]).unwrap();
+    let pending = sign
+        .call(
+            Js::Undefined,
+            vec![
+                supplied,
+                Js::str(crate::constants::TEALSTREET_BUILDER_ADDRESS_MAINNET),
+                Js::Undefined,
+                Js::Bool(false),
+                Js::Number(42.0),
+            ],
+        )
+        .unwrap();
     runtime.drain();
-    let Js::Promise(pending) = pending else { panic!("async module helper") };
-    let result = pending.result().expect("supplied native signer completes").as_ref().unwrap().clone();
+    let Js::Promise(pending) = pending else {
+        panic!("async module helper")
+    };
+    let result = pending
+        .result()
+        .expect("supplied native signer completes")
+        .as_ref()
+        .unwrap()
+        .clone();
     assert_eq!(source_json(&mut host, &result), source["signature"]);
-    assert_eq!(calls.borrow()[0].get("maxFeeRate").unwrap().to_display(), "0.01%");
+    assert_eq!(
+        calls.borrow()[0].get("maxFeeRate").unwrap().to_display(),
+        "0.01%"
+    );
     assert!(host.global_binding("window").is_err());
     let math = host.global_binding("Math").unwrap();
     let original_math = math.clone();
@@ -877,45 +962,88 @@ fn native_module_imports_match_the_maintained_browser_guard_and_signature_bodies
     let reads = Rc::new(std::cell::Cell::new(0));
     let count = draws.clone();
     let observed = reads.clone();
-    math.define_accessor("random", Some(Rc::new(move |receiver| {
-        assert!(receiver.same_reference(&original_math));
-        observed.set(observed.get() + 1);
-        let count = count.clone();
-        let original_math = original_math.clone();
-        Ok(Js::function("random", move |receiver, _| {
+    math.define_accessor(
+        "random",
+        Some(Rc::new(move |receiver| {
             assert!(receiver.same_reference(&original_math));
-            let index = count.get();
-            count.set(index + 1);
-            Ok(Js::Number([0.0, 0.5, 1.0 - f64::EPSILON, f64::NAN][index]))
-        }))
-    })), None).unwrap();
-    let name = host.global_binding("generateAgentWalletName").unwrap().call(Js::Undefined, vec![]).unwrap();
+            observed.set(observed.get() + 1);
+            let count = count.clone();
+            let original_math = original_math.clone();
+            Ok(Js::function("random", move |receiver, _| {
+                assert!(receiver.same_reference(&original_math));
+                let index = count.get();
+                count.set(index + 1);
+                Ok(Js::Number([0.0, 0.5, 1.0 - f64::EPSILON, f64::NAN][index]))
+            }))
+        })),
+        None,
+    )
+    .unwrap();
+    let name = host
+        .global_binding("generateAgentWalletName")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
     assert_eq!(source_json(&mut host, &name), source["name"]);
     assert_eq!(reads.get(), 4);
     assert_eq!(draws.get(), 4);
-    let available = host.global_binding("hasEthereumWallet").unwrap().call(Js::Undefined, vec![]).unwrap();
+    let available = host
+        .global_binding("hasEthereumWallet")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
     assert!(available.strict_equals(&Js::Bool(false)));
     let cause = Js::object(vec![("code", Js::utf16(&[0xd800]))]);
     let thrown = cause.clone();
     let window = Js::object(vec![]);
-    window.define_accessor("ethereum", Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))), None).unwrap();
+    window
+        .define_accessor(
+            "ethereum",
+            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+            None,
+        )
+        .unwrap();
     host.set_global("window", window);
-    let error = host.global_binding("hasEthereumWallet").unwrap().call(Js::Undefined, vec![]).unwrap_err();
+    let error = host
+        .global_binding("hasEthereumWallet")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap_err();
     assert!(error.value.same_reference(&cause));
-    host.shared.globals.delete(&"window".encode_utf16().collect::<Vec<_>>()).unwrap();
+    host.shared
+        .globals
+        .delete(&"window".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
     let report = host.global_binding("reportEvent").unwrap();
     let payload = Js::object(vec![("amount", Js::Number(-0.0))]);
-    assert!(report.call(Js::Undefined, vec![Js::str("no-sink"), payload.clone()]).unwrap().is_undefined());
-    struct Sink { observed: Rc<std::cell::RefCell<Option<Js>>>, cause: Js }
+    assert!(
+        report
+            .call(Js::Undefined, vec![Js::str("no-sink"), payload.clone()])
+            .unwrap()
+            .is_undefined()
+    );
+    struct Sink {
+        observed: Rc<std::cell::RefCell<Option<Js>>>,
+        cause: Js,
+    }
     impl safe_cex_types::telemetry::TelemetrySink for Sink {
         fn event(&self, _: &str, data: Rc<dyn std::any::Any>) -> Result<(), Rc<dyn std::any::Any>> {
-            *self.observed.borrow_mut() = Some(data.downcast_ref::<Js>().expect("original native payload").clone());
+            *self.observed.borrow_mut() = Some(
+                data.downcast_ref::<Js>()
+                    .expect("original native payload")
+                    .clone(),
+            );
             Err(Rc::new(self.cause.clone()))
         }
     }
     let observed = Rc::new(std::cell::RefCell::new(None));
-    *host.shared.extra.telemetry.borrow_mut() = Some(Rc::new(Sink { observed: observed.clone(), cause: cause.clone() }));
-    let error = report.call(Js::Undefined, vec![Js::str("event"), payload.clone()]).unwrap_err();
+    *host.shared.extra.telemetry.borrow_mut() = Some(Rc::new(Sink {
+        observed: observed.clone(),
+        cause: cause.clone(),
+    }));
+    let error = report
+        .call(Js::Undefined, vec![Js::str("event"), payload.clone()])
+        .unwrap_err();
     assert!(error.value.same_reference(&cause));
     assert!(observed.borrow().as_ref().unwrap().same_reference(&payload));
 }
@@ -929,30 +1057,66 @@ fn installed_substr_uses_utf16_indices_and_source_coercion_order() {
         (vec![Js::Number(1.0), Js::Number(1.0)], vec![0xd800]),
         (vec![Js::Number(-2.0)], vec![66, 0xdc00]),
         (vec![Js::Number(f64::INFINITY), Js::Number(1.0)], vec![]),
-        (vec![Js::Number(f64::NEG_INFINITY), Js::Number(1.0)], vec![65]),
-        (vec![Js::Number(f64::NAN), Js::Number(2.0)], vec![65, 0xd800]),
-        (vec![Js::Number(1.0), Js::Number(f64::INFINITY)], vec![0xd800, 66, 0xdc00]),
+        (
+            vec![Js::Number(f64::NEG_INFINITY), Js::Number(1.0)],
+            vec![65],
+        ),
+        (
+            vec![Js::Number(f64::NAN), Js::Number(2.0)],
+            vec![65, 0xd800],
+        ),
+        (
+            vec![Js::Number(1.0), Js::Number(f64::INFINITY)],
+            vec![0xd800, 66, 0xdc00],
+        ),
         (vec![Js::Number(1.0), Js::Number(f64::NEG_INFINITY)], vec![]),
     ];
     let script = "const s=String.fromCharCode(65,0xd800,66,0xdc00);const rows=[[],[1,1],[-2],[Infinity,1],[-Infinity,1],[NaN,2],[1,Infinity],[1,-Infinity]];console.log(JSON.stringify(rows.map(args=>Array.from({length:s.substr(...args).length},(_,i)=>s.substr(...args).charCodeAt(i)))));";
-    let output = std::process::Command::new("node").args(["-e", script]).output().unwrap();
+    let output = std::process::Command::new("node")
+        .args(["-e", script])
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let source: Vec<Vec<u16>> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(source.len(), cases.len());
     for ((args, expected), source) in cases.into_iter().zip(source) {
         assert_eq!(expected, source);
-        assert_eq!(host.call_method(&text, "substr", &args).unwrap().as_str().map(|units| units.as_ref()), Some(expected.as_slice()));
+        assert_eq!(
+            host.call_method(&text, "substr", &args)
+                .unwrap()
+                .as_str()
+                .map(|units| units.as_ref()),
+            Some(expected.as_slice())
+        );
     }
     let order = Rc::new(std::cell::RefCell::new(vec![]));
     let start = Js::object(vec![]);
     let count = Js::object(vec![]);
     let first = order.clone();
-    start.define("valueOf", Js::function("start", move |_, _| { first.borrow_mut().push("start"); Ok(Js::Number(1.0)) })).unwrap();
+    start
+        .define(
+            "valueOf",
+            Js::function("start", move |_, _| {
+                first.borrow_mut().push("start");
+                Ok(Js::Number(1.0))
+            }),
+        )
+        .unwrap();
     let second = order.clone();
     let cause = Js::object(vec![]);
     let thrown = cause.clone();
-    count.define("valueOf", Js::function("count", move |_, _| { second.borrow_mut().push("count"); Err(Thrown::new(thrown.clone())) })).unwrap();
-    let error = host.call_method(&text, "substr", &[start, count]).unwrap_err();
+    count
+        .define(
+            "valueOf",
+            Js::function("count", move |_, _| {
+                second.borrow_mut().push("count");
+                Err(Thrown::new(thrown.clone()))
+            }),
+        )
+        .unwrap();
+    let error = host
+        .call_method(&text, "substr", &[start, count])
+        .unwrap_err();
     assert!(error.value.same_reference(&cause));
     assert_eq!(*order.borrow(), ["start", "count"]);
 }
@@ -1231,9 +1395,16 @@ fn production_order_wire_import_retains_undefined_and_limit_alias() {
 }
 
 fn source_json(host: &mut Host, value: &Js) -> serde_json::Value {
-    let units = host.stringify(value).unwrap().expect("source output has a JSON value");
+    let units = host
+        .stringify(value)
+        .unwrap()
+        .expect("source output has a JSON value");
     let text = String::from_utf16(&units).unwrap();
     let result: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(text, serde_json::to_string(&result).unwrap(), "canonical JS stringify uses the source numeric spelling");
+    assert_eq!(
+        text,
+        serde_json::to_string(&result).unwrap(),
+        "canonical JS stringify uses the source numeric spelling"
+    );
     result
 }

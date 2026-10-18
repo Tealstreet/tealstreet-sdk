@@ -92,8 +92,29 @@ console.log(JSON.stringify(values.map(value=>{try{return isNaN(value)}catch(e){r
     assert!(output.status.success());
     let expected: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     run(|scope| async move {
-        let check = scope.global("isNaN").expect("HL_SHARED_GLOBAL isNaN is installed");
-        let values = vec![Js::Undefined, Js::Null, Js::Bool(false), Js::Bool(true), Js::Number(0.), Js::Number(-0.), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::str(""), Js::str("  "), Js::str("1"), Js::str("bad"), Js::array(vec![]), Js::array(vec![Js::Number(1.)]), Js::array(vec![Js::Number(1.),Js::Number(2.)]), Js::object(vec![]), Js::BigInt(Rc::new(1.into())), Js::SymbolIterator];
+        let check = scope
+            .global("isNaN")
+            .expect("HL_SHARED_GLOBAL isNaN is installed");
+        let values = vec![
+            Js::Undefined,
+            Js::Null,
+            Js::Bool(false),
+            Js::Bool(true),
+            Js::Number(0.),
+            Js::Number(-0.),
+            Js::Number(f64::NAN),
+            Js::Number(f64::INFINITY),
+            Js::str(""),
+            Js::str("  "),
+            Js::str("1"),
+            Js::str("bad"),
+            Js::array(vec![]),
+            Js::array(vec![Js::Number(1.)]),
+            Js::array(vec![Js::Number(1.), Js::Number(2.)]),
+            Js::object(vec![]),
+            Js::BigInt(Rc::new(1.into())),
+            Js::SymbolIterator,
+        ];
         for (value, expected) in values.into_iter().zip(expected) {
             let actual = match check.call(Js::Undefined, vec![value]) {
                 Ok(Js::Bool(value)) => serde_json::json!(value),
@@ -106,11 +127,22 @@ console.log(JSON.stringify(values.map(value=>{try{return isNaN(value)}catch(e){r
         let observed = calls.clone();
         let cause = Js::object(vec![]);
         let failure = cause.clone();
-        let input = Js::object(vec![("valueOf", Js::function("valueOf", move |_, _| {
-            observed.set(observed.get() + 1);
-            Err(safe_cex_exchange::js_runtime::value::Thrown::new(failure.clone()))
-        }))]);
-        assert!(check.call(Js::Undefined, vec![input]).unwrap_err().value.same_reference(&cause));
+        let input = Js::object(vec![(
+            "valueOf",
+            Js::function("valueOf", move |_, _| {
+                observed.set(observed.get() + 1);
+                Err(safe_cex_exchange::js_runtime::value::Thrown::new(
+                    failure.clone(),
+                ))
+            }),
+        )]);
+        assert!(
+            check
+                .call(Js::Undefined, vec![input])
+                .unwrap_err()
+                .value
+                .same_reference(&cause)
+        );
         assert_eq!(calls.get(), 1);
     });
 }

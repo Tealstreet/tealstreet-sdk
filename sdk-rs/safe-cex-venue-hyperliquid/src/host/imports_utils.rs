@@ -1,9 +1,7 @@
 //! Small shared utility imports (lodash, utils/*, json-parse), implemented over
 //! realm values because several mutate or return their argument's identity.
-use safe_cex_exchange::js_runtime::{value::Js};
-use super::{
-    Host,
-};
+use super::Host;
+use safe_cex_exchange::js_runtime::value::Js;
 
 fn arg(args: &[Js], i: usize) -> Js {
     args.get(i).cloned().unwrap_or(Js::Undefined)
@@ -33,10 +31,24 @@ pub(crate) fn bind(realm: &Host) {
         }),
     );
     // lodash/uniqBy: first occurrence wins, keyed by SameValueZero.
-    realm.bind_import("uniqBy", realm.shared.globals.get("uniqBy").expect("installed shared utility"));
+    realm.bind_import(
+        "uniqBy",
+        realm
+            .shared
+            .globals
+            .get("uniqBy")
+            .expect("installed shared utility"),
+    );
 
     // lodash/flatten: one level.
-    realm.bind_import("flatten", realm.shared.globals.get("flatten").expect("installed shared utility"));
+    realm.bind_import(
+        "flatten",
+        realm
+            .shared
+            .globals
+            .get("flatten")
+            .expect("installed shared utility"),
+    );
 
     realm.bind_import(
         "omitUndefined",
@@ -58,7 +70,8 @@ pub(crate) fn bind(realm: &Host) {
         realm.native("createPositionId", 3, |r, _, a| {
             let symbol = arg(a, 0);
             let side = arg(a, 1);
-            let one_way = matches!(arg(a, 2), Js::String(ref u) if String::from_utf16_lossy(u) == "oneway");
+            let one_way =
+                matches!(arg(a, 2), Js::String(ref u) if String::from_utf16_lossy(u) == "oneway");
             if one_way || !side.truthy() {
                 return Ok(symbol);
             }
@@ -69,10 +82,24 @@ pub(crate) fn bind(realm: &Host) {
         }),
     );
     // utils/loop: sleep the interval, then run fn on the next turn.
-    realm.bind_import("loop", realm.shared.globals.get("loop").expect("installed shared utility"));
+    realm.bind_import(
+        "loop",
+        realm
+            .shared
+            .globals
+            .get("loop")
+            .expect("installed shared utility"),
+    );
 
     // @tealstreet/json-parse jsonParse: JSON.parse or null.
-    realm.bind_import("jsonParse", realm.shared.globals.get("jsonParse").expect("installed shared utility"));
+    realm.bind_import(
+        "jsonParse",
+        realm
+            .shared
+            .globals
+            .get("jsonParse")
+            .expect("installed shared utility"),
+    );
 
     // utils/orderbook calcOrderBookTotal: cumulative totals written in place.
     realm.bind_import(
@@ -94,9 +121,22 @@ pub(crate) fn bind(realm: &Host) {
             Ok(Js::Undefined)
         }),
     );
-    realm.bind_import("adjust", realm.shared.globals.get("adjust").expect("installed shared utility"));
+    realm.bind_import(
+        "adjust",
+        realm
+            .shared
+            .globals
+            .get("adjust")
+            .expect("installed shared utility"),
+    );
 
     // nanoid(): 21 URL-safe characters from the platform CSPRNG.
-    realm.bind_import("nanoid", realm.shared.globals.get("nanoid").expect("installed shared utility"));
-
+    realm.bind_import(
+        "nanoid",
+        realm
+            .shared
+            .globals
+            .get("nanoid")
+            .expect("installed shared utility"),
+    );
 }

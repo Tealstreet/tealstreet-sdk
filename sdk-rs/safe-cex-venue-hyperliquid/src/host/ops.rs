@@ -1,18 +1,12 @@
 //! Destructuring, spreads and parameter bindings with source IteratorClose.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-};
+use super::Host;
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 
 impl Host {
     /// `const [a, b, ...] = value` over `slots`; a `false` slot is an elision.
     /// After the last slot the iterator is closed unless already exhausted; a
     /// throwing `return` propagates (normal completion).
-    pub(crate) fn array_pattern(
-        &mut self,
-        value: &Js,
-        slots: &[bool],
-    ) -> Result<Vec<Js>, Thrown> {
+    pub(crate) fn array_pattern(&mut self, value: &Js, slots: &[bool]) -> Result<Vec<Js>, Thrown> {
         let iterator = self.get_iterator(value)?;
         let mut out = vec![];
         let mut done = false;
@@ -33,11 +27,7 @@ impl Host {
         }
         Ok(out)
     }
-    pub(crate) fn array_slots(
-        &mut self,
-        value: &Js,
-        count: usize,
-    ) -> Result<Vec<Js>, Thrown> {
+    pub(crate) fn array_slots(&mut self, value: &Js, count: usize) -> Result<Vec<Js>, Thrown> {
         self.array_pattern(value, &vec![true; count])
     }
     /// `const [head, ...rest] = value`.
@@ -51,11 +41,7 @@ impl Host {
         Ok((head, self.new_array(rest)))
     }
     /// `const { k1, k2 } = value`, with the source destructuring TypeError.
-    pub(crate) fn object_pattern(
-        &mut self,
-        value: &Js,
-        keys: &[&str],
-    ) -> Result<Vec<Js>, Thrown> {
+    pub(crate) fn object_pattern(&mut self, value: &Js, keys: &[&str]) -> Result<Vec<Js>, Thrown> {
         if value.is_nullish() {
             let first = keys.first().copied().unwrap_or("");
             let shown = if matches!(value, Js::Null) {
@@ -75,11 +61,7 @@ impl Host {
         keys.iter().map(|k| self.get_str(value, k)).collect()
     }
     /// Object spread / CopyDataProperties: own enumerable string then symbol keys.
-    pub(crate) fn copy_data_properties(
-        &mut self,
-        target: &Js,
-        source: &Js,
-    ) -> Result<(), Thrown> {
+    pub(crate) fn copy_data_properties(&mut self, target: &Js, source: &Js) -> Result<(), Thrown> {
         if source.is_nullish() {
             return Ok(());
         }
@@ -107,20 +89,12 @@ impl Host {
         Ok(self.new_array(items))
     }
     /// `f(...value)` appends the iterable's items to an argument list.
-    pub(crate) fn spread_args(
-        &mut self,
-        args: &mut Vec<Js>,
-        value: &Js,
-    ) -> Result<(), Thrown> {
+    pub(crate) fn spread_args(&mut self, args: &mut Vec<Js>, value: &Js) -> Result<(), Thrown> {
         args.extend(self.collect_iterable(value)?);
         Ok(())
     }
     /// `[...array, last]`.
-    pub(crate) fn spread_append(
-        &mut self,
-        iterable: &Js,
-        last: &Js,
-    ) -> Result<Js, Thrown> {
+    pub(crate) fn spread_append(&mut self, iterable: &Js, last: &Js) -> Result<Js, Thrown> {
         let mut items = self.collect_iterable(iterable)?;
         items.push(last.clone());
         Ok(self.new_array(items))

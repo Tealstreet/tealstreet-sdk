@@ -675,10 +675,14 @@ impl Js {
 
     pub fn instance_of(&self, constructor: &Js) -> Result<bool, Thrown> {
         if !constructor.is_object() {
-            return Err(Thrown::type_error("Right-hand side of 'instanceof' is not an object"));
+            return Err(Thrown::type_error(
+                "Right-hand side of 'instanceof' is not an object",
+            ));
         }
         if !constructor.is_callable() {
-            return Err(Thrown::type_error("Right-hand side of 'instanceof' is not callable"));
+            return Err(Thrown::type_error(
+                "Right-hand side of 'instanceof' is not callable",
+            ));
         }
         constructor.ordinary_has_instance(self)
     }

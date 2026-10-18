@@ -1,10 +1,8 @@
 //! The JS `BaseExchange` superclass the ported HyperliquidExchange class
 //! extends. Each inherited member the venue bodies use delegates to the Rust
 //! BaseExchange; members the bodies never reach are absent rather than stubbed.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-};
+use super::Host;
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput, exchange::BaseExchange,
     js_runtime::base_exchange::ExternalPublicDataFactory,
@@ -15,9 +13,15 @@ use std::rc::Rc;
 fn arg(args: &[Js], i: usize) -> Js {
     args.get(i).cloned().unwrap_or(Js::Undefined)
 }
-fn thrown(_: &Host, e: safe_cex_exchange::runtime::ExchangeError) -> Thrown { e.into() }
+fn thrown(_: &Host, e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
+    e.into()
+}
 pub(crate) fn error_input(_: &mut Host, value: &Js) -> Result<ExchangeErrorInput, Thrown> {
-    Ok(if value.is_undefined() { ExchangeErrorInput::Missing } else { ExchangeErrorInput::Raw(value.clone()) })
+    Ok(if value.is_undefined() {
+        ExchangeErrorInput::Missing
+    } else {
+        ExchangeErrorInput::Raw(value.clone())
+    })
 }
 
 /// The JS class; instances are allocated with newTarget's prototype and carry
@@ -37,26 +41,31 @@ pub(crate) fn base_exchange_class(
         let b = owner.clone();
         let emit = r.native("emit", 1, move |r, _, args| {
             let event = r.to_rust_string(&arg(args, 0))?;
-            b.emit_args(&event, args.get(1..).unwrap_or_default()).map_err(Thrown::from)?;
+            b.emit_args(&event, args.get(1..).unwrap_or_default())
+                .map_err(Thrown::from)?;
             Ok(Js::Undefined)
         });
-        r.define_str(&instance, "emitter", Js::object(vec![("emit",emit)]))?;
+        r.define_str(&instance, "emitter", Js::object(vec![("emit", emit)]))?;
         Ok(instance)
     });
-    class.define_property(&"prototype".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value",prototype.clone())])).expect("fresh base class prototype");
+    class
+        .define_property(
+            &"prototype".encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![("value", prototype.clone())]),
+        )
+        .expect("fresh base class prototype");
 
     realm.define_hidden(&prototype, Js::str("constructor"), class.clone());
 
-    let method = |realm: &Host,
-                  name: &str,
-                  length: u8,
-                  body: Rc<
-        dyn Fn(&mut Host, &Rc<BaseExchange>, &Js, &[Js]) -> Result<Js, Thrown>,
-    >| {
-        let b = base.clone();
-        let f = realm.native(name, length, move |r, this, args| body(r, &b, this, args));
-        realm.define_hidden(&prototype, Js::str(name), f);
-    };
+    let method =
+        |realm: &Host,
+         name: &str,
+         length: u8,
+         body: Rc<dyn Fn(&mut Host, &Rc<BaseExchange>, &Js, &[Js]) -> Result<Js, Thrown>>| {
+            let b = base.clone();
+            let f = realm.native(name, length, move |r, this, args| body(r, &b, this, args));
+            realm.define_hidden(&prototype, Js::str(name), f);
+        };
     method(
         realm,
         "log",
@@ -66,7 +75,8 @@ pub(crate) fn base_exchange_class(
                 Js::Undefined => "info".to_owned(),
                 s => r.to_rust_string(&s)?,
             };
-            b.log_value(&arg(a, 0), &severity).map_err(|e| thrown(r, e))?;
+            b.log_value(&arg(a, 0), &severity)
+                .map_err(|e| thrown(r, e))?;
             Ok(Js::Undefined)
         }),
     );
@@ -83,10 +93,8 @@ pub(crate) fn base_exchange_class(
             let extra = match arg(a, 2) {
                 Js::Undefined => None,
                 x => Some(
-                    safe_cex_exchange::js_runtime::value::to_retained_input(
-                        &x.clone(),
-                    )
-                    .map_err(|error| thrown(r, error.to_exchange_error()))?,
+                    safe_cex_exchange::js_runtime::value::to_retained_input(&x.clone())
+                        .map_err(|error| thrown(r, error.to_exchange_error()))?,
                 ),
             };
             b.emit_and_log_error(input, message.as_deref(), extra.as_ref())
@@ -126,10 +134,7 @@ pub(crate) fn base_exchange_class(
         realm,
         "getTickInterval",
         0,
-        Rc::new(|_, b, _, _| {
-            Ok(b.get_tick_interval()
-                .map_or(Js::Undefined, Js::Number))
-        }),
+        Rc::new(|_, b, _, _| Ok(b.get_tick_interval().map_or(Js::Undefined, Js::Number))),
     );
     method(
         realm,
@@ -137,7 +142,7 @@ pub(crate) fn base_exchange_class(
         0,
         Rc::new(|r, b, _, _| {
             let symbols = b.get_active_ticker_symbols();
-            r.from_typed(&symbols)
+            r.encode_typed(&symbols)
         }),
     );
     method(
@@ -208,7 +213,7 @@ pub(crate) fn base_exchange_class(
                     let (mut realm, owner) = (fills_realm.clone(), fills_owner.clone());
                     Box::pin(async move {
                         let options = realm
-                            .from_typed(&options)
+                            .encode_typed(&options)
                             .map_err(|error| realm.exchange_error(&error))?;
                         let result = realm
                             .call_method(&owner, "fetchHistoricalFills", &[options])
@@ -274,7 +279,7 @@ pub(crate) fn base_exchange_class(
                 )
                 .await
                 .map_err(|error| thrown(&realm, error.error))?;
-                realm.from_typed(&result.records)
+                realm.encode_typed(&result.records)
             })))
         }),
     );
@@ -292,11 +297,22 @@ pub(crate) fn base_exchange_class(
         Ok(Js::Bool(b.is_disposed()))
     });
     let setter = base.clone();
-    prototype.define_property(&"isDisposed".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![
-        ("get", disposed),
-        ("set", realm.native("set isDisposed", 1, move |_,_,args| { setter.set_disposed_flag(arg(args, 0).truthy()); Ok(Js::Undefined) })),
-        ("configurable", Js::Bool(true)),
-    ])).expect("fresh base prototype getter");
+    prototype
+        .define_property(
+            &"isDisposed".encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![
+                ("get", disposed),
+                (
+                    "set",
+                    realm.native("set isDisposed", 1, move |_, _, args| {
+                        setter.set_disposed_flag(arg(args, 0).truthy());
+                        Ok(Js::Undefined)
+                    }),
+                ),
+                ("configurable", Js::Bool(true)),
+            ]),
+        )
+        .expect("fresh base prototype getter");
 
     let b = base.clone();
     let public_only = realm.native("get isPublicDataOnly", 0, move |_, _, _| {
@@ -306,7 +322,7 @@ pub(crate) fn base_exchange_class(
     });
     realm.define_getter(&prototype, Js::str("isPublicDataOnly"), public_only);
     let b = base.clone();
-    let name = realm.native("get name", 0, move |r, _, _| r.from_typed(b.name()));
+    let name = realm.native("get name", 0, move |r, _, _| r.encode_typed(b.name()));
     realm.define_getter(&prototype, Js::str("name"), name);
     class
 }

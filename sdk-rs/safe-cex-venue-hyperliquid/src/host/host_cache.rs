@@ -4,15 +4,12 @@
 //! that exchange's own code but not across exchange instances. Native hosts
 //! have no BroadcastChannel or sessionStorage, so the cache is memory-only,
 //! which is the source's own behavior in a worker without those globals.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-    host_core::js,
-};
+use super::{Host, host_core::js};
 use crate::{
     cache_runtime::{self, CacheModule, CacheRuntimeHost, Callback},
     spot_json::JsString,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::{cell::RefCell, rc::Rc};
 
 type ModuleSlot = Rc<RefCell<Option<Rc<CacheModule<Js>>>>>;

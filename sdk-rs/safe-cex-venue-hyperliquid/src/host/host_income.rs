@@ -1,10 +1,10 @@
 //! Primitive host bindings for the existing income mappers and history pager.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use super::Host;
 use crate::{
     income::{IncomeFuture, IncomeHost},
     spot_json::JsString,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 
 impl IncomeHost for Host {
     fn number(&mut self, value: &Js) -> Result<f64, Thrown> {
@@ -29,8 +29,7 @@ impl IncomeHost for Host {
     }
     fn math_max(&mut self, left: f64, right: f64) -> Result<f64, Thrown> {
         let math = self.global_binding("Math")?;
-        let result =
-            self.call_method(&math, "max", &[Js::Number(left), Js::Number(right)])?;
+        let result = self.call_method(&math, "max", &[Js::Number(left), Js::Number(right)])?;
         self.to_number(&result)
     }
     fn await_value(&mut self, value: Js) -> IncomeFuture<'_, Js, Thrown> {

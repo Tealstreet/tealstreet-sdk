@@ -1,7 +1,5 @@
-use safe_cex_exchange::js_runtime::{value::Js};
-use super::{
-    test_runtime::TestRuntime,
-};
+use super::test_runtime::TestRuntime;
+use safe_cex_exchange::js_runtime::value::Js;
 use std::rc::Rc;
 
 #[test]
@@ -19,7 +17,10 @@ fn production_spot_limiter_debits_refills_and_recursively_waits() {
     let first = realm.call_method(&limiter, "waitForToken", &[]).unwrap();
     runtime.drain();
     assert!(matches!(
-        match &first { Js::Promise(p) => p.result(), _ => panic!("expected promise") },
+        match &first {
+            Js::Promise(p) => p.result(),
+            _ => panic!("expected promise"),
+        },
         Some(Ok(Js::Undefined))
     ));
     assert_eq!(
@@ -58,7 +59,10 @@ fn production_spot_limiter_debits_refills_and_recursively_waits() {
         .unwrap();
     assert!(
         matches!(
-            match &waiting { Js::Promise(p) => p.result(), _ => panic!("expected promise") },
+            match &waiting {
+                Js::Promise(p) => p.result(),
+                _ => panic!("expected promise"),
+            },
             None
         ),
         "production spot limiter waits when depleted"
@@ -66,7 +70,10 @@ fn production_spot_limiter_debits_refills_and_recursively_waits() {
     runtime.drain();
     assert!(
         matches!(
-            match &waiting { Js::Promise(p) => p.result(), _ => panic!("expected promise") },
+            match &waiting {
+                Js::Promise(p) => p.result(),
+                _ => panic!("expected promise"),
+            },
             Some(Ok(Js::Undefined))
         ),
         "production spot limiter recursive wait resolves"

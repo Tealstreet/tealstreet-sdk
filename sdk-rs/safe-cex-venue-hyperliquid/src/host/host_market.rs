@@ -1,11 +1,11 @@
 //! Scalar-market and fast-asset-context host primitives for the imported
 //! market helpers (price precision, volume/OI parsing, fastAssetCtxs decode).
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use super::Host;
 use crate::{
     market_helpers::{FastAssetCtxHost, MarketScalarHost, PreciseComparison},
     spot_json::JsString,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::cmp::Ordering;
 
 fn units(text: &str) -> JsString {
@@ -55,12 +55,7 @@ impl MarketScalarHost for Host {
     }
     fn value_by_key(&mut self, value: &Js, key: &str) -> Result<Js, Thrown> {
         let v = self.import("v")?;
-        Host::call(
-            self,
-            &v,
-            &Js::Undefined,
-            &[value.clone(), Js::str(key)],
-        )
+        Host::call(self, &v, &Js::Undefined, &[value.clone(), Js::str(key)])
     }
     fn parse_float(&mut self, text: &[u16]) -> Result<f64, Thrown> {
         Ok(safe_cex_num::parse_float(&String::from_utf16_lossy(text)))

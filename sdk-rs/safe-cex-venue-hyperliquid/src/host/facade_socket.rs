@@ -6,11 +6,9 @@
 //! this bridge forwards to those listeners and to the instance's own
 //! `connectAndSubscribe`/`ping`. CHOSEN: `close` listeners are not invoked —
 //! the Rust core runs the close/reconnect path the base `onClose` would.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
+use super::Host;
 use safe_cex_exchange::js_runtime::value::ObjectData;
-use super::{
-    Host,
-};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
@@ -130,10 +128,12 @@ impl WsProtocol for Bridge {
 }
 
 fn handle_of(r: &mut Host, this: &Js) -> Result<Rc<Handle>, Thrown> {
-    this.resource::<Handle>().ok_or_else(|| r.type_error("BaseWebSocket method called on an object that is not a socket"))
+    this.resource::<Handle>().ok_or_else(|| {
+        r.type_error("BaseWebSocket method called on an object that is not a socket")
+    })
 }
 fn thrown(r: &Host, e: ExchangeError) -> Thrown {
-    r.from_exchange_error(e)
+    r.restore_error(e)
 }
 
 /// A JS callback as a diagnostic formatter (errors and non-strings mean "drop").
@@ -144,7 +144,7 @@ fn formatter(realm: &Host, f: Js) -> Option<Rc<dyn Fn(&serde_json::Value) -> Opt
     let realm = realm.clone();
     Some(Rc::new(move |data: &serde_json::Value| {
         let mut r = realm.clone();
-        let v = r.from_serde(data);
+        let v = r.encode_json(data);
         match r.call(&f, &Js::Undefined, &[v]) {
             Ok(Js::String(u)) => Some(String::from_utf16_lossy(&u)),
             _ => None,
@@ -156,38 +156,48 @@ pub(crate) fn base_websocket_class(realm: &mut Host, deps: SocketDependencies) -
     let prototype = realm.new_object();
     let next_id = Rc::new(Cell::new(1u64));
     let class = realm.constructor("BaseWebSocket", 1, move |r, args, new_target| {
-            let bridge = Rc::new(Bridge {
-                realm: r.clone(),
-                instance: RefCell::new(Weak::new()),
-                listeners: RefCell::default(),
-            });
-            let id = next_id.get();
-            next_id.set(id + 1);
-            let socket = BaseWebSocket::new(
-                id,
-                deps.parent.clone(),
-                deps.runtime.clone(),
-                bridge.clone(),
-            );
-            let class_name = r.to_rust_string(&new_target.get("name")?)?;
-            let slot = if class_name.contains("Private") {
-                SocketSlot::Private
-            } else {
-                SocketSlot::Public
-            };
-            deps.base.set_socket(slot, Some(socket.clone()));
-            let handle = Rc::new(Handle { socket, bridge: bridge.clone() });
-            let instance = Js::host_object(handle);
-            let Js::Object(data) = &instance else { unreachable!() };
-            *data.proto.borrow_mut() = new_target.allocate_instance()?.prototype();
-            *bridge.instance.borrow_mut() = Rc::downgrade(data);
-            r.define_str(&instance, "parent", arg(args, 0))?;
-            r.define_str(&instance, "pingAt", Js::Number(0.0))?;
-            let books = r.new_object();
-            r.define_str(&instance, "orderBookInnerState", books)?;
-            Ok(instance)
+        let bridge = Rc::new(Bridge {
+            realm: r.clone(),
+            instance: RefCell::new(Weak::new()),
+            listeners: RefCell::default(),
+        });
+        let id = next_id.get();
+        next_id.set(id + 1);
+        let socket = BaseWebSocket::new(
+            id,
+            deps.parent.clone(),
+            deps.runtime.clone(),
+            bridge.clone(),
+        );
+        let class_name = r.to_rust_string(&new_target.get("name")?)?;
+        let slot = if class_name.contains("Private") {
+            SocketSlot::Private
+        } else {
+            SocketSlot::Public
+        };
+        deps.base.set_socket(slot, Some(socket.clone()));
+        let handle = Rc::new(Handle {
+            socket,
+            bridge: bridge.clone(),
+        });
+        let instance = Js::host_object(handle);
+        let Js::Object(data) = &instance else {
+            unreachable!()
+        };
+        *data.proto.borrow_mut() = new_target.allocate_instance()?.prototype();
+        *bridge.instance.borrow_mut() = Rc::downgrade(data);
+        r.define_str(&instance, "parent", arg(args, 0))?;
+        r.define_str(&instance, "pingAt", Js::Number(0.0))?;
+        let books = r.new_object();
+        r.define_str(&instance, "orderBookInnerState", books)?;
+        Ok(instance)
     });
-    class.define_property(&"prototype".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value",prototype.clone())])).expect("fresh socket class prototype");
+    class
+        .define_property(
+            &"prototype".encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![("value", prototype.clone())]),
+        )
+        .expect("fresh socket class prototype");
 
     realm.define_hidden(&prototype, Js::str("constructor"), class.clone());
 

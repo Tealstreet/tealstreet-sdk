@@ -1,5 +1,4 @@
 //! Concrete Spot Exchange assembled from the existing Spot class bodies.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use crate::{
     binding::{Binding, HyperliquidDependencies, RuntimeClock, base_exchange_rejection, opt},
     cloid::hyperliquid_client_order_id_rule,
@@ -13,6 +12,7 @@ use crate::{
     },
     spot_runtime,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
@@ -107,7 +107,7 @@ impl HyperliquidSpotExchange {
         let class = spot_runtime::spot_exchange_class(&mut realm)
             .map_err(|error| realm.exchange_error(&error))?;
         let options = realm
-            .from_typed(&options)
+            .encode_typed(&options)
             .map_err(|error| realm.exchange_error(&error))?;
         let store = store_object(&realm, store).map_err(|error| error.to_exchange_error())?;
         let mut realm = realm.with_lexical(&class.constructor);
@@ -132,7 +132,10 @@ impl HyperliquidSpotExchange {
         body: impl FnOnce(Binding) -> F + 'static,
     ) -> ExchangeFuture<'static, T> {
         let binding = self.bound();
-        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move { body(binding?).await })
+        safe_cex_exchange::eager::start_eager(
+            &self.base.runtime,
+            async move { body(binding?).await },
+        )
     }
     fn typed<T: serde::de::DeserializeOwned + 'static>(
         &self,
@@ -164,7 +167,7 @@ impl HyperliquidSpotExchange {
             Ok(Js::Undefined)
         });
         let first = realm
-            .from_typed(&first)
+            .encode_typed(&first)
             .map_err(|error| realm.exchange_error(&error))?;
         let cleanup = realm
             .call_method(&instance, name, &[first, listener])
@@ -176,7 +179,11 @@ impl HyperliquidSpotExchange {
                 .map_err(|error| realm.exchange_error(&error))
         }))
     }
-    fn order_ids(&self, name: &'static str, options: impl serde::Serialize + 'static) -> ExchangeFuture<'static, Vec<String>> {
+    fn order_ids(
+        &self,
+        name: &'static str,
+        options: impl serde::Serialize + 'static,
+    ) -> ExchangeFuture<'static, Vec<String>> {
         self.launch(move |binding| Self::order_ids_bound(binding, name, options))
     }
     async fn order_ids_bound(
@@ -185,7 +192,7 @@ impl HyperliquidSpotExchange {
         options: impl serde::Serialize,
     ) -> Result<Vec<String>, ExchangeError> {
         let (mut realm, ids) = binding
-            .invoke(name, |realm| Ok(vec![realm.from_typed(&options)?]))
+            .invoke(name, |realm| Ok(vec![realm.encode_typed(&options)?]))
             .await?;
         // Source omitUndefined is lodash/omitBy: its array input produces an
         // object whose enumerable numeric keys retain the original indices.
@@ -255,7 +262,7 @@ impl Exchange for HyperliquidSpotExchange {
         self.listen("listenOrderBook", symbol, callback)
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
-        Box::pin(self.typed("fetchOHLCV", move |r| Ok(vec![r.from_typed(&options)?])))
+        Box::pin(self.typed("fetchOHLCV", move |r| Ok(vec![r.encode_typed(&options)?])))
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("start", |_| Ok(vec![])))
@@ -271,7 +278,9 @@ impl Exchange for HyperliquidSpotExchange {
         self.launch(move |binding| async move {
             let mut result = vec![];
             for order in orders.orders() {
-                result.extend(Self::order_ids_bound(binding.clone(), "placeOrder", order.options()).await?);
+                result.extend(
+                    Self::order_ids_bound(binding.clone(), "placeOrder", order.options()).await?,
+                );
             }
             Ok(result)
         })
@@ -304,11 +313,7 @@ impl Exchange for HyperliquidSpotExchange {
         side: Option<PositionSide>,
     ) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("setLeverage", move |r| {
-            Ok(vec![
-                Js::str(&symbol),
-                Js::Number(leverage),
-                opt(r, &side)?,
-            ])
+            Ok(vec![Js::str(&symbol), Js::Number(leverage), opt(r, &side)?])
         }))
     }
     fn change_position_mode(&self, _: bool, _: Option<String>) -> ExchangeFuture<'_, ()> {
@@ -323,7 +328,7 @@ impl Exchange for HyperliquidSpotExchange {
         Box::pin(self.order_ids("updateOrder", options))
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
-        Box::pin(self.unit("cancelOrders", move |r| Ok(vec![r.from_typed(&orders)?])))
+        Box::pin(self.unit("cancelOrders", move |r| Ok(vec![r.encode_typed(&orders)?])))
     }
     fn schedule_cancel(&self, _: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         base_exchange_rejection(&self.base.runtime)

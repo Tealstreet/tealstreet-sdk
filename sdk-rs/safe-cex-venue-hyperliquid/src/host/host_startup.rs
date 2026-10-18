@@ -1,10 +1,6 @@
 //! Error-class, tuple and market-startup host traits for the imported startup
 //! helpers (`fetchCoreMetaAndAssetCtxsWithFallback` and its HIP-3 sibling).
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-    host_core::js,
-};
+use super::{Host, host_core::js};
 use crate::{
     api_errors::{ApiErrorClass, ApiErrorHost},
     income::IncomeFuture,
@@ -12,6 +8,7 @@ use crate::{
     market_startup::StartupHost,
     spot_json::JsString,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 
 impl ApiErrorHost for Host {
     /// Error(message); the derived class name is assigned by the caller.

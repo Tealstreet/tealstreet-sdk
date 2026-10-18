@@ -1,9 +1,5 @@
 //! Base JS host traits over the production realm.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use safe_cex_exchange::js_runtime::promise::JsFuture;
-use super::{
-    Host,
-};
+use super::Host;
 use crate::{
     cache_orders::CacheOrdersHost,
     cross_cache::CrossCacheHost,
@@ -14,6 +10,8 @@ use crate::{
     startup_timeout::{StartupTimeoutHost, TimeoutCallback},
     ws_ping_lifecycle::{self, PingCallback, WsPingHost},
 };
+use safe_cex_exchange::js_runtime::promise::JsFuture;
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::{future::Future, pin::Pin, rc::Rc};
 
 pub(super) fn js(units: Rc<[u16]>) -> JsString {
@@ -267,11 +265,7 @@ impl CrossCacheHost for Host {
         self.set_index(object, key, value.clone())
     }
     fn define_data(&mut self, object: &Js, key: &JsString, value: &Js) -> Result<(), Thrown> {
-        self.define(
-            object,
-            Js::String(key.0.as_slice().into()),
-            value.clone(),
-        )
+        self.define(object, Js::String(key.0.as_slice().into()), value.clone())
     }
     fn call(&mut self, function: &Js, receiver: &Js, args: &[Js]) -> Result<Js, Thrown> {
         Host::call(self, function, receiver, args)
@@ -319,12 +313,7 @@ impl CacheOrdersHost for Host {
         let key = self.to_property_key(key)?;
         Host::delete(self, value, &key).map(|_| ())
     }
-    fn older_than(
-        &mut self,
-        now: &Js,
-        timestamp: &Js,
-        milliseconds: f64,
-    ) -> Result<bool, Thrown> {
+    fn older_than(&mut self, now: &Js, timestamp: &Js, milliseconds: f64) -> Result<bool, Thrown> {
         let elapsed = Host::binary(self, "-", now, timestamp)?;
         Ok(Host::binary(self, ">", &elapsed, &Js::Number(milliseconds))?.truthy())
     }

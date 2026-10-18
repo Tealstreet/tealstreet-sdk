@@ -309,10 +309,13 @@ pub(super) fn race_iterable(runtime: &Rc<dyn ExchangeRuntime>, value: &Js) -> Pr
         };
         let input = Promise::resolve(runtime, value);
         let output = result.clone();
-        Promise::spawn(runtime, Box::pin(async move {
-            output.settle(input.wait().await);
-            Ok(Js::Undefined)
-        }));
+        Promise::spawn(
+            runtime,
+            Box::pin(async move {
+                output.settle(input.wait().await);
+                Ok(Js::Undefined)
+            }),
+        );
     }
 }
 

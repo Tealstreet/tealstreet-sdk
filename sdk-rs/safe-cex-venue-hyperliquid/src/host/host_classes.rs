@@ -1,6 +1,5 @@
 //! Class assembly over canonical shared constructor and prototype operations.
 use super::Host;
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, FunctionData};
 use crate::{
     core_exchange_class::{self, CoreExchangeCapture, CoreExchangeClassHost},
     helper_tasks::HelperObserver,
@@ -9,36 +8,79 @@ use crate::{
     public_class::{self, CorePublicClassHost},
     public_constructor::{PublicConstructorHost, PublicSocketCapture},
 };
-use std::{cell::RefCell, rc::{Rc, Weak}};
+use safe_cex_exchange::js_runtime::value::{FunctionData, Js, Thrown};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 type ClassBody = Rc<dyn Fn(&mut Host, &Js, &[Js], &Js) -> Result<Js, Thrown>>;
-fn arg(args: &[Js], index: usize) -> Js { args.get(index).cloned().unwrap_or(Js::Undefined) }
+fn arg(args: &[Js], index: usize) -> Js {
+    args.get(index).cloned().unwrap_or(Js::Undefined)
+}
 impl Host {
-    pub(crate) fn derived_class(&mut self, name: &str, length: u8, base: &Js, body: ClassBody) -> Result<(Js, Js), Thrown> {
-        let parent = if matches!(base, Js::Null) { Js::Null } else { base.get("prototype")? };
+    pub(crate) fn derived_class(
+        &mut self,
+        name: &str,
+        length: u8,
+        base: &Js,
+        body: ClassBody,
+    ) -> Result<(Js, Js), Thrown> {
+        let parent = if matches!(base, Js::Null) {
+            Js::Null
+        } else {
+            base.get("prototype")?
+        };
         if !parent.is_object() && !matches!(parent, Js::Null) {
-            return Err(Thrown::type_error("Class extends value does not have valid prototype property"));
+            return Err(Thrown::type_error(
+                "Class extends value does not have valid prototype property",
+            ));
         }
         let prototype = Js::object(vec![]);
         prototype.set("__proto__", parent)?;
         let slot: Rc<RefCell<Weak<FunctionData>>> = Rc::default();
         let own = slot.clone();
         let class = self.constructor(name, length, move |host, args, target| {
-            let class = own.borrow().upgrade().map(Js::Function).ok_or_else(|| host.error("class was collected"))?;
+            let class = own
+                .borrow()
+                .upgrade()
+                .map(Js::Function)
+                .ok_or_else(|| host.error("class was collected"))?;
             body(host, &class, args, target)
         });
-        let Js::Function(function) = &class else { unreachable!() };
+        let Js::Function(function) = &class else {
+            unreachable!()
+        };
         *slot.borrow_mut() = Rc::downgrade(function);
-        if !matches!(base, Js::Null) { class.set("__proto__", base.clone())?; }
-        class.define_property(&"prototype".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value",prototype.clone())]))?;
+        if !matches!(base, Js::Null) {
+            class.set("__proto__", base.clone())?;
+        }
+        class.define_property(
+            &"prototype".encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![("value", prototype.clone())]),
+        )?;
         self.define_hidden(&prototype, Js::str("constructor"), class.clone());
         Ok((class, prototype))
     }
-    pub(crate) fn super_construct(&mut self, class: &Js, args: &[Js], target: &Js) -> Result<Js, Thrown> {
-        class.super_constructor()?.construct(args.to_vec(), Some(target))
+    pub(crate) fn super_construct(
+        &mut self,
+        class: &Js,
+        args: &[Js],
+        target: &Js,
+    ) -> Result<Js, Thrown> {
+        class
+            .super_constructor()?
+            .construct(args.to_vec(), Some(target))
     }
-    fn method_function(&self, name: &str, length: u8, body: Rc<dyn Fn(&mut Host, &Js, &[Js]) -> Result<Js, Thrown>>) -> Js {
-        self.native(name, length, move |host, receiver, args| body(host, receiver, args))
+    fn method_function(
+        &self,
+        name: &str,
+        length: u8,
+        body: Rc<dyn Fn(&mut Host, &Js, &[Js]) -> Result<Js, Thrown>>,
+    ) -> Js {
+        self.native(name, length, move |host, receiver, args| {
+            body(host, receiver, args)
+        })
     }
 }
 
@@ -87,12 +129,7 @@ impl CoreExchangeClassHost for Host {
         }
         Ok(())
     }
-    fn exchange_super(
-        &mut self,
-        class: &Js,
-        args: &[Js; 3],
-        target: &Js,
-    ) -> Result<Js, Thrown> {
+    fn exchange_super(&mut self, class: &Js, args: &[Js; 3], target: &Js) -> Result<Js, Thrown> {
         self.super_construct(class, args, target)
     }
     fn with_exchange_class(&self, class: &Js) -> Self {
@@ -154,12 +191,7 @@ impl PrivateConstructorHost for Host {
     fn construct(&mut self, constructor: &Js, args: &[Js]) -> Result<Js, Thrown> {
         Host::construct(self, constructor, args, None)
     }
-    fn private_super(
-        &mut self,
-        class: &Js,
-        parent: &Js,
-        new_target: &Js,
-    ) -> Result<Js, Thrown> {
+    fn private_super(&mut self, class: &Js, parent: &Js, new_target: &Js) -> Result<Js, Thrown> {
         self.super_construct(class, std::slice::from_ref(parent), new_target)
     }
     fn private_arrow(
@@ -204,12 +236,7 @@ impl CorePublicClassHost for Host {
         self.define_hidden(prototype, Js::str(name), value.clone());
         Ok(())
     }
-    fn public_super_get(
-        &mut self,
-        class: &Js,
-        receiver: &Js,
-        name: &str,
-    ) -> Result<Js, Thrown> {
+    fn public_super_get(&mut self, class: &Js, receiver: &Js, name: &str) -> Result<Js, Thrown> {
         let home = self.get_str(class, "prototype")?;
         self.super_get(&home, receiver, name)
     }
@@ -222,12 +249,7 @@ impl PublicConstructorHost for Host {
     fn construct(&mut self, constructor: &Js, args: &[Js]) -> Result<Js, Thrown> {
         Host::construct(self, constructor, args, None)
     }
-    fn public_super(
-        &mut self,
-        class: &Js,
-        parent: &Js,
-        new_target: &Js,
-    ) -> Result<Js, Thrown> {
+    fn public_super(&mut self, class: &Js, parent: &Js, new_target: &Js) -> Result<Js, Thrown> {
         self.super_construct(class, std::slice::from_ref(parent), new_target)
     }
     fn public_arrow(

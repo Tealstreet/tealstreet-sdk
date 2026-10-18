@@ -1,8 +1,5 @@
 //! Host operations for the existing Spot class, trading and socket bodies.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-};
+use super::Host;
 use crate::{
     spot_client::{self, ClientCallback, SpotClientHost},
     spot_json::JsString,
@@ -11,6 +8,7 @@ use crate::{
     spot_trading::{self, SpotTradingHost, TradingCallback},
     spot_ws_dispatch::{self as private, PrivateMethod, SpotWsHost},
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::rc::Rc;
 
 fn arg(args: &[Js], index: usize) -> Js {
@@ -117,12 +115,7 @@ impl SpotClientHost for Host {
     }
 }
 impl SpotRuntimeHost for Host {
-    fn base_exchange(
-        &mut self,
-        args: &[Js; 3],
-        target: &Js,
-        _: &Js,
-    ) -> Result<Js, Thrown> {
+    fn base_exchange(&mut self, args: &[Js; 3], target: &Js, _: &Js) -> Result<Js, Thrown> {
         let base = self.global_binding("BaseExchange")?;
         self.construct(&base, args, Some(target))
     }
@@ -225,12 +218,7 @@ impl SpotWsHost for Host {
             Some("BaseWebSocket"),
         )
     }
-    fn construct_base(
-        &mut self,
-        parent: &Js,
-        target: &Js,
-        _: &Js,
-    ) -> Result<Js, Thrown> {
+    fn construct_base(&mut self, parent: &Js, target: &Js, _: &Js) -> Result<Js, Thrown> {
         let base = self.global_binding("BaseWebSocket")?;
         self.construct(&base, &[parent.clone()], Some(target))
     }
@@ -277,12 +265,7 @@ impl SpotPublicHost for Host {
             public::run_public_method(&mut r.with_lexical(&class), &owner, body, args)
         }))
     }
-    fn base_socket(
-        &mut self,
-        parent: &Js,
-        target: &Js,
-        prototype: &Js,
-    ) -> Result<Js, Thrown> {
+    fn base_socket(&mut self, parent: &Js, target: &Js, prototype: &Js) -> Result<Js, Thrown> {
         SpotWsHost::construct_base(self, parent, target, prototype)
     }
     fn assign_index(&mut self, object: &Js, key: &Js, value: &Js) -> Result<(), Thrown> {

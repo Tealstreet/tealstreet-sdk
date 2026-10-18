@@ -1,6 +1,6 @@
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use super::start;
-use crate::host::{ test_runtime::TestRuntime};
+use crate::host::test_runtime::TestRuntime;
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::{
     future::Future,
     pin::Pin,
@@ -48,13 +48,11 @@ fn helper_observer_clone_shares_pending_completion_and_original_values() {
                 .is_pending()
         );
         let expected = realm.object_from(vec![("marker", Js::str("native result"))]);
-        cell.settle(
-            if rejected {
-                Err(Thrown::new(expected.clone()))
-            } else {
-                Ok(expected.clone())
-            },
-        );
+        cell.settle(if rejected {
+            Err(Thrown::new(expected.clone()))
+        } else {
+            Ok(expected.clone())
+        });
         runtime.drain();
         assert_eq!(first.0.load(Ordering::SeqCst), 1);
         assert_eq!(second.0.load(Ordering::SeqCst), 1);

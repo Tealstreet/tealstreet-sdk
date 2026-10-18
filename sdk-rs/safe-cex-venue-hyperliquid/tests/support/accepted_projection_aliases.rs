@@ -1,20 +1,17 @@
 //! Exact production Host instantiations; no claim for any other host or decoder.
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use crate::{
     core_exchange_class::{ExchangeError, ExchangeValue},
+    host::{Host, test_runtime::TestRuntime},
     private_class::{PrivateError, PrivateValue},
     public_class::{PublicError, PublicValue},
-    host::{Host, test_runtime::TestRuntime},
     ws_ping_lifecycle::WsPingHost,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::{any::TypeId, rc::Rc};
 
 fn require_production_associated_types<H: WsPingHost<Value = Js, Error = Thrown>>() {}
 
-fn native_invariants<A: 'static>(
-    as_alias: fn(&mut Js) -> &mut A,
-    as_value: fn(&mut A) -> &mut Js,
-) {
+fn native_invariants<A: 'static>(as_alias: fn(&mut Js) -> &mut A, as_value: fn(&mut A) -> &mut Js) {
     require_production_associated_types::<Host>();
     assert_eq!(TypeId::of::<A>(), TypeId::of::<Js>());
     let mut realm = crate::host::test_runtime::host(Rc::new(TestRuntime::default()));
@@ -104,23 +101,42 @@ fn exchange_error_realm_is_the_native_value() {
     native_error_invariants::<ExchangeError<Host>>(|value| value, |value| value);
 }
 
-fn native_error_invariants<A: 'static>(as_alias: fn(&mut Thrown) -> &mut A, as_error: fn(&mut A) -> &mut Thrown) {
+fn native_error_invariants<A: 'static>(
+    as_alias: fn(&mut Thrown) -> &mut A,
+    as_error: fn(&mut A) -> &mut Thrown,
+) {
     require_production_associated_types::<Host>();
     assert_eq!(TypeId::of::<A>(), TypeId::of::<Thrown>());
-    let object = Js::object(vec![("marker",Js::Number(-0.0))]);
-    let original_error = safe_cex_exchange::js_runtime::value::error_object("TypeError", "native thrown object");
-    let values = [Js::Undefined, Js::Number(-0.0), Js::Number(f64::INFINITY), Js::utf16(&[0xd800,0x0061]), object.clone(), original_error];
+    let object = Js::object(vec![("marker", Js::Number(-0.0))]);
+    let original_error =
+        safe_cex_exchange::js_runtime::value::error_object("TypeError", "native thrown object");
+    let values = [
+        Js::Undefined,
+        Js::Number(-0.0),
+        Js::Number(f64::INFINITY),
+        Js::utf16(&[0xd800, 0x0061]),
+        object.clone(),
+        original_error,
+    ];
     assert_eq!(values.len(), 6);
     for value in values {
         let mut thrown = Thrown::new(value.clone());
         let address = std::ptr::from_ref(&thrown);
         let actual = as_error(as_alias(&mut thrown));
-        assert!(std::ptr::eq(address, actual), "error alias changed the canonical completion slot");
+        assert!(
+            std::ptr::eq(address, actual),
+            "error alias changed the canonical completion slot"
+        );
         assert!(actual.value.same_reference(&value) || actual.value.strict_equals(&value));
-        if let (Js::Number(actual), Js::Number(expected)) = (&actual.value, &value) { assert_eq!(actual.to_bits(),expected.to_bits()); }
+        if let (Js::Number(actual), Js::Number(expected)) = (&actual.value, &value) {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
         if actual.value.same_reference(&object) {
-            actual.value.set("marker",Js::Number(2.5)).unwrap();
-            assert_eq!(object.get("marker").unwrap().as_f64().unwrap().to_bits(), 2.5_f64.to_bits());
+            actual.value.set("marker", Js::Number(2.5)).unwrap();
+            assert_eq!(
+                object.get("marker").unwrap().as_f64().unwrap().to_bits(),
+                2.5_f64.to_bits()
+            );
         }
     }
 }

@@ -1,11 +1,9 @@
 //! Module imports the ported class bodies read by name, bound to the existing
 //! Rust ports. A name the bodies reach that is not bound throws a visible
 //! ReferenceError rather than resolving to a stand-in.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-};
+use super::Host;
 use crate::{cloid, types};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 
 fn arg(args: &[Js], i: usize) -> Js {
     args.get(i).cloned().unwrap_or(Js::Undefined)
@@ -19,7 +17,11 @@ fn strings(r: &Host, items: &[&str]) -> Js {
 /// A frozen TS string enum.
 fn enumeration(r: &Host, rows: &[(&str, &str)]) -> Js {
     let o = table(r, rows);
-    r.shared.globals.get("Object").and_then(|object| object.call_method("freeze", vec![o.clone()])).expect("fresh string enum");
+    r.shared
+        .globals
+        .get("Object")
+        .and_then(|object| object.call_method("freeze", vec![o.clone()]))
+        .expect("fresh string enum");
     o
 }
 
@@ -176,10 +178,7 @@ fn bind_cloid(realm: &Host) {
         "readHyperliquidCloid",
         realm.native("readHyperliquidCloid", 1, |r, _, a| {
             let v = r.to_serde(&arg(a, 0))?;
-            Ok(
-                cloid::read_hyperliquid_cloid(Some(&v))
-                    .map_or(Js::Undefined, |s| Js::str(&s)),
-            )
+            Ok(cloid::read_hyperliquid_cloid(Some(&v)).map_or(Js::Undefined, |s| Js::str(&s)))
         }),
     );
     realm.bind_import(
@@ -190,7 +189,7 @@ fn bind_cloid(realm: &Host) {
             let placed_at = r.to_number(&arg(a, 2))?;
             let record = cloid::placement_record_from_wire(&wire, symbol, placed_at)
                 .map_err(|e| r.type_error(&e))?;
-            r.from_typed(&record)
+            r.encode_typed(&record)
         }),
     );
     let pattern = realm.new_object();

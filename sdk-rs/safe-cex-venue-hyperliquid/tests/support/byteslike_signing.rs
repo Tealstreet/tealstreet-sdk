@@ -30,7 +30,11 @@ fn run(success: bool) {
         .build()
         .unwrap();
     tokio::task::LocalSet::new().block_on(&executor, async {
-        let mut realm = Host::new(safe_cex_exchange::native::native_runtime(), std::sync::Arc::new(crate::host::test_runtime::NoHttp), std::rc::Rc::new(safe_cex_exchange::native_store::DefaultStore::new()));
+        let mut realm = Host::new(
+            safe_cex_exchange::native::native_runtime(),
+            std::sync::Arc::new(crate::host::test_runtime::NoHttp),
+            std::rc::Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+        );
         super::super::imports::bind(&realm);
         let make_wallet = realm.import("createWalletFromPrivateKey").unwrap();
         let wallet = realm
@@ -41,7 +45,7 @@ fn run(success: bool) {
             )
             .unwrap();
         let signer = realm.import("signL1Action").unwrap();
-        let action = realm.from_serde(&json!({"type":"cancel","cancels":[{"a":1,"o":1234}]}));
+        let action = realm.encode_json(&json!({"type":"cancel","cancels":[{"a":1,"o":1234}]}));
         let mut completed = 0;
         for row in source().iter().filter(|row| row["ok"] == success) {
             let vault = row["vault"].as_str().unwrap();
@@ -180,7 +184,11 @@ fn native_api_signing_retains_original_error_through_transport() {
                 shared::to_json(&cause.value().to_js()).unwrap(),
                 row["error"]
             );
-            let mut realm = Host::new(runtime.clone(), Arc::new(crate::host::test_runtime::NoHttp), Rc::new(safe_cex_exchange::native_store::DefaultStore::new()));
+            let mut realm = Host::new(
+                runtime.clone(),
+                Arc::new(crate::host::test_runtime::NoHttp),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+            );
             let projected = super::super::facade_rest::thrown_from(
                 &mut realm,
                 ExchangeError::from(RestFailure::from_transport(error, request)),

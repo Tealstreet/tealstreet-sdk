@@ -1,13 +1,10 @@
 //! Production `impl Exchange` for HyperliquidExchange. The constructor runs the
 //! ported class constructor inside the realm; every trait method invokes the
 //! instance's ported method and converts its result at the typed boundary.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
 use crate::{
     cloid::hyperliquid_client_order_id_rule,
     core_exchange_class,
     exchange::HyperliquidExchange,
-    private_class, public_class,
-    rate_limit::RateLimiter,
     host::{
         Host,
         facade_exchange::base_exchange_class,
@@ -16,7 +13,10 @@ use crate::{
         facade_store::store_object,
         imports,
     },
+    private_class, public_class,
+    rate_limit::RateLimiter,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
@@ -78,8 +78,12 @@ impl RateLimitClock for RuntimeClock {
 /// Error('Not implemented'))` (base.ts getAccount L734, fetchMarkets L754,
 /// fetchTickers L759, fetchSymbolMaxLeverage L799, changePositionMode L832,
 /// fetchPublicTrades L1138). No request, no emit.
-pub(crate) fn base_exchange_rejection<T: 'static>(runtime: &Rc<dyn ExchangeRuntime>) -> ExchangeFuture<'static, T> {
-    safe_cex_exchange::eager::start_eager(runtime, async { Err(ExchangeError::new("Not implemented")) })
+pub(crate) fn base_exchange_rejection<T: 'static>(
+    runtime: &Rc<dyn ExchangeRuntime>,
+) -> ExchangeFuture<'static, T> {
+    safe_cex_exchange::eager::start_eager(runtime, async {
+        Err(ExchangeError::new("Not implemented"))
+    })
 }
 
 impl HyperliquidExchange {
@@ -142,13 +146,14 @@ impl HyperliquidExchange {
             .map_err(|e| thrown(&mut realm, e))?;
         realm.bind_import("HyperliquidExchange", class.clone());
         let js_options = realm
-            .from_typed(&options)
+            .encode_typed(&options)
             .map_err(|e| thrown(&mut realm, e))?;
         // Startup resolves legacy identities by mutating the shared JS options.
         // Publish each successful write immediately to native privacy readers,
         // including callbacks that run before start() returns or rejects.
         let identity_owner = venue.base.clone();
-        js_options.set_write_observer(Some(Rc::new(move |_, key, value| {
+        js_options
+            .set_write_observer(Some(Rc::new(move |_, key, value| {
                 let application_id = key == "applicationId".encode_utf16().collect::<Vec<_>>();
                 if !application_id && key != "vault".encode_utf16().collect::<Vec<_>>() {
                     return Ok(());
@@ -160,7 +165,11 @@ impl HyperliquidExchange {
                             Thrown::type_error("Native account identity requires scalar Unicode")
                         })?)
                     }
-                    _ => return Err(Thrown::type_error("Native account identity must be a string")),
+                    _ => {
+                        return Err(Thrown::type_error(
+                            "Native account identity must be a string",
+                        ));
+                    }
                 };
                 let patch = if application_id {
                     AccountIdentityPatch {
@@ -175,7 +184,8 @@ impl HyperliquidExchange {
                 };
                 identity_owner.patch_account_identity(patch);
                 Ok(())
-            }))).map_err(|error| error.to_exchange_error())?;
+            })))
+            .map_err(|error| error.to_exchange_error())?;
         let js_store = store_object(&realm, store).map_err(|error| error.to_exchange_error())?;
         let mut scope = realm.with_lexical(&class);
         let instance = scope
@@ -202,7 +212,10 @@ impl HyperliquidExchange {
         body: impl FnOnce(Binding) -> F + 'static,
     ) -> ExchangeFuture<'static, T> {
         let binding = self.bound();
-        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move { body(binding?).await })
+        safe_cex_exchange::eager::start_eager(
+            &self.base.runtime,
+            async move { body(binding?).await },
+        )
     }
     fn typed<T: serde::de::DeserializeOwned + 'static>(
         &self,
@@ -234,7 +247,7 @@ impl HyperliquidExchange {
             Ok(Js::Undefined)
         });
         let first = realm
-            .from_typed(&first)
+            .encode_typed(&first)
             .map_err(|error| realm.exchange_error(&error))?;
         let cleanup = realm
             .call_method(&instance, name, &[first, listener])
@@ -285,7 +298,7 @@ impl Binding {
 
 pub(crate) fn opt<T: serde::Serialize>(r: &mut Host, v: &Option<T>) -> Result<Js, Thrown> {
     match v {
-        Some(v) => r.from_typed(v),
+        Some(v) => r.encode_typed(v),
         None => Ok(Js::Undefined),
     }
 }
@@ -345,14 +358,14 @@ impl Exchange for HyperliquidExchange {
         &self,
         options: safe_cex_types::OHLCVOptions,
     ) -> ExchangeFuture<'_, Vec<safe_cex_types::Candle>> {
-        Box::pin(self.typed("fetchOHLCV", move |r| Ok(vec![r.from_typed(&options)?])))
+        Box::pin(self.typed("fetchOHLCV", move |r| Ok(vec![r.encode_typed(&options)?])))
     }
     fn fetch_historical_fills(
         &self,
         options: safe_cex_types::ExecutionsOptions,
     ) -> ExchangeFuture<'_, Vec<safe_cex_types::Execution>> {
         Box::pin(self.typed("fetchHistoricalFills", move |r| {
-            Ok(vec![r.from_typed(&options)?])
+            Ok(vec![r.encode_typed(&options)?])
         }))
     }
     fn fetch_historical_orders(
@@ -376,11 +389,7 @@ impl Exchange for HyperliquidExchange {
         kind: Option<String>,
     ) -> ExchangeFuture<'_, Vec<safe_cex_types::IncomeRecord>> {
         Box::pin(self.typed("fetchIncomeHistoryRange", move |r| {
-            Ok(vec![
-                Js::Number(start),
-                Js::Number(end),
-                opt(r, &kind)?,
-            ])
+            Ok(vec![Js::Number(start), Js::Number(end), opt(r, &kind)?])
         }))
     }
     fn fetch_and_set_private_snapshot(&self, tries: u32) -> ExchangeFuture<'_, ()> {
@@ -436,14 +445,15 @@ impl Exchange for HyperliquidExchange {
         }))
     }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
-        self.typed("placeOrder", move |r| Ok(vec![r.from_typed(order.options())?]))
+        self.typed("placeOrder", move |r| {
+            Ok(vec![r.encode_typed(order.options())?])
+        })
     }
     fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
         self.typed("placeOrders", move |r| {
-                let list: Vec<&PlaceOrderOpts> =
-                    orders.orders().iter().map(|o| o.options()).collect();
-                Ok(vec![r.from_typed(&list)?])
-            })
+            let list: Vec<&PlaceOrderOpts> = orders.orders().iter().map(|o| o.options()).collect();
+            Ok(vec![r.encode_typed(&list)?])
+        })
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
         base_exchange_rejection(&self.base.runtime)
@@ -473,12 +483,8 @@ impl Exchange for HyperliquidExchange {
         side: Option<PositionSide>,
     ) -> ExchangeFuture<'_, ()> {
         self.unit("setLeverage", move |r| {
-                Ok(vec![
-                    Js::str(&symbol),
-                    Js::Number(leverage),
-                    opt(r, &side)?,
-                ])
-            })
+            Ok(vec![Js::str(&symbol), Js::Number(leverage), opt(r, &side)?])
+        })
     }
     fn change_position_mode(
         &self,
@@ -489,24 +495,24 @@ impl Exchange for HyperliquidExchange {
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
         self.unit("changeMarginType", move |r| {
-                Ok(vec![Js::Bool(isolated), opt(r, &symbol)?])
-            })
+            Ok(vec![Js::Bool(isolated), opt(r, &symbol)?])
+        })
     }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
-        self.typed("updateOrder", move |r| Ok(vec![r.from_typed(&options)?]))
+        self.typed("updateOrder", move |r| Ok(vec![r.encode_typed(&options)?]))
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
-        self.unit("cancelOrders", move |r| Ok(vec![r.from_typed(&orders)?]))
+        self.unit("cancelOrders", move |r| Ok(vec![r.encode_typed(&orders)?]))
     }
     /// None omits the argument (clear), Some(None) passes null (clear), Some(Some(t)) arms at t.
     fn schedule_cancel(&self, time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         self.unit("scheduleCancel", move |_| {
-                Ok(match time {
-                    None => vec![],
-                    Some(None) => vec![Js::Null],
-                    Some(Some(t)) => vec![Js::Number(t)],
-                })
+            Ok(match time {
+                None => vec![],
+                Some(None) => vec![Js::Null],
+                Some(Some(t)) => vec![Js::Number(t)],
             })
+        })
     }
     fn fetch_public_trades(
         &self,

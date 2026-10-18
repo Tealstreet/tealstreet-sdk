@@ -1,11 +1,7 @@
 //! Leaf JS host traits: operators, bindings, iteration and callback captures.
 //! Every capture becomes a native function whose body is the venue's mapped
 //! `run_*` algorithm; no algorithm lives here.
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-    host_core::js,
-};
+use super::{Host, host_core::js};
 use crate::{
     account_position_leaves::{self, AccountPositionHost, OppositePredicate},
     balance_state::{self, BalanceHost, BalanceOperator, SpotMarketPredicate},
@@ -35,6 +31,7 @@ use crate::{
     ws_emission::{self, DiagnosticScope, WsEmissionHost},
     ws_transport_leaves::{WsTransportHost, WsVenue},
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::future::Future;
 
 fn first(args: &[Js]) -> Js {
@@ -74,8 +71,7 @@ impl AccountPositionHost for Host {
     }
     fn opposite_predicate(&mut self, capture: OppositePredicate<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
-            account_position_leaves::run_opposite_predicate(r, &capture, &first(args))
-                .map(Js::Bool)
+            account_position_leaves::run_opposite_predicate(r, &capture, &first(args)).map(Js::Bool)
         }))
     }
 }
@@ -145,10 +141,7 @@ impl BalanceHost for Host {
     fn spread_into(&mut self, o: &Js, source: &Js) -> Result<(), Thrown> {
         self.copy_data_properties(o, source)
     }
-    fn spot_market_predicate(
-        &mut self,
-        capture: SpotMarketPredicate<Js>,
-    ) -> Result<Js, Thrown> {
+    fn spot_market_predicate(&mut self, capture: SpotMarketPredicate<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
             balance_state::run_spot_market_predicate(r, &capture, &first(args)).map(Js::Bool)
         }))
@@ -429,10 +422,7 @@ impl LimitOrderHost for Host {
 }
 
 impl MarketBootstrapHost for Host {
-    fn bootstrap_callback(
-        &mut self,
-        callback: MarketBootstrapCallback<Js>,
-    ) -> Result<Js, Thrown> {
+    fn bootstrap_callback(&mut self, callback: MarketBootstrapCallback<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
             market_bootstrap::run_market_bootstrap_callback(r, &callback, args)
         }))
@@ -544,12 +534,7 @@ impl OrderRequestHost for Host {
     fn unary_number(&mut self, value: &Js) -> Result<Js, Thrown> {
         self.unary("+", value)
     }
-    fn compare(
-        &mut self,
-        op: RequestComparison,
-        left: &Js,
-        right: &Js,
-    ) -> Result<Js, Thrown> {
+    fn compare(&mut self, op: RequestComparison, left: &Js, right: &Js) -> Result<Js, Thrown> {
         let op = match op {
             RequestComparison::Less => "<",
             RequestComparison::GreaterEqual => ">=",
@@ -617,12 +602,7 @@ impl PlacementHost for Host {
 }
 
 impl PositionOrderHost for Host {
-    fn position_operator(
-        &mut self,
-        operator: &str,
-        left: &Js,
-        right: &Js,
-    ) -> Result<Js, Thrown> {
+    fn position_operator(&mut self, operator: &str, left: &Js, right: &Js) -> Result<Js, Thrown> {
         Host::binary(self, operator, left, right)
     }
     fn position_unary(&mut self, operator: &str, value: &Js) -> Result<Js, Thrown> {
@@ -633,12 +613,7 @@ impl PositionOrderHost for Host {
             core_position_order_state::run_position_callback(r, &callback, args)
         }))
     }
-    fn set_position_index(
-        &mut self,
-        object: &Js,
-        key: &Js,
-        value: &Js,
-    ) -> Result<(), Thrown> {
+    fn set_position_index(&mut self, object: &Js, key: &Js, value: &Js) -> Result<(), Thrown> {
         Host::set_index(self, object, key, value.clone())
     }
     /// A spread element `...value` inside an array literal under construction.

@@ -1,14 +1,12 @@
 //! `createExchangeAPI` / `createInfoAPI` / `rateLimit` and the `post` clients
 //! the bodies call, over the ported `ApiClient` (signing, weighted limiter,
 //! response checks, read-only retry).
-use safe_cex_exchange::js_runtime::{value::{Js, Thrown}};
-use super::{
-    Host,
-};
+use super::Host;
 use crate::{
     api::{ApiClient, create_exchange_api, create_info_api},
     rate_limit::RateLimiter,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput, exchange::BaseExchange, runtime::ExchangeError,
 };
@@ -46,7 +44,7 @@ fn arg(args: &[Js], i: usize) -> Js {
 }
 
 pub(crate) fn thrown_from(r: &mut Host, error: ExchangeError) -> Thrown {
-    r.from_exchange_error(error)
+    r.restore_error(error)
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
@@ -103,15 +101,13 @@ fn client_object(realm: &Host, client: Client) -> Js {
                         RestResponseBody::Encoded(bytes) => {
                             let text = String::from_utf8_lossy(bytes);
                             let units: Vec<u16> = text.encode_utf16().collect();
-                            realm
-                                .parse_json(&units)
-                                .unwrap_or_else(|_| Js::str(&text))
+                            realm.parse_json(&units).unwrap_or_else(|_| Js::str(&text))
                         }
                         RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => {
                             safe_cex_exchange::js_runtime::value::from_retained_input(v.clone())
                         }
                     };
-                    let headers = realm.from_typed(&response.headers)?;
+                    let headers = realm.encode_typed(&response.headers)?;
                     Ok(realm.object_from(vec![
                         ("data", data),
                         ("status", Js::Number(response.status as f64)),
@@ -192,7 +188,9 @@ fn bind_fetch(realm: &Host, http: Arc<dyn RestAdapter>) {
                 for (k, v) in r.own_entries(&headers)? {
                     let value = r.to_rust_string(&v)?;
                     request.headers.insert(
-                        String::from_utf16_lossy(k.as_str().map(|units| units.as_ref()).unwrap_or_default()),
+                        String::from_utf16_lossy(
+                            k.as_str().map(|units| units.as_ref()).unwrap_or_default(),
+                        ),
                         value,
                     );
                 }
