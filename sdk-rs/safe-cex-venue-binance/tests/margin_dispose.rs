@@ -50,7 +50,7 @@ fn error(name: &str, message: &str, code: &str, detail: &str, status: u16) -> Ex
     error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         code
     )));
-    error.response = Some(json!({"status":status,"data":{"msg":detail}}));
+    error = error.with_retained_response((json!({"status":status,"data":{"msg":detail}})).into());
     error
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,7 +172,10 @@ fn disposal(variant: &str) {
                     observed_error_code(&actual.code).as_ref(),
                     case["error"].get("code")
                 );
-                assert_eq!(actual.response.as_ref(), case["error"].get("response"));
+                assert_eq!(
+                    actual.response_json_view().as_ref(),
+                    case["error"].get("response")
+                );
                 assert_eq!(case["error"]["same"], true);
             }
         }
@@ -255,9 +258,7 @@ fn futures_margin_type_matches_source() {
         let post_reject = case["postReject"].as_bool().unwrap();
         let emit_reject = case["emitReject"].as_bool().unwrap();
         let mut post_error = error("RangeError", "fixture post", "post-code", "unused", 503);
-        post_error.response = Some(
-            json!({"status":503,"data":case.get("msg").map(|msg|json!({"msg":msg})).unwrap_or(json!({}))}),
-        );
+        post_error = post_error.with_retained_response((json!({"status":503,"data":case.get("msg").map(|msg|json!({"msg":msg})).unwrap_or(json!({}))})).into());
         let emitter_error = error(
             "RangeError",
             "fixture emitter",
@@ -358,7 +359,7 @@ fn futures_margin_type_matches_source() {
                 "MARGIN case {index} native source error code"
             );
             assert_eq!(
-                actual.response.as_ref(),
+                actual.response_json_view().as_ref(),
                 case["error"].get("response").filter(|v| !v.is_null()),
                 "MARGIN case {index} native source response"
             );

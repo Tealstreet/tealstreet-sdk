@@ -186,7 +186,7 @@ impl ReadTransport for Transport {
         Box::pin(async move {
             if host.input["reject"] == true && r.url == "/openApi/swap/v1/trade/amend" {
                 let mut e = ExchangeError::new("transport cause");
-                e.response = Some(json!({"data":{"msg":"wire denied"}}));
+                e = e.with_retained_response((json!({"data":{"msg":"wire denied"}})).into());
                 return Err(e);
             }
             let data = match r.url.as_str() {
@@ -291,7 +291,7 @@ impl ApiHost for ApiImport {
         assert_eq!(n, 3, "BINGX-C imported retry count");
         for (data, rejected) in signature_corpus() {
             assert_eq!(
-                signature(&data).unwrap(),
+                signature(&data.clone().into()).unwrap(),
                 rejected,
                 "BINGX-C retry signature predicate {data}"
             );
@@ -1206,7 +1206,7 @@ fn signature_rejection_predicate_matches_actual_typescript() {
     let mut inputs = vec![];
     for (data, rejected) in signature_corpus() {
         assert_eq!(
-            is_bingx_signature_rejection(&data).unwrap(),
+            is_bingx_signature_rejection(&data.clone().into()).unwrap(),
             rejected,
             "BINGX-C native signature predicate {data}"
         );

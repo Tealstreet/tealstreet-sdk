@@ -153,9 +153,7 @@ fn actual_quote_reads() {
             );
             run(future).map(|rows| Value::Array(rows.iter().map(market).collect()))
         } else {
-            original.response = Some(
-                json!({"data":{"msg":if name=="empty-msg"{json!("")}else if name=="object-msg"{json!({"detail":"object"})}else{json!("venue-message")}}}),
-            );
+            original = original.with_retained_response((json!({"data":{"msg":if name=="empty-msg"{json!("")}else if name=="object-msg"{json!({"detail":"object"})}else{json!("venue-message")}}})).into());
             let session = || {
                 trace.borrow_mut().push(json!("session"));
                 ready(if name == "session" {

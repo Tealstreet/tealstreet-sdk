@@ -95,7 +95,7 @@ impl BitunixVenue {
         o: Option<IncomeHistoryOptions>,
     ) -> ExchangeFuture<'static, Vec<IncomeRecord>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let (start, end, symbol) =
                 o.map_or((None, None, None), |o| (o.start_time, o.end_time, o.symbol));
             crate::history_reads::fetch_income_history(
@@ -120,7 +120,7 @@ impl BitunixVenue {
         kind: Option<String>,
     ) -> ExchangeFuture<'static, Vec<IncomeRecord>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             crate::exchange_lifecycle::fetch_income_history_range(start, end, kind, |range| {
                 me.fetch_income_history(Some(IncomeHistoryOptions {
                     start_time: Some(range.start_time),
@@ -156,7 +156,7 @@ impl BitunixVenue {
         o: HistoricalTradeOptions,
     ) -> ExchangeFuture<'static, Vec<ClosedPnlEntry>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let account = o.account_name.clone().unwrap_or_default();
             crate::history_reads::fetch_closed_pnl(
                 || Ok(me.public_only()),
@@ -179,7 +179,7 @@ impl BitunixVenue {
         o: safe_cex_exchange::journal::HistoricalPositionOptions,
     ) -> ExchangeFuture<'static, Vec<Value>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let quotes = me.clone();
             let records = crate::history_reads::fetch_historical_positions(
                 || Ok((o.from, o.to)),
@@ -222,7 +222,7 @@ impl BitunixVenue {
         o: Option<OrderHistoryOptions>,
     ) -> ExchangeFuture<'static, Vec<HistoricalOrder>> {
         let me = self.clone();
-        Box::pin(async move {
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, async move {
             let (from, to, limit, symbol) = o.map_or((None, None, None, None), |o| {
                 (o.from, o.to, o.limit, o.symbol)
             });

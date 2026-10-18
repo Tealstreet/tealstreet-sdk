@@ -3829,7 +3829,7 @@
     "category": "decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:242",
     "reason": "Normalizes raw Axios-shaped JSON and host identity facts into native ExchangeError fields; execute network/HTTP/coercion/refusal branches without serializing the error.",
-    "call": "{ match $type(&$value[\"source\"],$value[\"isError\"].as_bool().expect(\"error fact\"),$value.get(\"exchange\").and_then(serde_json::Value::as_str),$value[\"timestamp\"].as_str().expect(\"timestamp\"),$value[\"xhr\"].as_bool().expect(\"XHR fact\")) { Ok(decoded)=>serde_json::json!({\"ok\":true,\"name\":decoded.name.clone(),\"message\":decoded.message.clone(),\"stack\":decoded.stack.clone(),\"context\":decoded.context.clone(),\"enhanced\":decoded.enhanced_message.clone(),\"original\":decoded.original_error.clone(),\"isAxios\":decoded.is_axios_error,\"request\":decoded.request.clone(),\"config\":decoded.config.clone(),\"code\":decoded.code.as_ref().map(|code|crate::js_runtime::value::to_json(code).expect(\"finite code fixture\")),\"response\":decoded.response.clone()}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message}) } }",
+    "call": "{ match $type(&$value[\"source\"],$value[\"isError\"].as_bool().expect(\"error fact\"),$value.get(\"exchange\").and_then(serde_json::Value::as_str),$value[\"timestamp\"].as_str().expect(\"timestamp\"),$value[\"xhr\"].as_bool().expect(\"XHR fact\")) { Ok(decoded)=>serde_json::json!({\"ok\":true,\"name\":decoded.name.clone(),\"message\":decoded.message.clone(),\"stack\":decoded.stack.clone(),\"context\":decoded.context.clone(),\"enhanced\":decoded.enhanced_message.clone(),\"original\":decoded.original_error.clone(),\"isAxios\":decoded.is_axios_error,\"request\":decoded.request.clone(),\"config\":decoded.config.clone(),\"code\":decoded.code.as_ref().map(|code|crate::js_runtime::value::to_json(code).expect(\"finite code fixture\")),\"response\":decoded.response_json_view()}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -10960,6 +10960,226 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "with_retained_response",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "response",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Construction of one retained API response origin, chaining the original cause. Observes nearest retained response native units/bits and derives a JSON view only at the diagnostic boundary. No stored JSON cache or replacement transport payload.",
+        "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let code=$value.as_u64().expect(\"authored surrogate\") as u16;let mut original=<$type>::new(\"message\");let old=crate::runtime::ExchangeErrorOrigin::new(std::io::Error::other(\"opaque cause\"));original.origin=Some(old.clone());let response=Input::Object(vec![(\"data\".encode_utf16().collect(),Input::Text(vec![code])),(\"zero\".encode_utf16().collect(),Input::Float(-0.0)),(\"ownUndefined\".encode_utf16().collect(),Input::Undefined)]);let decoded=original.with_retained_response(response);let native=decoded.retained_response_input().expect(\"retained response\");let units=match native.get(\"data\").unwrap(){Input::Text(units)=>units.clone(),_=>panic!(\"native text\")};let zero=safe_cex_num::js_retained_number(native.get(\"zero\")).unwrap().to_bits().to_string();let cause=std::error::Error::source(&decoded).and_then(|wrapper|wrapper.source()).and_then(|value|value.downcast_ref::<std::io::Error>()).expect(\"original cause\");serde_json::json!({\"units\":units,\"zero\":zero,\"undefined\":matches!(native.get(\"ownUndefined\"),Some(Input::Undefined)),\"sameCause\":std::ptr::eq(cause,old.error().downcast_ref::<std::io::Error>().unwrap()),\"view\":decoded.response_json_view()})}",
+        "cases": [
+          {
+            "input": 55296,
+            "output": {
+              "units": [
+                55296
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          },
+          {
+            "input": 57343,
+            "output": {
+              "units": [
+                57343
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "retained_response_input",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual retained_response_input read on an API-created retained response origin. Native units, own undefined, signed-zero bits and original cause identity are observed separately from the computed diagnostic JSON view.",
+        "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let code=$value.as_u64().expect(\"authored surrogate\") as u16;let mut original=<$type>::new(\"message\");let old=crate::runtime::ExchangeErrorOrigin::new(std::io::Error::other(\"opaque cause\"));original.origin=Some(old.clone());let response=Input::Object(vec![(\"data\".encode_utf16().collect(),Input::Text(vec![code])),(\"zero\".encode_utf16().collect(),Input::Float(-0.0)),(\"ownUndefined\".encode_utf16().collect(),Input::Undefined)]);let decoded=original.with_retained_response(response);let native=decoded.retained_response_input().expect(\"retained response\");let units=match native.get(\"data\").unwrap(){Input::Text(units)=>units.clone(),_=>panic!(\"native text\")};let zero=safe_cex_num::js_retained_number(native.get(\"zero\")).unwrap().to_bits().to_string();let cause=std::error::Error::source(&decoded).and_then(|wrapper|wrapper.source()).and_then(|value|value.downcast_ref::<std::io::Error>()).expect(\"original cause\");serde_json::json!({\"units\":units,\"zero\":zero,\"undefined\":matches!(native.get(\"ownUndefined\"),Some(Input::Undefined)),\"sameCause\":std::ptr::eq(cause,old.error().downcast_ref::<std::io::Error>().unwrap()),\"view\":decoded.response_json_view()})}",
+        "cases": [
+          {
+            "input": 55296,
+            "output": {
+              "units": [
+                55296
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          },
+          {
+            "input": 57343,
+            "output": {
+              "units": [
+                57343
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "response_json_view",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual response_json_view read on an API-created retained response origin. Native units, own undefined, signed-zero bits and original cause identity are observed separately from the computed diagnostic JSON view.",
+        "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let code=$value.as_u64().expect(\"authored surrogate\") as u16;let mut original=<$type>::new(\"message\");let old=crate::runtime::ExchangeErrorOrigin::new(std::io::Error::other(\"opaque cause\"));original.origin=Some(old.clone());let response=Input::Object(vec![(\"data\".encode_utf16().collect(),Input::Text(vec![code])),(\"zero\".encode_utf16().collect(),Input::Float(-0.0)),(\"ownUndefined\".encode_utf16().collect(),Input::Undefined)]);let decoded=original.with_retained_response(response);let native=decoded.retained_response_input().expect(\"retained response\");let units=match native.get(\"data\").unwrap(){Input::Text(units)=>units.clone(),_=>panic!(\"native text\")};let zero=safe_cex_num::js_retained_number(native.get(\"zero\")).unwrap().to_bits().to_string();let cause=std::error::Error::source(&decoded).and_then(|wrapper|wrapper.source()).and_then(|value|value.downcast_ref::<std::io::Error>()).expect(\"original cause\");serde_json::json!({\"units\":units,\"zero\":zero,\"undefined\":matches!(native.get(\"ownUndefined\"),Some(Input::Undefined)),\"sameCause\":std::ptr::eq(cause,old.error().downcast_ref::<std::io::Error>().unwrap()),\"view\":decoded.response_json_view()})}",
+        "cases": [
+          {
+            "input": 55296,
+            "output": {
+              "units": [
+                55296
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          },
+          {
+            "input": 57343,
+            "output": {
+              "units": [
+                57343
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "new",
           "signature": {
             "inputs": [
@@ -11197,7 +11417,7 @@
         },
         "input": "observed",
         "reason": "Actual REST failure conversion parses encoded JSON response bytes, preserves non-JSON text fallback and keeps authoritative typed origin/request/raw bytes; no owner serialization. The JavaScript transport-kind case additionally observes TypeError name while retaining the complete native request/response origin.",
-        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:if $value[\"js\"].as_bool().unwrap_or(false){Some(Box::new(safe_cex_transport::TransportError::JavaScript(safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"native failure\"})))}else{None},message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.as_ref().map(|code|crate::js_runtime::value::to_json(code).expect(\"finite code fixture\")),\"context\":decoded.context.clone(),\"response\":decoded.response.clone(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
+        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:if $value[\"js\"].as_bool().unwrap_or(false){Some(Box::new(safe_cex_transport::TransportError::JavaScript(safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"native failure\"})))}else{None},message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.as_ref().map(|code|crate::js_runtime::value::to_json(code).expect(\"finite code fixture\")),\"context\":decoded.context.clone(),\"response\":decoded.response_json_view(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
         "cases": [
           {
             "input": {
@@ -31438,5 +31658,189 @@
     },
     "evidence": "Production JsHttpHost capability construction; the Paradex native_payload_provider_signs_real_paradex_order_modify_and_jwt witness executes this constructor with real NativeRuntime/reqwest and compares actual SDK preimages, signatures and HTTP headers to maintained Node code. API classification itself is not a decoder receipt.",
     "reason": "Constructs the sole REST host from existing runtime, adapter and optional executable remote/payload signing providers. It retains capabilities without deserializing account options or admitting a domain model; rest_http_host_signed delegates here with no payload capability."
+  },
+  "safe_cex_exchange::runtime::retained_http_response": {
+    "api": {
+      "kind": "function",
+      "name": "retained_http_response",
+      "signature": {
+        "inputs": [
+          [
+            "response",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestResponse",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Exact original RestResponse capture: physical bytes use the shared JSON parser, transformed data stays native. Observe envelope fields, data key order, native string units, own undefined and negative-zero bits before any JSON view. No response cache or second parser.",
+    "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let native=$value[\"native\"]==true;let code=$value[\"unit\"].as_u64().expect(\"authored code unit\") as u16;let body=if native{safe_cex_transport::RestResponseBody::Transformed(Input::Object(vec![(vec![code],Input::Float(-0.0)),(\"message\".encode_utf16().collect(),Input::Text(vec![code])),(\"missing\".encode_utf16().collect(),Input::Undefined)]))}else{safe_cex_transport::RestResponseBody::Encoded($value[\"raw\"].as_str().unwrap().as_bytes().to_vec())};let response=safe_cex_transport::RestResponse{status:409,reason:Some(\"retained\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"unchanged\".into())]),body};let actual=$type(&response);let data=actual.get(\"data\").unwrap();let keys=match data{Input::Object(fields)=>fields.iter().map(|(key,_)|key.clone()).collect::<Vec<_>>(),_=>panic!(\"data object\")};let message=match data.get(\"message\"){Some(Input::Text(units))=>units.clone(),_=>panic!(\"message units\")};let zero=if native{data.as_object().unwrap().first().map(|(_,v)|v)}else{data.get(\"zero\")};serde_json::json!({\"status\":safe_cex_num::js_retained_number(actual.get(\"status\")).unwrap()==409.0,\"reason\":actual.get(\"statusText\")==Some(&Input::Text(\"retained\".encode_utf16().collect())),\"header\":actual.get(\"headers\").unwrap().get(\"x-proof\")==Some(&Input::Text(\"unchanged\".encode_utf16().collect())),\"keys\":keys,\"message\":message,\"zero\":safe_cex_num::js_retained_number(zero).unwrap().to_bits().to_string(),\"undefined\":matches!(data.get(\"missing\"),Some(Input::Undefined))})}",
+    "cases": [
+      {
+        "input": {
+          "native": false,
+          "unit": 55296,
+          "raw": "{\"zero\":-0,\"message\":\"\\ud800\"}"
+        },
+        "output": {
+          "status": true,
+          "reason": true,
+          "header": true,
+          "keys": [
+            [
+              122,
+              101,
+              114,
+              111
+            ],
+            [
+              109,
+              101,
+              115,
+              115,
+              97,
+              103,
+              101
+            ]
+          ],
+          "message": [
+            55296
+          ],
+          "zero": "9223372036854775808",
+          "undefined": false
+        }
+      },
+      {
+        "input": {
+          "native": true,
+          "unit": 57343,
+          "raw": "{\"zero\":-0,\"message\":\"\\ud800\"}"
+        },
+        "output": {
+          "status": true,
+          "reason": true,
+          "header": true,
+          "keys": [
+            [
+              57343
+            ],
+            [
+              109,
+              101,
+              115,
+              115,
+              97,
+              103,
+              101
+            ],
+            [
+              109,
+              105,
+              115,
+              115,
+              105,
+              110,
+              103
+            ]
+          ],
+          "message": [
+            57343
+          ],
+          "zero": "9223372036854775808",
+          "undefined": true
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::runtime::response_json_view": {
+    "api": {
+      "kind": "function",
+      "name": "response_json_view",
+      "signature": {
+        "inputs": [
+          [
+            "body",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestResponseBody",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Explicit decision-5 diagnostic decoder/view only. Physical text receives the existing shared parser; native values keep their phase before JS stringify applies undefined omission, nonfinite null and zero spelling, with explicit UTF8 replacement. The authoritative response body remains untouched.",
+    "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let body=if $value[\"native\"]==true{safe_cex_transport::RestResponseBody::Transformed(Input::Object(vec![(vec![$value[\"unit\"].as_u64().unwrap() as u16],Input::Text(vec![0xd800])),(\"zero\".encode_utf16().collect(),Input::Float(-0.0)),(\"nan\".encode_utf16().collect(),Input::Float(f64::NAN)),(\"missing\".encode_utf16().collect(),Input::Undefined)]))}else{safe_cex_transport::RestResponseBody::Encoded($value[\"raw\"].as_str().unwrap().as_bytes().to_vec())};$type(&body)}",
+    "cases": [
+      {
+        "input": {
+          "native": true,
+          "unit": 57343
+        },
+        "output": {
+          "�": "�",
+          "zero": 0,
+          "nan": null
+        }
+      },
+      {
+        "input": {
+          "native": false,
+          "raw": "{\"zero\":-0,\"message\":\"\\ud800\"}"
+        },
+        "output": {
+          "zero": 0,
+          "message": "�"
+        }
+      },
+      {
+        "input": {
+          "native": false,
+          "raw": "not-json"
+        },
+        "output": "not-json"
+      }
+    ]
   }
 }

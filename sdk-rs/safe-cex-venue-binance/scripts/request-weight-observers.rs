@@ -92,6 +92,10 @@ pub fn weight(
 }
 pub fn diagnostic(input: &Value, f: impl FnOnce(String) -> Failure) -> Value {
     let error = f(input.as_str().unwrap().to_owned());
-    assert!(error.code.is_none() && error.response.is_none() && error.original_error.is_none());
+    assert!(
+        error.code.is_none()
+            && error.retained_response_input().is_none()
+            && error.original_error.is_none()
+    );
     json!({"name":error.name,"units":error.message.encode_utf16().collect::<Vec<_>>()})
 }
