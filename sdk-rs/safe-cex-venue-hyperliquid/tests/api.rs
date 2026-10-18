@@ -559,7 +559,7 @@ fn live_ts_numeric_coercion_and_user_signatures() {
         let result = action_hash(&action, None, &raw(case, "raw"));
         match result {
             Ok(hash) => assert_eq!(hash, case["hash"].as_str().unwrap()),
-            Err(error) => assert_eq!(error, case["error"].as_str().unwrap()),
+            Err(error) => assert_eq!(error.to_string(), case["error"].as_str().unwrap()),
         }
     }
     let cases = data["user"].as_array().unwrap();
@@ -970,7 +970,7 @@ fn sign_only_bigint_strings_are_rejected_but_blank_strings_hash_zero() {
         let action: Value = serde_json::from_str(r#"{"type":"scheduleCancel"}"#).unwrap();
         match action_hash(&action, None, &raw(case, "raw")) {
             Ok(hash) => assert_eq!(hash, case["hash"].as_str().unwrap()),
-            Err(error) => assert_eq!(error, case["error"].as_str().unwrap()),
+            Err(error) => assert_eq!(error.to_string(), case["error"].as_str().unwrap()),
         }
     }
 }

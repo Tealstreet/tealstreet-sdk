@@ -28,7 +28,7 @@ impl crate::signing::SigningInput for SignedView {
     }
 }
 
-fn signing_error(
+pub(super) fn signing_error(
     r: &mut Realm,
     cause: safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError,
 ) -> Thrown {

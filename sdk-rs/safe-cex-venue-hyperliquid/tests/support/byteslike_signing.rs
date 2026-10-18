@@ -131,40 +131,78 @@ fn native_realm_signer_retains_byteslike_error_protocol() {
 }
 
 #[test]
+#[allow(clippy::arc_with_non_send_sync)]
 fn native_api_signing_retains_original_error_through_transport() {
     use safe_cex_exchange::js_runtime::value::{self as shared, owned::OwnedCallbackError};
-    use safe_cex_exchange::runtime::{ExchangeError, ExchangeRuntime, LogSeverity};
+    use safe_cex_exchange::runtime::{ExchangeError, ExchangeRuntime};
     use safe_cex_transport::{RestFailure, TransportError};
     use std::{rc::Rc, sync::Arc};
     let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    tokio::task::LocalSet::new().block_on(&executor,async {
+    tokio::task::LocalSet::new().block_on(&executor, async {
         let runtime = safe_cex_exchange::native::native_runtime();
         let clock = Arc::new(crate::binding::RuntimeClock::new(runtime.clone()));
         let reporter = runtime.clone();
+        let options = serde_json::from_value(json!({
+            "key": "key", "secret": format!("0x{}", "11".repeat(32))
+        }))
+        .unwrap();
         let client = crate::api::create_exchange_api(
-            serde_json::from_value(json!({"key":"key","secret":format!("0x{}", "11".repeat(32))})).unwrap(),
+            options,
             Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
-            Rc::new(crate::rate_limit::RateLimiter::with_defaults(clock,None,None)),
-            Arc::new(move |message|reporter.console(LogSeverity::Error,message)),
+            Rc::new(crate::rate_limit::RateLimiter::with_defaults(
+                clock, None, None,
+            )),
+            Arc::new(move |message| reporter.console("error", message)),
         );
         let mut completed = 0;
-        for row in source().iter().filter(|row|row["ok"] == false) {
-            let request = client.build_request("/exchange",&json!({"action":{"type":"cancel","cancels":[{"a":1,"o":1234}]},"nonce":1700000000123u64,"vaultAddress":row["vault"]})).unwrap();
-            let error = client.prepare_request(request.clone(),true).await.unwrap_err();
-            let TransportError::Rejected(origin) = &error else {panic!("native signer must preserve typed origin: {error:?}")};
-            let cause = origin.error().downcast_ref::<OwnedCallbackError>().expect("canonical owned callback cause");
-            assert_eq!(shared::to_json(&cause.value().to_js()).unwrap(),row["error"]);
-            let projected = shared::Thrown::from(ExchangeError::from(RestFailure::from_transport(error,request))).value;
+        for row in source().iter().filter(|row| row["ok"] == false) {
+            let body = json!({
+                "action": {"type": "cancel", "cancels": [{"a": 1, "o": 1234}]},
+                "nonce": 1700000000123u64, "vaultAddress": row["vault"]
+            });
+            let request = client.build_request("/exchange", &body).unwrap();
+            let error = client
+                .prepare_request(request.clone(), true)
+                .await
+                .unwrap_err();
+            let TransportError::Rejected(origin) = &error else {
+                panic!("native signer must preserve typed origin: {error:?}")
+            };
+            let cause = origin
+                .error()
+                .downcast_ref::<OwnedCallbackError>()
+                .expect("canonical owned callback cause");
+            assert_eq!(
+                shared::to_json(&cause.value().to_js()).unwrap(),
+                row["error"]
+            );
+            let mut realm = Realm::new(runtime.clone());
+            let projected = super::super::facade_rest::thrown_from(
+                &mut realm,
+                ExchangeError::from(RestFailure::from_transport(error, request)),
+            );
             let mut actual = serde_json::Map::new();
-            for name in ["name","message","code","argument","value","shortMessage"] {
-                actual.insert(name.into(),shared::to_json(&projected.get(name).unwrap()).unwrap());
+            for name in [
+                "name",
+                "message",
+                "code",
+                "argument",
+                "value",
+                "shortMessage",
+            ] {
+                let field = realm.get_str(&projected, name).unwrap();
+                actual.insert(name.into(), realm.to_serde(&field).unwrap());
             }
-            assert_eq!(Json::Object(actual),row["error"],"canonical native transport/error projection retains original fields");
+            assert_eq!(
+                Json::Object(actual),
+                row["error"],
+                "production Realm REST error projection retains original fields"
+            );
             completed += 1;
         }
-        assert_eq!(completed,3);
+        assert_eq!(completed, 3);
     });
 }

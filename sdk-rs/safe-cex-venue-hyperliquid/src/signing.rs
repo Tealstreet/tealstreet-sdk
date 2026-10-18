@@ -385,7 +385,9 @@ pub fn address_to_bytes(address: &str) -> Result<Vec<u8>, OwnedCallbackError> {
         .ok_or_else(|| byteslike_error(address))?;
     Ok(hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let digit = |c: u8| {
                 if c.is_ascii_digit() {
