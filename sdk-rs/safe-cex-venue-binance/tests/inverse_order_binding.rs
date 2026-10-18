@@ -199,7 +199,7 @@ fn run(spec: &Value) {
 }
 fn group(names: &[&str]) {
     let cases = corpus();
-    assert_eq!(cases.len(), 23);
+    assert_eq!(cases.len(), 25);
     for name in names {
         run(cases.iter().find(|c| c["name"] == *name).unwrap());
     }
@@ -222,9 +222,11 @@ fn placement_split_stops_batch_ids_and_preflight_match_source() {
 fn cancellation_and_amendment_preserve_request_and_store_ordering() {
     group(&[
         "cancel-partial-unknown",
+        "cancel-group-order",
         "cancel-symbol",
         "amend-zero-price",
         "amend-cancel-failed",
+        "amend-unknown-order",
     ]);
 }
 #[test]

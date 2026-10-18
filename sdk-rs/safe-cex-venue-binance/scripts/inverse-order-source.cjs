@@ -28,9 +28,12 @@ add('full-close-missing','placeOrder',[opts({type:'stop_market',amount:0,close:t
 add('format-all-before-send','placeOrders',[[opts({}),opts({symbol:'MISSING'})]],[]);
 const grouped = [...Array.from({length:11},(_,i)=>order(i+1)),order(20,'ETHUSD_PERP'),order(21,'ETHUSD_PERP')];
 add('cancel-partial-unknown','cancelOrders',[grouped],[route('DELETE','/dapi/v1/batchOrders',{}),route('DELETE','/dapi/v1/order',{code:-2011,msg:'Unknown order'})],{seed:{orders:grouped}});
+const unusualGroups=[order(30,'10'),order(31,'2'),order(32,'__proto__'),order(33,'10'),order(34,'2'),order(35)];
+add('cancel-group-order','cancelOrders',[unusualGroups],[route('DELETE','/dapi/v1/batchOrders',{}),cancel],{seed:{orders:unusualGroups}});
 add('cancel-symbol','cancelSymbolOrders',[symbol],[route('DELETE','/dapi/v1/allOpenOrders',{})],{seed:{orders:[order(1),order(2,'ETHUSD_PERP')]}});
 add('amend-zero-price','updateOrder',[{order:order(1),update:{price:0,amount:3}}],[cancel,single],{seed:{orders:[order(1)]}});
 add('amend-cancel-failed','updateOrder',[{order:order(1),update:{amount:3}}],[route('DELETE','/dapi/v1/order',{code:-4000,msg:'cancel rejected'})],{seed:{orders:[order(1)]}});
+add('amend-unknown-order','updateOrder',[{order:order(1),update:{amount:3}}],[route('DELETE','/dapi/v1/order',{code:-2011,msg:'Unknown order'}),single],{seed:{orders:[order(1)]}});
 for (const [name,value] of [['min',-5],['max',100],['unchanged',10]]) add('leverage-'+name,'setLeverage',[symbol,value],[route('POST','/dapi/v1/leverage',{})],{seed:{positions:[position('long'),position('short')]}});
 add('leverage-failure','setLeverage',[symbol,20],[route('POST','/dapi/v1/leverage',{code:-4000,msg:'leverage rejected'})],{seed:{positions:[position('long')]}});
 add('leverage-missing','setLeverage',[symbol,20],[]);
@@ -81,7 +84,7 @@ function numbers(value) {
       outputs.push({...spec,expected:numbers({result,error,calls,events,state})});
     } finally { venue.dispose(); }
   }
-  assert.equal(outputs.length,23);
+  assert.equal(outputs.length,25);
   const observation=name=>outputs.find(c=>c.name===name).expected;
   const params=(name,index=0)=>Object.fromEntries(observation(name).calls[index].params);
   assert.equal(params('limit').price,'5000.2');
@@ -97,10 +100,13 @@ function numbers(value) {
   assert.equal(observation('format-all-before-send').calls.length,0);
   assert.deepEqual(observation('cancel-partial-unknown').state.orders.map(o=>o.status),[...Array(10).fill('canceled'),'open','open','open']);
   assert.equal(observation('cancel-partial-unknown').calls.length,2);
+  assert.deepEqual(observation('cancel-group-order').calls.map(c=>Object.fromEntries(c.params).symbol),['2','10','__proto__',symbol]);
+  assert.ok(observation('cancel-group-order').state.orders.every(o=>o.status==='canceled'));
   assert.deepEqual(observation('amend-zero-price').calls.map(c=>c.method),['DELETE','POST']);
   assert.equal(params('amend-zero-price',1).price,'undefined');
   assert.equal(params('amend-zero-price',1).quantity,'3');
   assert.equal(observation('amend-cancel-failed').calls.length,1);
+  assert.deepEqual(observation('amend-unknown-order').calls.map(c=>c.method),['DELETE','POST']);
   assert.equal(params('leverage-min').leverage,'1');
   assert.equal(params('leverage-max').leverage,'50');
   assert.equal(observation('leverage-unchanged').calls.length,0);
