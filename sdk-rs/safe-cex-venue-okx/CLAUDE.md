@@ -208,3 +208,12 @@ The websocket-account fixture supplies Map, Set and WsDirectFallback as explicit
 A separate constructed-family witness verifies all four OKX variants install
 distinct public/private/business socket owners sharing the original Store,
 without issuing HTTP during construction.
+
+The constructed index-ticker lookup reads canonical Store rows directly. It calls
+the actual markets filter and dynamically resolves getIndexTickerInstId for each
+visited row; it does not decode every Market (or its opaque info) to select IDs.
+The helper reads only info?.uly and the cold id.replace branch, preserving UTF-16,
+source coercion/getter order, strict argument comparison and original row identity.
+The native index_lookup_binding tests and maintained AST index-lookup-source.mjs
+cover poisoned unrelated fields, live method replacement, sparse/captured-length
+filtering, custom filter/replace receivers and original thrown identity.
