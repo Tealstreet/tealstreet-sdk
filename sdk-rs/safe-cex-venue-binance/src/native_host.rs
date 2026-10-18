@@ -1099,10 +1099,8 @@ impl ExchangeImports for NativeImports {
             Ok(record([
                 (
                     "records",
-                    EventValue::from_json(
-                        serde_json::to_value(&result.records)
-                            .map_err(|e| failure(e.to_string()))?,
-                    ),
+                    safe_cex_exchange::js_runtime::value::from_typed(&result.records)
+                        .map_err(|error| exchange_failure(error.to_exchange_error()))?,
                 ),
                 ("truncated", EventValue::Bool(result.truncated)),
                 ("exhaustedChunks", number(result.exhausted_chunks)),
