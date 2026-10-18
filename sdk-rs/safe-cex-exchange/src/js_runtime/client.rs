@@ -26,6 +26,10 @@ pub trait JsHttpHost {
     fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
         None
     }
+    /// Native implementation of the source options.payloadSigner callback.
+    fn payload_signer(&self) -> Option<Rc<dyn safe_cex_crypto::PayloadSigner>> {
+        None
+    }
 }
 
 type Host = Rc<dyn JsHttpHost>;
@@ -728,6 +732,7 @@ struct RestHttpHost {
     runtime: Rc<dyn ExchangeRuntime>,
     adapter: std::sync::Arc<dyn RestAdapter>,
     remote: Option<super::base_exchange::HostedSigner>,
+    payload: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
     exchange: RefCell<Option<safe_cex_types::ExchangeName>>,
 }
 
@@ -745,10 +750,21 @@ pub fn rest_http_host_signed(
     adapter: std::sync::Arc<dyn RestAdapter>,
     remote: Option<super::base_exchange::HostedSigner>,
 ) -> Rc<dyn JsHttpHost> {
+    rest_http_host_with_signers(runtime, adapter, remote, None)
+}
+
+/// Native signer capabilities remain executable handles outside serialized options.
+pub fn rest_http_host_with_signers(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: Option<super::base_exchange::HostedSigner>,
+    payload: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
+) -> Rc<dyn JsHttpHost> {
     Rc::new(RestHttpHost {
         runtime,
         adapter,
         remote,
+        payload,
         exchange: RefCell::new(None),
     })
 }
@@ -1046,6 +1062,9 @@ impl JsHttpHost for RestHttpHost {
     }
     fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
         self.remote.clone()
+    }
+    fn payload_signer(&self) -> Option<Rc<dyn safe_cex_crypto::PayloadSigner>> {
+        self.payload.clone()
     }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.runtime.clone()

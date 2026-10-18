@@ -4425,6 +4425,7 @@ dependencies = [
  "serde_json",
  "starknet-core",
  "starknet-crypto",
+ "tokio",
 ]
 
 [[package]]

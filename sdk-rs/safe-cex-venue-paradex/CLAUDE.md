@@ -257,3 +257,16 @@ admission stay strict. Source live-info alias versus native owned snapshot remai
 a declared boundary. `scripts/retained-order-info-controls.py` compiles three
 isolated faults (member JSON projection, REST JSON projection, undefined loss),
 requires the named real-binding test to fail and restores exact source bytes.
+
+The typed native payload provider reaches options before constructor-started SDK
+initialization. A hosted key reference therefore selects the source address-only
+account branch instead of local private-key parsing. The child-module
+`payload_signer_binding` witness runs NativeRuntime, the production REST host,
+reqwest and a loopback config/auth server; it compares all three Order/ModifyOrder/
+JWT hash-signature requests and auth headers with maintained Node SDK code, then
+checks HMAC hex/base64 through the same provider and propagated signer rejection.
+The labelled RED commit declares only the new host ABI/union; assembly is unchanged.
+`payload-signer-controls.py` independently disables real provider installation and
+truncates the forwarded hash, requires named compiled failures and restores exact
+source bytes before rerunning the witness. Apex has no maintained payloadSigner
+caller in this source tree; no Apex signing API is introduced by this repair.

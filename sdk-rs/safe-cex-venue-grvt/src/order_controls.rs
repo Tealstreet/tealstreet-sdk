@@ -384,14 +384,29 @@ pub fn update_order<
     opts: &UpdateOrderOpts,
     cancel: impl FnOnce(&Order) -> F,
     place: impl FnOnce(PreparedOrderOpts) -> G,
-    mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError>,
-    mut emit_error: impl FnMut(&str) -> Result<(), ExchangeError>,
+    log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError>,
+    emit_error: impl FnMut(&str) -> Result<(), ExchangeError>,
 ) -> impl Future<Output = Result<Vec<String>, ExchangeError>> {
-    let id = opts.order.id.clone();
     let count = match &opts.update {
         UpdateOrderOptsUpdate::Variant0(u) => 1 + usize::from(u.price.is_some()),
         UpdateOrderOptsUpdate::Variant1(u) => 1 + usize::from(u.amount.is_some()),
     };
+    update_order_with_field_count(opts, count, cancel, place, log, emit_error)
+}
+
+/// Constructed receivers retain raw enumerable key count before typed projection.
+pub(crate) fn update_order_with_field_count<
+    F: Future<Output = Result<(), ExchangeError>>,
+    G: Future<Output = Result<Vec<String>, ExchangeError>>,
+>(
+    opts: &UpdateOrderOpts,
+    count: usize,
+    cancel: impl FnOnce(&Order) -> F,
+    place: impl FnOnce(PreparedOrderOpts) -> G,
+    mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError>,
+    mut emit_error: impl FnMut(&str) -> Result<(), ExchangeError>,
+) -> impl Future<Output = Result<Vec<String>, ExchangeError>> {
+    let id = opts.order.id.clone();
     let begin = (|| {
         log(
             &format!("Updating order {id} (fieldCount={count})"),
