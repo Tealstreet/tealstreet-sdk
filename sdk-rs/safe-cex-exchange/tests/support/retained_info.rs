@@ -290,7 +290,9 @@ fn retained_config_uses_the_production_store_update_without_json_copy() {
 
 #[test]
 fn retained_config_replacement_preserves_top_level_undefined() {
-    for case in source()["replacements"].as_array().unwrap() {
+    let cases = source()["replacements"].as_array().unwrap();
+    assert_eq!(cases.len(), 13, "native config replacement source floor");
+    for case in cases {
         let native = Rc::new(DefaultStore::new());
         let facade = store::facade(native.clone());
         facade
@@ -314,7 +316,9 @@ fn retained_config_replacement_preserves_top_level_undefined() {
 fn retained_wrapper(kind: &str) {
     let cases = source()["wrappers"].as_array().unwrap();
     assert_eq!(cases.len(), 26, "nested wrapper source floor");
-    for case in cases.iter().filter(|case| case["kind"] == kind) {
+    let cases: Vec<_> = cases.iter().filter(|case| case["kind"] == kind).collect();
+    assert_eq!(cases.len(), 13, "native {kind} wrapper comparison floor");
+    for case in cases {
         let native = Rc::new(DefaultStore::new());
         let facade = store::facade(native.clone());
         let record = input(&case["record"]);
