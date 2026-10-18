@@ -6,7 +6,7 @@ use safe_cex_store::{
     model_patch::{ModelPatch, PatchSource},
 };
 use safe_cex_types::*;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::{cell::Cell, rc::Rc};
 pub(super) struct ReadTrace {
     inner: Rc<safe_cex_exchange::native_store::DefaultStore>,
@@ -206,10 +206,10 @@ impl safe_cex_store::Store for ReadTrace {
     fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
         safe_cex_store::Store::fetched_leverage(self.inner.as_ref())
     }
-    fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
+    fn socket_health(&self) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError> {
         safe_cex_store::Store::socket_health(self.inner.as_ref())
     }
-    fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError> {
+    fn update_socket_health(&self, data: &safe_cex_types::retained_json::RetainedJsonInput) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::update_socket_health(self.inner.as_ref(), data)
     }
     fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError> {

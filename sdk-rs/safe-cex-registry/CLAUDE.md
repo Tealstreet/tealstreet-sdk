@@ -28,11 +28,13 @@ UTF-16 unit, matching source slice(0,-1), then replaces a remaining isolated uni
 with U+FFFD at the approved typed String boundary. Generated provider keys always
 contain a delimiter and retain their complete Unicode symbols.
 
-GatewayChannel explicitly preserves the TS unchecked `auth` cast as a declared
-runtime divergence. GatewayMessage validates the entire frame, unlike the unchecked TS cast: missing
-required fields, unknown enums, wrong types and typed optional nulls reject the
-whole frame, even when a handler would ignore the offending field. This broader
-validation difference is declared divergent. Four envelope constructors permit external producers while
+GatewayChannel preserves the TS unchecked `auth` cast without changing emitted
+frames. GatewayMessage is a strict standalone envelope decoder; production raw
+gateway ingress does not use it. The actual native gateway type-audit witness
+delivers malformed unused envelope fields through market/ticker startup and
+compares auth frames with the maintained TS provider. The two verdicts are in
+`../safe-cex-types/per-row-rulings.md`.
+Four envelope constructors permit external producers while
 keeping literal wire tags enforced. The ambient native `require` declaration is not-applicable; executable native
 entries delegate through NativeModuleHost.
 

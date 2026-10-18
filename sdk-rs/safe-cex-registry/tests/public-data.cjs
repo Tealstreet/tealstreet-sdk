@@ -187,4 +187,20 @@ assert.equal(socket.sent[0].channel, 'auth'); assert.equal(socket.sent[0].data.t
 assert.equal(socket.sent[3].symbol, 'BTC:PERP'); assert.equal(socket.sent[4].interval, '1m');
 assert.equal(changedUnsubscribe.symbol, 'CHANGED'); assert.equal(changedUnsubscribe.interval, '5m');
 // Native JS values were asserted before serializing source observations.
-process.stdout.write(JSON.stringify({inProcess, gateway: gatewaySummary}));
+const auditParent = parent();
+const auditGateway = new external.ExternalPublicDataProvider(auditParent, {url:'wss://fixture',exchangeId:'binance',authToken:'audit-token'});
+auditGateway.connect(); const auditSocket=sockets.at(-1); auditSocket.open();
+assert.deepEqual(auditSocket.sent[0], {type:'subscribe',exchangeId:'binance',channel:'auth',data:{token:'audit-token'}});
+auditSocket.message({type:'subscribed',exchangeId:'binance',channel:'auth'});
+assert.ok(auditParent.logs.some(([message])=>message.endsWith('Subscribed to auth')));
+auditSocket.message({type:'future-type',exchangeId:'binance',channel:'future-channel'});
+auditSocket.message({type:'data',exchangeId:'binance',channel:'future-channel',data:null});
+assert.equal(auditParent.updates.length,0,'GATEWAY_ENVELOPE unknown tags are ignored');
+for (const [channel,data] of [['market',{...fixture.market,symbol:'GWUSDT'}],['tickers',{...fixture.ticker,symbol:'GWUSDT',last:10}]]) {
+  auditSocket.message({type:'data',exchangeId:'binance',channel,data:[data],symbol:null,interval:{unused:true},error:17,requestId:false,extra:{keep:'unused'}});
+}
+assert.equal(auditParent.store.markets[0].symbol,'ADAPT:GWUSDT');
+assert.equal(auditParent.store.tickers[0].last,10);
+const gatewayTypeAudit={auth:true,markets:auditParent.store.markets.length,tickers:auditParent.store.tickers.length,last:auditParent.store.tickers[0].last};
+auditGateway.dispose();
+process.stdout.write(JSON.stringify({inProcess, gateway: gatewaySummary, gatewayTypeAudit}));

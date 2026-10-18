@@ -102,6 +102,11 @@ test('health Store notification origin cannot be flattened', () => {
     '.map_err(|_| Rc::new(PortfolioThrown::from_value(None)))?;',
     'health native origin bridge retains StoreMutationError');
 });
+test('health retained conversion must keep the original partial update', () => {
+  healthControl('.update_socket_health(&Value::Object(update).into())',
+    '.update_socket_health(&Value::Null.into())',
+    'health native origin bridge retains StoreMutationError');
+});
 test('health log failures cannot be discarded', () => {
   healthControl('log(reason, "warning")?;', 'let _ = log(reason, "warning");',
     'health log failure must propagate');

@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Eighteen rows are reconciled below; the other
-19 remain pending individual production-binding audits.
+`divergence-cluster-rulings.md`. Twenty-five rows are reconciled below; the other
+12 remain with the delegated production-binding audit owner.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -74,10 +74,10 @@ The position batch reconciles five rows. With the seven rows in PR #1182,
 row 37 ACCEPT-safety in PR #1188 and the five Hyro rows below, 18 of 37
 are reconciled and 19 remain.
 
-The remaining 19 rows are split by module: codex-0efu4x owns rows
+The former 19-row remainder was split by module: codex-0efu4x owns rows
 1/2/3/6/7/8/12/13/16/23/25/35 (public/private socket lifecycle, history mapping
-and position controls); codex-0w5ohi retains rows
-18/24/26/27/32/33/36 (Spot, placement options, account,
+and position controls); codex-0w5ohi retained rows
+18/24/26/27/32/33/36 (reconciled in the retained batch below) (Spot, placement options, account,
 market and startup/facade work). Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
 
@@ -137,3 +137,29 @@ and prove that shadowed `__proto__` accessors are not read.
 `scripts/hyro-account-controls.py` mutates each accepted guard/result and the
 Error classification separately, requires compiled named native failures, then
 restores exact source bytes and replays the receiver.
+
+## Retained startup, markets, tickers and placement: rows 18/24/26/27/32/33/36
+
+| Row | Verdict | Production binding evidence |
+| --- | --- | --- |
+| 18 | FIX | Spot startup kept its eager Promise and sequential markets/tickers flow, but narrowed the private-probe warning to UTF-8. The original warning code units now reach the logger. |
+| 24 | ACCEPT | The stronger enum is strictly placement input. Six null/malformed/conflicting extension profiles refuse through the actual placement capability before signing or HTTP; existing positive BBO/tick-size/ordinary bindings retain allowed fields. |
+| 26 | ACCEPT | Decision 3 applies per market row. Good/bad/good HTTP pages retain both valid neighbors through fetch and refresh, while malformed asset/symbol values are visibly reported. Source property/coercion errors remain distinct. |
+| 27 | FIX | Spot's production helper projected the complete response through JSON before mapping. It now captures retained metadata directly, including own undefined, lone-surrogate text and infinity; row-only typed refusal remains. |
+| 32 | ACCEPT | The actual primary receiver already starts its canonical Promise eagerly, fetches markets/tickers concurrently and keeps continuations after waiter abandonment. Detached cache failures visibly report the original value under the shared no-silent-failure rule, instead of the source empty catch. |
+| 33 | FIX | Primary/Spot production parsing now uses the original indexed list and live market dictionary. Falsy input returns the original cached array; unread metadata is untouched and parseFloat retains UTF-16 prefixes. |
+| 36 | ACCEPT | The shared Rust carrier installs the separate Spot members. Existing actual facade/socket/trading tests confirm Spot class identity, category, fixed leverage, empty positions and inherited refusals. |
+
+`receiver_tests::retained_audit_*` constructs the native production owner and
+observes raw identity, UTF-16 units, IEEE bits, held clock/request settlement,
+loaded flags, detached reporting and private connection/snapshot/tick ordering.
+The three master defects compile and fail by assertion before their fixes.
+`scripts/retained-audit-fixtures.cjs` executes the maintained TS members through
+the existing API-validation source gate. `retained-audit-controls.py` compiles
+cache-copy, numeric-prefix, raw-info projection and warning-text faults, then
+restores exact production bytes and requires the named native witnesses GREEN. The market-row HTTP, Spot facade and
+primary placement targets retain their original cases and effects. The exported
+JSON mappers remain supplemental tests, with no production fallback through them.
+
+This batch reconciles all seven rows retained by codex-0w5ohi. The twelve rows
+delegated to codex-0efu4x retain that owner's separate milestones and verdicts.

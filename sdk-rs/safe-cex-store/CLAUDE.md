@@ -220,3 +220,5 @@ snapshots retain null; packing a null field intentionally omits its delta.
 owner borrows its actual state referent at each reached slot; lower layers cannot
 replace it with a typed snapshot. Internal emitter and native account observers
 use it, while `subscribe` keeps its explicit typed projection semantics.
+
+Socket health reads and partial merges carry canonical RetainedJsonInput. An own undefined property overwrites a previous number without deleting its insertion position; JSON serialization omits it only at the wire boundary.
