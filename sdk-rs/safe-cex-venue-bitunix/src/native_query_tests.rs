@@ -160,10 +160,7 @@ fn discarded_native_reads_start_every_assigned_request() {
 #[test]
 fn discarded_native_writes_resume_store_updates_after_held_http() {
     use safe_cex_exchange::exchange::Exchange;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
+    use std::sync::Arc;
     for metadata in [false, true] {
         let (venue, runtime, store, wire) = eager_fixture();
         let endpoint = if metadata {
@@ -171,7 +168,7 @@ fn discarded_native_writes_resume_store_updates_after_held_http() {
         } else {
             "/api/v1/futures/account/change_leverage"
         };
-        let gate = Arc::new(AtomicBool::new(false));
+        let gate = Arc::new(fixture::HeldResponse::default());
         wire.held_responses
             .lock()
             .unwrap()
@@ -202,15 +199,18 @@ fn discarded_native_writes_resume_store_updates_after_held_http() {
             assert_eq!(position.leverage, 10., "Store waits for actual response");
         }
         drop(positions);
-        gate.store(true, Ordering::SeqCst);
+        gate.release();
         runtime.pump();
         let positions = store.positions();
         assert_eq!(positions.len(), 2);
         for (position, id) in positions.iter().zip(["BTCUSDT:long", "BTCUSDT:short"]) {
             assert_eq!(position.id, id);
             assert_eq!(
-                position.leverage, 23.,
-                "discarded waiter retains Store continuation"
+                position.leverage,
+                23.,
+                "discarded waiter retains Store continuation: metadata={metadata}; errors={:?}; console={:?}",
+                runtime.errors.borrow(),
+                runtime.console.borrow()
             );
             if metadata {
                 assert_eq!(
@@ -235,7 +235,7 @@ fn discarded_native_amendments_keep_normal_and_standalone_routes() {
             "type":if standalone {"take_profit_market"} else {"limit"},
             "side":"buy","price":120.5,"amount":2.5,"filled":0,"remaining":2.5,
             "reduceOnly":false,"lastUpdate":17,
-            "info": if standalone { json!({"orderId":"raw-7","tpPrice":"120.5","tpQty":"2.5","tpStopType":"MARK_PRICE","tpOrderType":"MARKET"}) } else {json!({"orderId":"raw-7","qty":"2.5","price":"120.5"})}
+            "info": if standalone { json!({"orderId":"raw-7","tpPrice":"120.5","tpQty":"2.5","tpStopType":"MARK_PRICE","tpOrderType":"MARKET"}) } else {json!({"orderId":"amend-7","orderType":"LIMIT","reduceOnly":false,"qty":"2.5","price":"120.5"})}
         })).unwrap();
         let endpoint = if standalone {
             "/api/v1/futures/tpsl/modify_order"
@@ -255,10 +255,58 @@ fn discarded_native_amendments_keep_normal_and_standalone_routes() {
         assert_eq!(
             requests.len(),
             1,
-            "discarded amendment starts its native route"
+            "discarded amendment starts its native route: standalone={standalone}; errors={:?}; console={:?}",
+            runtime.errors.borrow(),
+            runtime.console.borrow()
         );
         assert_eq!(requests[0].url, endpoint);
         drop(requests);
         venue.dispose().unwrap();
     }
+}
+
+#[test]
+fn ready_native_http_preserves_source_await_before_store_write() {
+    use safe_cex_exchange::exchange::Exchange;
+    for metadata in [false, true] {
+        let (venue, runtime, store, _) = eager_fixture();
+        let pending = if metadata {
+            venue.update_symbol_metadata("BTCUSDT".into())
+        } else {
+            venue.set_leverage("BTCUSDT".into(), 23.)
+        };
+        assert_eq!(store.positions().len(), 2);
+        for position in store.positions().iter() {
+            assert_eq!(
+                position.leverage, 10.,
+                "ready HTTP must retain source await fence; metadata={metadata}"
+            );
+        }
+        drop(pending);
+        runtime.pump();
+        for position in store.positions().iter() {
+            assert_eq!(
+                position.leverage, 23.,
+                "ready HTTP continuation remains owned"
+            );
+        }
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn private_open_runs_login_clock_prefix_before_queuing_its_waiter() {
+    use safe_cex_exchange::exchange::Exchange;
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    let (venue, runtime, _, _) = eager_fixture();
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 40_000.0);
+    assert!(VIRTUAL_CLOCK.get_current_time_ms() - (VIRTUAL_CLOCK.now)() > 30_000.0);
+    drive(&runtime, venue.socket("private").base.on_open()).unwrap();
+    let offset = VIRTUAL_CLOCK.get_current_time_ms() - (VIRTUAL_CLOCK.now)();
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
+    venue.dispose().unwrap();
+    assert!(
+        offset.abs() < 1000.,
+        "private onOpen must begin source sendLogin sync before queuing its waiter: {offset}"
+    );
 }

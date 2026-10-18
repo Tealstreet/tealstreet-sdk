@@ -23,10 +23,10 @@ async function main() {
   void method('fetchTickers', receiver)();
   assert.deepEqual(requests, [ENDPOINTS.TICKERS], 'actual source call prefix survives discarded result');
   const writes = [];
-  for (const metadata of [false, true]) {
-    let release;
+  for (const metadata of [false, true]) for (const held of [false, true]) {
+    let release = () => {};
     let sent = 0;
-    const response = new Promise(resolve => {release = resolve;});
+    const response = held ? new Promise(resolve => {release = resolve;}) : Promise.resolve({data:{data:{leverage:23,marginMode:'ISOLATION'}}});
     const positions = ['long', 'short'].map(side => ({id: createPositionId('BTCUSDT', side), symbol:'BTCUSDT', leverage:10}));
     const store = {
       positions,
@@ -52,7 +52,7 @@ async function main() {
     await new Promise(setImmediate);
     assert.deepEqual(store.positions.map(p => p.leverage), [23,23], 'source owns dropped-result continuation');
     if (metadata) assert.equal(owner.symbolSettings.get('BTCUSDT').marginType, MarginType.Isolated);
-    writes.push({metadata, sent, leverage:store.positions.map(p => p.leverage)});
+    writes.push({metadata, held, sent, leverage:store.positions.map(p => p.leverage)});
   }
   process.stdout.write(JSON.stringify({requests,writes}));
 }
