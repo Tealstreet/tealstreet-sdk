@@ -38,7 +38,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("accepted fixture unexpectedly scheduled work")
     }
-    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {
+    fn console_values(&self, _: &str, _: &[Js]) {
         panic!("accepted fixture unexpectedly logged")
     }
     fn unique_id(&self) -> String {
@@ -61,7 +61,7 @@ impl ExchangeRuntime for Runtime {
     }
     fn report_raw_exception(
         &self,
-        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &Js,
         _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("accepted fixture unexpectedly reported a raw exception")

@@ -45,7 +45,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
                 }
             };
             Ok(Box::pin(async move {
-                await_js(pending).await?;
+                await_js(&h.0.exchange_runtime(), pending).await?;
                 Ok(())
             }))
         },
@@ -105,7 +105,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
                 "getOrFetchSymbolConfig",
                 std::vec![Js::utf16(symbol), Js::Bool(refetch)],
             )?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         margin_type: |_, config| to_typed(&config.get("marginType")?),
         position_mode: |_, config| to_typed(&config.get("positionMode")?),
@@ -144,7 +144,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
         },
         fetch_positions: |h| {
             let pending = h.call("fetchPositions", std::vec![])?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         update_positions: |h, positions| {
             h.call(

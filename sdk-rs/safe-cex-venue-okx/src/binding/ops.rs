@@ -247,12 +247,16 @@ fn js_callback(f: ReadMapper<Js, Thrown>) -> Js {
     Js::function("", move |_, args| f(arg(&args, 0)))
 }
 
-fn await_value(v: Js) -> ReadAwait<Js, Thrown> {
-    Box::pin(await_js(v))
+fn await_value(
+    runtime: &std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
+    v: Js,
+) -> ReadAwait<Js, Thrown> {
+    Box::pin(await_js(runtime, v))
 }
 
 pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
     let s = scope.clone();
+    let await_runtime = s.exchange_runtime();
     let cap = s.clone();
     let intr = s.clone();
     let rt = s.clone();
@@ -316,7 +320,10 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
                 let values = xs.into_iter().map(|x| rt.spawn(f(x))).collect();
                 Js::Promise(all(&rt.exchange_runtime(), values))
             });
-            Box::pin(async move { await_js(started?).await })
+            {
+                let runtime = rt.exchange_runtime();
+                Box::pin(async move { await_js(&runtime, started?).await })
+            }
         }),
         some: Rc::new(|v, f| {
             for x in items(&v)? {
@@ -326,7 +333,7 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
             }
             Ok(false)
         }),
-        await_value: Rc::new(await_value),
+        await_value: Rc::new(move |v| await_value(&await_runtime, v)),
         error_value: Rc::new(|e| e.value.clone()),
         new_error: Rc::new(|ctor, message| Ok(Thrown::new(call_js(&ctor, vec![message])?))),
     })
@@ -357,6 +364,8 @@ pub(crate) fn socket_ops(scope: &OkxScope) -> Rc<SocketEventOps<Js, Thrown>> {
 
 pub(crate) fn mutation_ops(scope: &OkxScope) -> Rc<OrderMutationOps<Js, Thrown>> {
     let s = scope.clone();
+    let await_runtime = s.exchange_runtime();
+    let return_runtime = await_runtime.clone();
     Rc::new(OrderMutationOps {
         value: market_ops(scope),
         has: Rc::new(|k, v| safe_cex_exchange::js_runtime::library::in_operator(v, k)),
@@ -401,7 +410,7 @@ pub(crate) fn mutation_ops(scope: &OkxScope) -> Rc<OrderMutationOps<Js, Thrown>>
                 Ok(Js::array(out))
             })
         }),
-        adopt_return: Rc::new(await_value),
+        adopt_return: Rc::new(move |v| await_value(&return_runtime, v)),
     })
 }
 
@@ -426,7 +435,7 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
         get: m.get.clone(),
         capture: cap,
         invoke: inv,
-        await_value: Rc::new(|v| Box::pin(await_js(v))),
+        await_value: m.await_value.clone(),
         intrinsic: intr,
         for_of: Rc::new(|v, f| for_of(&v, |x| f(x))),
         truthy: m.truthy.clone(),

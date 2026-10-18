@@ -113,8 +113,8 @@ pub(super) fn install(g: &Js, weak: Weak<Shared>) -> Result<(), Thrown> {
         Js::function("readBlob", move |_, a| {
             let h = scope_of(&w)?;
             let buffer = arg(&a, 0).call_method("arrayBuffer", vec![]);
-            Ok(h.spawn(Box::pin(async move {
-                let bytes = await_js(buffer?)
+            Ok(h.clone().spawn(Box::pin(async move {
+                let bytes = await_js(&h.exchange_runtime(), buffer?)
                     .await?
                     .get("bytes")?
                     .array_values()
@@ -460,8 +460,11 @@ fn member(rt: &Rt, r: Js, name: &'static str) -> Js {
                 }
                 "fetchBalanceAndPositionsRaw" => account(&h, &r).await,
                 "fetchBalance" => {
-                    let data =
-                        await_js(r.call_method("fetchBalanceAndPositionsRaw", vec![])?).await?;
+                    let data = await_js(
+                        &h.exchange_runtime(),
+                        r.call_method("fetchBalanceAndPositionsRaw", vec![])?,
+                    )
+                    .await?;
                     r.call_method("parseBalance", vec![data])
                 }
                 "fetchAndSyncSymbolMaxLeverage"
@@ -487,7 +490,9 @@ async fn account(h: &Rt, r: &Js) -> Result<Js, Thrown> {
                 .call_method("get", vec![Js::str(url)])
                 .map_err(|e| e.to_exchange_error())?;
             Ok(async move {
-                let response = await_js(request).await.map_err(|e| e.to_exchange_error())?;
+                let response = await_js(&h.exchange_runtime(), request)
+                    .await
+                    .map_err(|e| e.to_exchange_error())?;
                 let data = response.get("data").map_err(|e| e.to_exchange_error())?;
                 if data.is_undefined() {
                     Ok(None)
@@ -517,7 +522,7 @@ async fn leverage(h: &Rt, r: &Js, name: &str, symbol: Js) -> Result<Js, Thrown> 
             .call_method("get", vec![Js::str(url), from_json(&config)])
             .map_err(|e| e.to_exchange_error())?;
         Ok(async move {
-            let v = await_js(p)
+            let v = await_js(&h.exchange_runtime(), p)
                 .await
                 .map_err(|e| e.to_exchange_error())?
                 .get("data")
@@ -565,7 +570,11 @@ async fn metadata(h: &Rt, r: &Js, symbols: Js, mut supplied: Js) -> Result<Js, T
             }
         }
         if missing {
-            let account = await_js(r.call_method("fetchBalanceAndPositionsRaw", vec![])?).await?;
+            let account = await_js(
+                &h.exchange_runtime(),
+                r.call_method("fetchBalanceAndPositionsRaw", vec![])?,
+            )
+            .await?;
             supplied = r.call_method("getAccountPositionSnapshots", vec![account])?;
         }
     }
@@ -601,7 +610,9 @@ async fn metadata(h: &Rt, r: &Js, symbols: Js, mut supplied: Js) -> Result<Js, T
                     .call_method("fetchBalanceAndPositionsRaw", vec![])
                     .map_err(|e| e.to_exchange_error())?;
                 Ok(async move {
-                    let v = await_js(p).await.map_err(|e| e.to_exchange_error())?;
+                    let v = await_js(&h.exchange_runtime(), p)
+                        .await
+                        .map_err(|e| e.to_exchange_error())?;
                     if v.is_undefined() {
                         Ok(None)
                     } else {

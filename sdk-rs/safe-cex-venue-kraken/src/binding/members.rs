@@ -77,9 +77,12 @@ fn get_data(
         .get(client)
         .and_then(|c| c.call_method(verb, args))
         .map_err(ex)?;
-    Ok(async move {
-        let response = await_js(promise).await.map_err(ex)?;
-        number_input(&response.get("data").map_err(ex)?).map_err(ex)
+    Ok({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let response = await_js(&await_runtime, promise).await.map_err(ex)?;
+            number_input(&response.get("data").map_err(ex)?).map_err(ex)
+        }
     })
 }
 
@@ -521,9 +524,12 @@ pub(crate) fn dispatch(
                 };
                 let balance = || {
                     let promise = rt.this.call_method("fetchBalance", vec![]).map_err(ex)?;
-                    Ok(async move {
-                        let value = await_js(promise).await.map_err(ex)?;
-                        to_typed::<safe_cex_types::Balance>(&value).map_err(ex)
+                    Ok({
+                        let await_runtime = rt.exchange_runtime();
+                        async move {
+                            let value = await_js(&await_runtime, promise).await.map_err(ex)?;
+                            to_typed::<safe_cex_types::Balance>(&value).map_err(ex)
+                        }
                     })
                 };
                 let result = if spot {
@@ -837,13 +843,17 @@ pub(crate) fn dispatch(
             future(async move {
                 let this = rt.this.clone();
                 let disposed = rt.this.clone();
+                let auth_runtime = rt.exchange_runtime();
                 private_auth::futures_on_open(
                     move || disposed.get("isDisposed").is_ok_and(|v| v.truthy()),
                     move || {
                         let promise = this.call_method("authenticate", vec![]).map_err(ex)?;
-                        Ok(async move {
-                            await_js(promise).await.map_err(ex)?;
-                            Ok(())
+                        Ok({
+                            let await_runtime = auth_runtime.clone();
+                            async move {
+                                await_js(&await_runtime, promise).await.map_err(ex)?;
+                                Ok(())
+                            }
                         })
                     },
                     |message, severity| log_with(&rt, parent.clone(), message, severity),
@@ -867,6 +877,7 @@ pub(crate) fn dispatch(
             future(async move {
                 let disposed = rt.this.clone();
                 let fetch_parent = parent.clone();
+                let auth_runtime = rt.exchange_runtime();
                 private_auth::spot_on_open(
                     &host.spot_auth,
                     move || disposed.get("isDisposed").is_ok_and(|v| v.truthy()),
@@ -874,9 +885,12 @@ pub(crate) fn dispatch(
                         let promise = fetch_parent
                             .call_method("fetchWsToken", vec![])
                             .map_err(ex)?;
-                        Ok(async move {
-                            let token = await_js(promise).await.map_err(ex)?;
-                            js_json(&token).map_err(ex)
+                        Ok({
+                            let await_runtime = auth_runtime.clone();
+                            async move {
+                                let token = await_js(&await_runtime, promise).await.map_err(ex)?;
+                                js_json(&token).map_err(ex)
+                            }
                         })
                     },
                     send,

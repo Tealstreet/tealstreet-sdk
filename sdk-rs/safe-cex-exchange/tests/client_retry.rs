@@ -156,8 +156,9 @@ fn jobs(rt: &Runtime) {
         }
     }
 }
-fn settle(rt: &Runtime, value: Js) -> Result<Js, Thrown> {
-    let mut future = Box::pin(await_js(value));
+fn settle(rt: &Rc<Runtime>, value: Js) -> Result<Js, Thrown> {
+    let exchange_runtime: Rc<dyn ExchangeRuntime> = rt.clone();
+    let mut future = Box::pin(await_js(&exchange_runtime, value));
     for _ in 0..32 {
         if let Poll::Ready(result) = future
             .as_mut()

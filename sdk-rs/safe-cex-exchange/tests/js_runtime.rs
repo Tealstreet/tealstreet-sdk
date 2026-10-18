@@ -261,8 +261,9 @@ impl JsHttpHost for Http {
     }
 }
 
-fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
-    let mut future = Box::pin(await_js(value));
+fn settle(runtime: &Rc<Runtime>, value: Js) -> Result<Js, Thrown> {
+    let exchange_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
+    let mut future = Box::pin(await_js(&exchange_runtime, value));
     for _ in 0..16 {
         if let Poll::Ready(v) = future
             .as_mut()
@@ -1399,7 +1400,7 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
         sent: RefCell::default(),
     });
     let xhr = client::create(http.clone(), Js::object(vec![]));
-    let adapter = Rc::new(client::JsRestAdapter::new(xhr));
+    let adapter = Rc::new(client::JsRestAdapter::new(runtime.clone(), xhr));
     let exchange_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
     let run = |method: &str, url: &str| {
         let adapter = adapter.clone();
@@ -4259,7 +4260,7 @@ fn retained_rest_adapter_reaches_real_client_interceptor_before_json_projection(
             })],
         )
         .unwrap();
-    let adapter = Rc::new(client::JsRestAdapter::new(xhr));
+    let adapter = Rc::new(client::JsRestAdapter::new(runtime.clone(), xhr));
     let worker_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
     let pending = Js::Promise(Promise::spawn(
         &worker_runtime,
@@ -4366,7 +4367,7 @@ fn native_http_factory_updates_global_request_counts() {
                 let xhr = factory::create(host, &safe_cex_transport::DirectTransport,
                     Js::object(vec![("baseURL", Js::str(&origin))]),
                     &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]), &owner).unwrap();
-                assert_eq!(await_js(xhr.call_method("get", vec![Js::str("/stats")]).unwrap()).await.is_ok(), status == 200);
+                assert_eq!(await_js(&(runtime.clone() as Rc<dyn ExchangeRuntime>), xhr.call_method("get", vec![Js::str("/stats")]).unwrap()).await.is_ok(), status == 200);
                 server.await.unwrap();
             }
             let after = HTTP_STATS.lock().unwrap().get_stats(runtime.now_ms())["total"].as_u64().unwrap();

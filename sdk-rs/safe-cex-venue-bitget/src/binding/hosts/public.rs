@@ -515,9 +515,11 @@ impl PublicDataHost for Rt {
             Js::Undefined,
             vec![path, Js::object(vec![("params", params)])],
         )?;
-        Ok(Box::pin(
-            async move { await_js(started).await?.get("data") },
-        ))
+        Ok(Box::pin(async move {
+            await_js(&self.exchange_runtime(), started)
+                .await?
+                .get("data")
+        }))
     }
 }
 
@@ -545,7 +547,7 @@ impl SocketRuntimeHost for Rt {
     }
     fn start(&self, method: Js, args: Vec<Js>) -> Result<SocketFuture<'_, Js, Thrown>, Thrown> {
         let started = method.call(Js::Undefined, args)?;
-        Ok(Box::pin(await_js(started)))
+        Ok(Box::pin(await_js(&self.exchange_runtime(), started)))
     }
     fn property(&self, value: &Js, name: &str) -> Result<Js, Thrown> {
         value.get(name)

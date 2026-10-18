@@ -194,7 +194,7 @@ impl IncomeHost for Rt {
         let promise = self
             .this
             .call_method("_fetchAccountLogPage", vec![(*params).clone()])?;
-        Ok(async move { Ok(h(await_js(promise).await?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?)) })
     }
     fn income_range(
         &self,
@@ -206,7 +206,7 @@ impl IncomeHost for Rt {
             "fetchIncomeHistoryRange",
             vec![(*start).clone(), (*end).clone(), (*income_type).clone()],
         )?;
-        Ok(async move { Ok(h(await_js(promise).await?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?)) })
     }
     fn warning(&self, message: Handle<Self>) -> ReadResult<Self, ()> {
         self.this
@@ -270,7 +270,7 @@ impl PollHost for Rt {
         let promise = self
             .this
             .call_method("fetchOHLCV", vec![(*options).clone()])?;
-        Ok(async move { Ok(h(await_js(promise).await?)) })
+        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?)) })
     }
     // ts: `console.error(prefix, err)`.
     fn console_error(&self, prefix: &'static str, error: Thrown) -> ReadResult<Self, ()> {

@@ -32,6 +32,7 @@ pub(super) struct ClientEntry {
     signature: Rc<RefCell<Option<IsSignatureRejection>>>,
 }
 struct Transport {
+    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
     client: Js,
     signer: Rc<RefCell<Weak<BingxApi>>>,
     signature: Rc<RefCell<Option<IsSignatureRejection>>>,
@@ -130,6 +131,7 @@ impl ReadTransport for Transport {
                 .map_err(error)?;
             let response = loop {
                 match await_js(
+                    &self.runtime,
                     self.client
                         .call_method("request", vec![config.clone()])
                         .map_err(error)?,
@@ -316,6 +318,7 @@ impl ApiHost for Host {
         let signer = Rc::new(RefCell::new(Weak::new()));
         let signature = Rc::new(RefCell::new(None));
         let transport: Rc<dyn ReadTransport> = Rc::new(Transport {
+            runtime: self.scope.http.runtime(),
             client: client.clone(),
             signer: signer.clone(),
             signature: signature.clone(),

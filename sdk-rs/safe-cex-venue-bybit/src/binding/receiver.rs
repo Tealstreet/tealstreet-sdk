@@ -295,7 +295,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let request = arg(&a, 0);
         let rt = rt.clone();
         Ok(rt.clone().spawn(Box::pin(async move {
-            match await_js(request).await {
+            match await_js(&rt.exchange_runtime(), request).await {
                 Ok(value) => Ok(value),
                 Err(error) => {
                     venue(&rt)?.needs_reinit.set(true);

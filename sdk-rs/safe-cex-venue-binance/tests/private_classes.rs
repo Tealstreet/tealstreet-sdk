@@ -6,6 +6,9 @@ mod lifecycle_aliases;
 #[cfg(feature = "native")]
 #[path = "support/public_frame_guard.rs"]
 mod public_frame_guard;
+#[cfg(feature = "native")]
+#[path = "support/public_subscription_receipts.rs"]
+mod public_subscription_receipts;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -5468,6 +5471,10 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
 #[cfg(feature = "native")]
 #[path = "support/private_action_key_binding.rs"]
 mod private_action_key_binding;
+
+#[cfg(feature = "native")]
+#[path = "support/snapshot_future_binding.rs"]
+mod snapshot_future_binding;
 
 #[cfg(feature = "native")]
 #[path = "support/public_listener_aliases.rs"]
