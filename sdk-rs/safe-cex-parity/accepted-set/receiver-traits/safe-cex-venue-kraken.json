@@ -64,5 +64,53 @@
     "file": "safe-cex-venue-kraken/src/binding/host.rs",
     "reason": "Reviewed the complete production ErrorHost impl. emit_and_log forwards the original native message/Error cell and optional text context to the already-assembled emitAndLogError member; formatting/reporting belongs to BaseExchange and this receiver does not decode errors. tests/support/accepted_trading_error_receivers.rs::emit_and_log_reaches_real_base_console_and_event_with_context uses the actual constructed KrakenExchange Scope, real BaseExchange native console sink and error listener: original TypeError identity at the console, exact contextual event, then the separate context-absent string branch. No replacement emitter or host implementation is supplied.",
     "itemSha256": "593965b5f01b74b1833d17f78f3ca5112218d2620a72d00788c15d50ce0486a4"
+  },
+  "safe_cex_venue_kraken::spot_cancel::SpotCancelHost::post_cancel for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
+    "reason": "Reviewed the complete current production SpotCancelHost impl. post_cancel forwards the supplied endpoint, field and original native ID to the live unlimitedXHR.post member and awaits its original native Promise. It adds no response/model schema and preserves synchronous and asynchronous Thrown values. The witness reaches the real constructed Spot client, signing interceptors and terminal HTTP: two distinct IDs, exact endpoint/form field/nonce and nonempty API signature. tests/support/accepted_additional_receivers.rs::post_cancel_uses_the_signed_spot_client_and_original_id uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "7106abba45385544fda5379c83d2e04c533014f29209e7b16cfd5a81a29ef0e7"
+  },
+  "safe_cex_venue_kraken::spot_cancel::SpotCancelHost::error_message for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
+    "reason": "Reviewed the complete current production SpotCancelHost impl. error_message delegates optional original Thrown.value.message lookup and JS truthiness, preserving the original truthy cell or supplied text fallback. It no longer converts through ExchangeError/String. The witness observes native object identity, lone UTF16, infinity, NaN/negative-zero/false/empty/nullish fallback and original getter-thrown identity. tests/support/accepted_additional_receivers.rs::spot_error_message_keeps_truthy_text_and_falsy_fallback uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "7106abba45385544fda5379c83d2e04c533014f29209e7b16cfd5a81a29ef0e7"
+  },
+  "safe_cex_venue_kraken::spot_cancel::SpotCancelHost::emit_error for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
+    "reason": "Reviewed the complete current production SpotCancelHost impl. emit_error forwards the original native message and supplied static context to the already-assembled emitAndLogError member. BaseExchange owns formatting/reporting; this method admits no error record or model. The witness records the real BaseExchange terminal console arguments and contextual error event; the assembled cancel regression additionally preserves lone UTF16 before its fresh Error rethrow. tests/support/accepted_additional_receivers.rs::spot_emit_error_reaches_the_real_base_reporter uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "7106abba45385544fda5379c83d2e04c533014f29209e7b16cfd5a81a29ef0e7"
+  },
+  "safe_cex_venue_kraken::private_accounts::AccountHost::position_id for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-kraken/src/binding/host_more.rs",
+    "reason": "Reviewed the complete current production AccountHost impl. position_id constructs a position ID by shared native ToString followed by UTF16 colon/side concatenation, matching utils/createPositionId with no mode. This output synthesis is not a record/model decoder. The witness observes original unmatched UTF16 units, negative-zero coercion, the exact side separator, and original native coercion Error identity. tests/support/accepted_additional_receivers.rs::position_id_keeps_native_utf16_and_coercion_errors uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "398fbd01e6df50b353fa95b9ef1a5a7c2e9df3233e5c6a4b2ed06c6e8043dfa8"
+  },
+  "safe_cex_venue_kraken::private_accounts::AccountHost::optional_preference for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host_more.rs",
+    "reason": "Reviewed the complete current production AccountHost impl. optional_preference selects the owning exchange or socket.parent preference map, returns Undefined for a nullish map, otherwise invokes its existing get with the original symbol. It imposes no map-entry schema and performs no JSON projection. The witness uses both actual parent maps, lone UTF16 keys, original object/native infinity/own Undefined value cells, missing entries, nullish maps and noncallable receiver refusal. tests/support/accepted_additional_receivers.rs::optional_preference_uses_parent_maps_and_original_keys uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "398fbd01e6df50b353fa95b9ef1a5a7c2e9df3233e5c6a4b2ed06c6e8043dfa8"
+  },
+  "safe_cex_venue_kraken::classes::ClassHost::imported for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-kraken/src/binding/members.rs",
+    "reason": "Reviewed the complete current production ClassHost impl. imported constructs native String arrays from the two statically ported endpoint tables used by the real Spot constructor; unknown imports return ReferenceError. It performs no inbound record decoding. The witness checks both actual initialized constructor fields and direct receiver outputs, every ordered table entry and the unknown-name refusal. Module-array referential identity is held for the separately owned array work; this review claims static value materialization only. tests/support/accepted_additional_receivers.rs::imported_values_match_the_constructed_spot_endpoint_tables uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "28c3efacb43e4dae1ff63f81015937209595c7110300c379c54e84022c09f39c"
+  },
+  "safe_cex_venue_kraken::classes::ClassHost::member for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-kraken/src/binding/members.rs",
+    "reason": "Reviewed the complete current production ClassHost impl. member constructs a callable capability closing over the existing runtime and exact port target; invocation delegates to live dispatch with the supplied native receiver and argument handles. It does not parse a schema. The witness invokes the production public-listener dispatcher on the actual constructed Scope, proving the supplied receiver selects its socket, exact argument count/UTF16/object cells and original return identity. tests/support/accepted_additional_receivers.rs::member_dispatch_uses_the_supplied_receiver_and_argument_cells uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "28c3efacb43e4dae1ff63f81015937209595c7110300c379c54e84022c09f39c"
+  },
+  "safe_cex_venue_kraken::classes::ClassHost::prototype for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-kraken/src/binding/members.rs",
+    "reason": "Reviewed the complete current production ClassHost impl. prototype installs a native function on the prototype belonging to the selected socket Kind, forwarding call-time this and arguments to the existing NativeMember and scheduling its Future through the shared Promise runtime. It constructs callable/prototype state rather than decoding records. The witness uses sockets built by the actual constructed Scope, same-kind shared member identity, cross-kind isolation, inherited ownership, native this/argument/result cells, original thrown identity and asynchronous settlement. tests/support/accepted_additional_receivers.rs::prototype_installs_native_this_args_and_future_on_the_matching_socket_kind uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
+    "itemSha256": "28c3efacb43e4dae1ff63f81015937209595c7110300c379c54e84022c09f39c"
   }
 }
