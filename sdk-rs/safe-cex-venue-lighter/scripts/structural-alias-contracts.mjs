@@ -30,7 +30,7 @@ const results = runProbes(root, metadata, [{
 }], loadContracts(), { target: 'native', features: [], jobs: 1 });
 fs.writeFileSync(path.join(metadata.target_directory, 'lighter-structural-alias-results.json'),
   `${JSON.stringify(results, null, 2)}\n`);
-assert.deepEqual(results.map(result => result.name).sort(), names);
+assert.deepEqual(results.map(result => result.name).sort(), names.slice().sort());
 if (args.includes('--expect-unclassified')) {
   assert.ok(results.every(result => result.failures.some(failure =>
     failure.includes('public alias needs an accepted-set contract'))));

@@ -15,12 +15,13 @@ function rootPath(type) {
 
 function registeredRegistryRoot(row, canonical, packageMetadata) {
   if (row.kind !== 'struct' || row.artifact?.kind !== 'registry') return false;
-  const identity = row.artifact.packageId?.match(/^registry\+[^#]+#([^@#]+)@([^@#]+)$/);
+  const identity = row.artifact.packageId?.match(/^(registry\+[^#]+)#([^@#]+)@([^@#]+)$/);
   const crateName = canonical.split('::')[0];
   const dependencies = (packageMetadata?.dependencies ?? []).filter(dependency =>
     dependency.kind === null && (dependency.rename ?? dependency.name).replaceAll('-', '_') === crateName);
   return Boolean(identity && dependencies.length === 1 &&
-    dependencies[0].name === identity[1] && dependencies[0].req === `=${identity[2]}` &&
+    dependencies[0].source === identity[1] && dependencies[0].name === identity[2] &&
+    dependencies[0].req === `=${identity[3]}` &&
     typeof row.compilerPath === 'string' && row.compilerPath === row.artifact.compilerPath);
 }
 

@@ -141,7 +141,7 @@ test('reviewed generic aliases return only their spec-owned fixed instantiation'
   const registrySpecs = { [registered.name]: selected };
   const compilerPath = '/compiled/libindexmap.rmeta';
   const registryContext = { macroOrigins: ['serde_json'],
-    packageMetadata: { dependencies: [{ name: 'indexmap', rename: null, kind: null, req: '=2.14.2' }] },
+    packageMetadata: { dependencies: [{ name: 'indexmap', rename: null, kind: null, req: '=2.14.2', source: 'registry+https://github.com/rust-lang/crates.io-index' }] },
     externalTypeAliases: [{ name: registered.name, canonical, kind: 'struct', compilerPath,
       artifact: { kind: 'registry', compilerPath,
         packageId: 'registry+https://github.com/rust-lang/crates.io-index#indexmap@2.14.2' } }],
@@ -150,6 +150,7 @@ test('reviewed generic aliases return only their spec-owned fixed instantiation'
   for (const mutate of [
     item => { item.packageMetadata.dependencies = []; },
     item => { item.packageMetadata.dependencies[0].req = '^2.14'; },
+    item => { item.packageMetadata.dependencies[0].source = 'registry+https://foreign.test'; },
     item => { item.externalTypeAliases[0].artifact.packageId = 'registry+https://example.test#indexmap@2.14.1'; },
     item => { item.externalTypeAliases[0].artifact.packageId = 'registry+https://example.test#other@2.14.2'; },
     item => { item.externalTypeAliases[0].artifact.compilerPath = '/other/libindexmap.rmeta'; },
