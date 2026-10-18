@@ -877,6 +877,13 @@ then restores exact production bytes and requires passes. These execution proofs
 do not classify the remaining Auth/PrivateState raw APIs or erase the documented
 UTF-8 frame boundary.
 
+`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
+`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
+including full dependency discovery and actual compiler features, then checks the
+one resulting classification receipt. It does not claim decoder execution;
+`private_owner_binding` and its independently compiled controls establish the
+separate real constructor/Store/authentication effects described above.
+
 The standalone `delegated_methods` extraction layer has no production caller and
 is retired with its options alias and mock-only oracle. Keep the six TypeScript
 rows on the live ExchangeState listener/dispatch members. The native candle,
@@ -926,10 +933,3 @@ keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell'
 immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
 requires four independent compiled faults to fail actual constructed native
 socket/HTTP tests, with exact source restoration and a passing rerun after each.
-
-`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
-`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
-including full dependency discovery and actual compiler features, then checks the
-one resulting classification receipt. It does not claim decoder execution;
-`private_owner_binding` and its independently compiled controls establish the
-separate real constructor/Store/authentication effects described above.
