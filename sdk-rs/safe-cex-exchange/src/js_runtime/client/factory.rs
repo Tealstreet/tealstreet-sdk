@@ -104,7 +104,8 @@ pub fn create(
 /// Source safeCexAxiosCreateNoProxy: bypass provider REST routing while keeping
 /// the same terminal host, fixed timeout and owning exchange outcome observer.
 pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Result<Js, Thrown> {
-    host.configure_exchange(owner.name().clone())?;
+    let exchange = owner.name().clone();
+    host.configure_exchange(exchange.clone())?;
     let defaults = config.spread_object()?;
     defaults.define("timeout", Js::Number(20_000.0))?;
     let headers = super::axios_headers_from(&Js::object(vec![(
@@ -115,8 +116,25 @@ pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Resu
         super::set_header(&headers, Js::utf16(&name), value, Js::Undefined)?;
     }
     defaults.define("headers", headers)?;
+    let stats_runtime = host.runtime();
+    let stats_exchange = serde_json::to_value(&exchange)
+        .expect("exchange name")
+        .as_str()
+        .expect("exchange name string")
+        .to_owned();
     let client = super::create(host, defaults);
     install_outcome_interceptor(&client, Rc::downgrade(owner), false)?;
+    let record_request = Js::function("recordRequestStats", move |_, args| {
+        HTTP_STATS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record_request(&stats_exchange, stats_runtime.now_ms());
+        Ok(arg(&args, 0))
+    });
+    client
+        .get("interceptors")?
+        .get("request")?
+        .call_method("use", vec![record_request])?;
     Ok(client)
 }
 

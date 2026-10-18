@@ -79,3 +79,18 @@ Reproduce from `sdk-rs` with `--jobs 1`: the `inverse_rest_binding`,
 explicitly ignored in hermetic default runs and included by the existing
 `venue-oracle:binance` all-targets gate. Supply the real installed compiler using
 `SAFE_CEX_TYPESCRIPT_PATH`; do not replace source imports with fixture methods.
+
+The integrated NoProxy provider regression also checks HTTP accounting. With
+master's routed-factory recorder but no NoProxy recorder, the constructed
+`fetchMarkets` made two terminal requests and the native tracker reported one
+(compiled RED). Installing the same recorder on the source NoProxy client reports
+two (GREEN), while all direct-public/private-routing assertions stay intact.
+The source factory is `safeCexAxiosCreate.ts::safeCexAxiosCreateNoProxy`, invoked
+by `binanceinverse.api.ts:23`.
+
+Accepted-set coverage includes the seventeen non-socket owners and eleven socket
+helpers. Each cohort executed unchanged native production owners and compiled
+isolated faults with named failure receipts, followed by exact restoration.
+The bounded observation scopes are documented in inverse/CLAUDE.md and
+INVERSE_SOCKET_HELPER_CONTRACT_REVIEW.md; they do not erase the explicit frame,
+wire-record and callback representation profiles.
