@@ -30,7 +30,12 @@ fn response() -> RestResponse {
         status: 401,
         reason: None,
         headers: Default::default(),
-        body: RestResponseBody::Untransformed(json!({"code":{"toString":0}})),
+        body: RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"code":{"toString":0}}),
+            )
+            .unwrap(),
+        ),
     }
 }
 fn predicate() -> IsSignatureRejection {

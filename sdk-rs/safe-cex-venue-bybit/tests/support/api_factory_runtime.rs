@@ -276,7 +276,7 @@ impl HttpHost for Host {
     fn note_response(&self, response: &RestResponse, _: &RestRequest) {
         self.responses
             .borrow_mut()
-            .push(response.body.clone().into_data());
+            .push(response.body.clone().into_data().into_value().unwrap());
     }
     fn note_success(&self, _: &ExchangeName, _: &RestResponse) {}
     fn note_failure(&self, _: &ExchangeName, _: &HttpFailure) {
