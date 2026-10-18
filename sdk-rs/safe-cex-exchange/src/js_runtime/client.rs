@@ -756,7 +756,7 @@ impl RestAdapter for JsRestAdapter {
                                         let mut config = vec![];
                                         for (name, cell) in cell.own_entries()? {
                                             if cell.is_callable()
-                                                || cell.array_items().is_some_and(|items| {
+                                                || cell.array_items()?.is_some_and(|items| {
                                                     items
                                                         .into_iter()
                                                         .flatten()

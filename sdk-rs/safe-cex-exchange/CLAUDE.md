@@ -1314,13 +1314,12 @@ native `Deref` view and the added `Js` protocol APIs have executed output
 observations. Independently authored Node fixtures and per-owner compiled
 controls supplement these bounded native/default receipts.
 
-The JS Store facade exposes `markOrdersTerminal` by delegating to the existing
-native terminal-memory operation. It remembers IDs even when the Store has no
-orders, and preserves committed-state subscriber errors through the existing
-mutation bridge. IDs cross the declared typed string boundary without lossy
-surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
-snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
-real private-frame witnesses cover the production caller and final fill ordering.
+The raw JS Store facade exposes `markOrdersTerminal` on its canonical graph.
+It remembers native UTF16 IDs even before orders exist and preserves committed
+subscriber errors. The typed Store API supplies Rust string IDs separately.
+`tests/js_store_terminal.rs` compares raw surrogate terminal memory with the
+maintained source: D800 and U+FFFD remain distinct, and the surviving row retains
+identity. OKX's real private frames cover its production caller/fill ordering.
 
 Shared builtins for source callers: `Array#pop`/`reverse` (holes mirror),
 `Object.getOwnPropertyNames` (own keys incl. non-enumerable; functions and
@@ -2019,3 +2018,18 @@ leaves, and waiter drop leaves the continuation alive. Positive infinity disable
 all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
+
+
+## Raw Store replay and callable splice
+
+The source-backed Store-correctness batch distinguishes raw mutation from typed
+read/patch admission. Unknown settings, raw undefined/callable/null numeric fields
+and UTF16 terminal IDs follow maintained DefaultStore; invalid raw rows can make
+a typed read fail. Source snapshots in tests/js_store_correctness_source.mjs
+observe these values before JSON. See STORE_CORRECTNESS_REVIEW.md.
+Private ID dictionaries apply string-hint ToPropertyKey while retaining a returned
+Symbol in its own slot; the actual Symbol/string Store witness checks both slots.
+Installed Array.splice captures length before coercion and deleted-slot reads,
+then uses the canonical checked splice_array mutation with that captured length.
+Its Node corpus preserves holes/deleted values and reentrant length effects;
+readonly failures and raw row/reference identity remain observable.

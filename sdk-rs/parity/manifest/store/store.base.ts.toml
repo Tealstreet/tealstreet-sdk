@@ -46,9 +46,9 @@ note = "The canonical native graph preserves live property effects and reference
 ts = "DefaultStore#buildIdLookup"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_key", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::set_id_key" ]
 status = "ported"
-note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup`. The split id_key/set_id_key adapters preserve source ToPropertyKey string-hint coercion and Symbol identity on the private null-prototype dictionary; they do not project keys through UTF-8. Explicit adapter rename: buildIdLookup -> id_key/set_id_key; reused by buildIdIndexMap/findIndexById."
 
 [[symbol]]
 ts = "DefaultStore#findIndexById"

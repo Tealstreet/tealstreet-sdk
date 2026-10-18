@@ -62,5 +62,21 @@ terminals.markOrdersTerminal([{id:'\ud800'}], 'closed');
 terminals.update({orders:[seed('\ufffd'),seed('\ud800')]});
 const ids = terminals.orders.map(order => Array.from({length:order.id.length},(_,i)=>order.id.charCodeAt(i)));
 assert.deepEqual(ids,[[0xfffd]],'surrogate terminal memory must not alias replacement character');
+// Symbols must retain their own slot, including object/array ToPrimitive.
+const symbols=[];
+for (const arrayKey of [false,true]) {
+ const symbolic = new DefaultStore();
+ symbolic.update({orders:[seed(Symbol.iterator),seed('Symbol(Symbol.iterator)')],
+ positions:[{...position,id:Symbol.iterator},{...position,id:'Symbol(Symbol.iterator)'}]});
+ let conversions = 0;
+ const key = arrayKey ? [] : {};
+ key.toString=()=>{conversions++;return Symbol.iterator};
+ const selector = {id:key};
+ symbolic.removeOrders([selector]);
+ symbolic.updatePositions([[selector,{contracts:7}],[{id:'Symbol(Symbol.iterator)'},{contracts:9}]]);
+ const result={ids:symbolic.orders.map(row=>row.id),contracts:symbolic.positions.map(row=>row.contracts),conversions};
+ assert.deepEqual(result,{ids:['Symbol(Symbol.iterator)'],contracts:[7,9],conversions:2});
+ symbols.push(result);
+}
 process.stdout.write(JSON.stringify({setting:{other:settings.options.other,calls:settingCalls},patch,
- nullLeverage:raw.leverage===null,terminalIds:ids}));
+ nullLeverage:raw.leverage===null,terminalIds:ids,symbols}));
