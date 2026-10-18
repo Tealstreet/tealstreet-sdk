@@ -1,4 +1,4 @@
-#![cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#![cfg(feature = "native")]
 use safe_cex_venue_binance::{exchange_classes, native_host, private_session};
 #[path = "support/inverse_rest_runtime.rs"]
 mod host;

@@ -56,10 +56,9 @@ A key hook appends a row, and the next update exposes the resulting source index
 choice. Native observations compare row IDs, amounts and both hook calls before
 JSON. This preserves the maintained behavior rather than correcting its quirk.
 
-The five-crate Wasm all-target check also exposed three pre-existing native-only
-Binance fixtures (inherited refusals, retained errors and class/State bindings)
-whose feature cfg enabled native transport on Wasm. Their target cfg now matches
-the native dependencies they actually use; every native assertion is unchanged.
+Wasm validation uses the portable health feature set without the native host.
+The exchange Cargo manifest explicitly excludes its native runtime on wasm32;
+native all-features and portable Wasm builds are separate supported branches.
 
 ## Final merged-head checks
 
