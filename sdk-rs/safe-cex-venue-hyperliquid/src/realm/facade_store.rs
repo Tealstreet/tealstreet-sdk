@@ -25,26 +25,81 @@ struct TableView {
     table: Table,
 }
 
-impl Exotic for TableView {
-    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value> {
-        let key = String::from_utf16_lossy(key.units()?);
-        match self.table {
-            Table::MarketsBySymbol => realm.from_typed(self.store.markets_by_symbol().get(&key)?),
-            Table::MarketsById => realm.from_typed(self.store.markets_by_id().get(&key)?),
-            Table::TickersBySymbol => realm.from_typed(self.store.tickers_by_symbol().get(&key)?),
-            Table::TickersById => realm.from_typed(self.store.tickers_by_id().get(&key)?),
-        }
-        .ok()
-    }
-
-    fn keys(&self) -> Vec<PropKey> {
-        let keys: Vec<String> = match self.table {
-            Table::MarketsBySymbol => self.store.markets_by_symbol().keys().cloned().collect(),
-            Table::MarketsById => self.store.markets_by_id().keys().cloned().collect(),
-            Table::TickersBySymbol => self.store.tickers_by_symbol().keys().cloned().collect(),
-            Table::TickersById => self.store.tickers_by_id().keys().cloned().collect(),
+impl TableView {
+    fn native_map(
+        &self,
+        realm: &mut Realm,
+    ) -> Result<safe_cex_exchange::js_runtime::value::Js, Thrown> {
+        use safe_cex_types::{StoreReadError, StoreReadPhase};
+        let field = match self.table {
+            Table::MarketsBySymbol => "marketsBySymbol",
+            Table::MarketsById => "marketsById",
+            Table::TickersBySymbol => "tickersBySymbol",
+            Table::TickersById => "tickersById",
         };
-        keys.iter().map(|k| PropKey::str(k)).collect()
+        safe_cex_exchange::native_store::facade(self.store.clone())
+            .and_then(|store| store.get(field))
+            .map_err(|cause| {
+                realm.from_exchange_error(
+                    StoreReadError::new(StoreReadPhase::Property, Rc::new(cause)).into(),
+                )
+            })
+    }
+}
+impl Exotic for TableView {
+    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Result<Option<Value>, Thrown> {
+        use safe_cex_types::{StoreReadError, StoreReadPhase};
+        let Some(units) = key.units() else {
+            return Ok(None);
+        };
+        let map = self.native_map(realm)?;
+        if !map
+            .own_property_names()
+            .map_err(|cause| {
+                realm.from_exchange_error(
+                    StoreReadError::new(StoreReadPhase::Property, Rc::new(cause)).into(),
+                )
+            })?
+            .iter()
+            .any(|key| key.as_ref() == units)
+        {
+            return Ok(None);
+        }
+        let row = map.get_key(units).map_err(|cause| {
+            realm.from_exchange_error(
+                StoreReadError::new(StoreReadPhase::Property, Rc::new(cause)).into(),
+            )
+        })?;
+        // Preserve the legacy successful DTO snapshot boundary, but project only
+        // the reached row. Unrelated rows and their getters remain untouched.
+        fn selected<T: serde::de::DeserializeOwned + serde::Serialize>(
+            realm: &mut Realm,
+            row: &safe_cex_exchange::js_runtime::value::Js,
+        ) -> Result<Option<Value>, Thrown> {
+            let value: T = safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined(row)
+                .map_err(|cause| {
+                    realm.from_exchange_error(
+                        StoreReadError::new(StoreReadPhase::Projection, Rc::new(cause)).into(),
+                    )
+                })?;
+            realm.from_typed(&value).map(Some)
+        }
+        match self.table {
+            Table::MarketsBySymbol | Table::MarketsById => {
+                selected::<safe_cex_types::Market>(realm, &row)
+            }
+            Table::TickersBySymbol | Table::TickersById => {
+                selected::<safe_cex_types::Ticker>(realm, &row)
+            }
+        }
+    }
+    fn keys(&self, realm: &mut Realm) -> Result<Vec<PropKey>, Thrown> {
+        Ok(self
+            .native_map(realm)?
+            .own_keys()
+            .into_iter()
+            .map(PropKey::String)
+            .collect())
     }
 }
 
@@ -52,12 +107,12 @@ fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 fn mutation(
-    r: &Realm,
+    r: &mut Realm,
     result: Result<(), safe_cex_store::StoreMutationError>,
 ) -> Result<Value, Thrown> {
     result
         .map(|()| Value::Undefined)
-        .map_err(|e| r.error(&e.to_string()))
+        .map_err(|e| r.from_exchange_error(e.into()))
 }
 fn id_of(r: &mut Realm, selector: &Value) -> Result<String, Thrown> {
     let id = r.get_str(selector, "id")?;
@@ -100,13 +155,69 @@ pub(crate) fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
             let f = realm.native(&format!("get {name}"), 0, move |r, _, _| body(r, &store));
             realm.define_getter(&o, PropKey::str(name), f);
         };
-    getter("orders", Rc::new(|r, s| snapshot(r, &*s.orders())));
-    getter("positions", Rc::new(|r, s| snapshot(r, &*s.positions())));
-    getter("markets", Rc::new(|r, s| snapshot(r, &*s.markets())));
-    getter("tickers", Rc::new(|r, s| snapshot(r, &*s.tickers())));
-    getter("balance", Rc::new(|r, s| snapshot(r, &*s.balance())));
-    getter("loaded", Rc::new(|r, s| snapshot(r, &*s.loaded())));
-    getter("latency", Rc::new(|_, s| Ok(Value::Number(s.latency()))));
+    getter(
+        "orders",
+        Rc::new(|r, s| {
+            let value = s
+                .orders()
+                .map_err(|error| r.from_exchange_error(error.into()))?;
+            snapshot(r, &value)
+        }),
+    );
+    getter(
+        "positions",
+        Rc::new(|r, s| {
+            let value = s
+                .positions()
+                .map_err(|error| r.from_exchange_error(error.into()))?;
+            snapshot(r, &value)
+        }),
+    );
+    getter(
+        "markets",
+        Rc::new(|r, s| {
+            let value = s
+                .markets()
+                .map_err(|error| r.from_exchange_error(error.into()))?;
+            snapshot(r, &value)
+        }),
+    );
+    getter(
+        "tickers",
+        Rc::new(|r, s| {
+            let value = s
+                .tickers()
+                .map_err(|error| r.from_exchange_error(error.into()))?;
+            snapshot(r, &value)
+        }),
+    );
+    getter(
+        "balance",
+        Rc::new(|r, s| {
+            let value = s
+                .balance()
+                .map_err(|error| r.from_exchange_error(error.into()))?;
+            snapshot(r, &value)
+        }),
+    );
+    getter(
+        "loaded",
+        Rc::new(|r, s| {
+            let value = s
+                .loaded()
+                .map_err(|error| r.from_exchange_error(error.into()))?;
+            snapshot(r, &value)
+        }),
+    );
+    getter(
+        "latency",
+        Rc::new(|_r, s| {
+            Ok(Value::Number(
+                s.latency()
+                    .map_err(|error| _r.from_exchange_error(error.into()))?,
+            ))
+        }),
+    );
     for (name, table) in [
         ("marketsBySymbol", Table::MarketsBySymbol),
         ("marketsById", Table::MarketsById),
@@ -246,7 +357,7 @@ pub(crate) fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
 mod tests {
     use super::*;
     use crate::realm::test_runtime::TestRuntime;
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     use serde_json::json;
 
     #[test]
@@ -271,7 +382,7 @@ mod tests {
                 .call(&update, &facade, &[selector.clone(), changes])
                 .unwrap();
             assert_eq!(
-                store.orders()[0].price.as_ref().unwrap().to_bits(),
+                store.orders().unwrap()[0].price.as_ref().unwrap().to_bits(),
                 value.to_bits()
             );
         }
@@ -279,11 +390,11 @@ mod tests {
         realm
             .call(&update, &facade, &[selector.clone(), changes])
             .unwrap();
-        assert!(store.orders()[0].price.is_undefined());
+        assert!(store.orders().unwrap()[0].price.is_undefined());
         let omitted = realm.new_object();
         realm.call(&update, &facade, &[selector, omitted]).unwrap();
         assert!(
-            store.orders()[0].price.is_undefined(),
+            store.orders().unwrap()[0].price.is_undefined(),
             "an absent patch preserves the field"
         );
     }

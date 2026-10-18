@@ -52,7 +52,7 @@ pub(crate) fn assemble(
 ) -> Result<Rt, ExchangeError> {
     let name = safe_cex_exchange::js_runtime::value::from_typed(&parts.name)?;
     let options = safe_cex_exchange::js_runtime::value::from_typed(&parts.options)?;
-    let store = safe_cex_exchange::js_runtime::store::facade(parts.store.clone());
+    let store = safe_cex_exchange::js_runtime::store::facade(parts.store.clone())?;
     let http = (deps.http)(&parts.options)?;
     let shared = Rc::new_cyclic(|weak| {
         let globals = Js::object(vec![]);

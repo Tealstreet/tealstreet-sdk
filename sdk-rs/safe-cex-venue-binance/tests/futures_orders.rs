@@ -1,9 +1,10 @@
 #[path = "support/precision_identity.rs"]
 mod precision_identity;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{client_order_id::*, exchange::*, runtime::*};
 use safe_cex_num::number_from_string;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_binance::futures_orders::format_futures_create_order;
 use serde_json::{Value, json};

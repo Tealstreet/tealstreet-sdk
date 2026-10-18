@@ -37,11 +37,11 @@ pub fn get_current_margin_type(
     symbol: &str,
     margin_type_by_symbol: &std::collections::HashMap<String, MarginType>,
     store: &dyn safe_cex_store::Store,
-) -> MarginType {
+) -> Result<MarginType, safe_cex_types::StoreReadError> {
     if let Some(cached) = margin_type_by_symbol.get(symbol) {
-        return *cached;
+        return Ok(*cached);
     }
-    let positions = store.positions();
+    let positions = store.positions()?;
     let mut active_margin_types = Vec::new();
     for position in positions
         .iter()
@@ -51,23 +51,28 @@ pub fn get_current_margin_type(
             active_margin_types.push(position.margin_type);
         }
     }
-    if active_margin_types.len() == 1 {
+    Ok(if active_margin_types.len() == 1 {
         active_margin_types[0].unwrap_or(MarginType::Cross)
     } else {
         MarginType::Cross
-    }
+    })
 }
 
 pub fn resolve_margin_type_for_order(
     opts: &PlaceOrderOpts,
     margin_type_by_symbol: &std::collections::HashMap<String, MarginType>,
     store: &dyn safe_cex_store::Store,
-) -> Result<MarginType, String> {
+) -> Result<MarginType, safe_cex_exchange::runtime::ExchangeError> {
     let cached = margin_type_by_symbol.get(&opts.symbol).copied();
     if !opts.reduce_only.unwrap_or(false) {
-        return Ok(cached.unwrap_or_else(|| {
-            get_current_margin_type(&opts.symbol, margin_type_by_symbol, store)
-        }));
+        return match cached {
+            Some(cached) => Ok(cached),
+            None => Ok(get_current_margin_type(
+                &opts.symbol,
+                margin_type_by_symbol,
+                store,
+            )?),
+        };
     }
     let closing_side = if opts.side == OrderSide::Buy {
         PositionSide::Short
@@ -75,7 +80,7 @@ pub fn resolve_margin_type_for_order(
         PositionSide::Long
     };
     let candidates: Vec<Option<MarginType>> = store
-        .positions()
+        .positions()?
         .iter()
         .filter(|position| {
             position.symbol == opts.symbol
@@ -97,11 +102,17 @@ pub fn resolve_margin_type_for_order(
         return Ok(candidates[0].unwrap_or(MarginType::Cross));
     }
     if candidates.len() > 1 {
-        return Err(format!(
+        return Err(safe_cex_exchange::runtime::ExchangeError::new(format!(
             "Orderly reduce-only order for {} is ambiguous across Cross and Isolated positions; select the intended margin mode first",
             opts.symbol
-        ));
+        )));
     }
-    Ok(cached
-        .unwrap_or_else(|| get_current_margin_type(&opts.symbol, margin_type_by_symbol, store)))
+    match cached {
+        Some(cached) => Ok(cached),
+        None => Ok(get_current_margin_type(
+            &opts.symbol,
+            margin_type_by_symbol,
+            store,
+        )?),
+    }
 }

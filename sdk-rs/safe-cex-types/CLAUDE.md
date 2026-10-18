@@ -97,6 +97,9 @@ its internal payload never appears in serialized JSON. The single retained JSON
 writer lives here below Num and applies JSON.stringify projection only on output.
 `safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
 against actual typed bridges and the production Store facade before wire checks.
+StoreData and StoreUpdate use the same native Store record profile: undefined
+optional JSON-view properties are omitted rather than turned into null, while
+retained zk config and nested model/info presence keep their native markers.
 
 Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
 float directly. Capture accepts that event using the same Float path as the

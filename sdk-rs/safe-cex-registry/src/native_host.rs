@@ -943,11 +943,11 @@ impl PublicDataParent for StoreParent {
     fn now_ms(&self) -> f64 {
         self.0.runtime.now_ms()
     }
-    fn loaded(&self) -> StoreDataLoaded {
-        self.0.store.loaded().clone()
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError> {
+        Ok(self.0.store.loaded()?)
     }
-    fn tickers(&self) -> TickerBatch {
-        Rc::new(RefCell::new(self.0.store.tickers().to_vec()))
+    fn tickers(&self) -> Result<TickerBatch, ExchangeError> {
+        Ok(Rc::new(RefCell::new(self.0.store.tickers()?)))
     }
     fn adapt_markets(&self, markets: MarketBatch) -> Result<MarketBatch, ExchangeError> {
         let adapted = self.0.adapt_external_markets(markets.borrow().clone());

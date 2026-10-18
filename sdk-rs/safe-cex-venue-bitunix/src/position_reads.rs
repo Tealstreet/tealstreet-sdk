@@ -84,10 +84,10 @@ pub async fn fetch_positions<E, F>(
     read: impl FnOnce(&'static str, Value) -> F,
     mut settings: impl FnMut(&str) -> (Option<MarginType>, Option<f64>),
     account_mode: impl FnOnce() -> PositionMode,
-    markets: impl FnOnce() -> Vec<String>,
-    cached: impl FnOnce() -> Vec<Position>,
+    markets: impl FnOnce() -> Result<Vec<String>, E>,
+    cached: impl FnOnce() -> Result<Vec<Position>, E>,
     report: impl FnOnce(&E),
-) -> Vec<Position>
+) -> Result<Vec<Position>, E>
 where
     E: From<JsCoercionError>,
     F: Future<Output = Result<Option<Value>, E>>,
@@ -159,7 +159,7 @@ where
             positions.push(p);
         }
         let mode = account_mode();
-        for symbol in markets() {
+        for symbol in markets()? {
             for side in [PositionSide::Long, PositionSide::Short] {
                 let (margin, leverage) = settings(&symbol);
                 positions.push(position(
@@ -177,7 +177,7 @@ where
     }
     .await;
     match result {
-        Ok(positions) => positions,
+        Ok(positions) => Ok(positions),
         Err(error) => {
             report(&error);
             cached()

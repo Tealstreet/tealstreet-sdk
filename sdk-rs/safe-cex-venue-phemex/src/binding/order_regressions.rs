@@ -51,6 +51,7 @@ fn batch_cancel_success_checks_envelope_not_order_rows() {
     assert!(
         h.store
             .orders()
+            .unwrap()
             .iter()
             .all(|o| o.status == OrderStatus::Canceled)
     );
@@ -76,7 +77,7 @@ fn symbol_cancel_uses_the_live_store_filter_and_real_cancellation_client() {
     assert_eq!(requests[0].method.to_uppercase(), "DELETE");
     assert_eq!(requests[0].params["symbol"], "BTCUSDT");
     assert_eq!(requests[0].params["orderID"], "order-0,order-2");
-    let stored = h.store.orders();
+    let stored = h.store.orders().unwrap();
     assert_eq!(stored.len(), 3);
     assert_eq!(stored[0].status, OrderStatus::Canceled);
     assert_eq!(
@@ -105,6 +106,7 @@ fn batch_cancel_rejection_preserves_live_orders_and_message() {
         assert!(
             h.store
                 .orders()
+                .unwrap()
                 .iter()
                 .all(|o| o.status == OrderStatus::Open)
         );

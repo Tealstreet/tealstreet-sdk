@@ -20,7 +20,7 @@ fn native_number_to_fixed_matches_node_and_preserves_coercion_errors() {
         let runtime = native_runtime();
         let http = client::rest_http_host(runtime.clone(), Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
         let shared = Rc::new(ScopeShared::new(runtime, http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()), Js::object(vec![]), ()));
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()), Js::object(vec![]), ()));
         globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
         let values = [10.125, -10.125, 0.5, -0.0, -0.001, 1e21, 1e20,
             f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 1.005];

@@ -46,7 +46,7 @@ setTimeout(()=>{trace.push('timer');console.log(JSON.stringify(trace))},0);
         let shared = Rc::new(ScopeShared::new(
             native.clone(),
             host,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -142,7 +142,7 @@ setTimeout(()=>{trace.push('next-timer');console.log(JSON.stringify(trace))},0);
         let shared = Rc::new(ScopeShared::new(
             native.clone(),
             host,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -328,7 +328,7 @@ fn native_cleared_timer_releases_its_callback_and_idle_driver() {
         let shared = Rc::new(ScopeShared::new(
             native.clone(),
             host,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -395,7 +395,7 @@ const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const
         let shared = Rc::new(ScopeShared::new(
             native.clone(),
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -605,7 +605,7 @@ await Promise.all([a,b]);rows.push(trace);
         let shared = Rc::new(ScopeShared::new(
             native.clone(),
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));

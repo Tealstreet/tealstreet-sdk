@@ -494,7 +494,7 @@ pub(crate) fn dispatch(
             })
         }
         ("reads", "fetch_spot_positions") => future(async move {
-            let positions = reads::fetch_spot_positions(rt.shared.store.as_ref());
+            let positions = reads::fetch_spot_positions(rt.shared.store.as_ref())?;
             from_typed(&positions)
         }),
         ("reads", "fetch_ws_token") => {
@@ -585,7 +585,7 @@ pub(crate) fn dispatch(
                         .map_err(ex)?;
                     Ok(())
                 },
-                || rt.shared.store.loaded().clone(),
+                || rt.shared.store.loaded().map_err(ExchangeError::from),
                 |flags| {
                     rt.this
                         .get("store")

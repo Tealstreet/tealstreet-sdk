@@ -384,17 +384,17 @@ impl TickerBatchHost<u64> for Public {
     fn is_connected(&self) -> bool {
         self.connected()
     }
-    fn markets(&self) -> Rc<AddedMarkets> {
+    fn markets(&self) -> Result<Rc<AddedMarkets>, ExchangeError> {
         let h = self.host().expect("live runtime");
-        Rc::new(RefCell::new(
+        Ok(Rc::new(RefCell::new(
             h.0.shared
                 .store
-                .markets()
+                .markets()?
                 .iter()
                 .cloned()
                 .map(|v| Rc::new(RefCell::new(v)))
                 .collect(),
-        ))
+        )))
     }
     fn clear(&self, id: &u64) -> Result<(), ExchangeError> {
         self.clear(id)
@@ -566,7 +566,7 @@ impl PublicFeedHost for Public {
     }
     fn market_by_instrument(&self, instrument: &Js) -> Result<Option<Js>, ExchangeError> {
         let h = self.host().map_err(err)?;
-        let values = h.0.shared.store.markets();
+        let values = h.0.shared.store.markets()?;
         for m in values.iter() {
             if from_typed(&m.id).map_err(err)?.strict_equals(instrument) {
                 return from_typed(m).map(Some).map_err(err);
@@ -579,7 +579,7 @@ impl PublicFeedHost for Public {
         Ok(h.0
             .shared
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == symbol)
             .cloned()
@@ -599,7 +599,7 @@ impl PublicFeedHost for Public {
         Ok(Rc::new(RefCell::new(
             h.0.shared
                 .store
-                .positions()
+                .positions()?
                 .iter()
                 .cloned()
                 .map(|p| Some(Rc::new(RefCell::new(p))))

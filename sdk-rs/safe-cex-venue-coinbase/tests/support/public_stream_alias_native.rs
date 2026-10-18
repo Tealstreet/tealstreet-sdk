@@ -11,8 +11,8 @@ use crate::{
     },
     starbase_public_frames::CoinbaseStarbaseFrameValue as Frame,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{js_runtime::client, native::native_runtime};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use serde_json::json;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
@@ -156,6 +156,7 @@ fn listener_failure_alias_is_the_exact_actual_dispatch_failure() {
             let exchange = owner(name);
             let public = exchange.class.public_websocket.borrow().clone().unwrap();
             let failure: ListenerFailure = Rc::new(PublicStreamFailure {
+                native: None,
                 name: "TypeError".into(),
                 message: "alias listener failure".into(),
             });

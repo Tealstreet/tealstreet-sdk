@@ -73,7 +73,7 @@ pub fn fetch_symbol_max_leverage<'a, F, Fut>(
     symbol: &'a str,
     public_data_only: bool,
     get: F,
-) -> impl Future<Output = f64> + 'a
+) -> impl Future<Output = Result<f64, ExchangeError>> + 'a
 where
     F: FnOnce(&'static str, Value) -> Result<Fut, ExchangeError> + 'a,
     Fut: Future<Output = Result<Option<Value>, ExchangeError>> + 'a,
@@ -81,16 +81,16 @@ where
     let request = fetch_and_sync_symbol_max_leverage(store, symbol, public_data_only, get);
     async move {
         if let Some(maximum) = request.await {
-            return maximum;
+            return Ok(maximum);
         }
         let existing = store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(symbol)
             .map(|market| market.limits.leverage.max);
-        match existing {
+        Ok(match existing {
             Some(value) if value.is_finite() && value > 0.0 => value,
             _ => 1.0,
-        }
+        })
     }
 }
 

@@ -179,7 +179,7 @@ fn hyro_mode_profile_matches_source() {
             .unwrap();
         assert_eq!(row["removed"], json!([{"id":"mode-order"}]));
         assert!(
-            h.store.orders().is_empty(),
+            h.store.orders().unwrap().is_empty(),
             "Hyro production retains the local REST cancellation fallback"
         );
         h.venue().dispose().unwrap();

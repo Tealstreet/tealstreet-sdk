@@ -373,13 +373,14 @@ impl PrivateStream {
         }
         Ok(())
     }
-    fn order(&self, id: Option<&str>) -> Option<Order> {
-        self.parent
+    fn order(&self, id: Option<&str>) -> Result<Option<Order>, ExchangeError> {
+        Ok(self
+            .parent
             .store()
-            .orders()
+            .orders()?
             .iter()
             .find(|o| Some(o.id.as_str()) == id)
-            .cloned()
+            .cloned())
     }
     fn update_order(
         &self,
@@ -413,7 +414,7 @@ impl PrivateStream {
     }
     fn handle_execution_report(&self, data: &Value) -> Result<(), ExchangeError> {
         self.repairs.schedule_order_reconcile()?;
-        if let Some(order) = self.order(optional_id(data.get("i"))?.as_deref()) {
+        if let Some(order) = self.order(optional_id(data.get("i"))?.as_deref())? {
             self.update_order(
                 order,
                 status(data.get("X"))?,
@@ -522,7 +523,7 @@ impl PrivateStream {
                 })?;
             }
         }
-        let Some(order) = self.order(id.as_deref()) else {
+        let Some(order) = self.order(id.as_deref())? else {
             return Ok(());
         };
         let time = account::get_order_update_time(d, || self.parent.virtual_time_ms())
@@ -570,7 +571,7 @@ impl PrivateStream {
         updates: &[account::AssetBalanceUpdate],
         deltas: &[(String, f64)],
     ) -> Result<bool, ExchangeError> {
-        let current = self.parent.store().balance().clone();
+        let current = self.parent.store().balance()?.clone();
         let mut currencies = current.currencies.clone().unwrap_or_default();
         let delta = |asset: &str| {
             or_zero(
@@ -689,8 +690,8 @@ impl PrivateStream {
             );
         };
         let store = self.parent.store();
-        let positions = store.positions().to_vec();
-        let balance = store.balance().clone();
+        let positions = store.positions()?.to_vec();
+        let balance = store.balance()?.clone();
         let currencies: Vec<String> = balance
             .currencies
             .as_ref()
@@ -725,7 +726,7 @@ impl PrivateStream {
                 let amount = parsed(pos.get("pa"))?;
                 let side = account::get_position_side(pos, amount).map_err(coercion)?;
                 let symbol = pos.get("s").and_then(Value::as_str).unwrap_or("");
-                let existing: Vec<Position> = store.positions().to_vec();
+                let existing: Vec<Position> = store.positions()?.to_vec();
                 if amount != 0.0 {
                     if let Some(current) = existing
                         .iter()
@@ -756,7 +757,7 @@ impl PrivateStream {
                             } else {
                                 PositionSide::Long
                             };
-                            let existing = store.positions().to_vec();
+                            let existing = store.positions()?.to_vec();
                             if let Some(old) = existing
                                 .iter()
                                 .find(|p| p.symbol == symbol && p.side == opposite)
@@ -769,7 +770,7 @@ impl PrivateStream {
                                     LogSeverity::Info,
                                 )?;
                                 let next_positions = store
-                                    .positions()
+                                    .positions()?
                                     .iter()
                                     .filter(|p| p.id != old.id)
                                     .cloned()
@@ -792,7 +793,7 @@ impl PrivateStream {
                             LogSeverity::Info,
                         )?;
                         let next_positions = store
-                            .positions()
+                            .positions()?
                             .iter()
                             .filter(|p| p.symbol != symbol)
                             .cloned()
@@ -807,7 +808,7 @@ impl PrivateStream {
                     }
                 }
             }
-            let emitted_positions = store.positions().to_vec();
+            let emitted_positions = store.positions()?.to_vec();
             self.parent.emit_positions(&emitted_positions)?;
             self.repairs.schedule_position_repair()?;
         }

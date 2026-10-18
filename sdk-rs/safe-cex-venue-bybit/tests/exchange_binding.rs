@@ -469,7 +469,7 @@ fn change_margin_type_switches_the_account_and_restamps_positions() {
         h.wire.calls("/v5/account/set-margin-mode")[0].body,
         json!({"setMarginMode": "ISOLATED_MARGIN"})
     );
-    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    let positions = safe_cex_store::Store::positions(h.store.as_ref()).unwrap();
     assert!(!positions.is_empty());
     assert!(
         positions
@@ -536,7 +536,7 @@ fn start_loads_public_and_private_state_and_dials_both_sockets() {
         h.runtime.now.set(h.runtime.now.get() + 50.0);
     }
     let store = h.store.as_ref();
-    let loaded = safe_cex_store::Store::loaded(store).clone();
+    let loaded = safe_cex_store::Store::loaded(store).unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers,
         "public state loaded: {loaded:?}"
@@ -545,16 +545,21 @@ fn start_loads_public_and_private_state_and_dials_both_sockets() {
         loaded.orders && loaded.positions && loaded.balance,
         "private snapshot loaded: {loaded:?}"
     );
-    assert_eq!(safe_cex_store::Store::markets(store).len(), 1);
-    assert_eq!(safe_cex_store::Store::tickers(store)[0].last, 25000.0);
+    assert_eq!(safe_cex_store::Store::markets(store).unwrap().len(), 1);
+    assert_eq!(
+        safe_cex_store::Store::tickers(store).unwrap()[0].last,
+        25000.0
+    );
     assert!(
         safe_cex_store::Store::orders(store)
+            .unwrap()
             .iter()
             .any(|o| o.id == "o-1"),
         "orders snapshot stored"
     );
     assert!(
         safe_cex_store::Store::positions(store)
+            .unwrap()
             .iter()
             .all(|p| p.margin_type == Some(safe_cex_types::MarginType::Isolated)),
         "the margin probe ran before positions were stamped"
@@ -618,7 +623,7 @@ fn start_with_external_data_keeps_the_account_overlay_and_private_snapshot() {
             let runtime = base.runtime.clone();
             drop(runtime.clone().spawn_local(Box::pin(async move {
                 runtime.sleep(500).await.unwrap();
-                let mut loaded = base.store.loaded().clone();
+                let mut loaded = base.store.loaded().unwrap().clone();
                 loaded.markets = true;
                 loaded.tickers = true;
                 base.store
@@ -669,7 +674,7 @@ fn start_with_external_data_keeps_the_account_overlay_and_private_snapshot() {
             move |_: &safe_cex_types::ExchangeOptionsExternalPublicData, base: Rc<BaseExchange>| {
                 *provider_base.borrow_mut() = Some(base.clone());
                 assert_eq!(
-                    base.store.markets()[0].taker_fee,
+                    base.store.markets().unwrap()[0].taker_fee,
                     Some(0.00055),
                     "account overlay precedes provider construction"
                 );
@@ -719,7 +724,7 @@ fn start_with_external_data_keeps_the_account_overlay_and_private_snapshot() {
         ),
         "provider receives the actual exchange base"
     );
-    let loaded = h.store.loaded().clone();
+    let loaded = h.store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers && loaded.positions && loaded.orders && loaded.balance
     );
@@ -729,11 +734,12 @@ fn start_with_external_data_keeps_the_account_overlay_and_private_snapshot() {
         h.wire.calls("/v5/account/fee-rate")[0].params["category"],
         "linear"
     );
-    assert_eq!(h.store.markets()[0].maker_fee, Some(0.0002));
-    assert!(!h.store.positions().is_empty());
+    assert_eq!(h.store.markets().unwrap()[0].maker_fee, Some(0.0002));
+    assert!(!h.store.positions().unwrap().is_empty());
     assert!(
         h.store
             .positions()
+            .unwrap()
             .iter()
             .all(|position| position.margin_type == Some(safe_cex_types::MarginType::Isolated)),
         "external public data still probes private margin mode before the snapshot"
@@ -1031,7 +1037,7 @@ fn demo_cancel_retires_rows_and_reduce_only_limits_reconcile_from_fills() {
             );
         })
     };
-    let has = |h: &support::Harness, id: &str| h.store.orders().iter().any(|o| o.id == id);
+    let has = |h: &support::Harness, id: &str| h.store.orders().unwrap().iter().any(|o| o.id == id);
 
     let h = demo();
     seed_orders(&h, vec![store_order(json!({}))]);
@@ -1275,7 +1281,11 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
             assert!(calls[1].params.get("cursor").is_some());
         }
         assert_eq!(
-            !h.store.orders().iter().any(|order| order.id == "ro-1"),
+            !h.store
+                .orders()
+                .unwrap()
+                .iter()
+                .any(|order| order.id == "ro-1"),
             retired,
             "partial or truncated fill history cannot retire the order"
         );
@@ -1379,7 +1389,7 @@ fn position_mode_publication_retains_native_nan_and_negative_zero() {
         let venue = h.venue();
         h.drive(Box::pin(venue.base().place_order(venue, opts)))
             .expect("position mode maps and publishes native positions before placement");
-        let positions = h.store.positions();
+        let positions = h.store.positions().unwrap();
         assert_eq!(
             positions.len(),
             1,
@@ -1504,7 +1514,7 @@ fn native_position_controls_match_thirty_two_source_compositions() {
             );
             json!("oneway")
         };
-        let positions: Vec<_> = h.store.positions().iter().map(|p| {
+        let positions: Vec<_> = h.store.positions().unwrap().iter().map(|p| {
             let leverage = if p.leverage.is_nan() { "NaN".into() } else if p.leverage.to_bits() == (-0.0f64).to_bits() { "-0".into() } else {safe_cex_num::js_number_string(p.leverage)};
             json!({"symbol":p.symbol,"mode":match p.position_mode.into_value() {Some(PositionMode::OneWay)=>"oneway",Some(PositionMode::Hedged)=>"hedged",None=>"undefined"},"leverage":leverage})
         }).collect();
@@ -1545,7 +1555,7 @@ fn native_leverage_keeps_option_refusal_and_not_modified_policy() {
         );
         if accepted {
             assert!(
-                h.store.positions()[0].leverage.is_nan(),
+                h.store.positions().unwrap()[0].leverage.is_nan(),
                 "native refresh retains NaN"
             );
             assert_eq!(
@@ -1623,7 +1633,7 @@ fn native_position_mode_keeps_proxy_status_and_nonempty_failure_override() {
         h.drive(Box::pin(venue.base().place_order(venue, opts)))
             .expect("source position-mode fallback still places");
         assert_eq!(
-            h.store.positions().len(),
+            h.store.positions().unwrap().len(),
             usize::from(publishes),
             "array-only/nonempty-list policy: {response}"
         );
@@ -1638,7 +1648,7 @@ fn native_position_mode_keeps_proxy_status_and_nonempty_failure_override() {
             h.runtime.logs.borrow()
         );
         if publishes {
-            let actual = h.store.positions()[0].leverage;
+            let actual = h.store.positions().unwrap()[0].leverage;
             if response["result"]["list"][0]["leverage"] == "NaN" {
                 assert!(actual.is_nan());
             } else {
@@ -1745,7 +1755,7 @@ fn control_switch_keeps_native_position_numbers(margin: bool) {
                     "successful position mode switch must publish native fetched positions",
                 );
             }
-            let positions = h.store.positions();
+            let positions = h.store.positions().unwrap();
             assert_eq!(
                 positions.len(),
                 1,
