@@ -27,6 +27,9 @@ pub(super) const TICKER_FIELDS: [&str; 11] = [
 #[derive(Clone)]
 pub(super) enum Subscriber {
     Native(Js),
+    NativeCallback(
+        Rc<dyn Fn(&dyn std::any::Any, bool) -> Result<(), safe_cex_types::StoreSubscriberError>>,
+    ),
     Typed(
         std::sync::Arc<
             dyn Fn(
@@ -270,6 +273,32 @@ impl Graph {
         Box::new(move || {
             for (_, entry) in &mut listeners.borrow_mut().slots {
                 if matches!(entry, Some(Subscriber::Typed(old)) if std::sync::Arc::ptr_eq(old, &callback))
+                {
+                    *entry = None;
+                }
+            }
+        })
+    }
+
+    pub(super) fn subscribe_native_callback(
+        &self,
+        callback: Rc<
+            dyn Fn(&dyn std::any::Any, bool) -> Result<(), safe_cex_types::StoreSubscriberError>,
+        >,
+    ) -> Box<dyn Fn()> {
+        let mut listeners = self.listeners.borrow_mut();
+        if !listeners.slots.iter().any(|(_, entry)| {
+            matches!(entry, Some(Subscriber::NativeCallback(old)) if Rc::ptr_eq(old, &callback))
+        }) {
+            let id = listeners.next;
+            listeners.next += 1;
+            listeners.slots.push((id, Some(Subscriber::NativeCallback(callback.clone()))));
+        }
+        drop(listeners);
+        let listeners = self.listeners.clone();
+        Box::new(move || {
+            for (_, entry) in &mut listeners.borrow_mut().slots {
+                if matches!(entry, Some(Subscriber::NativeCallback(old)) if Rc::ptr_eq(old, &callback))
                 {
                     *entry = None;
                 }
@@ -1300,6 +1329,14 @@ impl Graph {
             match callback {
                 Some(Subscriber::Native(callback)) => {
                     callback.call(Js::Undefined, vec![self.state(), Js::Bool(from_worker)])?;
+                }
+                Some(Subscriber::NativeCallback(callback)) => {
+                    callback(&self.state(), from_worker).map_err(|cause| {
+                        super::mutation_thrown(
+                            safe_cex_store::StoreNotificationError::from_subscriber(id, cause)
+                                .into(),
+                        )
+                    })?;
                 }
                 Some(Subscriber::Typed(callback)) => {
                     let data = super::project(&self.state()).map_err(super::read_thrown)?;

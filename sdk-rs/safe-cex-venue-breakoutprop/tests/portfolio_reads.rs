@@ -429,21 +429,50 @@ fn inherited_and_utf8_read_boundaries() {
                 );
                 assert!(balance.used > 0.0);
             }
-            "fetchOpenPositions" => assert!(
-                run(fetch_open_positions(
+            "fetchOpenPositions" => {
+                let rows = run(fetch_open_positions(
                     fetch,
                     &store,
                     &|ms| ms,
                     &report,
-                    |e| e.message
+                    |e| e.message,
                 ))
-                .is_err(),
-                "closed Position symbol refusal"
-            ),
-            "fetchOrders" => assert!(
-                run(fetch_orders(fetch, &store, &|ms| ms, &report, |e| e.message)).is_err(),
-                "closed Order symbol refusal"
-            ),
+                .unwrap()
+                .unwrap();
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].symbol, "\u{fffd}");
+                assert_eq!(rows[1].symbol, "ETHUSD");
+                assert_eq!(
+                    rows[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("symbol")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+            }
+            "fetchOrders" => {
+                let rows = run(fetch_orders(fetch, &store, &|ms| ms, &report, |e| {
+                    e.message
+                }))
+                .unwrap()
+                .unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].id, "id-A");
+                assert_eq!(rows[0].symbol, "\u{fffd}");
+                assert_eq!(
+                    rows[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("instrument")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+            }
             "fetchPositions" => {
                 assert!(
                     serde_json::from_str::<Vec<String>>(r#"["\ud800"]"#).is_err(),

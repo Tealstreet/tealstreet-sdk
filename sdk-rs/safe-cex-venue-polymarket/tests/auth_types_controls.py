@@ -71,7 +71,7 @@ mutate('optional null collapse', rust, lambda s: s.replace('String::deserialize(
 mutate('heritage blindness', oracle, lambda s: s.replace('type.getProperties().map(property =>', 'type.getProperties().filter(property => property.getDeclarations().every(d => d.parent === node)).map(property =>'), 'inherited_required_inventory')
 mutate('actual source inherited field', source, lambda s: s.replace('export interface PolymarketCredentials {', 'interface RequiredCredentialParent { inheritedCredential: string }\nexport interface PolymarketCredentials extends RequiredCredentialParent {'), 'declared field inheritedCredential')
 mutate('unresolved heritage', oracle, lambda s: s.replace('assert.equal(actualBases.length, expectedBases, `resolved_heritage ${node.name.text}`);', 'void actualBases; void expectedBases;'), 'unresolved_heritage_refusal')
-mutate('surrogate replacement at ingress', crate / 'tests/auth_types.rs', lambda s: s.replace('    match name {', '    let normalized = raw.replace(r"\\ud800", r"\\ufffd");\n    let raw = normalized.as_str();\n    match name {', 1), 'string_boundary_refusal:PolymarketCredentials')
+mutate('typed surrogate corruption at ingress', crate / 'tests/auth_types.rs', lambda s: s.replace('    match name {', '    let normalized = raw.replace(r"\\ud800", r"corrupted");\n    let raw = normalized.as_str();\n    match name {', 1), 'typed auth U+FFFD field')
 def swap_payload(text, name, first, second):
     start = text.index('pub struct ' + name)
     end = text.index('impl JsNumberOutput for ' + name, start)

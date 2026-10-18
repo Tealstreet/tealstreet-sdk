@@ -794,21 +794,48 @@ fn sdk_batches_unicode_and_depth() {
                 }
             }
         } else {
-            let result = match record {
-                "BatchTxReq" => (
-                    serde_json::from_str::<BatchTxReq>(raw).is_err(),
-                    js_from_str::<BatchTxReq>(raw).is_err(),
-                ),
-                "BatchCreateOrdersParams" => (
-                    serde_json::from_str::<BatchCreateOrdersParams>(raw).is_err(),
-                    js_from_str::<BatchCreateOrdersParams>(raw).is_err(),
-                ),
-                _ => (
-                    serde_json::from_str::<BatchTxResponse>(raw).is_err(),
-                    js_from_str::<BatchTxResponse>(raw).is_err(),
-                ),
+            typed_utf16::retained(raw);
+            let values = match record {
+                "BatchTxReq" => vec![
+                    Batch::Tx(serde_json::from_str(raw).unwrap()),
+                    Batch::Tx(js_from_str(raw).unwrap()),
+                ],
+                "BatchCreateOrdersParams" => vec![
+                    Batch::Orders(serde_json::from_str(raw).unwrap()),
+                    Batch::Orders(js_from_str(raw).unwrap()),
+                ],
+                _ => vec![
+                    Batch::Response(serde_json::from_str(raw).unwrap()),
+                    Batch::Response(js_from_str(raw).unwrap()),
+                ],
             };
-            assert_eq!(result, (true, true), "{record} {path:?} raw UTF16 boundary");
+            for value in values {
+                if path[0] == "extra" {
+                    continue;
+                }
+                let actual = match &value {
+                    Batch::Response(v) if path[0] == "txHashes" => {
+                        v.tx_hashes[path[1].as_u64().unwrap() as usize].clone()
+                    }
+                    Batch::Response(v) => v.errors.get(path[1].as_str().unwrap()).unwrap().clone(),
+                    _ => {
+                        let payload = leaf(&value, path);
+                        let original: safe_cex_types::retained_json::RetainedJsonInput =
+                            payload.clone().decode().unwrap();
+                        assert_eq!(
+                            original.as_text().unwrap(),
+                            units,
+                            "batch retained payload native units"
+                        );
+                        payload.decode::<String>().unwrap()
+                    }
+                };
+                assert_eq!(
+                    actual,
+                    String::from_utf16_lossy(&units),
+                    "batch typed String replacement"
+                );
+            }
         }
     }
     assert_eq!(inventory.len(), 9, "batch Unicode field inventory");
@@ -944,3 +971,6 @@ fn sdk_batches_source_controls() {
         );
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
