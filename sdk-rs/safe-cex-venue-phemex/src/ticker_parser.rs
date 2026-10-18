@@ -70,7 +70,7 @@ pub fn parse_tickers(
             ask: numeric(row.get("askRp"))?,
             last: numeric(row.get("lastRp"))?,
             mark: numeric(row.get("markRp"))?,
-            index: numeric(row.get("indexRp"))?,
+            index: Some(numeric(row.get("indexRp"))?),
             percentage: ((numeric(row.get("lastRp"))? - numeric(row.get("openRp"))?)
                 / numeric(row.get("openRp"))?)
                 * 100.0,

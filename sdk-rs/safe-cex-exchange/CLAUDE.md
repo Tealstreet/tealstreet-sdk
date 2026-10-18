@@ -1,5 +1,12 @@
 # Exchange core contract
 
+The native Axios factory enhances rejections before venue interceptors, using
+the maintained helper's field order and live message getter. Its originalError
+Error snapshot excludes the self-reference under decision 2; existing owned
+metadata preserves diagnostics, extra/config data and nearest-response authority.
+Executable config capabilities retain the owned-data boundary. Constructed Aster
+and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
@@ -1931,6 +1938,11 @@ prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
 boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
+
+Store payload ticker baselines retain nullable index prices. The maintained worker
+advances its baseline for number-to-null transitions but omits non-number deltas;
+null-to-number emits the new number. Preserve this source behavior. The live
+store_payload oracle pins both transitions and unchanged-null packed arrays.
 
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.

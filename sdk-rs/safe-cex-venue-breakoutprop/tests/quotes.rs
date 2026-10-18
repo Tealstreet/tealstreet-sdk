@@ -62,7 +62,7 @@ fn market(m: &Market) -> Value {
     v
 }
 fn ticker(t: &Ticker) -> Value {
-    let mut v = json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":number(t.index),"percentage":number(t.percentage),"openInterest":number(t.open_interest),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume)});
+    let mut v = json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":t.index.map(number).unwrap_or(Value::Null),"percentage":number(t.percentage),"openInterest":number(t.open_interest),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume)});
     optional(&mut v, "midPrice", t.mid_price.map(number));
     optional(&mut v, "info", t.info.as_ref().map(observe));
     v

@@ -392,7 +392,15 @@ impl PatchModel for safe_cex_types::Ticker {
             "ask" => self.ask = number(field, value)?,
             "last" => self.last = number(field, value)?,
             "mark" => self.mark = number(field, value)?,
-            "index" => self.index = number(field, value)?,
+            "index" => {
+                self.index = match value {
+                    PatchValueRef::Json(Value::Null) => None,
+                    PatchValueRef::Native(v) if v.is::<Option<f64>>() => {
+                        *v.downcast_ref::<Option<f64>>().unwrap()
+                    }
+                    value => Some(number(field, value)?),
+                }
+            }
             "midPrice" => self.mid_price = Some(number(field, value)?),
             "percentage" => self.percentage = number(field, value)?,
             "openInterest" => self.open_interest = number(field, value)?,

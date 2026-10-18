@@ -1,5 +1,8 @@
 //! Concrete AsterDEX exchange assembled from the ported bodies and shared runtime.
 #[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "fix_audit_tests.rs"]
+mod fix_audit_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "native_emitter_tests.rs"]
 mod native_emitter_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]

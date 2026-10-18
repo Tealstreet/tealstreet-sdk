@@ -1,32 +1,34 @@
-# WOO websocket state review
+# WOO websocket retirement review
 
-The V3 acknowledgement and subscription helpers remain inert. Their existing
-`ws_state` target retains the eight blocker records, command-ID metadata,
-31 acknowledgement cases, 12 create cases, 12 plan cases, nine acknowledgement
-transitions and six reconnect cases, with native fields and number bits checked
-before any wire projection. Its oracle executes the maintained TypeScript module.
-The three remaining compiled controls cover blocker parsing, acknowledgement time
-and reconnect generation; the retired sequence control is removed.
+Assigned rows 22–45, 54 and 59 are ACCEPT. These declarations belong to the
+inactive V3 websocket island, not the legacy public/private sockets constructed
+by WOO. Row 46's sequence helper was retired in the preceding batch.
 
-## Sequence retirement
+The TypeScript source is `packages/safe-cex/src/exchanges/woo/woo.v3.websocket.ts`.
+Its only runtime imports are audit tests; the separate inert ticker and recovery
+modules import types. The maintained whole-class dependency probe starts from
+`woo.exchange.ts`, `woo.api.ts`, `woo.ws-public.ts` and `woo.ws-private.ts`, loads
+no V3 module, constructs two receivers and checks all eight hard-false gates.
+The native constructed exchange checks all 47 assigned V3 identities against
+its actual receiver and runtime globals, with positive legacy member checks.
 
-Assigned FIX-audit row 46 is ACCEPT because no production TypeScript caller imports
-`advanceWooV3OrderBookSequence`. Repository references are its declaration at
-`packages/safe-cex/src/exchanges/woo/woo.v3.websocket.ts:774` and the audit test
-`packages/safe-cex/src/__tests__/audit-regressions/woo.v3-websocket-contracts.test.ts`.
-The maintained constructed-class dependency walk loads no V3 module, and the real
-native exchange exposes no sequence member or global.
+A tracked-workspace Rust caller scan finds no consumer outside the six modules,
+their six facade test targets and their exact oracle/control scaffolding. All six
+modules are removed together: `v3_ws_topics`, `v3_ws_commands`, `v3_ws_session`,
+`v3_ws_state`, `v3_ws_public` and `v3_ws_private`. Their facade tests, orphan scripts,
+generated gate reports and the exact unused book-level array registration are
+removed too. Eighty manifest mappings retain their source identities with
+not-applicable status; no identity fallback or alias permission is added.
 
-The only Rust callers were `tests/ws_state.rs`. The isolated function, its result
-enum, two orphan literal codecs, nine facade cases, declaration/strict-result
-checks and sequence-only control are removed together. Acknowledgement and
-subscription inputs, assertions and source observations remain unchanged. The
-obsolete historical census and generated gate report are removed as well.
+`v3_ws_quotes` remains because the separate ticker composer consumes its BBO and
+Trade declarations. All unrelated source corpora and native assertions remain.
+The four remaining structural aliases still have their native contract runner.
+The retired book-array identity now reaches the ordinary unsupported-alias refusal.
 
-Scoped validation uses `fix_audit_tests::`, `--test ws_state` and
-`binding_streams::listen_order_book_joins_the_snapshot_with_buffered_deltas`.
-The latter constructs the real exchange and exercises signed snapshot HTTP,
-public socket deltas, orderbook publication and cleanup before and after removal.
-All-target strict Clippy compiles the remaining consumers. Full parity indexing
-keeps both TypeScript rows as not-applicable and refuses stale Rust targets.
-This is dead-code retirement, not a claim of a master-red behavior repair.
+Validation uses the real `fix_audit_tests::` source/native registration probes,
+plus the actual legacy public startup, private authentication and execution
+reports, buffered orderbook snapshot/delta join and candle subscription tests.
+Strict all-target Clippy checks the remaining compiler consumers. The full parity
+index checks every source mapping, and the all-features cancellation inventory
+checks the shared producers. This is dead-code retirement, not a claim of a
+master-red behavior repair.

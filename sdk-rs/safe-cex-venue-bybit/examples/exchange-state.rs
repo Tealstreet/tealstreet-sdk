@@ -108,7 +108,7 @@ fn main() {
                 "native cached ticker identity mark"
             );
             assert_eq!(
-                row.index,
+                row.index.unwrap(),
                 wire["tickers"][i]["cached"][j]["index"].as_f64().unwrap(),
                 "native cached ticker identity index"
             );
@@ -192,7 +192,7 @@ fn main() {
                         t.ask,
                         t.last,
                         t.mark,
-                        t.index,
+                        t.index.unwrap(),
                         t.percentage,
                         t.open_interest,
                         t.funding_rate,
@@ -211,7 +211,7 @@ fn main() {
                         t.ask,
                         t.last,
                         t.mark,
-                        t.index,
+                        t.index.unwrap(),
                         t.percentage,
                         t.open_interest,
                         t.funding_rate,

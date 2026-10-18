@@ -63,7 +63,7 @@ pub fn format_spot_cfm_tickers(data: &Input) -> Result<Vec<Ticker>, String> {
                 ask: price,
                 last: price,
                 mark: price,
-                index: price,
+                index: Some(price),
                 mid_price: None,
                 percentage,
                 open_interest,

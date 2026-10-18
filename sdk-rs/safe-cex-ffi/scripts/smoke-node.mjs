@@ -29,6 +29,7 @@ execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-meta
 
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-lifecycle.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-replay.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-delivery-order.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, '../scripts/live-diff/replay-clock.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-signer-availability.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-startup.test.mjs')], { stdio: 'inherit' });

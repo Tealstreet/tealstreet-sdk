@@ -147,7 +147,7 @@ pub fn ticker() -> safe_cex_types::Ticker {
         ask: 2.0,
         last: 1.5,
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         percentage: 0.0,
         open_interest: 0.0,
