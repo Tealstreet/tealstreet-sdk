@@ -10,7 +10,8 @@ use crate::{
     utils::get_coinbase_usd_equivalent_alias_product_id,
 };
 use indexmap::IndexMap;
-use safe_cex_num::{adjust, js_number, js_number_string, js_string, js_truthy};
+use safe_cex_num::{adjust, js_number_string, js_string, js_truthy};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Market, Order, OrderExtra, OrderSide, OrderStatus, OrderTimeInForce, OrderType,
     PreparedOrderOpts,
@@ -35,7 +36,7 @@ pub struct CoinbaseOrderPolling {
 pub struct CoinbaseOrderResponse {
     /// Replace a root property by inserting a new handle. Mutating the retained
     /// object/array contents through its existing handle preserves shallow aliases.
-    pub fields: Rc<RefCell<IndexMap<String, Rc<RefCell<Value>>>>>,
+    pub fields: Rc<RefCell<IndexMap<Vec<u16>, Rc<RefCell<Input>>>>>,
 }
 impl CoinbaseOrderResponse {
     pub fn from_json(mut fields: Map<String, Value>) -> Self {
@@ -47,13 +48,31 @@ impl CoinbaseOrderResponse {
             fields: Rc::new(RefCell::new(
                 fields
                     .into_iter()
+                    .map(|(key, value)| {
+                        (
+                            key.encode_utf16().collect(),
+                            Rc::new(RefCell::new(value.into())),
+                        )
+                    })
+                    .collect(),
+            )),
+        }
+    }
+    pub fn from_retained(fields: Vec<(Vec<u16>, Input)>) -> Self {
+        Self {
+            fields: Rc::new(RefCell::new(
+                fields
+                    .into_iter()
                     .map(|(key, value)| (key, Rc::new(RefCell::new(value))))
                     .collect(),
             )),
         }
     }
-    fn get(&self, key: &str) -> Option<Value> {
-        self.fields.borrow().get(key).map(|v| v.borrow().clone())
+    fn get(&self, key: &str) -> Option<Input> {
+        self.fields
+            .borrow()
+            .get(&key.encode_utf16().collect::<Vec<_>>())
+            .map(|v| v.borrow().clone())
     }
     fn shallow_copy(&self) -> Self {
         Self {
@@ -314,51 +333,53 @@ pub fn build_optimistic_order_from_create(
     {
         return Ok(None);
     }
-    let (base, price) =
-        if let Some(config) = response.get("order_configuration").filter(|v| !v.is_null()) {
-            let limit = ["limit_limit_gtc", "limit_limit_gtd", "sor_limit_ioc"]
-                .iter()
-                .find_map(|key| config.get(key).filter(|v| js_truthy(Some(v))));
-            let Some(limit) = limit else {
-                return Ok(None);
-            };
-            (
-                limit.get("base_size").cloned(),
-                limit.get("limit_price").cloned(),
-            )
-        } else {
-            let c = &payload.order_configuration;
-            let limit = c
-                .limit_limit_gtc
-                .as_ref()
-                .map(|v| (&v.base_size, &v.limit_price))
-                .or_else(|| {
-                    c.limit_limit_gtd
-                        .as_ref()
-                        .map(|v| (&v.base_size, &v.limit_price))
-                })
-                .or_else(|| {
-                    c.sor_limit_ioc
-                        .as_ref()
-                        .map(|v| (&v.base_size, &v.limit_price))
-                });
-            let Some((base, price)) = limit else {
-                return Ok(None);
-            };
-            (
-                Some(Value::String(base.clone())),
-                Some(Value::String(price.clone())),
-            )
+    let (base, price) = if let Some(config) = response
+        .get("order_configuration")
+        .filter(|v| !v.is_nullish())
+    {
+        let limit = ["limit_limit_gtc", "limit_limit_gtd", "sor_limit_ioc"]
+            .iter()
+            .find_map(|key| config.get(key).filter(|v| v.is_truthy()));
+        let Some(limit) = limit else {
+            return Ok(None);
         };
-    let amount = js_number(base.as_ref()).map_err(coercion)?;
-    let price = js_number(price.as_ref()).map_err(coercion)?;
+        (
+            limit.get("base_size").cloned(),
+            limit.get("limit_price").cloned(),
+        )
+    } else {
+        let c = &payload.order_configuration;
+        let limit = c
+            .limit_limit_gtc
+            .as_ref()
+            .map(|v| (&v.base_size, &v.limit_price))
+            .or_else(|| {
+                c.limit_limit_gtd
+                    .as_ref()
+                    .map(|v| (&v.base_size, &v.limit_price))
+            })
+            .or_else(|| {
+                c.sor_limit_ioc
+                    .as_ref()
+                    .map(|v| (&v.base_size, &v.limit_price))
+            });
+        let Some((base, price)) = limit else {
+            return Ok(None);
+        };
+        (
+            Some(Input::from(Value::String(base.clone()))),
+            Some(Input::from(Value::String(price.clone()))),
+        )
+    };
+    let amount = safe_cex_num::js_retained_number(base.as_ref()).map_err(coercion)?;
+    let price = safe_cex_num::js_retained_number(price.as_ref()).map_err(coercion)?;
     if !amount.is_finite() || amount <= 0.0 || !price.is_finite() || price <= 0.0 {
         return Ok(None);
     }
     let info = response.shallow_copy();
     info.fields.borrow_mut().insert(
-        "optimisticFromCreateOrder".into(),
-        Rc::new(RefCell::new(Value::Bool(true))),
+        "optimisticFromCreateOrder".encode_utf16().collect(),
+        Rc::new(RefCell::new(Input::Bool(true))),
     );
     Ok(Some(Rc::new(CoinbaseOptimisticOrder {
         id: order_id.into(),
@@ -430,23 +451,23 @@ pub fn place_order<H: CoinbaseOrderHost + 'static>(
                     .borrow_mut()
                     .post_create_order("/api/v3/brokerage/orders", &payload);
                 let data = request.await?;
-                if !js_truthy(data.get("success").as_ref()) {
+                if !data.get("success").as_ref().is_some_and(Input::is_truthy) {
                     let failure = data.get("error_response");
                     let fallback = data.get("failure_reason");
                     let reason = failure
                         .as_ref()
                         .and_then(|e| e.get("new_order_failure_reason"))
-                        .filter(|v| js_truthy(Some(v)))
+                        .filter(|v| v.is_truthy())
                         .or_else(|| {
                             failure
                                 .as_ref()
                                 .and_then(|e| e.get("preview_failure_reason"))
-                                .filter(|v| js_truthy(Some(v)))
+                                .filter(|v| v.is_truthy())
                         })
-                        .or_else(|| fallback.as_ref().filter(|v| js_truthy(Some(v))));
+                        .or_else(|| fallback.as_ref().filter(|v| v.is_truthy()));
                     return Err(error(
                         reason
-                            .map(|v| js_string(Some(v)))
+                            .map(|v| safe_cex_num::js_retained_string(Some(v)))
                             .transpose()
                             .map_err(coercion)?
                             .unwrap_or_else(|| "Unknown error".into()),
@@ -459,14 +480,16 @@ pub fn place_order<H: CoinbaseOrderHost + 'static>(
                     .and_then(|v| v.get("order_id"))
                     .filter(|v| !v.is_null())
                     .or(fallback.as_ref());
-                if !js_truthy(id) {
+                if !id.is_some_and(Input::is_truthy) {
                     return Err(error(
                         "Coinbase create-order response did not include an order ID",
                     ));
                 }
                 // The declared response domain supplies string order IDs.
                 let id = id
-                    .and_then(Value::as_str)
+                    .and_then(Input::as_text)
+                    .and_then(|v| String::from_utf16(v).ok())
+                    .as_deref()
                     .ok_or_else(|| error("Coinbase order ID must be a string"))?
                     .to_owned();
                 let optimistic_order = build_optimistic_order_from_create(

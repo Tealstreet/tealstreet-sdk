@@ -740,7 +740,7 @@ impl CoinbasePrivateClassHost for SocketHost {
             .store
             .update(
                 StoreUpdate {
-                    orders: Some(Self::order_values(&orders)),
+                    orders: Some(Self::order_values(&orders)?),
                     loaded: Some(
                         safe_cex_exchange::js_runtime::value::to_typed(&to_js(&loaded))
                             .map_err(from_thrown)?,
@@ -755,7 +755,7 @@ impl CoinbasePrivateClassHost for SocketHost {
         self.host
             .shared
             .store
-            .add_or_update_orders(Self::order_values(&orders))
+            .add_or_update_orders(Self::order_values(&orders)?)
             .map_err(|error| Rc::new(error.into()))
     }
     fn emit_private_order_fill(

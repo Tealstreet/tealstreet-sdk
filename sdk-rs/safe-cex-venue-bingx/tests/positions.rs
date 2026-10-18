@@ -101,7 +101,7 @@ fn position(v: &Position) -> Value {
         out["marginSize"] = number(s);
     }
     if let Some(s) = v.info.as_ref() {
-        out["info"] = observe(s);
+        out["info"] = observe(&s.clone().into_value().unwrap());
     }
     assert!(
         v.extra.is_none() && v.realized_pnl.is_none() && v.last_update.is_none(),

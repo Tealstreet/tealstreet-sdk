@@ -135,9 +135,9 @@ pub fn map_coinbase_rest_order<I: Clone + Into<Input>>(
         symbol: market.symbol.clone(),
         r#type: (resolved.kind).into(),
         side: if raw_order.get("side").is_some_and(|v| v.text_equals("BUY")) {
-            safe_cex_types::ModelField::Input(OrderSide::Buy)
+            safe_cex_types::ModelField::Value(OrderSide::Buy)
         } else {
-            safe_cex_types::ModelField::Input(OrderSide::Sell)
+            safe_cex_types::ModelField::Value(OrderSide::Sell)
         },
         price: (parse_unsigned_decimal(resolved.price).unwrap_or(0.0)).into(),
         amount: add(filled, remaining),

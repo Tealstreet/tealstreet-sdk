@@ -1,17 +1,11 @@
-use super::{
-    error::{failure, from_thrown},
-    rt::Host,
-};
+use super::{error::from_thrown, rt::Host};
 use crate::{
     market_position_reads::*, portfolios_balances::*, public_data::PublicData,
     public_market_reads::*, starbase_auth::CoinbaseStarbasePromise as Promise,
 };
-use safe_cex_exchange::{
-    js_runtime::value::{Js, from_json},
-    runtime::ExchangeError,
-};
-use serde_json::{Value, json};
+use safe_cex_exchange::js_runtime::value::{Js, from_json};
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
+use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
 
 pub(super) fn items(data: &Input, field: &str) -> Result<ReadItems, PortfolioFailure> {
@@ -52,7 +46,7 @@ impl Host {
         endpoint: &'static str,
         params: Option<Value>,
     ) -> Promise<Result<ReadReply, PortfolioFailure>> {
-        let result = self.request("get", endpoint, params);
+        let result = self.request("get", endpoint, params.map(Input::from));
         self.promise(async move {
             let data = result.await?;
             Ok(ReadReply {
@@ -129,7 +123,7 @@ impl PortfolioHost for Host {
         let result = self.request(
             "get",
             endpoint,
-            portfolio_uuid.map(|id| json!({"portfolio_uuid":id})),
+            portfolio_uuid.map(|id| Input::from(json!({"portfolio_uuid":id}))),
         );
         self.promise(async move {
             let data = result.await?;
@@ -138,8 +132,12 @@ impl PortfolioHost for Host {
                 let mut portfolios = Vec::new();
                 for item in array.borrow().iter() {
                     portfolios.push(Rc::new(RefCell::new(
-                        serde_json::from_value(item.borrow().clone())
-                            .map_err(|error| failure(ExchangeError::new(error.to_string())))?,
+                        safe_cex_exchange::js_runtime::value::to_typed(
+                            &safe_cex_exchange::js_runtime::value::from_retained_input(
+                                item.borrow().clone(),
+                            ),
+                        )
+                        .map_err(from_thrown)?,
                     )));
                 }
                 Some(Rc::new(RefCell::new(portfolios)))
@@ -175,7 +173,7 @@ impl MarketPositionHost for Host {
     fn error_response_items(&self, err: &PortfolioFailure) -> Option<ReadItems> {
         let data = err.value.as_ref()?.get("response")?.get("data")?;
         items(
-            data,
+            &Input::from(data.clone()),
             if data.is_array() {
                 ""
             } else if data.get("products").is_some() {
@@ -260,7 +258,7 @@ impl PublicMarketReadHost for Host {
                 .iter()
                 .cloned()
                 .map(|mut fields| {
-                    let info = Rc::new(RefCell::new(fields.info.take().unwrap_or(Value::Null)));
+                    let info = Rc::new(RefCell::new(fields.info.take().unwrap_or(Input::Null)));
                     Rc::new(RefCell::new(CatalogMarket { fields, info }))
                 })
                 .collect(),
@@ -364,7 +362,10 @@ pub(super) fn balance_fields(balance: &Balance) -> safe_cex_types::Balance {
                     .and_then(|native| native.info.clone())
             }),
         coins: if let Some(coins) = value.extra.get("coins") {
-            serde_json::from_value(coins.borrow().clone()).ok()
+            safe_cex_exchange::js_runtime::value::to_typed(
+                &safe_cex_exchange::js_runtime::value::from_retained_input(coins.borrow().clone()),
+            )
+            .ok()
         } else {
             value
                 .native_snapshot

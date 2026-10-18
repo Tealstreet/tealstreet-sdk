@@ -74,7 +74,7 @@ fn sorted(value: &Value) -> Value {
 fn balance(v: &Balance) -> Value {
     let mut out = json!({"total":number(v.total),"free":number(v.free),"used":number(v.used),"upnl":number(v.upnl)});
     if let Some(info) = &v.info {
-        out["info"] = observe(info);
+        out["info"] = observe(&info.clone().into_value().unwrap());
     }
     assert!(
         v.coins.is_none() && v.currencies.is_none(),

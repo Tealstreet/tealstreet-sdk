@@ -31,7 +31,7 @@ pub trait OrderEditHost {
     fn market_by_symbol(&self, symbol: String) -> Result<Option<ReadMarket>, PortfolioFailure>;
     fn cancel_orders(&self, orders: SyncedOrders) -> EditAsync<()>;
     fn place_order(&self, order: EditReplacement) -> EditAsync<Vec<String>>;
-    fn post_edit(&self, endpoint: &'static str, payload: EditOrderRequest) -> EditAsync<Value>;
+    fn post_edit(&self, endpoint: &'static str, payload: EditOrderRequest) -> EditAsync<Input>;
     fn schedule_reconciliation(&self, reason: &'static str) -> Result<(), PortfolioFailure>;
     fn schedule_write_check(&self) -> Result<(), PortfolioFailure>;
     fn emit_and_log_error(&self, message: Option<Value>) -> Result<(), PortfolioFailure>;
@@ -97,8 +97,16 @@ fn exact_decimal(raw: Option<&Input>, number: f64) -> bool {
     };
     Some(raw) == decimal_key(&js_number_string(number))
 }
+fn native_decimal(raw: Option<&Input>, check: fn(Option<&Value>) -> bool) -> bool {
+    let text = raw
+        .and_then(Input::as_text)
+        .and_then(|v| String::from_utf16(v).ok())
+        .map(Value::String);
+    check(text.as_ref())
+}
 fn positive_decimal(raw: Option<&Input>) -> bool {
-    is_coinbase_unsigned_decimal(raw) && !is_coinbase_zero_decimal(raw)
+    native_decimal(raw, is_coinbase_unsigned_decimal)
+        && !native_decimal(raw, is_coinbase_zero_decimal)
 }
 fn prop<'a>(v: Option<&'a Input>, key: &str) -> Option<&'a Input> {
     v.and_then(|v| v.get(key))
@@ -243,7 +251,9 @@ pub fn update_order<H: OrderEditHost + 'static>(
                     .and_then(Input::as_text)
                     .and_then(|v| String::from_utf16(v).ok())
                     .as_deref()
-                    .is_some_and(|v| v.is_empty() || is_coinbase_zero_decimal(stop));
+                    .is_some_and(|v| {
+                        v.is_empty() || native_decimal(stop, is_coinbase_zero_decimal)
+                    });
                 let product_matches = product
                     .and_then(Input::as_text)
                     .and_then(|v| String::from_utf16(v).ok())
@@ -307,7 +317,7 @@ pub fn update_order<H: OrderEditHost + 'static>(
                     (canonical.borrow().fields.price).to_number(),
                     market.borrow().precision.price,
                 );
-                let reconciled = is_coinbase_zero_decimal(filled)
+                let reconciled = native_decimal(filled, is_coinbase_zero_decimal)
                     && positive_decimal(remaining)
                     && positive_decimal(price)
                     && canonical.borrow().fields.filled == 0.0
@@ -381,8 +391,8 @@ pub fn update_order<H: OrderEditHost + 'static>(
             };
             let result = async {
                 let data = r.host.post_edit("/api/v3/brokerage/orders/edit", payload)?.await?;
-                let errors = data.get("errors").and_then(Value::as_array);
-                if data.get("success") != Some(&Value::Bool(true))
+                let errors = data.get("errors").and_then(Input::as_array);
+                if data.get("success") != Some(&Input::Bool(true))
                     || errors.is_none()
                     || errors.is_some_and(|e| !e.is_empty())
                 {
@@ -393,8 +403,8 @@ pub fn update_order<H: OrderEditHost + 'static>(
                                 return Err(Rc::new(PortfolioThrown::from_value(Some(json!({"name":"TypeError", "message":"Cannot destructure property 'edit_failure_reason' of 'object null' as it is null."})))));
                             }
                             for key in ["edit_failure_reason", "preview_failure_reason"] {
-                                if let Some(value) = item.get(key).filter(|v| js_truthy(Some(v))) {
-                                    reasons.push(js_string(Some(value)).map_err(coercion_error)?);
+                                if let Some(value) = item.get(key).filter(|v| v.is_truthy()) {
+                                    reasons.push(safe_cex_num::js_retained_string(Some(value)).map_err(coercion_error)?);
                                 }
                             }
                         }
@@ -417,10 +427,16 @@ pub fn update_order<H: OrderEditHost + 'static>(
                 Ok(v) => Ok(v),
                 Err(e) => {
                     let v = e.value.as_ref();
-                    let msg = truthy_or(prop(prop(prop(v, "response"), "data"), "message"), || {
-                        truthy_or(prop(v, "message"), || None)
-                    })
-                    .cloned();
+                    let msg = v
+                        .and_then(|v| v.get("response"))
+                        .and_then(|v| v.get("data"))
+                        .and_then(|v| v.get("message"))
+                        .filter(|v| js_truthy(Some(v)))
+                        .or_else(|| {
+                            v.and_then(|v| v.get("message"))
+                                .filter(|v| js_truthy(Some(v)))
+                        })
+                        .cloned();
                     let message = match msg {
                         Some(v) => Some(v),
                         None => Some(Value::from(js_string(v).map_err(coercion_error)?)),

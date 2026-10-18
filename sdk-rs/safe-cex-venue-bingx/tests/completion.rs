@@ -766,15 +766,21 @@ fn run(case: &Value) {
             "BINGX-C direct native reduce-only"
         );
         assert_eq!(
-            native.info.as_ref().map(observe),
-            expected.info.as_ref().map(observe),
+            native
+                .info
+                .as_ref()
+                .map(|v| observe(&v.clone().into_value().unwrap())),
+            expected
+                .info
+                .as_ref()
+                .map(|v| observe(&v.clone().into_value().unwrap())),
             "BINGX-C direct native retained info"
         );
     }
     let native_balance = s.balance();
     assert_eq!(
         native_balance.info,
-        case["balance"].get("info").cloned(),
+        case["balance"].get("info").cloned().map(Into::into),
         "BINGX-C direct native balance info"
     );
     for (field, n) in [

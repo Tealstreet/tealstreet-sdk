@@ -1,3 +1,5 @@
+#[path = "support/retained_info.rs"]
+mod retained_info;
 use safe_cex_venue_coinbase::{
     portfolios_balances::*,
     starbase_auth::{CoinbaseStarbasePromise as Promise, CoinbaseStarbasePromiseResolver},
@@ -90,10 +92,12 @@ fn cached() -> Balance {
     );
     b.has_currencies = true;
     b.currencies = Some(Rc::new(RefCell::new(currencies)));
+    b.extra.insert(
+        "info".into(),
+        Rc::new(RefCell::new(json!({"retained":23}).into())),
+    );
     b.extra
-        .insert("info".into(), Rc::new(RefCell::new(json!({"retained":23}))));
-    b.extra
-        .insert("primitive".into(), Rc::new(RefCell::new(json!(5))));
+        .insert("primitive".into(), Rc::new(RefCell::new(json!(5).into())));
     Rc::new(RefCell::new(b))
 }
 fn receiver(
@@ -122,7 +126,7 @@ fn receiver(
                         Err(e)
                     } else {
                         Ok(PortfolioReply {
-                            data: p["data"].clone(),
+                            data: p["data"].clone().into(),
                             portfolios: Some(portfolios.clone()),
                         })
                     })
@@ -208,10 +212,18 @@ fn assert_json(actual: Option<&Value>, expected: &Value, label: &str) {
 }
 fn assert_portfolio(actual: &Portfolio, expected: &Value, label: &str) {
     let p = actual.borrow();
-    assert_eq!(p.metadata["name"], expected["name"], "{label}");
+    assert_eq!(
+        p.metadata["name"],
+        expected["name"].clone().into(),
+        "{label}"
+    );
     assert_eq!(p.uuid, expected["uuid"], "{label}");
     assert_eq!(p.r#type, expected["type"], "{label}: native portfolio type");
-    assert_eq!(p.metadata["deleted"], expected["deleted"], "{label}");
+    assert_eq!(
+        p.metadata["deleted"],
+        expected["deleted"].clone().into(),
+        "{label}"
+    );
 }
 fn assert_balance(actual: &Balance, e: &Value, label: &str) {
     let b = actual.borrow();
@@ -232,7 +244,7 @@ fn assert_balance(actual: &Balance, e: &Value, label: &str) {
         }
     }
     for (k, v) in &b.extra {
-        assert_json(Some(&v.borrow()), &e[k], label);
+        retained_info::assert_info(Some(&v.borrow()), &e[k], label);
     }
     let expected_keys = e.as_object().unwrap().len();
     assert_eq!(
@@ -505,14 +517,14 @@ fn base_probe_waits_all_and_selects_input_order() {
         "base concurrent probes launch"
     );
     br.resolve(Ok(PortfolioReply {
-        data: json!({}),
+        data: json!({}).into(),
         portfolios: None,
     }));
     tasks.drain();
     assert!(is_pending(&mut pending), "base waits every probe");
     tasks.enqueue(move || {
         ar.resolve(Ok(PortfolioReply {
-            data: json!({}),
+            data: json!({}).into(),
             portfolios: None,
         }))
     });
@@ -549,7 +561,7 @@ fn spot_probes_are_sequential_and_hot_without_await() {
         "spot later probe starts after masked error even unawaited"
     );
     br.resolve(Ok(PortfolioReply {
-        data: json!({}),
+        data: json!({}).into(),
         portfolios: None,
     }));
     tasks.drain();

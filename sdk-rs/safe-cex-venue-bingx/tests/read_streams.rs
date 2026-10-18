@@ -81,7 +81,7 @@ fn order_value(o: &Order) -> Value {
         v["timeInForce"] = json!(t);
     }
     if let Some(info) = o.info.as_ref() {
-        v["info"] = observe(info);
+        v["info"] = observe(&info.clone().into_value().unwrap());
     }
     if let Some(t) = o.sl_trigger_type.into_value() {
         v["slTriggerType"] = json!(t);

@@ -89,7 +89,7 @@ fn order(v: &Order) -> Value {
         out["slTriggerType"] = json!(t);
     }
     if let Some(info) = v.info.as_ref() {
-        out["info"] = observe(info);
+        out["info"] = observe(&info.clone().into_value().unwrap());
     }
     assert!(
         v.parent_id.is_none()
@@ -113,7 +113,7 @@ fn position(v: &Position) -> Value {
         out["marginSize"] = number(n);
     }
     if let Some(info) = v.info.as_ref() {
-        out["info"] = observe(info);
+        out["info"] = observe(&info.clone().into_value().unwrap());
     }
     assert!(
         v.realized_pnl.is_none() && v.extra.is_none() && v.last_update.is_none(),

@@ -5,7 +5,7 @@ use crate::{
     starbase_auth::{CoinbaseStarbasePromise as Promise, CoinbaseStarbasePromiseSpawner},
     utils::normalize_cfm_contract_size,
 };
-use safe_cex_num::{js_date_parse, js_time_clip, js_truthy, multiply, parse_float};
+use safe_cex_num::{js_date_parse, js_time_clip, js_truthy, multiply};
 use safe_cex_num::{js_retained_number, js_retained_string};
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
@@ -110,7 +110,7 @@ fn has_length(value: Option<&Input>) -> bool {
     }
 }
 fn float(value: Option<&Input>) -> Result<f64, PortfolioFailure> {
-    text(value).map(|v| parse_float(&v))
+    safe_cex_num::js_retained_parse_float(value).map_err(|e| error(e.name, e.message))
 }
 fn text(value: Option<&Input>) -> Result<String, PortfolioFailure> {
     js_retained_string(value).map_err(|e| error(&e.name, &e.message))
@@ -508,7 +508,7 @@ pub fn fetch_open_positions_cfm<H: MarketPositionHost + 'static>(
                 };
                 let p = item.borrow();
                 let mut fields = position(text(p.get("product_id"))?);
-                fields.side = if p.get("side").unwrap_or(&Input::Undefined) == "LONG" {safe_cex_types::ModelField::Value(PositionSide::Long)} else {safe_cex_types::ModelField::Value(PositionSide::Short)};
+                fields.side = if p.get("side").is_some_and(|v| v.text_equals("LONG")) {safe_cex_types::ModelField::Value(PositionSide::Long)} else {safe_cex_types::ModelField::Value(PositionSide::Short)};
                 fields.entry_price = float(p.get("avg_entry_price"))?;
                 let mark = float(p.get("current_price"))?;
                 let size = float(p.get("number_of_contracts"))?.abs();
@@ -555,8 +555,9 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
                 for item in reply.items.borrow().clone() {
                     let p = item.borrow();
                     let mut fields = position(text(p.get("symbol"))?);
-                    fields.side = if p.get("position_side").unwrap_or(&Input::Undefined)
-                        == "POSITION_SIDE_LONG"
+                    fields.side = if p
+                        .get("position_side")
+                        .is_some_and(|v| v.text_equals("POSITION_SIDE_LONG"))
                     {
                         safe_cex_types::ModelField::Value(PositionSide::Long)
                     } else {

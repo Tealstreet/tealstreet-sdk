@@ -7,7 +7,7 @@ use crate::{
     utils::{format_order_state, format_order_type, normalize_cfm_contract_size},
 };
 use indexmap::IndexMap;
-use safe_cex_num::{add, js_string, js_truthy, multiply, parse_float};
+use safe_cex_num::{add, multiply, parse_float};
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Order, OrderExtra, OrderSide};
 use serde_json::{Value, json};
@@ -27,13 +27,13 @@ pub struct OrderPageQuery {
     pub contract_expiry_type: Option<&'static str>,
     pub order_status: &'static str,
     pub limit: f64,
-    pub cursor: Option<Value>,
+    pub cursor: Option<Input>,
 }
 #[derive(Clone)]
 pub struct OrderPage {
     pub orders: ReadItems,
-    pub has_next: Option<Value>,
-    pub cursor: Option<Value>,
+    pub has_next: Option<Input>,
+    pub cursor: Option<Input>,
 }
 pub trait OrderSnapshotHost {
     fn public_only(&self) -> bool;
@@ -75,12 +75,6 @@ fn property(raw: &ReadItem, name: &str) -> Result<Option<Input>, PortfolioFailur
         ));
     }
     Ok(raw.get(name).cloned())
-}
-fn text(value: Option<&Value>) -> Result<String, PortfolioFailure> {
-    js_string(value).map_err(|e| error(e.name, e.message))
-}
-fn float(value: Option<&Value>) -> Result<f64, PortfolioFailure> {
-    Ok(parse_float(&text(value)?))
 }
 pub fn fetch_orders<H: OrderSnapshotHost + 'static>(
     r: Rc<OrderSnapshotReceiver<H>>,
@@ -150,29 +144,38 @@ pub fn fetch_open_orders_snapshot<H: OrderSnapshotHost + 'static>(
                             let raw = page.orders.borrow().get(index).cloned();
                             let Some(raw) = raw else { break };
                             index += 1;
-                            let product = text(property(&raw, "product_id")?.as_ref())?;
+                            let product = safe_cex_num::js_retained_string(
+                                property(&raw, "product_id")?.as_ref(),
+                            )
+                            .map_err(|e| error(e.name, e.message))?;
                             let market = r.host.resolve_market_by_product(product)?;
                             let Some(market) = market else {
-                                let product = text(property(&raw, "product_id")?.as_ref())?;
+                                let product = safe_cex_num::js_retained_string(
+                                    property(&raw, "product_id")?.as_ref(),
+                                )
+                                .map_err(|e| error(e.name, e.message))?;
                                 *missing.entry(product).or_default() += 1.0;
                                 continue;
                             };
                             let now = r.host.now_ms()?;
                             let order = r.host.map_rest_order(raw.clone(), market, now)?;
                             let Some(order) = order else {
-                                let product = text(property(&raw, "product_id")?.as_ref())?;
+                                let product = safe_cex_num::js_retained_string(
+                                    property(&raw, "product_id")?.as_ref(),
+                                )
+                                .map_err(|e| error(e.name, e.message))?;
                                 *unsupported.entry(product).or_default() += 1.0;
                                 continue;
                             };
                             let id = order.borrow().fields.id.clone();
                             by_id.insert(id, order);
                         }
-                        cursor = if js_truthy(page.has_next.as_ref()) {
+                        cursor = if page.has_next.as_ref().is_some_and(Input::is_truthy) {
                             page.cursor
                         } else {
                             None
                         };
-                        if !js_truthy(cursor.as_ref()) {
+                        if !cursor.as_ref().is_some_and(Input::is_truthy) {
                             break;
                         }
                     }
@@ -209,7 +212,7 @@ pub struct PrivateOrderEvent {
 }
 pub type PrivateOrderEventRoot = Rc<RefCell<PrivateOrderEvent>>;
 #[derive(Debug, Clone)]
-pub struct PrivateOrderFill<S = Value> {
+pub struct PrivateOrderFill<S = Input> {
     pub id: String,
     pub side: safe_cex_types::ModelField<OrderSide>,
     pub symbol: String,

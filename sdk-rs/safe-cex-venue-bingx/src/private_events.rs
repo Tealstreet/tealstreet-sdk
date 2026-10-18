@@ -2,7 +2,7 @@
 use crate::{constants, data_reads::BingxDataReads};
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
 use safe_cex_num::{
-    TableHit, js_number, js_string, js_table_lookup, js_truthy, math_max, parse_float, subtract,
+    TableHit, js_string, js_table_lookup, js_truthy, math_max, parse_float, subtract,
 };
 use safe_cex_store::StoreUpdate;
 use safe_cex_types::{
@@ -35,9 +35,7 @@ fn first<'a>(row: &'a Value, keys: &[&str]) -> Option<&'a Value> {
 fn float(value: Option<&Value>) -> Result<f64, ExchangeError> {
     Ok(parse_float(&text(value)?))
 }
-fn number(value: Option<&Value>) -> Result<f64, ExchangeError> {
-    js_number(value).map_err(|e| type_error(e.message))
-}
+
 fn table<T: Copy>(rows: &[(&str, T)], key: &str) -> Result<Option<T>, ExchangeError> {
     match js_table_lookup(rows, key) {
         TableHit::Mapped(v) => Ok(Some(*v)),
@@ -45,9 +43,7 @@ fn table<T: Copy>(rows: &[(&str, T)], key: &str) -> Result<Option<T>, ExchangeEr
         TableHit::Inherited(_) => Err(type_error("BingX typed enum refuses an inherited callable")),
     }
 }
-fn strict_true(value: Option<&Value>) -> bool {
-    value == Some(&Value::Bool(true)) || value == Some(&Value::String("true".into()))
-}
+
 fn finite_or_zero(value: f64) -> f64 {
     if value.is_finite() { value } else { 0.0 }
 }
