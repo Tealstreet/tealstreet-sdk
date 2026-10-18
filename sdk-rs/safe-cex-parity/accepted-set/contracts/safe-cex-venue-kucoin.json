@@ -10301,7 +10301,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -10341,7 +10341,7 @@
         "where_predicates": []
       }
     },
-    "call": "{match $type($value){Ok(result)=>serde_json::json!({\"ok\":true,\"rejected\":result}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "call": "{match $type(&safe_cex_types::retained_json::RetainedJsonInput::from_value($value.clone()).expect(\"authored retained input\")){Ok(result)=>serde_json::json!({\"ok\":true,\"rejected\":result}),Err(_)=>serde_json::json!({\"ok\":false})}}",
     "cases": [
       {
         "input": {

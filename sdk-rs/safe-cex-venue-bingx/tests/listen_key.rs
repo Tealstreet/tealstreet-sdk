@@ -223,7 +223,9 @@ impl ReadTransport for Host {
             }
             if !error.is_null() {
                 let mut e = ExchangeError::new(error["message"].as_str().unwrap());
-                e.response = Some(json!({"data":{"msg":error["msg"]},"status":error["status"]}));
+                e = e.with_retained_response(
+                    (json!({"data":{"msg":error["msg"]},"status":error["status"]})).into(),
+                );
                 e.store_subscriber_ids = vec![71, 83];
                 return Err(e);
             }

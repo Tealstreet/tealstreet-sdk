@@ -55,7 +55,7 @@ fn error() -> Failure {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         -1000
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"listener detail"}}));
+    e = e.with_retained_response(json!({"status":503,"data":{"msg":"listener detail"}}).into());
     Rc::new(e)
 }
 struct Timer {
@@ -171,7 +171,7 @@ impl Host {
         }
     }
     fn json(&self) -> Value {
-        json!({"sent":self.sent.borrow().iter().map(wire).collect::<Vec<_>>(),"timers":self.timers.borrow().iter().map(|t|json!({"delay":t.delay,"id":t.id})).collect::<Vec<_>>(),"cleared":self.cleared.borrow().iter().map(wire).collect::<Vec<_>>(),"cleanup":*self.cleaned.borrow(),"handlers":self.state.handlers.borrow().iter().map(|(k,v)|(k.clone(),json!(v.len()))).collect::<serde_json::Map<_,_>>(),"topics":self.state.topics.borrow().iter().map(|(k,v)|(k.clone(),json!(v))).collect::<serde_json::Map<_,_>>(),"nextId":self.state.next_subscription_id.get(),"candles":*self.candles.borrow(),"books":*self.book_values.borrow(),"gets":self.gets.borrow().iter().map(|(v,s,l)|json!({"client":if *v==Venue::Spot{"xhr"}else{"publicXhr"},"endpoint":if *v==Venue::Spot{"/api/v3/depth"}else{"/fapi/v1/depth"},"symbol":s,"limit":l})).collect::<Vec<_>>(),"applies":self.applies.borrow().iter().map(|(d,p)|json!({"u":wire(&d.read("u").unwrap()),"previous":p})).collect::<Vec<_>>(),"ops":*self.ops.borrow(),"failures":self.failures.borrow().iter().map(|e|json!({"original":Rc::ptr_eq(e,&self.primary),"name":e.name,"message":e.message,"code":observed_error_code(&e.code),"response":e.response})).collect::<Vec<_>>(),"inner":self.state.inner.borrow().iter().map(|(k,v)|(k.clone(),json!({"loaded":v.snapshot_loaded.get(),"updates":v.updates.borrow().iter().map(wire).collect::<Vec<_>>()}))).collect::<serde_json::Map<_,_>>()})
+        json!({"sent":self.sent.borrow().iter().map(wire).collect::<Vec<_>>(),"timers":self.timers.borrow().iter().map(|t|json!({"delay":t.delay,"id":t.id})).collect::<Vec<_>>(),"cleared":self.cleared.borrow().iter().map(wire).collect::<Vec<_>>(),"cleanup":*self.cleaned.borrow(),"handlers":self.state.handlers.borrow().iter().map(|(k,v)|(k.clone(),json!(v.len()))).collect::<serde_json::Map<_,_>>(),"topics":self.state.topics.borrow().iter().map(|(k,v)|(k.clone(),json!(v))).collect::<serde_json::Map<_,_>>(),"nextId":self.state.next_subscription_id.get(),"candles":*self.candles.borrow(),"books":*self.book_values.borrow(),"gets":self.gets.borrow().iter().map(|(v,s,l)|json!({"client":if *v==Venue::Spot{"xhr"}else{"publicXhr"},"endpoint":if *v==Venue::Spot{"/api/v3/depth"}else{"/fapi/v1/depth"},"symbol":s,"limit":l})).collect::<Vec<_>>(),"applies":self.applies.borrow().iter().map(|(d,p)|json!({"u":wire(&d.read("u").unwrap()),"previous":p})).collect::<Vec<_>>(),"ops":*self.ops.borrow(),"failures":self.failures.borrow().iter().map(|e|json!({"original":Rc::ptr_eq(e,&self.primary),"name":e.name,"message":e.message,"code":observed_error_code(&e.code),"response":e.response_json_view()})).collect::<Vec<_>>(),"inner":self.state.inner.borrow().iter().map(|(k,v)|(k.clone(),json!({"loaded":v.snapshot_loaded.get(),"updates":v.updates.borrow().iter().map(wire).collect::<Vec<_>>()}))).collect::<serde_json::Map<_,_>>()})
     }
 }
 impl ListenerHost for Host {

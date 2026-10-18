@@ -31,7 +31,9 @@ pub fn create_kraken_api_error(
     cause: Option<&Value>,
 ) -> ExchangeError {
     let mut error = ExchangeError::new(message);
-    error.metadata.response = response.cloned();
+    if let Some(response) = response {
+        error = error.with_retained_response(response.clone().into());
+    }
     error.metadata.original_error = cause.cloned();
     error
 }

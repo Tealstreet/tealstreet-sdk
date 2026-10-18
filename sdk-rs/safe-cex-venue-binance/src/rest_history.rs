@@ -118,9 +118,9 @@ fn endpoint(key: &str) -> &'static str {
 /// response/message referent identity; executable metadata properties excluded.
 fn err_message(e: &Failure) -> EventValue {
     let response = e
-        .response
+        .retained_response_input()
         .clone()
-        .map(EventValue::from_json)
+        .map(safe_cex_exchange::js_runtime::value::from_retained_input)
         .unwrap_or(EventValue::Undefined);
     let msg = optional(
         &optional(&response, "data").unwrap_or(EventValue::Undefined),
