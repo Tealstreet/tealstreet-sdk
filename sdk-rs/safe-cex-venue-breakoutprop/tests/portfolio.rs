@@ -302,14 +302,42 @@ fn portfolio_utf8_boundary() {
                     "native position reduction precedes closed model projection"
                 );
             }
-            "formatOpenPositions" => assert!(
-                format_open_positions(&input, &store, &|ms| ms, &report).is_err(),
-                "closed Position symbol refusal"
-            ),
-            "formatOrders" => assert!(
-                format_orders(&input, &store, &|ms| ms, &report).is_err(),
-                "closed Order symbol refusal"
-            ),
+            "formatOpenPositions" => {
+                let rows = format_open_positions(&input, &store, &|ms| ms, &report)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].symbol, "\u{fffd}");
+                assert_eq!(rows[1].symbol, "ETHUSD");
+                assert_eq!(
+                    rows[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("symbol")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+            }
+            "formatOrders" => {
+                let rows = format_orders(&input, &store, &|ms| ms, &report)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].id, "id-A");
+                assert_eq!(rows[0].symbol, "\u{fffd}");
+                assert_eq!(
+                    rows[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("instrument")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+            }
             "formatPositions" => {
                 assert!(
                     serde_json::from_str::<Vec<String>>(r#"["\ud800"]"#).is_err(),
