@@ -15,12 +15,12 @@ pub(super) fn v(value: Js) -> V {
     Rc::new(value)
 }
 #[derive(Clone)]
-pub(super) struct Host {
+pub(crate) struct Host {
     pub weak: Weak<Shared>,
     pub this: Js,
 }
 impl Host {
-    pub(super) fn new(rt: &Rt) -> Self {
+    pub(crate) fn new(rt: &Rt) -> Self {
         Self {
             weak: Rc::downgrade(&rt.shared),
             this: rt.this.clone(),

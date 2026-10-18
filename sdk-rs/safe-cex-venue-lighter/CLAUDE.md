@@ -458,3 +458,17 @@ wrapper. Read numbers and UTF-16 fields directly before any JSON report; source
 computed numbers use `Float`. Consumer coercion uses the shared retained Number,
 parseFloat and String helpers. JSON rendering belongs at the explicit output
 boundary, with no alternate model-info carrier.
+
+Structural alias receipts use compiler-authenticated declarations and artifacts via
+`scripts/structural-alias-contracts.mjs`. Six generic aliases have one exact
+production-shaped argument each; they make no claim for other instantiations.
+The selected result/promise/query payloads have no Deserialize implementation.
+`ReadonlyWarningTimes` does implement Deserialize: its receipt distinguishes the
+empty JSON map from native UTF16-sequence keys, checks duplicate overwrite and
+binary64 bits, and observes mutation through the decoded shared cell without
+claiming HashMap iteration order. Constructed parent tests exercise actual SDK
+query/result identity and the private class-wide warning cooldown; signed order
+placement exercises real promise continuation and native crypto. The publicly
+exported SDK validator is exercised through its native function entry separately.
+`scripts/structural-alias-controls.py` compiles independent production faults and
+requires named failures followed by exact restoration.

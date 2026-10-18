@@ -1,0 +1,307 @@
+{
+  "safe_cex_venue_orderly::ws_controls::Value": {
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_orderly::ws_controls::WsHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_orderly::ws_controls::WsHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The exact configured native Host value is Rc<Js>, a retained runtime referent, not a JSON decoder. Native Host.get and actual websocket callbacks preserve referent identity, own undefined, numeric bits and UTF16 units. No claim for custom WsHost implementations.",
+    "evidence": "Live ws_controls alias used by the actual binding::Host and source websocket bodies. Fresh authenticated compiler discovery, fixed production-host/type equality and native trait probes remain required. The separate constructed native_exchange structural_alias_tests witness covers all six source account classes and real socket callbacks.",
+    "entrypoints": []
+  },
+  "safe_cex_venue_orderly::ws_controls::Result": {
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Error",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_orderly::ws_controls::WsHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Error",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_orderly::ws_controls::WsHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The concrete production profile is Result<Rc<Js>,Thrown>, returned by configured WsHost operations. It retains the actual success referent or original failure rather than deserializing an error envelope. Actual native host calls and websocket callback failures pin receiver/argument forwarding and original retained error identity. This fixed native value result does not classify other T or H.",
+    "evidence": "Live ws_controls alias used by the actual binding::Host and source websocket bodies. Fresh authenticated compiler discovery, fixed production-host/type equality and native trait probes remain required. The separate constructed native_exchange structural_alias_tests witness covers all six source account classes and real socket callbacks.",
+    "entrypoints": []
+  },
+  "safe_cex_venue_orderly::ws_controls::Entries": {
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_orderly::ws_controls::Value",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "H"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "qualified_path": {
+                                    "name": "Value",
+                                    "args": null,
+                                    "self_type": {
+                                      "generic": "H"
+                                    },
+                                    "trait": {
+                                      "path": "safe_cex_venue_orderly::ws_controls::WsHost",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The exact native Host entry result owns the ordered UTF16-key/Rc<Js> snapshot. It is not a raw record decoder. Real Host.entries observations pin complete cardinality, native units/bits, original child referents and snapshot-vs-child mutation behavior; actual socket dispatch consumes it. No claim for arbitrary H.",
+    "evidence": "Live ws_controls alias used by the actual binding::Host and source websocket bodies. Fresh authenticated compiler discovery, fixed production-host/type equality and native trait probes remain required. The separate constructed native_exchange structural_alias_tests witness covers all six source account classes and real socket callbacks.",
+    "entrypoints": []
+  }
+}

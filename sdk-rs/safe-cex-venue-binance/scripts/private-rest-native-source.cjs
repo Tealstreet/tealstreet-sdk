@@ -32,13 +32,14 @@ const compile = text => ts.transpileModule(text, { compilerOptions: {module: ts.
   const helpers = input.pm ? ['describeBinancePMResponseShape', 'getBinancePMResponseMessage', 'requireBinancePMArrayResponse'].map(name => declaration(tree, name)).join('\n') : '';
   const context = vm.createContext({exports: {}, require, virtualClock: {getCurrentTimeMs: () => 10000}});
   const notices = [];
-  context.console = {error: (...args) => notices.push(['console', ...args]), log() {}};
+  const consoleLogs = [];
+  context.console = {error: (...args) => notices.push(['console', ...args]), log: (...args) => consoleLogs.push(args)};
   vm.runInContext(compile(shared.statements.filter(ts.isEnumDeclaration).map(n => n.getText(shared)).join('\n') + '\n' + severity.statements.filter(ts.isEnumDeclaration).map(n => n.getText(severity)).join('\n') + '\n' + tables + '\n' + helpers + '\n' + [declaration(math, 'POW10_CACHE'), math.statements.find(ts.isForStatement).getText(math), declaration(math, 'pow10'), declaration(math, 'afterDecimal'), declaration(math, 'subtract')].join('\n') + `\nexports.Subject=class {${member.getText(tree)} ${log.getText(baseTree)}};`), context);
   const keys = {exports: {}, require};
   vm.runInNewContext(compile(fs.readFileSync(path.join(root, 'utils/get-key.ts'), 'utf8')), keys);
   context.v = keys.exports.v;
   context.subtract = context.exports.subtract;
-  const subject = new context.exports.Subject();
+  let subject = new context.exports.Subject();
   const payload = JSON.parse(input.raw);
   subject.xhr = {get: async endpoint => ({data: endpoint.toLowerCase().includes('algo') ? [] : payload})};
   subject.papiXhr = {get: async () => ({data: payload})};
@@ -48,6 +49,20 @@ const compile = text => ts.transpileModule(text, { compilerOptions: {module: ts.
   subject.emitter = {emit: (event, ...args) => notices.push([event, ...args])};
   subject.emitAndLogError = (...args) => notices.push(['emit', ...args]);
   const units = value => Array.from({length: value.length}, (_, i) => value.charCodeAt(i));
+  if (input.warning) {
+    const fetch = cls.members.find(m => m.name?.getText(tree) === 'fetchOrders');
+    vm.runInContext(compile(`exports.fetch=class {${fetch.getText(tree)}};`), context);
+    const fetchSubject = new context.exports.fetch();
+    Object.assign(fetchSubject, subject);
+    subject.fetchOrders = fetchSubject.fetchOrders;
+    subject = fetchSubject;
+    subject.fetchConditionalOrders = async () => [];
+    subject.options.tuning.consoleLogging = true;
+    await subject.fetchOrders();
+    await subject.fetchOrders();
+    process.stdout.write(JSON.stringify({log:notices.filter(n=>n[0]==='log').map(n=>units(n[1])),console:consoleLogs.map(args=>args.map(units))}));
+    return;
+  }
   let output;
   try {
     const rows = await subject[method]();

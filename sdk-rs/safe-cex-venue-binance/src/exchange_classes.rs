@@ -1134,7 +1134,7 @@ impl crate::private_rest::SnapshotBindings for Context {
                         }
                         _ => "info".into(),
                     };
-                    owner.base.log(&value.text()?, &severity).map_err(Rc::new)
+                    owner.base.log_value(&value, &severity).map_err(Rc::new)
                 }
                 crate::private_rest::SnapshotMethod::Emit => owner.emit(value),
             }
