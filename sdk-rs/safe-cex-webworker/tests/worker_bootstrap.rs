@@ -1831,3 +1831,47 @@ fn config_and_fixture_carriers_reach_real_listener_without_legacy_validation() {
     assert_eq!(source["configs"], json!(configs));
     assert_eq!(source["dumps"], json!(dumps));
 }
+
+#[test]
+fn native_perf_record_dump_replay_matches_maintained_listener_roundtrip() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/worker_bootstrap_oracle.mjs"))
+        .arg("--perf-service").output().unwrap();
+    assert!(output.status.success(), "PERF source roundtrip: {}", String::from_utf8_lossy(&output.stderr));
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let host = Host::new();host.state.next.set(1);
+    let module = WorkerModule::new(host.clone());let session = module.start(host.clone(), false);
+    let listener = host.state.listener.borrow().clone().unwrap();
+    finish(&host, listener(Js::object(vec![("op", Js::str("__workerConfig")), ("data", Js::object(vec![("perfFixture", Js::object(vec![("mode", Js::str("record"))]))]))]))).unwrap();
+    finish(&host, host.send(init_payload())).unwrap();
+    let input = Js::object(vec![("n", Js::Number(17.))]);
+    session.get_worker().unwrap().exchange().unwrap().base().emit("fill", input.clone()).unwrap();
+    input.set("n", Js::Number(42.)).unwrap();
+    finish(&host, listener(Js::object(vec![("op", Js::str("__perfFixtureDump"))]))).unwrap();
+    let fixture = host.state.native_posts.borrow().iter().find(|p|p.get("op").unwrap().strict_equals(&Js::str("__perfFixtureDump"))).unwrap().get("data").unwrap();
+    let frames = fixture.get("frames").unwrap();
+    let count = frames.get("length").unwrap().to_number().unwrap() as usize;
+    assert_eq!(count, source["frames"].as_u64().unwrap() as usize, "PERF listener must record actual outbound frames");
+    let ops: Vec<_> = (0..count).map(|i|frames.get(&i.to_string()).unwrap().get("msg").unwrap().get("op").unwrap().to_display()).collect();
+    assert_eq!(json!(ops), source["ops"]);
+    let fill = (0..count).map(|i|frames.get(&i.to_string()).unwrap().get("msg").unwrap()).find(|p|p.get("op").unwrap().strict_equals(&Js::str("fill"))).unwrap();
+    assert!(matches!(fill.get("data").unwrap().get("n").unwrap(), Js::Number(n) if n.to_bits()==17_f64.to_bits()), "PERF captured payload cannot follow later Store/event mutation");
+    drop(module);
+    let replay = Host::new();replay.state.next.set(1);
+    let replay_module = WorkerModule::new(replay.clone());let _session = replay_module.start(replay.clone(), false);
+    let receive = replay.state.listener.borrow().clone().unwrap();
+    finish(&replay, receive(Js::object(vec![("op", Js::str("__workerConfig")), ("data", Js::object(vec![("perfFixture", Js::object(vec![("mode", Js::str("replay")), ("fixture", fixture), ("intervalMs", Js::Number(7.)), ("loop", Js::Bool(false))]))]))]))).unwrap();
+    finish(&replay, receive(Js::object(vec![("op", Js::str("init")), ("data", Js::object(vec![]))]))).unwrap();
+    assert!(replay_module.exchange_workers.borrow().is_empty());
+    let base = replay.state.native_posts.borrow().len();let mut delays = vec![];
+    for index in 0..count {
+        let timers = replay.state.timers.borrow();assert_eq!(timers.len(),1,"PERF only one owned metronome timer");
+        let (&id,(delay,_))=timers.iter().next().unwrap();delays.push(*delay);drop(timers);
+        replay.fire(id,500.+index as f64*7.);
+        let posts = replay.state.native_posts.borrow();assert_eq!(posts.len(),base+index+1);
+        assert!(posts[base+index].strict_equals(&frames.get(&index.to_string()).unwrap().get("msg").unwrap()),"PERF replay retains the captured frame reference");
+    }
+    assert!(replay.state.timers.borrow().is_empty());
+    assert_eq!(json!(delays),source["delays"]);
+    assert!(!replay.state.events.borrow().contains(&"load".to_string()));
+}
