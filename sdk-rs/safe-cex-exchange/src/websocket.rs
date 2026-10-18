@@ -2604,8 +2604,9 @@ impl BaseWebSocket {
             completed: completed.clone(),
         };
         let sleep = self.runtime.sleep(delay.max(0.0).ceil() as u64);
-        let task = self.owned_tasks.start(
+        let task = self.owned_tasks.start_classified(
             self.runtime.as_ref(),
+            RuntimeTaskKind::Timer,
             |_| {
                 Box::pin(async move {
                     if sleep.await.is_err() {

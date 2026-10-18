@@ -1301,20 +1301,23 @@ fn schedule_timer(
     let id = this.next.get() + 1.0;
     this.next.set(id);
     let (runtime, timers) = (this.runtime.clone(), Rc::downgrade(this));
-    let task = this.runtime.spawn_local(Box::pin(async move {
-        if runtime.sleep(delay.max(0.0) as u64).await.is_err() {
-            return;
-        }
-        if let Some(timers) = timers.upgrade() {
-            timers.live.borrow_mut().remove(&(id as u64));
-        }
-        if let Err(error) = action() {
-            runtime.report_exception(
-                &error,
-                &serde_json::json!({"operation":"binance timer"}).into(),
-            );
-        }
-    }));
+    let task = this.runtime.spawn_classified(
+        safe_cex_exchange::runtime::RuntimeTaskKind::Timer,
+        Box::pin(async move {
+            if runtime.sleep(delay.max(0.0) as u64).await.is_err() {
+                return;
+            }
+            if let Some(timers) = timers.upgrade() {
+                timers.live.borrow_mut().remove(&(id as u64));
+            }
+            if let Err(error) = action() {
+                runtime.report_exception(
+                    &error,
+                    &serde_json::json!({"operation":"binance timer"}).into(),
+                );
+            }
+        }),
+    );
     this.live.borrow_mut().insert(id as u64, task);
     number(id)
 }

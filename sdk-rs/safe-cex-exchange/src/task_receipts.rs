@@ -16,6 +16,8 @@ const ACTIVE: usize = 0;
 const TIMER: usize = 1;
 const SOCKET: usize = 2;
 const DELEGATED: usize = 3;
+const STATUS_MASK: usize = 3;
+const NEXT_WAKE: usize = 4;
 
 #[derive(Default)]
 pub(crate) struct Tasks {
@@ -25,7 +27,6 @@ pub(crate) struct Tasks {
 pub(crate) struct State {
     kind: Option<RuntimeTaskKind>,
     status: AtomicUsize,
-    wakes: AtomicUsize,
 }
 pub(crate) struct Registration {
     id: usize,
@@ -43,7 +44,6 @@ pub(crate) fn register(owner: &Rc<RefCell<Tasks>>, kind: Option<RuntimeTaskKind>
     let state = Arc::new(State {
         kind,
         status: AtomicUsize::new(ACTIVE),
-        wakes: AtomicUsize::new(0),
     });
     let mut tasks = owner.borrow_mut();
     let id = tasks.next;
@@ -56,13 +56,14 @@ pub(crate) fn register(owner: &Rc<RefCell<Tasks>>, kind: Option<RuntimeTaskKind>
     }
 }
 
-fn with_current<R>(callback: impl FnOnce(&RefCell<Option<Arc<State>>>) -> R) -> R {
+type Current = Option<(Arc<State>, usize)>;
+fn with_current<R>(callback: impl FnOnce(&RefCell<Current>) -> R) -> R {
     std::thread_local! {
-        static CURRENT: RefCell<Option<Arc<State>>> = const { RefCell::new(None) };
+        static CURRENT: RefCell<Current> = const { RefCell::new(None) };
     }
     CURRENT.with(callback)
 }
-pub(crate) struct Enter(Option<Arc<State>>);
+pub(crate) struct Enter(Current);
 impl Drop for Enter {
     fn drop(&mut self) {
         with_current(|current| *current.borrow_mut() = self.0.take());
@@ -79,16 +80,24 @@ impl Wake for Signal {
     fn wake_by_ref(self: &Arc<Self>) {
         // A waiting task becomes blocking as soon as its input is ready, before
         // Tokio polls it. This also fences wakes during the current poll.
-        self.state.wakes.fetch_add(1, Ordering::SeqCst);
-        self.state.status.store(ACTIVE, Ordering::SeqCst);
+        self.state
+            .status
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                Some(
+                    (value & !STATUS_MASK)
+                        .checked_add(NEXT_WAKE)
+                        .expect("raw task wake counter exhausted"),
+                )
+            })
+            .expect("raw task wake update");
         self.parent.wake_by_ref();
     }
 }
 impl Registration {
     pub(crate) fn enter(&self, parent: &Waker) -> (Enter, Waker, usize) {
-        self.state.status.store(ACTIVE, Ordering::SeqCst);
-        let version = self.state.wakes.load(Ordering::SeqCst);
-        let previous = with_current(|current| current.borrow_mut().replace(self.state.clone()));
+        let version = self.state.status.fetch_and(!STATUS_MASK, Ordering::SeqCst) & !STATUS_MASK;
+        let previous =
+            with_current(|current| current.borrow_mut().replace((self.state.clone(), version)));
         let waker = Waker::from(Arc::new(Signal {
             state: self.state.clone(),
             parent: parent.clone(),
@@ -97,10 +106,14 @@ impl Registration {
     }
     pub(crate) fn pending(&self, version: usize) {
         if self.state.kind == Some(RuntimeTaskKind::PromiseDriver) {
-            self.state.status.store(DELEGATED, Ordering::SeqCst);
-        }
-        if self.state.wakes.load(Ordering::SeqCst) != version {
-            self.state.status.store(ACTIVE, Ordering::SeqCst);
+            // A wake and a waiting observation share one atomic word: a stale
+            // poll can never overwrite a newer readiness notification.
+            let _ = self.state.status.compare_exchange(
+                version | ACTIVE,
+                version | DELEGATED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
         }
     }
 }
@@ -109,17 +122,20 @@ impl Registration {
 /// A finite/unknown task remains blocking even if it happens to await a timer.
 pub(crate) fn waiting(kind: RuntimeTaskKind) {
     with_current(|current| {
-        if let Some(state) = current.borrow().as_ref() {
-            if state.kind == Some(kind) {
-                state.status.store(
-                    match kind {
-                        RuntimeTaskKind::Timer => TIMER,
-                        RuntimeTaskKind::SocketReader => SOCKET,
-                        _ => return,
-                    },
-                    Ordering::SeqCst,
-                );
-            }
+        if let Some((state, version)) = current.borrow().as_ref()
+            && state.kind == Some(kind)
+        {
+            let status = match kind {
+                RuntimeTaskKind::Timer => TIMER,
+                RuntimeTaskKind::SocketReader => SOCKET,
+                _ => return,
+            };
+            let _ = state.status.compare_exchange(
+                *version | ACTIVE,
+                *version | status,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
         }
     });
 }
@@ -133,7 +149,10 @@ pub(crate) fn receipt(owner: &Rc<RefCell<Tasks>>) -> serde_json::Value {
     let mut sockets = 0;
     let mut drivers = 0;
     for state in tasks.entries.values() {
-        match (state.kind, state.status.load(Ordering::SeqCst)) {
+        match (
+            state.kind,
+            state.status.load(Ordering::SeqCst) & STATUS_MASK,
+        ) {
             (None, _) => unknown += 1,
             (Some(RuntimeTaskKind::Timer), TIMER) => timers += 1,
             (Some(RuntimeTaskKind::SocketReader), SOCKET) => sockets += 1,
