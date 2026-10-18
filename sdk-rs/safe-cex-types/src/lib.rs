@@ -1011,6 +1011,8 @@ pub struct HistoricalTradeOptions {
 #[ts(optional_fields)]
 pub struct OHLCVOptions {
     pub symbol: String,
+    // The TS declaration is narrower than the source worker's runtime interval domain.
+    #[ts(as = "Timeframe")]
     pub interval: AnyTimeframe,
     #[serde(
         default,
