@@ -281,6 +281,10 @@
     "accepted-woo-alias.test.mjs": [
       "retired WOO book array has no special alias permission",
       "WOO four structural aliases execute actual native traits and decoded values"
+    ],
+    "accepted-kraken-numeric-changes.test.mjs": [
+      "Kraken borrowed NumericChanges pins compiler identity and every route without a general exemption",
+      "Kraken borrowed NumericChanges executes native routes and detects identity member and route drift"
     ]
   },
   "mutations": [
@@ -479,6 +483,9 @@
     "required feature native dispatch removal",
     "Binance exact-method scope",
     "Binance native observer pin",
-    "Binance source oracle pin"
+    "Binance source oracle pin",
+    "NumericChanges identity",
+    "NumericChanges members",
+    "NumericChanges route"
   ]
 }
