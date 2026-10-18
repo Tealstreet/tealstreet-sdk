@@ -957,3 +957,8 @@ primary/demo exchanges, actual Store notification and native stderr reporting.
 Its compiled core controls distinguish synchronous caller rejection from a
 detached report and require both continuation and reporting. This closes stale
 notification timing notes; it does not change the public SDK wrapper family.
+
+Protective-side inference preserves the get-key primitive TypeError without
+embedding the class name in its message. The 242-case maintained-source test
+checks both the constructed native receiver and the typed helper; primitive
+diagnostics are compared directly rather than normalized to a custom string.

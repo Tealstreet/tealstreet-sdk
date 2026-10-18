@@ -211,3 +211,8 @@ native Store witness compares thirteen configuration profiles with TypeScript.
 Required numeric Ticker patch fields reject own Undefined as a typed patch error.
 Candidate publication remains atomic; optional-field and info presence policies
 are unchanged. Orderly's real socket census covers per-row refusal and siblings.
+
+`subscribe_native` is a required opaque native-state subscription. The canonical
+owner borrows its actual state referent at each reached slot; lower layers cannot
+replace it with a typed snapshot. Internal emitter and native account observers
+use it, while `subscribe` keeps its explicit typed projection semantics.

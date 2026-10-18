@@ -239,9 +239,8 @@ impl BybitExchange {
     ) -> Result<Option<safe_cex_types::OrderSide>, safe_cex_exchange::runtime::ExchangeError> {
         use safe_cex_types::{OrderSide, PositionSide};
         if !order.is_null() && !order.is_object() && !order.is_array() {
-            return Err(type_error(
-                "TypeError: Bybit field lookup requires an object",
-            ));
+            safe_cex_num::get_key::v_unknown(Some(order), "positionIdx")
+                .map_err(|error| type_error(error.message))?;
         }
         let index = safe_cex_num::js_number(
             crate::json_field::field(order, "positionIdx").map_err(type_error)?,

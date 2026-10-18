@@ -232,12 +232,17 @@ fn deserialize_present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 
 type Subscriber = StoreSubscriber;
 
+/// A borrowed native state referent; no typed snapshot is constructed for delivery.
+pub type NativeStoreSubscriber =
+    Box<dyn Fn(&dyn Any, bool) -> Result<(), safe_cex_types::StoreSubscriberError>>;
+
 /// Object-safe, local callbacks support native and browser hosts without an SDK projection.
 pub trait Store {
     fn native_owner(&self) -> Rc<dyn Any>;
     fn update(&self, changes: StoreUpdate, from_worker: bool) -> Result<(), StoreMutationError>;
     fn reset(&self) -> Result<(), StoreMutationError>;
     fn subscribe(&self, callback: Subscriber) -> Box<dyn Fn()>;
+    fn subscribe_native(&self, callback: NativeStoreSubscriber) -> Box<dyn Fn()>;
     fn set_setting(&self, key: &str, value: bool) -> Result<(), StoreMutationError>;
     fn remove_order(&self, id: &str) -> Result<(), StoreMutationError>;
     fn update_order_status(&self, id: &str, status: OrderStatus) -> Result<(), StoreMutationError>;

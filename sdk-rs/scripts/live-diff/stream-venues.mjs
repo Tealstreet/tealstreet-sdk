@@ -1,5 +1,7 @@
 // Literal production hosts: no tunnel, credentials, testnet or private sockets.
 export const publicStreams = {
+  lighter: { hosts: ['mainnet.zklighter.elliot.ai'], symbol: 'BTC', startupOnly: true },
+  apexomni: { hosts: ['quote.omni.apex.exchange'], symbol: 'BTCUSDT', startupOnly: true },
   binance: { hosts: ['fstream.binance.com'], symbol: 'BTCUSDT' },
   bybit: { hosts: ['stream.bybit.com'], symbol: 'BTCUSDT' },
   okx: { hosts: ['ws.okx.com'], symbol: 'BTCUSDT' },

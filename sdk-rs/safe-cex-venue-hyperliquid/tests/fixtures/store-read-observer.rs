@@ -20,6 +20,9 @@ impl safe_cex_store::Store for ReadTrace {
     fn reset(&self) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::reset(self.inner.as_ref())
     }
+    fn subscribe_native(&self, callback: safe_cex_store::contract::NativeStoreSubscriber) -> Box<dyn Fn()> {
+        safe_cex_store::Store::subscribe_native(self.inner.as_ref(), callback)
+    }
     fn subscribe(&self, callback: StoreSubscriber) -> Box<dyn Fn()> {
         safe_cex_store::Store::subscribe(self.inner.as_ref(), callback)
     }
