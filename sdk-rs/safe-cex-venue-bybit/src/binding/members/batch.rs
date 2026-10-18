@@ -116,6 +116,26 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             }
         })))
     })?;
+    method(rt, "getStopOrderPositionIdx", |rt, a| {
+        let input = arg(&a, 0);
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let opts = rt.global("omit")?.call(
+                Js::Undefined,
+                vec![input, Js::array(vec![Js::str("reduceOnly")])],
+            )?;
+            let index = await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("getOrderPositionIdx", vec![opts])?,
+            )
+            .await?;
+            Js::object(vec![
+                ("0", Js::Number(0.)),
+                ("1", Js::Number(2.)),
+                ("2", Js::Number(1.)),
+            ])
+            .get_key(&index.to_js_string()?)
+        })))
+    })?;
     method(rt, "placeOrders", place_orders)?;
     method(rt, "placeBatchOrders", place_batch_orders)?;
     method(

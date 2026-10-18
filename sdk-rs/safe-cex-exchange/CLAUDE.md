@@ -29,6 +29,13 @@ Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
 
+The native owner retains one lazily constructed facade. Repeated facade requests
+reuse the same object and methods, including custom descriptors across reset;
+state dictionaries still publish their normal replacement generations. The cache
+belongs to the owner capability, while the facade captures only the graph. A
+retained facade or method therefore survives Store drop without retaining its
+cache owner, and the last handle releases the graph without a reference cycle.
+
 Native snapshots retain their own undefined properties; JSON serialization is a
 separate boundary. Retained config reads keep absence distinct from an own
 undefined or null value. Source `for` loops recheck live input lengths, while
@@ -1373,6 +1380,13 @@ The native-host `js_sort` target checks the compiled master panic and error coun
 plus Node ordering across merge boundaries. Ordering under an inconsistent
 comparator remains implementation-dependent under ECMAScript.
 
+Journal interval reconstruction reuses that sorter for both fills and reconstructed
+intervals. Equal timestamps with missing IDs and NaN close times need not define
+a total order. The journal target compares all position fields with maintained
+TS across 128 finite mixed-ID and 128 nonfinite-close profiles, alongside its
+192 existing interval/funding profiles. The old fill sort panics on the finite
+profiles; a separate reversed-result-order control checks the final sort.
+
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
 receiver and thrown value. String conversion uses the same private primitive
@@ -1936,6 +1950,8 @@ measure the same recorded probe with the production allocator. The test binary
 has a counting allocator and must not supply production CPU ratios. Report CPU
 medians and spread from at least three interleaved control/candidate runs;
 input restoration and complete output observations stay outside timed phases.
+The bootstrap parse/decode budget is 250 ms process CPU per recorded venue;
+TS ratios remain diagnostic. Per-frame WebSocket timing is a separate budget.
 Native observation files encode UTF-16, own undefined and f64 bits explicitly so
 before/after byte comparisons do not hide lossy JSON projections.
 
@@ -2033,3 +2049,23 @@ hosts; it does not cover arbitrary external Tokio tasks or transport internals.
 The public probe requires the versioned raw receipt and refuses older addons.
 Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
 the private wake-race witness checks the pre-repoll fence.
+
+Js::ordinary_has_instance implements the shared OrdinaryHasInstance operation
+using the bound target, constructor prototype and internal prototype links.
+Bound call-only functions retain that target independently of constructibility.
+The js_construction Node comparison covers bound constructors, primitive left
+operands, null prototypes and invalid prototypes; native getter checks preserve
+original thrown identity. Hyro validation consumes this operation directly.
+
+`js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+natural-run detection, minrun, binary insertion, stack collapse, directional merges
+and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
+retain source comparisons and the first failure. The 4096-case real Node
+differential checks native result identities, comparison counts, pair-trace hashes
+and random-comparator state, alongside the constructed Paradex ticker corpus.
+Do not replace this with Rust slice sorting or a differently scheduled merge.
+
+The differential rejects other Node versions: inconsistent comparator ordering is
+engine-dependent. Array sort compacts defined values before TimSort, then writes
+undefined values and deletes remaining holes; four native/Node profiles pin the
+comparator schedule as well as sparse output.

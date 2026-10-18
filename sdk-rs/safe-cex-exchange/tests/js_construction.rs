@@ -243,3 +243,106 @@ fn construction_keeps_new_target_dynamic_super_bound_arguments_and_realm() {
         "JS_CONSTRUCT native construct operation requires an object result"
     );
 }
+
+#[test]
+fn ordinary_has_instance_matches_node_prototypes_bound_functions_and_primitives() {
+    let globals = Js::object(vec![]);
+    safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&globals, std::rc::Weak::new());
+    let error = globals.get("Error").unwrap();
+    let prototype = error.get("prototype").unwrap();
+    let inherited = Js::object(vec![]);
+    globals
+        .get("Object")
+        .unwrap()
+        .call_method("setPrototypeOf", vec![inherited.clone(), prototype])
+        .unwrap();
+    let detached = error.construct(vec![Js::str("message")], None).unwrap();
+    globals
+        .get("Object")
+        .unwrap()
+        .call_method("setPrototypeOf", vec![detached.clone(), Js::Null])
+        .unwrap();
+    let bound = error.call_method("bind", vec![Js::Null]).unwrap();
+    let twice = bound.call_method("bind", vec![Js::Null]).unwrap();
+    bound.define("prototype", Js::Number(7.)).unwrap();
+    inherited
+        .define_accessor(
+            "__proto__",
+            Some(Rc::new(|_| {
+                panic!("internal prototype walk must not read __proto__")
+            })),
+            None,
+        )
+        .unwrap();
+    let ordinary_error = error.construct(vec![], None).unwrap();
+    let invalid = Js::function("Invalid", |_, _| Ok(Js::Undefined));
+    invalid.define("prototype", Js::Number(7.)).unwrap();
+    let arrow = Js::function("Arrow", |_, _| Ok(Js::Undefined));
+    arrow
+        .define("prototype", error.get("prototype").unwrap())
+        .unwrap();
+    let bound_arrow = arrow.call_method("bind", vec![Js::Null]).unwrap();
+    let mut actual = Vec::new();
+    for (constructor, value) in [
+        (error.clone(), ordinary_error),
+        (error.clone(), inherited.clone()),
+        (bound, inherited.clone()),
+        (twice, inherited.clone()),
+        (error.clone(), detached),
+        (error.clone(), Js::Null),
+        (error.clone(), Js::Undefined),
+        (error.clone(), Js::Number(1.)),
+        (error.clone(), Js::str("text")),
+        (Js::object(vec![]), inherited.clone()),
+        (invalid.clone(), Js::Number(1.)),
+        (invalid, inherited.clone()),
+        (bound_arrow, inherited),
+    ] {
+        actual.push(match constructor.ordinary_has_instance(&value) {
+            Ok(value) => json!(value),
+            Err(error) => json!({"throw":error.value.get("name").unwrap().to_display(),"message":error.value.get("message").unwrap().to_display()}),
+        });
+    }
+    let script = r#"
+const inherited=Object.create(Error.prototype), detached=new Error('message');
+Object.setPrototypeOf(detached,null);
+const bound=Error.bind(null), twice=bound.bind(null), invalid=function Invalid(){};
+bound.prototype=7;Object.defineProperty(inherited,'__proto__',{get(){throw Error('shadowed');}});
+invalid.prototype=7;const arrow=()=>{};arrow.prototype=Error.prototype;const boundArrow=arrow.bind(null);
+const cases=[[Error,new Error()],[Error,inherited],[bound,inherited],[twice,inherited],
+[Error,detached],[Error,null],[Error,undefined],[Error,1],[Error,'text'],[{},inherited],
+[invalid,1],[invalid,inherited],[boundArrow,inherited]];
+console.log(JSON.stringify(cases.map(([constructor,value])=>{
+try{return Function.prototype[Symbol.hasInstance].call(constructor,value);}
+catch(error){return {throw:error.name,message:error.message};}})));
+"#;
+    let output = Command::new("node").args(["-e", script]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json!(actual), expected, "ordinary_has_instance_node_cases");
+    let reason = Js::object(vec![("opaque", Js::utf16(&[0xd800]))]);
+    let thrown = reason.clone();
+    let getter = Js::function("Getter", |_, _| Ok(Js::Undefined));
+    getter
+        .define_accessor(
+            "prototype",
+            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+            None,
+        )
+        .unwrap();
+    assert!(
+        !getter.ordinary_has_instance(&Js::Number(1.)).unwrap(),
+        "primitive LHS skips prototype getter"
+    );
+    assert!(
+        getter
+            .ordinary_has_instance(&Js::object(vec![]))
+            .unwrap_err()
+            .value
+            .strict_equals(&reason)
+    );
+}

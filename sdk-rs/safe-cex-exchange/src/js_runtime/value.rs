@@ -76,12 +76,13 @@ pub struct FunctionData {
     pub props: RefCell<IndexMap<Str, Prop>>,
     pub proto: RefCell<Option<Js>>,
     construct: Option<Construct>,
+    bound_target: Option<Js>,
     realm: Rc<safe_cex_num::PrototypeRealm>,
 }
 
 enum Construct {
     Native(NativeFn),
-    Bound { target: Js, args: Vec<Js> },
+    Bound { args: Vec<Js> },
 }
 
 #[derive(Clone)]
@@ -643,6 +644,7 @@ impl Js {
                     .map(Js::Builtin),
             ),
             construct: None,
+            bound_target: None,
             realm,
         }))
     }
@@ -678,20 +680,38 @@ impl Js {
         if !constructor.is_callable() {
             return Err(Thrown::type_error("Right-hand side of 'instanceof' is not callable"));
         }
-        if let Js::Function(function) = constructor
-            && let Some(Construct::Bound { target, .. }) = &function.construct
+        constructor.ordinary_has_instance(self)
+    }
+
+    /// OrdinaryHasInstance follows bound targets and internal prototypes without reading __proto__.
+    pub fn ordinary_has_instance(&self, value: &Js) -> Result<bool, Thrown> {
+        if !self.is_callable() {
+            return Ok(false);
+        }
+        if let Js::Function(function) = self
+            && let Some(target) = &function.bound_target
         {
-            return self.instance_of(target);
+            return target.ordinary_has_instance(value);
         }
-        if !self.is_object() { return Ok(false); }
-        let prototype = constructor.get("prototype")?;
-        if !prototype.is_object() {
-            return Err(Thrown::type_error(&format!("Function has non-object prototype '{}' in instanceof check", prototype.to_display())));
+        if !value.is_object() && !value.is_array() && !value.is_callable() {
+            return Ok(false);
         }
-        let mut current = self.prototype();
-        while let Some(parent) = current {
-            if parent.same_reference(&prototype) { return Ok(true); }
-            current = parent.prototype();
+        let prototype = self.get("prototype")?;
+        if !prototype.is_object() && !prototype.is_array() && !prototype.is_callable() {
+            let mut message = utf16("Function has non-object prototype '").to_vec();
+            message.extend_from_slice(&prototype.to_js_string()?);
+            message.extend_from_slice(&utf16("' in instanceof check"));
+            return Err(Thrown::new(make_error_object(
+                "TypeError",
+                Some(message.into()),
+            )));
+        }
+        let mut candidate = value.prototype();
+        while let Some(current) = candidate {
+            if current.strict_equals(&prototype) {
+                return Ok(true);
+            }
+            candidate = current.prototype();
         }
         Ok(false)
     }
@@ -718,10 +738,11 @@ impl Js {
         }
         let value = match construct {
             Construct::Native(body) => body(new_target.clone(), args)?,
-            Construct::Bound {
-                target,
-                args: prefix,
-            } => {
+            Construct::Bound { args: prefix } => {
+                let target = function
+                    .bound_target
+                    .as_ref()
+                    .expect("bound constructor target");
                 let mut combined = prefix.clone();
                 combined.extend(args);
                 let new_target = if new_target.same_reference(self) {
@@ -2168,9 +2189,9 @@ impl Js {
                         name.extend_from_slice(&target_name);
                     }
                     let construct = this.is_constructor().then(|| Construct::Bound {
-                        target: this.clone(),
                         args: bound_args.clone(),
                     });
+                    let bound_target = Some(this.clone());
                     let realm = match &this {
                         Js::Function(function) => function.realm.clone(),
                         Js::Builtin(reference) => reference.realm().clone(),
@@ -2208,6 +2229,7 @@ impl Js {
                         props: RefCell::new(props),
                         proto: RefCell::new(proto),
                         construct,
+                        bound_target,
                         realm,
                     })))
                 }

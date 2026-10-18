@@ -7,32 +7,32 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 
 | Row | Maintained source surface | Resolution | Evidence or next review |
 | --- | --- | --- | --- |
-| 2 | ChaserOrderManager#tryPlaceOrders | OPEN | Eager entry and cancellation ownership. |
-| 3 | ChaserOrderManager#emitComplete | OPEN | Native event and await order. |
-| 4 | chaserOrderManagerInstance | OPEN | Constructed module/receiver composition. |
-| 5 | TwapInstance.resume | OPEN | Native timer and immediate async prefix. |
-| 6 | TwapInstance.terminate | OPEN | Immediate cleanup and detached lifetime. |
+| 2 | ChaserOrderManager#tryPlaceOrders | FIX | Canonical eager continuation and await checkpoints; late-stop cancellation survives a dropped waiter. |
+| 3 | ChaserOrderManager#emitComplete | FIX | Canonical settlement and retained fill reconciliation after caller abandonment. |
+| 4 | chaserOrderManagerInstance | ACCEPT | Pure empty-list allocation; actual module/thread identity and real-engine witness below. |
+| 5 | TwapInstance.resume | FIX | Canonical Promise settlement; immediate prefix and rejection profiles below. |
+| 6 | TwapInstance.terminate | FIX | Same settlement boundary; synchronous cleanup and partial-commit order preserved. |
 | 7 | UpdatePositionsHandler.handleUpdatePositions | FIX | Shared eager boundary; source/native timing profiles below. |
 | 8 | UpdatePositionsHandler.handle | FIX | Same operation invoked during dispatch, without an extra spawn. |
 | 17 | StoreWorkerPayload | OPEN | Whole worker carrier and report boundary. |
 | 18 | WorkerConfig | OPEN | Actual admitted config and host reachability. |
 | 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
-| 20 | start | OPEN | Constructed worker session/bootstrap lifecycle. |
+| 20 | start | OPEN | Startup listener ownership repaired below; raw init/config and session boundaries remain. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
 | 22 | defaultChaserState | OPEN | Native default ownership and caller mutation. |
-| 23 | ChaserOrderManager | OPEN | Constructed manager and receiver contracts. |
+| 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
 | 25 | ChaserCompleteEvent | OPEN | Native event payload. |
-| 26 | CallMethodHandler.handleCallMethod | OPEN | Actual method/Promise dispatch. |
+| 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
 | 30 | readStringProperty | ACCEPT | Merged #1158: native Get, getter cause and approved typed String replacement. |
-| 71 | ExchangeWorker.start | OPEN | Real bootstrap construction and startup race. |
+| 71 | ExchangeWorker.start | FIX | Canonical eager startup, source await checkpoints and dropped-waiter continuation below. |
 | 72 | PerfFixtureFrame | OPEN | Recording/replay carrier reachability. |
 | 73 | PerfFixture | OPEN | Recording/replay envelope. |
 | 74 | PerfFixtureConfig | OPEN | Actual config admission. |
 | 75 | ChaserOrderOptions | OPEN | Shared task model and live reads. |
 | 76 | TwapOptions | OPEN | Shared task model and live reads. |
 | 77 | TwapState | OPEN | Native state/serialization. |
-| 78 | CallMethodHandler.handle | OPEN | Dispatcher entry timing. |
+| 78 | CallMethodHandler.handle | OPEN | Entry timing repaired below; malformed/raw envelope admission remains. |
 | 79 | OHLCVSubscriptionsHandler.handle | OPEN | Actual listener/subscription timing. |
 
 ## Position refresh: rows 7 and 8
@@ -65,3 +65,142 @@ commit, subscriber failure and stopped-fanout assertions remain in their native 
 The typed payload decoder's filtering and UTF-8 input costs remain separately
 declared on the manifest row. This timing repair does not close the whole
 worker-carrier cohort or claim arbitrary JavaScript input admission.
+
+## TWAP settlement: rows 5 and 6
+
+The maintained `twap/TwapInstance.ts` async arrows (resume at line 249 and
+terminate at line 267) have no awaits. State/timer effects already ran before
+native method return; the difference was their ready Result futures continuing
+an awaiting caller without the source Promise checkpoint. Both now return the
+canonical `start_eager` waiter over the already computed result. No body is
+re-executed, no bespoke task driver is added, and dropping the waiter cannot undo
+synchronous effects. Success, guarded no-op and post rejection all yield once.
+
+Two named `yields_caller_settlement` regressions in `tests/twap_lifecycle.rs`
+fail on the compiled master body at `5c3082cee1`: each returns Ready where the
+maintained-source oracle requires the caller to return before continuation.
+Six source/native profiles run actual TWAP instances and managers with only
+the existing terminal clock/timer/post capabilities supplied. They compare
+complete prefix events, status, manager membership, retained timer, slice list,
+tracked chaser IDs and continuation outcomes. A failed post leaves the state
+commit in place and prevents later cleanup/removal exactly as TS does. The
+existing 252 interleavings, constructor, clock, price and timeout cases remain.
+
+This closes the two timing findings, not the independent shared options/state
+representation review (rows 76/77). The native model still uses typed state
+snapshots and explicit timer/post capabilities; no arbitrary JS getter, mutable
+array alias or whole browser-worker startup equivalence is claimed here.
+
+## Chaser placement and completion: rows 2 and 3
+
+The maintained manager's async methods (tryPlaceOrders at line 214 and
+emitComplete at line 911) start immediately and continue independently of the
+caller's Promise. The native prefixes already ran during method entry, but the
+returned boxed future owned pending placement/reconciliation and could settle a
+ready result in the caller's first poll. Dropping it lost late-order cancellation
+or the completion event. Both operations now use the shared start_eager driver;
+ready typed leaves cross the canonical await checkpoint before post-await work.
+Typed order IDs and fill amounts remain native across that boundary.
+
+Four named regressions in tests/chaser_engine.rs fail against the exact compiled
+master body at 0f5dbb345e: two caller-settlement tests, a dropped placement waiter
+whose late order must be cancelled after STOP, and a dropped completion waiter
+whose pending fill must still reach its event. Eight maintained-source profiles
+execute the actual TS manager and instance against native ChaserEngine, manager,
+instance, DefaultStore and canonical scheduler; only venue I/O/timers are supplied.
+Native fill bits precede finite profile comparisons. The original retry ceilings,
+nonfinite sizing, ambiguous placement, cancellation and supervisor cases remain.
+An independently compiled removal of the await fences must fail the ready-source
+prefix checks even with the eager driver retained; restoring exact bytes recovers.
+
+This closes the assigned continuation/timing findings. It does not classify
+arbitrary JS error/receiver admission or the separately open manager, options,
+state and event representations (rows 4, 21-25 and 75). The helper-specific Store
+snapshot and optional-method capability boundaries keep their own manifest rows.
+
+## CallMethod continuation repair within rows 26 and 78
+
+The actual maintained async arrow invokes the venue member before returning.
+Awaited cases post their reply after the source Promise checkpoint; synchronous
+cases (including unknown methods and recovery) post during entry. Caller
+abandonment leaves the operation running. The native boxed body previously
+started only when polled and its reply guard cancelled an abandoned caller.
+
+One canonical start_eager driver now owns dispatch and reply. Awaited typed
+leaves cross the canonical await checkpoint on fulfillment and rejection;
+removeOrders also yields after its synchronous mutator succeeds. The outer
+handler drops only the returned waiter, without spawning another body. Runtime
+teardown retains the existing guarded cancellation/report behavior.
+
+The handlers target compares twelve actual-source/native profiles across both
+entry points: ready/failed/held leverage, ready/throwing synchronous recovery and
+unknown methods. Four named regressions cover immediate entry, caller settlement
+and held-operation completion after dropping an unpolled waiter. DATA tests keep
+native binary64 fields and own undefined observations, and notification tests
+retain committed removal, original subscriber failure and stopped fanout.
+
+This is a bounded repair, not closure of the assigned representation findings.
+Rows 26/78 remain OPEN: typed Exchange arguments still reject values TS forwards,
+primitive throws are not ExchangeError, and raw dispatcher defaults still differ
+from source object spread. The retained carrier review must resolve those costs;
+this timing change supplies no authorization for accepting them.
+
+## Manager composition: rows 4 and 23
+
+The maintained manager has no constructor body: its only instance initializer is
+an empty array, and its module export constructs that manager once. Allocation
+runs no exchange, host callback, timer or Promise. The native accessor delays this
+allocation until first access and retains one manager per host thread. Independent
+threads model independent worker module realms, rather than a process-global
+non-Send Rc. This delay has no caller-visible prefix or continuation to lose.
+
+The explicit host/callback composition category ruling authorizes row 23's
+required native bindings. There are no default-success supervision, cancellation
+or completion leaves. The existing ChaserEngine implements those bodies; its
+ChaserHost supplies terminal venue/runtime capabilities. This classification
+covers linking and manager ownership, not arbitrary method replacement, startup
+ordering or the independently mapped method behavior.
+
+The real-engine composition test executes the maintained module in two separate
+VM realms and native singleton access on separate threads. It compares shared
+manager/list identity, independent managers, empty construction without terminal
+calls, immediate add registration/logging, stopped-instance cleanup and exactly
+one completion. Native size/fill bits are asserted before the finite source
+profile. The native path uses ChaserOrderManager, ChaserEngine, BaseExchange,
+DefaultStore and the canonical runtime; the supplied host owns only terminal
+capabilities. Existing dispatch and engine cases retain reentrant list changes,
+listener failures, cancellation, placement and reconciliation floors. A compiled
+control rebinds supervision to a fresh manager instead of the registered one;
+the named composition assertion fails with an uncleared singleton. Exact
+production bytes are restored before the positive replay and required gates.
+
+No worker-carrier or numeric-depth row is closed by this evidence. Rows 21/22,
+24/25 and 75 retain their independent state/default/event/options review.
+
+## Startup continuation: row 71 and the timing part of row 20
+
+ExchangeWorker.start awaits the real clock, dynamic loader and startup race.
+The native clock prefix already ran during entry, but dropping the returned
+future cancelled the remainder; ready leaves also crossed their source awaits
+within the caller's poll. Startup now uses canonical start_eager with native
+results and shared await checkpoints. The session listener owns its init/cleanup
+continuation through the same driver, so dropping its waiter cannot leave a
+failed worker in the table. Required runtime access comes from the bootstrap
+host; no new executor or per-method task registry is introduced.
+
+Three actual worker/session regressions fail on compiled master 35b178ba1c:
+ready-clock loader ordering, abandoned held-clock success/failure, and abandoned
+listener completion/failure cleanup. The maintained source oracle runs the real
+ExchangeWorker and complete store.webworker module. Native probes use the real
+worker, DefaultStore, BaseExchange and canonical runtime with only terminal
+venue/import/clock and port capabilities supplied. Seed latency bits are checked
+before source profiles. Held loader and venue-start cases also finish after
+waiter abandonment. Two independent compiled controls remove the clock await
+fence or session eager driver; their named regressions fail, then exact
+production bytes are restored before the positive gates. Disposal while the
+clock is pending suppresses later construction; existing cancellation, deadline, retained-loser, event wiring,
+buffer and forced-snapshot tests remain mandatory.
+
+Row 71's scheduling/ownership finding is repaired. Row 20 stays OPEN for raw
+init/config admission and independently declared session lifetime costs; this
+batch supplies no JSON/carrier/depth acceptance.

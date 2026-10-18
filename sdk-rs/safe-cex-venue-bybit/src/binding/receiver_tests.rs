@@ -50,11 +50,20 @@ fn run(future: impl Future<Output = ()>) {
         .block_on(tokio::task::LocalSet::new().run_until(future));
 }
 fn venue(name: ExchangeName) -> Rc<BybitExchange> {
-    let runtime = native_runtime();
-    BybitExchange::create(
+    venue_with_options(
         name,
         serde_json::from_value(serde_json::json!({"key":"", "secret":"", "publicDataOnly":true}))
             .unwrap(),
+    )
+}
+fn venue_with_options(
+    name: ExchangeName,
+    options: safe_cex_types::ExchangeOptions,
+) -> Rc<BybitExchange> {
+    let runtime = native_runtime();
+    BybitExchange::create(
+        name,
+        options,
         Rc::new(DefaultStore::new()),
         BybitDependencies {
             runtime,
@@ -770,5 +779,598 @@ fn divergence_sdk_account_starts_original_client_before_waiter_poll() {
             Some("91")
         );
         exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn hyro_divergence_account_configuration_receivers() {
+    if crate::types::HYROTRADER_PROD_URL["livenet"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty()
+    {
+        let directory =
+            std::env::temp_dir().join(format!("bybit-hyro-account-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("configured.log");
+        let log = std::fs::File::create(&path).unwrap();
+        let mut child =
+            std::process::Command::new(std::env::var_os("CARGO").unwrap_or("cargo".into()))
+                .args([
+                    "test",
+                    "--locked",
+                    "-p",
+                    "safe-cex-venue-bybit",
+                    "--lib",
+                    "hyro_divergence_account_configuration_receivers",
+                    "--jobs",
+                    "1",
+                    "--",
+                    "--test-threads=1",
+                    "--nocapture",
+                ])
+                .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
+                .env("CARGO_INCREMENTAL", "0")
+                .env(
+                    "NEXT_PUBLIC_HYROTRADER_PROD_REST_URL",
+                    "https://hyro-audit.example",
+                )
+                .env(
+                    "NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL",
+                    "https://hyro-sim-audit.example",
+                )
+                .stdout(std::process::Stdio::from(log.try_clone().unwrap()))
+                .stderr(std::process::Stdio::from(log))
+                .spawn()
+                .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(600);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                let output = std::fs::read_to_string(&path).unwrap();
+                assert!(status.success(), "configured Hyro audit failed: {output}");
+                assert!(output.contains("1 passed; 0 failed"));
+                return;
+            }
+            if Instant::now() > deadline {
+                child.kill().expect("stop timed-out configured Hyro audit");
+                child.wait().unwrap();
+                panic!("configured Hyro audit timed out: {}", path.display());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    run(async {
+        for mode in ["production", "demo"] {
+            let options = serde_json::from_value(serde_json::json!({
+                "key":"", "secret":"", "publicDataOnly":true,
+                "enableOptionMarkets":true, "enableInverseMarkets":true,
+                "extra":{"hyrotraderMode":mode}
+            }))
+            .unwrap();
+            let exchange = venue_with_options(ExchangeName::Hyrotrader, options);
+            let this = &exchange.js.get().unwrap().this;
+            for name in ["optionsEnabled", "inverseEnabled"] {
+                assert!(
+                    this.call_method(name, vec![])
+                        .unwrap()
+                        .strict_equals(&Js::Bool(false)),
+                    "hyro_capability_flags_ignore_optins"
+                );
+            }
+            let poison = Js::object(vec![]);
+            poison
+                .define_accessor(
+                    "startTime",
+                    Some(Rc::new(|_| panic!("empty range must ignore arguments"))),
+                    None,
+                )
+                .unwrap();
+            let first = this
+                .call_method(
+                    "fetchIncomeHistoryRange",
+                    vec![
+                        poison.clone(),
+                        Js::Number(f64::NAN),
+                        Js::String(vec![0xd800].into()),
+                    ],
+                )
+                .unwrap();
+            let second = this
+                .call_method("fetchIncomeHistoryRange", vec![poison])
+                .unwrap();
+            assert!(
+                !first.strict_equals(&second),
+                "fresh source Promise per call"
+            );
+            let first = await_js(&exchange.base.runtime, first).await.unwrap();
+            let second = await_js(&exchange.base.runtime, second).await.unwrap();
+            assert_eq!(
+                first.array_values().unwrap().unwrap().len(),
+                0,
+                "hyro_empty_income_range"
+            );
+            assert!(!first.strict_equals(&second), "fresh empty array per call");
+            let messages = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let seen = messages.clone();
+            this.define(
+                "emitAndLogError",
+                Js::function("emitAndLogError", move |_, args| {
+                    seen.borrow_mut().push(arg(&args, 0));
+                    Ok(Js::Undefined)
+                }),
+            )
+            .unwrap();
+            let balance = Js::object(vec![
+                ("total", Js::Number(-0.0)),
+                ("opaque", Js::String(vec![0xd800].into())),
+            ]);
+            let result_balance = balance.clone();
+            this.define(
+                "fetchBalance",
+                Js::function("fetchBalance", move |_, _| Ok(result_balance.clone())),
+            )
+            .unwrap();
+            let result = this.call_method("validateAccount", vec![]).unwrap();
+            let result = await_js(&exchange.base.runtime, result).await.unwrap();
+            assert!(result.get("balance").unwrap().strict_equals(&balance));
+            assert!(result.get("error").unwrap().strict_equals(&Js::str("")));
+            let published = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let observed = published.clone();
+            this.get("store")
+                .unwrap()
+                .define(
+                    "update",
+                    Js::function("update", move |_, args| {
+                        observed.borrow_mut().push(arg(&args, 0));
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+            for disposed in [false, true] {
+                let pending = safe_cex_exchange::js_runtime::promise::Promise::pending(
+                    &exchange.base.runtime,
+                );
+                let request = pending.clone();
+                let calls = Rc::new(Cell::new(0));
+                let count = calls.clone();
+                this.define(
+                    "fetchBalance",
+                    Js::function("fetchBalance", move |_, _| {
+                        count.set(count.get() + 1);
+                        Ok(Js::Promise(request.clone()))
+                    }),
+                )
+                .unwrap();
+                let result = this.call_method("fetchMarginAccountInfos", vec![]).unwrap();
+                assert_eq!(calls.get(), 1, "Hyro balance begins before caller polling");
+                let before = published.borrow().len();
+                if disposed {
+                    exchange.base.dispose().unwrap();
+                }
+                pending.settle(Ok(balance.clone()));
+                let settled = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    await_js(&exchange.base.runtime, result),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert!(settled.is_undefined());
+                assert_eq!(
+                    published.borrow().len(),
+                    before + usize::from(!disposed),
+                    "hyro_margin_disposal_guard"
+                );
+                if !disposed {
+                    assert!(
+                        published
+                            .borrow()
+                            .last()
+                            .unwrap()
+                            .get("balance")
+                            .unwrap()
+                            .strict_equals(&balance)
+                    );
+                }
+            }
+        }
+        let exchange = venue(ExchangeName::Hyrotrader);
+        let this = &exchange.js.get().unwrap().this;
+        let rt = exchange.js.get().unwrap();
+        let prototype = rt.global("Error").unwrap().get("prototype").unwrap();
+        let reason = Js::object(vec![("message", Js::String(vec![0xd800, 0x61].into()))]);
+        rt.global("Object")
+            .unwrap()
+            .call_method("setPrototypeOf", vec![reason.clone(), prototype])
+            .unwrap();
+        let rejected = reason.clone();
+        this.define(
+            "fetchBalance",
+            Js::function("fetchBalance", move |_, _| {
+                Err(Thrown::new(rejected.clone()))
+            }),
+        )
+        .unwrap();
+        let logged = Rc::new(RefCell::new(Js::Undefined));
+        let sink = logged.clone();
+        this.define(
+            "emitAndLogError",
+            Js::function("emitAndLogError", move |_, args| {
+                *sink.borrow_mut() = arg(&args, 0);
+                Ok(Js::Undefined)
+            }),
+        )
+        .unwrap();
+        let result = this.call_method("validateAccount", vec![]).unwrap();
+        let result = await_js(&exchange.base.runtime, result).await.unwrap();
+        assert_eq!(
+            units(&result.get("error").unwrap()),
+            [0xd800, 0x61],
+            "hyro_error_prototype_message"
+        );
+        assert_eq!(units(&logged.borrow()), [0xd800, 0x61]);
+        let raw_message = Js::object(vec![("zero", Js::Number(-0.0))]);
+        let raw_error = rt.global("Error").unwrap().construct(vec![], None).unwrap();
+        raw_error.set("message", raw_message.clone()).unwrap();
+        let detached = rt
+            .global("Error")
+            .unwrap()
+            .construct(vec![Js::str("original")], None)
+            .unwrap();
+        rt.global("Object")
+            .unwrap()
+            .call_method("setPrototypeOf", vec![detached.clone(), Js::Null])
+            .unwrap();
+        detached
+            .define(
+                "toString",
+                Js::function("toString", |_, _| Ok(Js::utf16(&[0xd800, 0x62]))),
+            )
+            .unwrap();
+        let custom = Js::object(vec![(
+            "toString",
+            Js::function("toString", |_, _| Ok(Js::utf16(&[0xd800, 0x63]))),
+        )]);
+        for (reason, expected) in [
+            (custom, Js::utf16(&[0xd800, 0x63])),
+            (Js::utf16(&[0xdfff]), Js::utf16(&[0xdfff])),
+            (raw_error, raw_message),
+            (detached, Js::utf16(&[0xd800, 0x62])),
+        ] {
+            for synchronous in [false, true] {
+                let failure = reason.clone();
+                let runtime = exchange.base.runtime.clone();
+                this.define(
+                    "fetchBalance",
+                    Js::function("fetchBalance", move |_, _| {
+                        if synchronous {
+                            Err(Thrown::new(failure.clone()))
+                        } else {
+                            Ok(Js::Promise(
+                                safe_cex_exchange::js_runtime::promise::Promise::settled(
+                                    &runtime,
+                                    Err(Thrown::new(failure.clone())),
+                                ),
+                            ))
+                        }
+                    }),
+                )
+                .unwrap();
+                let result = this.call_method("validateAccount", vec![]).unwrap();
+                let result = await_js(&exchange.base.runtime, result).await.unwrap();
+                assert!(result.get("error").unwrap().strict_equals(&expected));
+                assert!(logged.borrow().strict_equals(&expected));
+                assert!(!result.has_own("balance"));
+            }
+        }
+        let logging = Js::object(vec![("opaque", Js::utf16(&[0xd800]))]);
+        let thrown = logging.clone();
+        this.define(
+            "emitAndLogError",
+            Js::function("emitAndLogError", move |_, _| {
+                Err(Thrown::new(thrown.clone()))
+            }),
+        )
+        .unwrap();
+        let result = this.call_method("validateAccount", vec![]).unwrap();
+        assert!(
+            await_js(&exchange.base.runtime, result)
+                .await
+                .unwrap_err()
+                .value
+                .strict_equals(&logging)
+        );
+        assert!(
+            safe_cex_exchange::capabilities::is_base_capability_fallback(
+                &super::capabilities(&ExchangeName::Hyrotrader).fetch_income_history_range,
+                safe_cex_exchange::capabilities::BaseCapabilityMethod::FetchIncomeHistoryRange,
+            )
+        );
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn divergence_audit_order_index_keeps_live_options_and_rejection_identity() {
+    run(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitinverse,
+        ] {
+            let exchange = venue(name);
+            let runtime = exchange.base.runtime.clone();
+            let this = &exchange.js.get().unwrap().this;
+            let symbol = Js::object(vec![("opaque", Js::String(vec![0xd800].into()))]);
+            let opts = Js::object(vec![
+                ("symbol", symbol.clone()),
+                ("side", Js::str("buy")),
+                ("reduceOnly", Js::Bool(true)),
+            ]);
+            for reject in [false, true] {
+                let pending = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+                let request = pending.clone();
+                let original_symbol = symbol.clone();
+                let calls = Rc::new(Cell::new(0));
+                let count = calls.clone();
+                this.define(
+                    "fetchPositionMode",
+                    Js::function("fetchPositionMode", move |_, args| {
+                        assert!(arg(&args, 0).strict_equals(&original_symbol));
+                        count.set(count.get() + 1);
+                        Ok(Js::Promise(request.clone()))
+                    }),
+                )
+                .unwrap();
+                let result = this
+                    .call_method("getOrderPositionIdx", vec![opts.clone()])
+                    .unwrap();
+                assert_eq!(calls.get(), 1, "mode request starts before returning");
+                opts.set("side", Js::str("sell")).unwrap();
+                opts.set("reduceOnly", Js::object(vec![])).unwrap();
+                let reason = Js::object(vec![("message", Js::String(vec![0xd800].into()))]);
+                pending.settle(if reject {
+                    Err(Thrown::new(reason.clone()))
+                } else {
+                    Ok(Js::str("hedged"))
+                });
+                let result = await_js(&runtime, result).await;
+                if reject {
+                    assert!(result.unwrap_err().value.strict_equals(&reason));
+                } else {
+                    assert!(
+                        result.unwrap().strict_equals(&Js::Number(1.)),
+                        "post-await reads see the same options graph"
+                    );
+                }
+            }
+            exchange.base.dispose().unwrap();
+        }
+        let exchange = venue(ExchangeName::Bybitspot);
+        let this = &exchange.js.get().unwrap().this;
+        let opts = Js::object(vec![]);
+        opts.define_accessor(
+            "symbol",
+            Some(Rc::new(|_| panic!("Spot must ignore options"))),
+            None,
+        )
+        .unwrap();
+        let result = this.call_method("getOrderPositionIdx", vec![opts]).unwrap();
+        assert!(
+            await_js(&exchange.base.runtime, result)
+                .await
+                .unwrap()
+                .strict_equals(&Js::Number(0.))
+        );
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn divergence_audit_primary_stop_index_is_a_live_member() {
+    run(async {
+        let exchange = venue(ExchangeName::Bybit);
+        let this = &exchange.js.get().unwrap().this;
+        let called = Rc::new(Cell::new(0));
+        let calls = called.clone();
+        this.define(
+            "getOrderPositionIdx",
+            Js::function("getOrderPositionIdx", move |_, args| {
+                calls.set(calls.get() + 1);
+                assert!(!arg(&args, 0).has_own("reduceOnly"));
+                Ok(Js::Number(1.))
+            }),
+        )
+        .unwrap();
+        let result = this
+            .call_method(
+                "getStopOrderPositionIdx",
+                vec![Js::object(vec![("reduceOnly", Js::Bool(true))])],
+            )
+            .expect("stop_index_live_member");
+        assert!(
+            await_js(&exchange.base.runtime, result)
+                .await
+                .unwrap()
+                .strict_equals(&Js::Number(2.))
+        );
+        assert_eq!(called.get(), 1);
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn divergence_audit_stop_index_copies_inherited_values_and_rejects_asynchronously() {
+    run(async {
+        for name in [
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+        ] {
+            let exchange = venue(name);
+            let this = &exchange.js.get().unwrap().this;
+            let rt = exchange.js.get().unwrap();
+            let opaque = Js::object(vec![
+                ("text", Js::String(vec![0xd800].into())),
+                ("zero", Js::Number(-0.0)),
+            ]);
+            let proto = Js::object(vec![("inherited", opaque.clone())]);
+            let opts = Js::object(vec![]);
+            rt.global("Object")
+                .unwrap()
+                .call_method("setPrototypeOf", vec![opts.clone(), proto])
+                .unwrap();
+            opts.set("side", Js::str("buy")).unwrap();
+            opts.set("reduceOnly", Js::Bool(true)).unwrap();
+            let request =
+                safe_cex_exchange::js_runtime::promise::Promise::pending(&exchange.base.runtime);
+            let pending = request.clone();
+            let shared = opaque.clone();
+            let original = opts.clone();
+            this.define(
+                "getOrderPositionIdx",
+                Js::function("getOrderPositionIdx", move |_, args| {
+                    let copied = arg(&args, 0);
+                    assert!(!copied.strict_equals(&original));
+                    assert!(!copied.has_own("reduceOnly"));
+                    assert!(
+                        copied.get("inherited")?.strict_equals(&shared),
+                        "stop_index_inherited_alias"
+                    );
+                    assert!(original.has_own("reduceOnly"));
+                    Ok(Js::Promise(pending.clone()))
+                }),
+            )
+            .unwrap();
+            let result = this
+                .call_method("getStopOrderPositionIdx", vec![opts])
+                .unwrap();
+            request.settle(Ok(Js::str("1")));
+            assert!(
+                await_js(&exchange.base.runtime, result)
+                    .await
+                    .unwrap()
+                    .strict_equals(&Js::Number(2.)),
+                "source table uses property-key coercion"
+            );
+            for index in [
+                Js::Number(0.),
+                Js::Number(1.),
+                Js::Number(2.),
+                Js::Number(3.),
+                Js::str("constructor"),
+            ] {
+                let returned = index.clone();
+                this.define(
+                    "getOrderPositionIdx",
+                    Js::function("getOrderPositionIdx", move |_, _| Ok(returned.clone())),
+                )
+                .unwrap();
+                let result = this
+                    .call_method("getStopOrderPositionIdx", vec![Js::object(vec![])])
+                    .unwrap();
+                let value = await_js(&exchange.base.runtime, result).await.unwrap();
+                if index.is_string() {
+                    assert!(value.is_callable(), "inherited table member remains native");
+                } else if index.strict_equals(&Js::Number(3.)) {
+                    assert!(value.is_undefined());
+                } else {
+                    let expected = [0., 2., 1.][index.to_number().unwrap() as usize];
+                    assert!(value.strict_equals(&Js::Number(expected)));
+                }
+            }
+            let reason = Js::object(vec![("opaque", Js::String(vec![0xdfff].into()))]);
+            let thrown = reason.clone();
+            let opts = Js::object(vec![]);
+            opts.define_accessor(
+                "side",
+                Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+                None,
+            )
+            .unwrap();
+            let result = this
+                .call_method("getStopOrderPositionIdx", vec![opts])
+                .expect("async member must return rejected Promise");
+            assert!(
+                await_js(&exchange.base.runtime, result)
+                    .await
+                    .unwrap_err()
+                    .value
+                    .strict_equals(&reason)
+            );
+            exchange.base.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn divergence_audit_position_mode_maps_with_the_original_array_and_receiver() {
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+            let exchange = venue(name);
+            let this = &exchange.js.get().unwrap().this;
+            let rows = Js::array(vec![Js::object(vec![("symbol", Js::str("BTCUSDT"))])]);
+            let response = Js::object(vec![(
+                "data",
+                Js::object(vec![
+                    ("retCode", Js::Number(0.)),
+                    ("result", Js::object(vec![("list", rows.clone())])),
+                ]),
+            )]);
+            let count = Rc::new(Cell::new(0));
+            let mapped = Js::object(vec![("positionMode", Js::String(vec![0xd800].into()))]);
+            let mapped_row = mapped.clone();
+            let input_rows = rows.clone();
+            let receiver = this.clone();
+            let calls = count.clone();
+            this.define(
+                "mapPosition",
+                Js::function("mapPosition", move |actual_this, args| {
+                    assert!(actual_this.strict_equals(&receiver));
+                    if args.len() != 3 {
+                        return Err(Thrown::error("Error", "position_mode_mapper_arguments"));
+                    }
+                    assert!(arg(&args, 2).strict_equals(&input_rows));
+                    assert!(arg(&args, 0).strict_equals(&input_rows.get("0")?));
+                    assert!(arg(&args, 1).strict_equals(&Js::Number(0.)));
+                    calls.set(calls.get() + 1);
+                    Ok(mapped_row.clone())
+                }),
+            )
+            .unwrap();
+            let published = Rc::new(RefCell::new(Js::Undefined));
+            let observed = published.clone();
+            this.define(
+                "store",
+                Js::object(vec![
+                    ("positions", Js::array(vec![])),
+                    (
+                        "addOrUpdatePositions",
+                        Js::function("addOrUpdatePositions", move |_, args| {
+                            *observed.borrow_mut() = arg(&args, 0);
+                            Ok(Js::Undefined)
+                        }),
+                    ),
+                ]),
+            )
+            .unwrap();
+            this.define(
+                "xhr",
+                Js::object(vec![(
+                    "get",
+                    Js::function("get", move |_, _| Ok(response.clone())),
+                )]),
+            )
+            .unwrap();
+            let result = this
+                .call_method("fetchPositionMode", vec![Js::str("BTCUSDT")])
+                .unwrap();
+            let mode = await_js(&exchange.base.runtime, result).await.unwrap();
+            assert_eq!(units(&mode), [0xd800]);
+            assert_eq!(count.get(), 1);
+            assert!(published.borrow().get("0").unwrap().strict_equals(&mapped));
+            exchange.base.dispose().unwrap();
+        }
     });
 }

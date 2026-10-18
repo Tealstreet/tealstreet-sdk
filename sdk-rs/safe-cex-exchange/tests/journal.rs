@@ -162,6 +162,79 @@ fn interval(actual: &PositionInterval, expected: &Value) {
     );
 }
 #[test]
+fn interval_mixed_optional_ids_never_panic_or_lose_positions() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["orderingCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 128);
+    for (index, case) in cases.iter().enumerate() {
+        let fills: Vec<Execution> = serde_json::from_value(case["fills"].clone()).unwrap();
+        let actual =
+            reconstruct_position_intervals(&fills, &mut PositionIntervalOptions::default())
+                .expect("INTERVAL mixed optional IDs complete without a host panic");
+        let expected = case["intervals"].as_array().unwrap();
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "INTERVAL mixed ID count {index}"
+        );
+        for row in &actual {
+            let expected = expected
+                .iter()
+                .find(|value| value["symbol"] == row.symbol)
+                .unwrap();
+            interval(row, expected);
+        }
+    }
+}
+#[test]
+fn interval_nonfinite_close_times_never_panic_or_lose_positions() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["nonfiniteCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 128);
+    for case in cases {
+        let mut fills: Vec<Execution> = serde_json::from_value(case["fills"].clone()).unwrap();
+        for (fill, timestamp) in fills.iter_mut().zip(case["timestamps"].as_array().unwrap()) {
+            fill.timestamp = decoded(timestamp);
+        }
+        let actual =
+            reconstruct_position_intervals(&fills, &mut PositionIntervalOptions::default())
+                .expect("INTERVAL nonfinite close times complete without a host panic");
+        let expected = case["intervals"].as_array().unwrap();
+        assert_eq!(actual.len(), expected.len());
+        for row in &actual {
+            let expected = expected
+                .iter()
+                .find(|value| value["symbol"] == row.symbol)
+                .unwrap();
+            interval(row, expected);
+        }
+    }
+}
+#[test]
 #[ignore = "requires installed live TypeScript"]
 fn journal_interval_native_source_parity() {
     let output = std::process::Command::new("node")

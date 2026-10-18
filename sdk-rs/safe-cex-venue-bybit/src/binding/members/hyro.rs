@@ -303,83 +303,134 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             Js::function(name, move |_, args| {
                 let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
                 let body = rt.clone();
-                Ok(rt.spawn(Box::pin({ let await_runtime = rt.exchange_runtime(); async move {
-                    let owner = body.this.clone();
-                    match name {
-                        "fetchMarkets" => snapshots::fetch_markets(&body, owner).await,
-                        "reconcilePrivateState" => snapshots::reconcile_private_state(&body, owner, arg(&args, 0), arg(&args, 1)).await,
-                        "fetchAndSetPrivateSnapshot" => snapshots::fetch_and_set_private_snapshot(&body, owner).await,
-                        "fetchOrdersPositionsAndBalance" => snapshots::fetch_orders_positions_and_balance(&body, owner).await,
-                        "fetchAndSetPrivateSnapshotHelper" => snapshots::fetch_and_set_private_snapshot_helper(&body, owner, arg(&args, 0)).await,
-                        "validateAccount" => {
-                            let balance = match owner.call_method("fetchBalance", vec![]) {
-                                Ok(promise) => await_js(&await_runtime, promise).await,
-                                Err(error) => Err(error),
-                            };
-                            match balance {
-                                Ok(balance) => Ok(Js::object(vec![("error", Js::str("")), ("balance", balance)])),
-                                Err(error) => {
-                                    let message = if matches!(&error.value, Js::Object(data) if data.class == "Error") {
-                                        error.value.get("message")?
-                                    } else {
-                                        body.global("String")?.call(Js::Undefined, vec![error.value])?
-                                    };
-                                    owner.call_method("emitAndLogError", vec![message.clone()])?;
-                                    Ok(Js::object(vec![("error", message)]))
+                Ok(rt.spawn(Box::pin({
+                    let await_runtime = rt.exchange_runtime();
+                    async move {
+                        let owner = body.this.clone();
+                        match name {
+                            "fetchMarkets" => snapshots::fetch_markets(&body, owner).await,
+                            "reconcilePrivateState" => {
+                                snapshots::reconcile_private_state(
+                                    &body,
+                                    owner,
+                                    arg(&args, 0),
+                                    arg(&args, 1),
+                                )
+                                .await
+                            }
+                            "fetchAndSetPrivateSnapshot" => {
+                                snapshots::fetch_and_set_private_snapshot(&body, owner).await
+                            }
+                            "fetchOrdersPositionsAndBalance" => {
+                                snapshots::fetch_orders_positions_and_balance(&body, owner).await
+                            }
+                            "fetchAndSetPrivateSnapshotHelper" => {
+                                snapshots::fetch_and_set_private_snapshot_helper(
+                                    &body,
+                                    owner,
+                                    arg(&args, 0),
+                                )
+                                .await
+                            }
+                            "validateAccount" => {
+                                let balance = match owner.call_method("fetchBalance", vec![]) {
+                                    Ok(promise) => await_js(&await_runtime, promise).await,
+                                    Err(error) => Err(error),
+                                };
+                                match balance {
+                                    Ok(balance) => Ok(Js::object(vec![
+                                        ("error", Js::str("")),
+                                        ("balance", balance),
+                                    ])),
+                                    Err(error) => {
+                                        let message = if body
+                                            .global("Error")?
+                                            .ordinary_has_instance(&error.value)?
+                                        {
+                                            error.value.get("message")?
+                                        } else {
+                                            body.global("String")?
+                                                .call(Js::Undefined, vec![error.value])?
+                                        };
+                                        owner.call_method(
+                                            "emitAndLogError",
+                                            vec![message.clone()],
+                                        )?;
+                                        Ok(Js::object(vec![("error", message)]))
+                                    }
                                 }
                             }
-                        }
-                        "fetchMarginAccountInfos" => {
-                            let balance = await_js(&await_runtime, owner.call_method("fetchBalance", vec![])?).await?;
-                            if !owner.get("isDisposed")?.truthy() {
-                                owner.get("store")?.call_method("update", vec![Js::object(vec![("balance", balance)])])?;
+                            "fetchMarginAccountInfos" => {
+                                let balance = await_js(
+                                    &await_runtime,
+                                    owner.call_method("fetchBalance", vec![])?,
+                                )
+                                .await?;
+                                if !owner.get("isDisposed")?.truthy() {
+                                    owner.get("store")?.call_method(
+                                        "update",
+                                        vec![Js::object(vec![("balance", balance)])],
+                                    )?;
+                                }
+                                Ok(Js::Undefined)
                             }
-                            Ok(Js::Undefined)
-                        }
-                        "getAccount" => capabilities::get_account(&body, owner).await,
-                        "fetchApiKeyInfo" => capabilities::fetch_api_key_info(&body, owner).await,
-                        "fetchAndCacheApiKeyInfo" => {
-                            capabilities::fetch_and_cache_api_key_info(&body).await
-                        }
-                        "fetchFees" => capabilities::fetch_fees(&body, arg(&args, 0)).await,
-                        "fetchPositionMode" => {
-                            capabilities::fetch_position_mode(&body, arg(&args, 0)).await
-                        }
-                        "changePositionMode" => {
-                            capabilities::change_position_mode(
-                                &body,
-                                owner,
-                                arg(&args, 0),
-                                arg(&args, 1),
-                            )
-                            .await
-                        }
-                        "changeMarginType" => {
-                            capabilities::change_margin_type(&body, owner, arg(&args, 0)).await
-                        }
-                        "fetchRawBalance" => reads::fetch_raw_balance(&body, owner).await,
-                        "fetchOrders" => reads::fetch_orders(&body, owner).await,
-                        "fetchOrdersHelper" => {
-                            reads::fetch_orders_helper(&body, owner, arg(&args, 0), arg(&args, 1))
+                            "getAccount" => capabilities::get_account(&body, owner).await,
+                            "fetchApiKeyInfo" => {
+                                capabilities::fetch_api_key_info(&body, owner).await
+                            }
+                            "fetchAndCacheApiKeyInfo" => {
+                                capabilities::fetch_and_cache_api_key_info(&body).await
+                            }
+                            "fetchFees" => capabilities::fetch_fees(&body, arg(&args, 0)).await,
+                            "fetchPositionMode" => {
+                                capabilities::fetch_position_mode(&body, arg(&args, 0)).await
+                            }
+                            "changePositionMode" => {
+                                capabilities::change_position_mode(
+                                    &body,
+                                    owner,
+                                    arg(&args, 0),
+                                    arg(&args, 1),
+                                )
                                 .await
-                        }
-                        "fetchPrivateRows" => {
-                            reads::fetch_private_rows(&body, owner, arg(&args, 0), arg(&args, 1))
+                            }
+                            "changeMarginType" => {
+                                capabilities::change_margin_type(&body, owner, arg(&args, 0)).await
+                            }
+                            "fetchRawBalance" => reads::fetch_raw_balance(&body, owner).await,
+                            "fetchOrders" => reads::fetch_orders(&body, owner).await,
+                            "fetchOrdersHelper" => {
+                                reads::fetch_orders_helper(
+                                    &body,
+                                    owner,
+                                    arg(&args, 0),
+                                    arg(&args, 1),
+                                )
                                 .await
+                            }
+                            "fetchPrivateRows" => {
+                                reads::fetch_private_rows(
+                                    &body,
+                                    owner,
+                                    arg(&args, 0),
+                                    arg(&args, 1),
+                                )
+                                .await
+                            }
+                            "fetchPositionsHelper" => {
+                                reads::fetch_positions_helper(
+                                    &body,
+                                    owner,
+                                    arg(&args, 0),
+                                    arg(&args, 1),
+                                    arg(&args, 2),
+                                )
+                                .await
+                            }
+                            _ => unreachable!(),
                         }
-                        "fetchPositionsHelper" => {
-                            reads::fetch_positions_helper(
-                                &body,
-                                owner,
-                                arg(&args, 0),
-                                arg(&args, 1),
-                                arg(&args, 2),
-                            )
-                            .await
-                        }
-                        _ => unreachable!(),
                     }
-                } })))
+                })))
             }),
         )?;
     }

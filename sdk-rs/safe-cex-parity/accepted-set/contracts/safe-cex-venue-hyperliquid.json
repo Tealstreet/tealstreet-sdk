@@ -62021,5 +62021,2278 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_hyperliquid::spot_models::WsFill": {
+    "shape": "map",
+    "sample": {
+      "coin": "value:WsFill:0:\"\\/\b\f\n\r\t",
+      "px": "value:WsFill:1:\"\\/\b\f\n\r\t",
+      "sz": "value:WsFill:2:\"\\/\b\f\n\r\t",
+      "side": "value:WsFill:3:\"\\/\b\f\n\r\t",
+      "time": 18.5,
+      "startPosition": "value:WsFill:5:\"\\/\b\f\n\r\t",
+      "dir": "value:WsFill:6:\"\\/\b\f\n\r\t",
+      "closedPnl": "value:WsFill:7:\"\\/\b\f\n\r\t",
+      "hash": "value:WsFill:8:\"\\/\b\f\n\r\t",
+      "oid": 19.75,
+      "crossed": true,
+      "fee": "value:WsFill:11:\"\\/\b\f\n\r\t",
+      "tid": 20.5
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed hyperliquidspot.types.ts WsFill, its generated public Deserialize body, private remote WsFillWire and nested OnlyMap visitor. Raw text, slice and qualified Deserialize execute the actual public owner and visitor. Direct native observations read every JsString UTF-16 vector, boolean and f64 bit pattern before model serialization. Four independently typechecked maintained-source positives cover distinct fields, lone surrogates, signed zero, overflow/underflow and Unicode; negatives add complete positional arrays and omission/null/wrong-type for each required field. Last-duplicate selection and unknown lone-unit keys retain JSON.parse semantics. No Value ingress, Realm path, other owner, generic identity, source or helper guard is exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "coin",
+        "px",
+        "sz",
+        "side",
+        "time",
+        "startPosition",
+        "dir",
+        "closedPnl",
+        "hash",
+        "oid",
+        "crossed",
+        "fee",
+        "tid"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"authored Spot wire JSON\"); let mut decoder=serde_json::Deserializer::from_str(raw); let paths=[(\"text\",serde_json::from_str::<$type>(raw)),(\"slice\",serde_json::from_slice::<$type>(raw.as_bytes())),(\"qualified\",<$type as serde::Deserialize>::deserialize(&mut decoder))]; let mut observations=Vec::new(); for (route,result) in paths { let native=match result {Ok(decoded)=>serde_json::json!({\"ok\":true,\"coin\":&decoded.coin.0,\"px\":&decoded.px.0,\"sz\":&decoded.sz.0,\"side\":&decoded.side.0,\"time\":format!(\"{:016x}\", decoded.time.to_bits()),\"startPosition\":&decoded.start_position.0,\"dir\":&decoded.dir.0,\"closedPnl\":&decoded.closed_pnl.0,\"hash\":&decoded.hash.0,\"oid\":format!(\"{:016x}\", decoded.oid.to_bits()),\"crossed\":decoded.crossed,\"fee\":&decoded.fee.0,\"tid\":format!(\"{:016x}\", decoded.tid.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})}; if let Some(first)=observations.first(){assert_eq!(&native,first,\"Spot decoder route {route}\");} observations.push(native); } observations.remove(0) }",
+      "cases": [
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": true,
+            "coin": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              48,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "px": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "sz": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              50,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "side": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              51,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "time": "4032800000000000",
+            "startPosition": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              53,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "dir": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              54,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "closedPnl": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              55,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "hash": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              56,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "oid": "4033c00000000000",
+            "crossed": true,
+            "fee": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              49,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "tid": "4034800000000000"
+          }
+        },
+        {
+          "input": "{\"coin\":\"\",\"px\":\"\",\"sz\":\"\",\"side\":\"\",\"time\":-0,\"startPosition\":\"\",\"dir\":\"\",\"closedPnl\":\"\",\"hash\":\"\",\"oid\":-0,\"crossed\":false,\"fee\":\"\",\"tid\":-0}",
+          "output": {
+            "ok": true,
+            "coin": [],
+            "px": [],
+            "sz": [],
+            "side": [],
+            "time": "8000000000000000",
+            "startPosition": [],
+            "dir": [],
+            "closedPnl": [],
+            "hash": [],
+            "oid": "8000000000000000",
+            "crossed": false,
+            "fee": [],
+            "tid": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"coin\":\"\\ud8000\ud83d\ude00\\udfff\ufeff\",\"px\":\"\\ud8001\ud83d\ude00\\udfff\ufeff\",\"sz\":\"\\ud8002\ud83d\ude00\\udfff\ufeff\",\"side\":\"\\ud8003\ud83d\ude00\\udfff\ufeff\",\"time\":1e400,\"startPosition\":\"\\ud8005\ud83d\ude00\\udfff\ufeff\",\"dir\":\"\\ud8006\ud83d\ude00\\udfff\ufeff\",\"closedPnl\":\"\\ud8007\ud83d\ude00\\udfff\ufeff\",\"hash\":\"\\ud8008\ud83d\ude00\\udfff\ufeff\",\"oid\":-1e400,\"crossed\":true,\"fee\":\"\\ud80011\ud83d\ude00\\udfff\ufeff\",\"tid\":1e400}",
+          "output": {
+            "ok": true,
+            "coin": [
+              55296,
+              48,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "px": [
+              55296,
+              49,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "sz": [
+              55296,
+              50,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "side": [
+              55296,
+              51,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "time": "7ff0000000000000",
+            "startPosition": [
+              55296,
+              53,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "dir": [
+              55296,
+              54,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "closedPnl": [
+              55296,
+              55,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "hash": [
+              55296,
+              56,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "oid": "fff0000000000000",
+            "crossed": true,
+            "fee": [
+              55296,
+              49,
+              49,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "tid": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "{\"coin\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:0\",\"px\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:1\",\"sz\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:2\",\"side\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:3\",\"time\":1e-9999,\"startPosition\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:5\",\"dir\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:6\",\"closedPnl\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:7\",\"hash\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:8\",\"oid\":-1e-9999,\"crossed\":true,\"fee\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:11\",\"tid\":1e-9999}",
+          "output": {
+            "ok": true,
+            "coin": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              48
+            ],
+            "px": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              49
+            ],
+            "sz": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              50
+            ],
+            "side": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              51
+            ],
+            "time": "0000000000000000",
+            "startPosition": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              53
+            ],
+            "dir": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              54
+            ],
+            "closedPnl": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              55
+            ],
+            "hash": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              56
+            ],
+            "oid": "8000000000000000",
+            "crossed": true,
+            "fee": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              49,
+              49
+            ],
+            "tid": "0000000000000000"
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[0]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":false,\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",18.5,\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",19.75,true,\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",20.5]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"wire\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "1",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":null,\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":false,\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":null,\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":false,\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":null,\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":false,\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":null,\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":false,\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":null,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":false,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":null,\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":false,\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":null,\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":false,\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":null,\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":false,\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":null,\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":false,\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":null,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":false,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":null,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":\"true\",\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":null,\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":false,\"tid\":20.5}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":false}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":null,\"coin\":\"value:WsFill:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"px\":\"value:WsFill:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"sz\":\"value:WsFill:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"side\":\"value:WsFill:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"time\":18.5,\"startPosition\":\"value:WsFill:5:\\\"\\\\/\\b\\f\\n\\r\\t\",\"dir\":\"value:WsFill:6:\\\"\\\\/\\b\\f\\n\\r\\t\",\"closedPnl\":\"value:WsFill:7:\\\"\\\\/\\b\\f\\n\\r\\t\",\"hash\":\"value:WsFill:8:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":19.75,\"crossed\":true,\"fee\":\"value:WsFill:11:\\\"\\\\/\\b\\f\\n\\r\\t\",\"tid\":20.5,\"\\ud800\":{\"ignored\":\"\\udfff\"}}",
+          "output": {
+            "ok": true,
+            "coin": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              48,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "px": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "sz": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              50,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "side": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              51,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "time": "4032800000000000",
+            "startPosition": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              53,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "dir": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              54,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "closedPnl": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              55,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "hash": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              56,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "oid": "4033c00000000000",
+            "crossed": true,
+            "fee": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              70,
+              105,
+              108,
+              108,
+              58,
+              49,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "tid": "4034800000000000"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::spot_models::WsUserFunding": {
+    "shape": "map",
+    "sample": {
+      "time": 17.5,
+      "coin": "value:WsUserFunding:1:\"\\/\b\f\n\r\t",
+      "usdc": "value:WsUserFunding:2:\"\\/\b\f\n\r\t",
+      "szi": "value:WsUserFunding:3:\"\\/\b\f\n\r\t",
+      "fundingRate": "value:WsUserFunding:4:\"\\/\b\f\n\r\t"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed hyperliquidspot.types.ts WsUserFunding, its generated public Deserialize body, private remote WsUserFundingWire and nested OnlyMap visitor. Raw text, slice and qualified Deserialize execute the actual public owner and visitor. Direct native observations read every JsString UTF-16 vector, boolean and f64 bit pattern before model serialization. Four independently typechecked maintained-source positives cover distinct fields, lone surrogates, signed zero, overflow/underflow and Unicode; negatives add complete positional arrays and omission/null/wrong-type for each required field. Last-duplicate selection and unknown lone-unit keys retain JSON.parse semantics. No Value ingress, Realm path, other owner, generic identity, source or helper guard is exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "time",
+        "coin",
+        "usdc",
+        "szi",
+        "fundingRate"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"authored Spot wire JSON\"); let mut decoder=serde_json::Deserializer::from_str(raw); let paths=[(\"text\",serde_json::from_str::<$type>(raw)),(\"slice\",serde_json::from_slice::<$type>(raw.as_bytes())),(\"qualified\",<$type as serde::Deserialize>::deserialize(&mut decoder))]; let mut observations=Vec::new(); for (route,result) in paths { let native=match result {Ok(decoded)=>serde_json::json!({\"ok\":true,\"time\":format!(\"{:016x}\", decoded.time.to_bits()),\"coin\":&decoded.coin.0,\"usdc\":&decoded.usdc.0,\"szi\":&decoded.szi.0,\"fundingRate\":&decoded.funding_rate.0}),Err(_)=>serde_json::json!({\"ok\":false})}; if let Some(first)=observations.first(){assert_eq!(&native,first,\"Spot decoder route {route}\");} observations.push(native); } observations.remove(0) }",
+      "cases": [
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": true,
+            "time": "4031800000000000",
+            "coin": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "usdc": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              50,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "szi": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              51,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "fundingRate": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              52,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ]
+          }
+        },
+        {
+          "input": "{\"time\":-0,\"coin\":\"\",\"usdc\":\"\",\"szi\":\"\",\"fundingRate\":\"\"}",
+          "output": {
+            "ok": true,
+            "time": "8000000000000000",
+            "coin": [],
+            "usdc": [],
+            "szi": [],
+            "fundingRate": []
+          }
+        },
+        {
+          "input": "{\"time\":1e400,\"coin\":\"\\ud8001\ud83d\ude00\\udfff\ufeff\",\"usdc\":\"\\ud8002\ud83d\ude00\\udfff\ufeff\",\"szi\":\"\\ud8003\ud83d\ude00\\udfff\ufeff\",\"fundingRate\":\"\\ud8004\ud83d\ude00\\udfff\ufeff\"}",
+          "output": {
+            "ok": true,
+            "time": "7ff0000000000000",
+            "coin": [
+              55296,
+              49,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "usdc": [
+              55296,
+              50,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "szi": [
+              55296,
+              51,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "fundingRate": [
+              55296,
+              52,
+              55357,
+              56832,
+              57343,
+              65279
+            ]
+          }
+        },
+        {
+          "input": "{\"time\":1e-9999,\"coin\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:1\",\"usdc\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:2\",\"szi\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:3\",\"fundingRate\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:4\"}",
+          "output": {
+            "ok": true,
+            "time": "0000000000000000",
+            "coin": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              49
+            ],
+            "usdc": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              50
+            ],
+            "szi": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              51
+            ],
+            "fundingRate": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              52
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[0]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":false,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[17.5,\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"wire\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "1",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":null,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":false,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":null,\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":false,\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":null,\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":false,\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":null,\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":false,\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":false}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"time\":null,\"time\":17.5,\"coin\":\"value:WsUserFunding:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"usdc\":\"value:WsUserFunding:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"szi\":\"value:WsUserFunding:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"fundingRate\":\"value:WsUserFunding:4:\\\"\\\\/\\b\\f\\n\\r\\t\",\"\\ud800\":{\"ignored\":\"\\udfff\"}}",
+          "output": {
+            "ok": true,
+            "time": "4031800000000000",
+            "coin": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "usdc": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              50,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "szi": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              51,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "fundingRate": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              85,
+              115,
+              101,
+              114,
+              70,
+              117,
+              110,
+              100,
+              105,
+              110,
+              103,
+              58,
+              52,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::spot_models::WsLiquidation": {
+    "shape": "map",
+    "sample": {
+      "lid": 17.5,
+      "liquidator": "value:WsLiquidation:1:\"\\/\b\f\n\r\t",
+      "liquidated_user": "value:WsLiquidation:2:\"\\/\b\f\n\r\t",
+      "liquidated_ntl_pos": "value:WsLiquidation:3:\"\\/\b\f\n\r\t",
+      "liquidated_account_value": "value:WsLiquidation:4:\"\\/\b\f\n\r\t"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed hyperliquidspot.types.ts WsLiquidation, its generated public Deserialize body, private remote WsLiquidationWire and nested OnlyMap visitor. Raw text, slice and qualified Deserialize execute the actual public owner and visitor. Direct native observations read every JsString UTF-16 vector, boolean and f64 bit pattern before model serialization. Four independently typechecked maintained-source positives cover distinct fields, lone surrogates, signed zero, overflow/underflow and Unicode; negatives add complete positional arrays and omission/null/wrong-type for each required field. Last-duplicate selection and unknown lone-unit keys retain JSON.parse semantics. No Value ingress, Realm path, other owner, generic identity, source or helper guard is exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "lid",
+        "liquidator",
+        "liquidated_user",
+        "liquidated_ntl_pos",
+        "liquidated_account_value"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"authored Spot wire JSON\"); let mut decoder=serde_json::Deserializer::from_str(raw); let paths=[(\"text\",serde_json::from_str::<$type>(raw)),(\"slice\",serde_json::from_slice::<$type>(raw.as_bytes())),(\"qualified\",<$type as serde::Deserialize>::deserialize(&mut decoder))]; let mut observations=Vec::new(); for (route,result) in paths { let native=match result {Ok(decoded)=>serde_json::json!({\"ok\":true,\"lid\":format!(\"{:016x}\", decoded.lid.to_bits()),\"liquidator\":&decoded.liquidator.0,\"liquidated_user\":&decoded.liquidated_user.0,\"liquidated_ntl_pos\":&decoded.liquidated_ntl_pos.0,\"liquidated_account_value\":&decoded.liquidated_account_value.0}),Err(_)=>serde_json::json!({\"ok\":false})}; if let Some(first)=observations.first(){assert_eq!(&native,first,\"Spot decoder route {route}\");} observations.push(native); } observations.remove(0) }",
+      "cases": [
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": true,
+            "lid": "4031800000000000",
+            "liquidator": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "liquidated_user": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              50,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "liquidated_ntl_pos": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              51,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "liquidated_account_value": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              52,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ]
+          }
+        },
+        {
+          "input": "{\"lid\":-0,\"liquidator\":\"\",\"liquidated_user\":\"\",\"liquidated_ntl_pos\":\"\",\"liquidated_account_value\":\"\"}",
+          "output": {
+            "ok": true,
+            "lid": "8000000000000000",
+            "liquidator": [],
+            "liquidated_user": [],
+            "liquidated_ntl_pos": [],
+            "liquidated_account_value": []
+          }
+        },
+        {
+          "input": "{\"lid\":1e400,\"liquidator\":\"\\ud8001\ud83d\ude00\\udfff\ufeff\",\"liquidated_user\":\"\\ud8002\ud83d\ude00\\udfff\ufeff\",\"liquidated_ntl_pos\":\"\\ud8003\ud83d\ude00\\udfff\ufeff\",\"liquidated_account_value\":\"\\ud8004\ud83d\ude00\\udfff\ufeff\"}",
+          "output": {
+            "ok": true,
+            "lid": "7ff0000000000000",
+            "liquidator": [
+              55296,
+              49,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "liquidated_user": [
+              55296,
+              50,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "liquidated_ntl_pos": [
+              55296,
+              51,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "liquidated_account_value": [
+              55296,
+              52,
+              55357,
+              56832,
+              57343,
+              65279
+            ]
+          }
+        },
+        {
+          "input": "{\"lid\":1e-9999,\"liquidator\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:1\",\"liquidated_user\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:2\",\"liquidated_ntl_pos\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:3\",\"liquidated_account_value\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:4\"}",
+          "output": {
+            "ok": true,
+            "lid": "0000000000000000",
+            "liquidator": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              49
+            ],
+            "liquidated_user": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              50
+            ],
+            "liquidated_ntl_pos": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              51
+            ],
+            "liquidated_account_value": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              52
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[0]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":false,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[17.5,\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"wire\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "1",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":null,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":false,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":null,\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":false,\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":null,\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":false,\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":null,\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":false,\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":false}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"lid\":null,\"lid\":17.5,\"liquidator\":\"value:WsLiquidation:1:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_user\":\"value:WsLiquidation:2:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_ntl_pos\":\"value:WsLiquidation:3:\\\"\\\\/\\b\\f\\n\\r\\t\",\"liquidated_account_value\":\"value:WsLiquidation:4:\\\"\\\\/\\b\\f\\n\\r\\t\",\"\\ud800\":{\"ignored\":\"\\udfff\"}}",
+          "output": {
+            "ok": true,
+            "lid": "4031800000000000",
+            "liquidator": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              49,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "liquidated_user": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              50,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "liquidated_ntl_pos": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              51,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "liquidated_account_value": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              76,
+              105,
+              113,
+              117,
+              105,
+              100,
+              97,
+              116,
+              105,
+              111,
+              110,
+              58,
+              52,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::spot_models::WsNonUserCancel": {
+    "shape": "map",
+    "sample": {
+      "coin": "value:WsNonUserCancel:0:\"\\/\b\f\n\r\t",
+      "oid": 17.75
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed hyperliquidspot.types.ts WsNonUserCancel, its generated public Deserialize body, private remote WsNonUserCancelWire and nested OnlyMap visitor. Raw text, slice and qualified Deserialize execute the actual public owner and visitor. Direct native observations read every JsString UTF-16 vector, boolean and f64 bit pattern before model serialization. Four independently typechecked maintained-source positives cover distinct fields, lone surrogates, signed zero, overflow/underflow and Unicode; negatives add complete positional arrays and omission/null/wrong-type for each required field. Last-duplicate selection and unknown lone-unit keys retain JSON.parse semantics. No Value ingress, Realm path, other owner, generic identity, source or helper guard is exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "coin",
+        "oid"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"authored Spot wire JSON\"); let mut decoder=serde_json::Deserializer::from_str(raw); let paths=[(\"text\",serde_json::from_str::<$type>(raw)),(\"slice\",serde_json::from_slice::<$type>(raw.as_bytes())),(\"qualified\",<$type as serde::Deserialize>::deserialize(&mut decoder))]; let mut observations=Vec::new(); for (route,result) in paths { let native=match result {Ok(decoded)=>serde_json::json!({\"ok\":true,\"coin\":&decoded.coin.0,\"oid\":format!(\"{:016x}\", decoded.oid.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})}; if let Some(first)=observations.first(){assert_eq!(&native,first,\"Spot decoder route {route}\");} observations.push(native); } observations.remove(0) }",
+      "cases": [
+        {
+          "input": "{\"coin\":\"value:WsNonUserCancel:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":17.75}",
+          "output": {
+            "ok": true,
+            "coin": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              78,
+              111,
+              110,
+              85,
+              115,
+              101,
+              114,
+              67,
+              97,
+              110,
+              99,
+              101,
+              108,
+              58,
+              48,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "oid": "4031c00000000000"
+          }
+        },
+        {
+          "input": "{\"coin\":\"\",\"oid\":-0}",
+          "output": {
+            "ok": true,
+            "coin": [],
+            "oid": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"coin\":\"\\ud8000\ud83d\ude00\\udfff\ufeff\",\"oid\":-1e400}",
+          "output": {
+            "ok": true,
+            "coin": [
+              55296,
+              48,
+              55357,
+              56832,
+              57343,
+              65279
+            ],
+            "oid": "fff0000000000000"
+          }
+        },
+        {
+          "input": "{\"coin\":\"\\u0000\u00e9\u96ea\ud83d\ude00\u2028\ufeff:0\",\"oid\":-1e-9999}",
+          "output": {
+            "ok": true,
+            "coin": [
+              0,
+              233,
+              38634,
+              55357,
+              56832,
+              8232,
+              65279,
+              58,
+              48
+            ],
+            "oid": "8000000000000000"
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[0]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":false,\"oid\":17.75}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"value:WsNonUserCancel:0:\\\"\\\\/\\b\\f\\n\\r\\t\",17.75]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"wire\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "1",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"oid\":17.75}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":null,\"oid\":17.75}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":false,\"oid\":17.75}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsNonUserCancel:0:\\\"\\\\/\\b\\f\\n\\r\\t\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsNonUserCancel:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":\"value:WsNonUserCancel:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":false}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"coin\":null,\"coin\":\"value:WsNonUserCancel:0:\\\"\\\\/\\b\\f\\n\\r\\t\",\"oid\":17.75,\"\\ud800\":{\"ignored\":\"\\udfff\"}}",
+          "output": {
+            "ok": true,
+            "coin": [
+              118,
+              97,
+              108,
+              117,
+              101,
+              58,
+              87,
+              115,
+              78,
+              111,
+              110,
+              85,
+              115,
+              101,
+              114,
+              67,
+              97,
+              110,
+              99,
+              101,
+              108,
+              58,
+              48,
+              58,
+              34,
+              92,
+              47,
+              8,
+              12,
+              10,
+              13,
+              9
+            ],
+            "oid": "4031c00000000000"
+          }
+        }
+      ]
+    }
   }
 }
