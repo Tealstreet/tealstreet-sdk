@@ -1157,7 +1157,7 @@ impl<H: BlofinExchangeHost> rest_lifecycle::LifecycleHost for ExchangeLifecycle<
             self.owner
                 .fetch_tickers_raw()
                 .await
-                .map(|v| v.map(|v| UtilityInput::from_retained(v.retained().clone())))
+                .map(|v| v.map(|v| UtilityInput::from_retained((v.retained().clone()).into())))
         })
     }
     fn format_tickers(

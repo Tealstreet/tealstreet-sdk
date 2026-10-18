@@ -128,7 +128,7 @@ fn map_orders_with_projection(
     let mut result = Vec::new();
     for row in rows {
         // Reuse the previously ported helper with the same retained input contract.
-        let payload = crate::utility::UtilityInput::from_retained(row.clone());
+        let payload = crate::utility::UtilityInput::from_retained((row.clone()).into());
         if crate::utility::is_known_non_swap_instrument(&payload)? {
             continue;
         }
@@ -178,13 +178,17 @@ fn map_orders_with_projection(
                     "Cannot read properties of undefined (reading 'contractValue')",
                 )
             })?;
-            if info.is_null() {
+            if info.is_nullish() {
                 return Err(error(
                     "TypeError",
-                    "Cannot read properties of null (reading 'contractValue')",
+                    if info.is_null() {
+                        "Cannot read properties of null (reading 'contractValue')"
+                    } else {
+                        "Cannot read properties of undefined (reading 'contractValue')"
+                    },
                 ));
             }
-            let parsed = number(info.get("contractValue"))?;
+            let parsed = safe_cex_num::js_retained_parse_float(info.get("contractValue"))?;
             if parsed != 0.0 && !parsed.is_nan() {
                 parsed
             } else {
@@ -218,7 +222,7 @@ fn map_orders_with_projection(
             remaining,
             reduce_only: reduce_only.into(),
             close: (None).into(),
-            info: (Some(row.clone())).into(),
+            info: (Some(row.clone().into())).into(),
             time_in_force: time_in_force.into(),
             last_update,
             trigger_type: (None).into(),

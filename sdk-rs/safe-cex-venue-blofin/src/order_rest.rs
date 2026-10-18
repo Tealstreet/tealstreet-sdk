@@ -11,6 +11,7 @@ use safe_cex_num::{
 };
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::RestAdapter;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     FetchedLeverage, MarginType, Order, OrderStatus, OrderTimeInForce, OrderType, Position,
     PositionMode, PreparedOrderOpts,
@@ -394,7 +395,7 @@ async fn cancel_request<E: std::fmt::Display>(
     }
 }
 fn gone<E>(row: &Value) -> Result<bool, ServiceError<E>> {
-    is_already_gone_cancel_row(Some(&UtilityInput::from_retained(row.clone())))
+    is_already_gone_cancel_row(Some(&UtilityInput::from_retained((row.clone()).into())))
         .map_err(ServiceError::Coercion)
 }
 async fn cancel_batches<E: std::fmt::Display>(
@@ -509,13 +510,18 @@ pub async fn cancel_trigger_orders<E: std::fmt::Display>(
     for order in orders {
         let market = store.markets_by_symbol().get(&order.symbol).cloned();
         let raw = order.info.as_ref();
-        let id = truth(raw.and_then(|v| v.get("algoId")))
+        let id = raw
+            .and_then(|v| v.get("algoId"))
+            .filter(|v| v.is_truthy())
             .cloned()
-            .unwrap_or_else(|| Value::String(order.id.clone()));
-        let id = js_string(Some(&id)).map_err(ServiceError::Coercion)?;
+            .unwrap_or_else(|| Input::Text(order.id.encode_utf16().collect()));
+        let id = safe_cex_num::js_retained_string(Some(&id)).map_err(ServiceError::Coercion)?;
         if market.as_ref().is_none_or(|m| {
-            raw.and_then(|v| v.get("instId")).and_then(Value::as_str) != Some(m.id.as_str())
-        }) || raw.and_then(|v| v.get("orderType")).and_then(Value::as_str) != Some("trigger")
+            !raw.and_then(|v| v.get("instId"))
+                .is_some_and(|v| v.text_equals(&m.id))
+        }) || !raw
+            .and_then(|v| v.get("orderType"))
+            .is_some_and(|v| v.text_equals("trigger"))
             || id != order.id
         {
             return Err(ServiceError::Input(format!(
@@ -827,11 +833,16 @@ pub async fn update_order<E: std::fmt::Display>(
     }
     if order.r#type == OrderType::Conditional {
         let raw = order.info.as_ref();
-        let id = truth(raw.and_then(|r| r.get("algoId")))
+        let id = raw
+            .and_then(|r| r.get("algoId"))
+            .filter(|v| v.is_truthy())
             .cloned()
-            .unwrap_or_else(|| Value::String(String::new()));
-        if raw.and_then(|r| r.get("orderType")).and_then(Value::as_str) != Some("trigger")
-            || js_string(Some(&id)).map_err(ServiceError::Coercion)? != order.id
+            .unwrap_or_else(|| Input::Text(Vec::new()));
+        if !raw
+            .and_then(|r| r.get("orderType"))
+            .is_some_and(|v| v.text_equals("trigger"))
+            || safe_cex_num::js_retained_string(Some(&id)).map_err(ServiceError::Coercion)?
+                != order.id
         {
             reject(host.service,Some(&Value::String("Cannot safely update a BloFin trigger without authoritative trigger-order provenance".into())))?;
         }
@@ -841,8 +852,8 @@ pub async fn update_order<E: std::fmt::Display>(
         } else {
             opts.amount
         };
-        let price =
-            js_number(raw.and_then(|r| r.get("orderPrice"))).map_err(ServiceError::Coercion)?;
+        let price = safe_cex_num::js_retained_number(raw.and_then(|r| r.get("orderPrice")))
+            .map_err(ServiceError::Coercion)?;
         opts.price = (price.is_finite() && price > 0.0).then_some(price);
         opts.trigger_price = if object.contains_key("price") {
             Some(js_number(object.get("price")).map_err(ServiceError::Coercion)?)
@@ -853,11 +864,11 @@ pub async fn update_order<E: std::fmt::Display>(
         opts.time_in_force = Some(OrderTimeInForce::GoodTillCancel);
         let attached = raw
             .and_then(|r| r.get("attachAlgoOrders"))
-            .and_then(Value::as_array)
+            .and_then(Input::as_array)
             .and_then(|a| a.first());
         let positive = |key| -> Result<Option<f64>, ServiceError<E>> {
-            let value =
-                js_number(attached.and_then(|r| r.get(key))).map_err(ServiceError::Coercion)?;
+            let value = safe_cex_num::js_retained_number(attached.and_then(|r| r.get(key)))
+                .map_err(ServiceError::Coercion)?;
             Ok((value.is_finite() && value > 0.0).then_some(value))
         };
         opts.stop_loss = positive("slTriggerPrice")?;
@@ -866,7 +877,7 @@ pub async fn update_order<E: std::fmt::Display>(
             crate::utility::map_blofin_trigger_type(
                 attached
                     .and_then(|r| r.get(key))
-                    .map(|v| UtilityInput::from_retained(v.clone()))
+                    .map(|v| UtilityInput::from_retained((v.clone()).into()))
                     .as_ref(),
             )
         };

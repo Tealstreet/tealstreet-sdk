@@ -191,7 +191,10 @@ impl Exchange for BlofinNativeExchange {
                 .map_err(|e| ExchangeError::new(e.to_string()))?;
             ids(self
                 .inner
-                .update_order(&options.order, &UtilityInput::from_retained(update))
+                .update_order(
+                    &options.order,
+                    &UtilityInput::from_retained((update).into()),
+                )
                 .await
                 .map_err(service_error)?)
         })
@@ -338,7 +341,7 @@ impl Exchange for BlofinNativeExchange {
         args: &[Value],
     ) -> Result<(), ExchangeError> {
         let method = serde_json::to_value(method).map_err(|e| ExchangeError::new(e.to_string()))?;
-        let result = UtilityInput::from_retained(result.clone());
+        let result = UtilityInput::from_retained((result.clone()).into());
         let first = args.first().cloned().map(UtilityInput::from_retained);
         self.inner
             .after_method_called_in_worker(

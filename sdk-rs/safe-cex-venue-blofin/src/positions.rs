@@ -78,7 +78,7 @@ pub fn map_positions<E>(
     let mut supported = Vec::new();
     for row in rows {
         if !crate::utility::is_known_non_swap_instrument(
-            &crate::utility::UtilityInput::from_retained(row.clone()),
+            &crate::utility::UtilityInput::from_retained((row.clone()).into()),
         )? {
             supported.push(row);
         }
@@ -119,12 +119,15 @@ pub fn map_positions<E>(
             let info = market.info.as_ref().ok_or_else(|| {
                 error("Cannot read properties of undefined (reading 'contractValue')")
             })?;
-            if info.is_null() {
-                return Err(
-                    error("Cannot read properties of null (reading 'contractValue')").into(),
-                );
+            if info.is_nullish() {
+                return Err(error(if info.is_null() {
+                    "Cannot read properties of null (reading 'contractValue')"
+                } else {
+                    "Cannot read properties of undefined (reading 'contractValue')"
+                })
+                .into());
             }
-            let n = number(info.get("contractValue"))?;
+            let n = safe_cex_num::js_retained_parse_float(info.get("contractValue"))?;
             if truthy(n) { n } else { 1.0 }
         };
         let contracts = if truthy(pos) && truthy(contract) {
@@ -246,7 +249,7 @@ pub fn map_positions<E>(
                 unrealized_pnl_native: None,
             }))
             .into(),
-            info: (Some(p.clone())).into(),
+            info: (Some(p.clone().into())).into(),
             realized_pnl: (None).into(),
             margin_size: (None).into(),
             last_update: (None).into(),
