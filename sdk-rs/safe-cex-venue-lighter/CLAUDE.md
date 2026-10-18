@@ -480,3 +480,9 @@ The fourteen TransactionClient get/submit methods have a real-constructor timing
 proof in `TRANSACTION_TIMING_AUDIT.md`. Keep live JS inputs until the nonce await
 settles, retain the batch iterator, and preserve receiver dispatch for submits.
 The typed FIFO promise family is already eager; do not wrap it in a second driver.
+
+The SDK API error binding delegates Error initialization to the installed runtime
+constructor and inherits its prototype. Optional captureStackTrace executes after
+all source fields are assigned; its mutations and original throws remain visible.
+`ERROR_CONSTRUCTOR_REVIEW.md` records native regressions and the shared engine
+stack-generation residual.

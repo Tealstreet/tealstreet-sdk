@@ -732,3 +732,15 @@ restricted implementations or change those rows' classifications.
 Per the corrected workflow, the implementation is merged and pushed before
 scoped gates. Source/native cases, discriminating controls and named fresh exits
 will be recorded after that implementation push. No gate success is claimed here.
+
+## Shipped Lighter API error constructor follow-up
+
+The historical DTO-only error rows above do not describe the shipped venue
+constructor after its runtime repair. The production binding now delegates to
+the installed Error constructor/prototype and executes the optional capture hook.
+Non-enumerable message, inherited toString, field order, raw UTF16 diagnostics,
+callback receiver/constructor/details identity and abrupt capture outcomes have
+actual NativeRuntime/production-Realm regressions. The metadata DTO remains a
+field carrier; it does not itself run JS construction. Shared engine stack
+generation remains OPEN, without fabricated traces. See
+`../safe-cex-venue-lighter/ERROR_CONSTRUCTOR_REVIEW.md`.

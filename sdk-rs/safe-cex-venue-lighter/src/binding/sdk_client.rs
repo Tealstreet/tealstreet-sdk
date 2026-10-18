@@ -425,25 +425,20 @@ fn construct_api_error(realm: &Realm, args: Vec<Js>) -> Result<Thrown, Thrown> {
 
 // ts: LighterApiError.constructor — Error(message) coercion, the default code,
 // then the brand and raw details/requestId/statusCode assignments.
-fn lighter_api_error(prototype: Js, args: Vec<Js>) -> Result<Js, Thrown> {
-    let message = arg(&args, 0);
-    let text = if message.is_undefined() {
-        None
-    } else {
-        Some(ops::to_string(&message)?.to_vec())
-    };
-    let shape =
-        LighterApiError::<Js>::new(text.clone().unwrap_or_default(), None, None, None, None);
-    let error = Js::object_with_class("Error", vec![]);
-    if let Js::Object(o) = &error {
-        *o.proto.borrow_mut() = Some(prototype);
-    }
-    if text.is_some() {
-        error.define("message", Js::utf16(&shape.message))?;
+fn lighter_api_error(
+    superclass: &Js,
+    constructor: Js,
+    target: Js,
+    args: Vec<Js>,
+) -> Result<Js, Thrown> {
+    let error = superclass.construct(vec![arg(&args, 0)], Some(&target))?;
+    let shape = LighterApiError::<Js>::new(vec![], None, None, None, None);
+    for key in ["code", "details", "requestId", "statusCode"] {
+        error.define(key, Js::Undefined)?;
     }
     error.define("name", Js::str(shape.name))?;
     let code = arg(&args, 1);
-    error.define(
+    error.set(
         "code",
         if code.is_undefined() {
             Js::utf16(&shape.code)
@@ -451,9 +446,18 @@ fn lighter_api_error(prototype: Js, args: Vec<Js>) -> Result<Js, Thrown> {
             code
         },
     )?;
-    error.define("details", arg(&args, 2))?;
-    error.define("requestId", arg(&args, 3))?;
-    error.define("statusCode", arg(&args, 4))?;
+    error.set("details", arg(&args, 2))?;
+    error.set("requestId", arg(&args, 3))?;
+    error.set("statusCode", arg(&args, 4))?;
+    if superclass.get("captureStackTrace")?.truthy() {
+        let capture = superclass.get("captureStackTrace")?;
+        if !capture.is_callable() {
+            return Err(Thrown::type_error(
+                "Error.captureStackTrace is not a function",
+            ));
+        }
+        capture.call(superclass.clone(), vec![error.clone(), constructor])?;
+    }
     Ok(error)
 }
 
@@ -967,11 +971,23 @@ fn candlestick_api_class(realm: &Realm) -> Result<Js, Thrown> {
 
 pub(crate) fn install(realm: &Realm) -> Result<(), Thrown> {
     let globals = &realm.0.globals;
+    let superclass = realm.global("Error")?;
     let error_proto = Js::object(vec![]);
-    let error_instance_proto = error_proto.clone();
-    let error_class = Js::constructor("LighterApiError", None, move |_, a| {
-        lighter_api_error(error_instance_proto.clone(), a)
+    if let Js::Object(data) = &error_proto {
+        *data.proto.borrow_mut() = Some(superclass.get("prototype")?);
+    }
+    let identity = Rc::new(std::cell::RefCell::new(std::rc::Weak::new()));
+    let class_identity = identity.clone();
+    let error_class = Js::constructor("LighterApiError", None, move |target, args| {
+        let constructor = class_identity
+            .borrow()
+            .upgrade()
+            .ok_or_else(|| Thrown::type_error("LighterApiError constructor was released"))?;
+        lighter_api_error(&superclass, Js::Function(constructor), target, args)
     });
+    if let Js::Function(function) = &error_class {
+        *identity.borrow_mut() = Rc::downgrade(function);
+    }
     error_class.define("prototype", error_proto)?;
     globals.define("LighterApiError", error_class)?;
 
