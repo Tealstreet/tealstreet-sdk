@@ -961,3 +961,16 @@ keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell'
 immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
 requires four independent compiled faults to fail actual constructed native
 socket/HTTP tests, with exact source restoration and a passing rerun after each.
+
+The generic decoder cohort measures `class_decode::decode` and the crate's
+`deserialize_present` helper with finite concrete type arguments. Observations
+inspect returned native number bits, tuple members and optional presence before
+reporting; they do not establish every generic instantiation or arbitrary JS
+graph admission. `scripts/generic-decoder-contracts.mjs` retains canonical full
+compiler discovery while selecting these two owners.
+
+`scripts/generic-decoder-controls.py` independently faults the live native DTO
+bridge and the generated wire-field presence helper. The real constructed
+UpdateOrder binding and public position-risk decoder must fail their named
+assertions, then pass after exact source restoration. Existing contracts and
+source declarations remain intact.
