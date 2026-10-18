@@ -133,8 +133,7 @@ fn error_live_oracle() {
         );
         assert_eq!(
             error
-                .metadata
-                .response
+                .response_json_view()
                 .as_ref()
                 .map(capture)
                 .unwrap_or_else(absent),
@@ -152,7 +151,7 @@ fn error_live_oracle() {
             "createKrakenApiError cause native field"
         );
         assert_eq!(
-            json!(error.metadata.response.is_some()),
+            json!(error.response_json_view().is_some()),
             expected["hasResponse"],
             "createKrakenApiError response presence"
         );
@@ -256,7 +255,7 @@ fn chosen_helper_boundaries() {
     );
     assert_eq!(boundary["alias"]["cause"], cause, "source live cause alias");
     assert_eq!(
-        error.metadata.response,
+        error.response_json_view(),
         Some(json!({"status":403})),
         "CHOSEN response snapshot"
     );

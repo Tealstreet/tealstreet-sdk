@@ -121,9 +121,7 @@ fn actual_account_read() {
         let errors = RefCell::new(Vec::<Value>::new());
         let trace = RefCell::new(Vec::<Value>::new());
         let mut original = ExchangeError::new("original-rejection");
-        original.response = Some(
-            json!({"data":{"msg":if *name=="object-msg"{json!({"detail":"object"})}else if *name=="empty-msg"{json!("")}else{json!("venue-message")}}}),
-        );
+        original = original.with_retained_response((json!({"data":{"msg":if *name=="object-msg"{json!({"detail":"object"})}else if *name=="empty-msg"{json!("")}else{json!("venue-message")}}})).into());
         original.store_subscriber_ids = vec![17, 23];
         let mut logger_error = ExchangeError::new("logger-rejection");
         logger_error.store_subscriber_ids = vec![31, 41];
@@ -222,7 +220,7 @@ fn actual_validation_and_invalidation() {
         let c = &ORACLE["validations"][i];
         assert_eq!(c["name"], *name, "VALIDATE-SOURCE identity");
         let mut original = ExchangeError::new(c["message"].as_str().unwrap());
-        original.response = Some(c["response"].clone());
+        original = original.with_retained_response(c["response"].clone().into());
         let errors = RefCell::new(Vec::<Value>::new());
         let mut logger_error = ExchangeError::new("logger-rejection");
         logger_error.store_subscriber_ids = vec![47, 59];
@@ -303,12 +301,18 @@ fn account_auth_owned_and_lifecycle_boundaries() {
         "VALIDATE-SOURCE error alias"
     );
     let mut original = ExchangeError::new("alias");
-    original.response = Some(json!({"data":{"msg":{"value":"before"}}}));
+    original = original.with_retained_response((json!({"data":{"msg":{"value":"before"}}})).into());
     let result = run(validate_account(|| ready(Err(original.clone())), &|_| {
         Ok(())
     }))
     .unwrap();
-    original.response.as_mut().unwrap()["data"]["msg"]["value"] = json!("after");
+    let mut changed = original.response_json_view().unwrap();
+    changed["data"]["msg"]["value"] = json!("after");
+    original = original.with_retained_response(changed.into());
+    assert_eq!(
+        original.response_json_view().unwrap()["data"]["msg"]["value"],
+        "after"
+    );
     assert_eq!(
         result,
         json!({"error":{"value":"before"}}),
@@ -390,7 +394,9 @@ fn validation_logger_argument_snapshot() {
         "VALIDATE-SOURCE logger aliases return value"
     );
     let mut error = ExchangeError::new("alias");
-    error.response = Some(json!({"data":{"message":{"value":"before"},"msg":{"value":"before"}}}));
+    error = error.with_retained_response(
+        (json!({"data":{"message":{"value":"before"},"msg":{"value":"before"}}})).into(),
+    );
     let logger = |mut argument: Value| {
         argument["value"] = json!("logged");
         Ok(())

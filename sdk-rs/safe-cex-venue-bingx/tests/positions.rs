@@ -226,7 +226,7 @@ impl ReadTransport for Transport {
                 || (error["scope"] == "order-b" && params.unwrap()["orderId"] == "b"));
         let result = if rejected {
             let mut e = ExchangeError::new(error["message"].as_str().unwrap());
-            e.response = Some(json!({"data":{"msg":error["msg"]}}));
+            e = e.with_retained_response((json!({"data":{"msg":error["msg"]}})).into());
             e.store_subscriber_ids = vec![71, 83];
             Err(e)
         } else {
@@ -575,7 +575,8 @@ fn write_failures_preserve_subscriber_cause_and_partial_effects() {
                 let mut cause = ExchangeError::new("subscriber cause");
                 cause.name = "ListenerError".into();
                 cause.store_subscriber_ids = vec![71, 83];
-                cause.response = Some(json!({"data":{"msg":"subscriber denied"}}));
+                cause = cause
+                    .with_retained_response((json!({"data":{"msg":"subscriber denied"}})).into());
                 Err(StoreSubscriberError::new("subscriber cause").with_cause(Rc::new(cause)))
             }),
         );

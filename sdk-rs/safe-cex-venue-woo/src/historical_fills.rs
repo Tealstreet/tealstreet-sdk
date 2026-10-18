@@ -23,27 +23,19 @@ fn bounds(value: Option<f64>, milliseconds: bool) -> Result<Option<f64>, Exchang
     result.map_err(|error| ExchangeError::new(error.message))
 }
 fn rest_error(failure: RestFailure) -> ExchangeError {
-    let context_view = failure
-        .context
-        .as_deref()
-        .and_then(|value| value.get("response"))
-        .cloned();
-    // Shared conversion owns the explicit JSON error view and retained origin.
-    let mut error: ExchangeError = failure.into();
-    if let Some(view) = context_view {
-        error.response = Some(view);
-    }
-    error
+    failure.into()
 }
 
 fn report(venue: &dyn Exchange, error: ExchangeError) -> Result<(), ExchangeError> {
-    let response_message = error
-        .response
+    let response = error.retained_response_input();
+    let response_message = response
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("message"));
-    let input = match response_message.filter(|v| safe_cex_num::js_truthy(Some(v))) {
-        Some(Value::String(message)) => ExchangeErrorInput::Message(message.clone()),
+    let input = match response_message.filter(|v| safe_cex_num::js_retained_truthy(v)) {
+        Some(safe_cex_types::retained_json::RetainedJsonInput::Text(message)) => {
+            ExchangeErrorInput::Message(String::from_utf16_lossy(message))
+        }
         Some(_) => {
             return Err(ExchangeError::new(
                 "history error reporter cannot retain a non-string response message",

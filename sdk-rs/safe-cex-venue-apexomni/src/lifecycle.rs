@@ -56,8 +56,8 @@ impl ApexOmniExchange {
             .request("get", "/v3/user", J::Undefined, J::Undefined, false)
             .await
         {
-            let response_message = error
-                .response
+            let response_view = error.response_json_view();
+            let response_message = response_view
                 .as_ref()
                 .and_then(|v| v.get("data"))
                 .and_then(|v| v.get("msg"));

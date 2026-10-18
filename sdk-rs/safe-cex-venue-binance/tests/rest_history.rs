@@ -70,11 +70,11 @@ fn error(name: &str) -> Failure {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "history-code"
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"venue detail"}})).into());
     Rc::new(e)
 }
 fn error_wire(e: &Failure, want: &Failure) -> Value {
-    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))})
 }
 fn original(e: &Failure, want: &Failure, l: &str) {
     assert!(Rc::ptr_eq(e, want), "{l}: original Error Rc");
@@ -86,7 +86,7 @@ fn original(e: &Failure, want: &Failure, l: &str) {
         "{l}"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(json!({"status":503,"data":{"msg":"venue detail"}})),
         "{l}"
     )
@@ -675,7 +675,7 @@ fn reader(family: &str) {
                 assert!(!Rc::ptr_eq(e, &error), "{label}: generated Error");
                 assert_eq!(e.name, "TypeError", "{label}");
                 assert!(
-                    e.code.is_none() && e.response.is_none(),
+                    e.code.is_none() && e.response_json_view().is_none(),
                     "{label}: generated absent metadata"
                 );
                 let message = match (family, name) {
@@ -1149,7 +1149,7 @@ fn mapper() {
             } else {
                 assert_eq!(e.name, "TypeError");
                 assert_eq!(e.message, "Cannot read properties of null (reading 'id')");
-                assert!(e.code.is_none() && e.response.is_none());
+                assert!(e.code.is_none() && e.response_json_view().is_none());
             }
         } else {
             let v = result.as_ref().unwrap();

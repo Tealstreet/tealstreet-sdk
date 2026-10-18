@@ -677,9 +677,12 @@ fn account_http_error_keeps_status_and_request() {
         .unwrap() = (403.0, json!({"code":100202,"msg":"permission denied"}));
     let error = h.drive(h.venue().get_account()).unwrap_err();
     assert!(error.is_axios_error);
-    assert_eq!(error.response.as_ref().unwrap()["status"], 403.0);
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["msg"],
+        error.response_json_view().as_ref().unwrap()["status"],
+        403.0
+    );
+    assert_eq!(
+        error.response_json_view().as_ref().unwrap()["data"]["msg"],
         "permission denied"
     );
     assert_eq!(error.config.as_ref().unwrap()["url"], BALANCE);
