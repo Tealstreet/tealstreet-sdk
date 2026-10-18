@@ -61,11 +61,41 @@ fn futures_wire(wire: &Wire) {
 
 #[test]
 fn futures_binds_all_sixteen_defaults() {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use std::cell::RefCell;
+
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/position-mode-report-source.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     let (venue, f) = support::futures();
     let rt = &f.runtime;
     let wire = &f.wire;
     let venue: Rc<dyn Exchange> = venue;
     futures_wire(wire);
+    let emitted = Rc::new(RefCell::new(Vec::new()));
+    let received = emitted.clone();
+    venue.base().on(
+        "error",
+        Rc::new(move |_, value| {
+            received.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
 
     // 1 start: public bootstrap, both sockets' tokens, tick and the order snapshot
     drive(rt, venue.start()).unwrap();
@@ -239,9 +269,10 @@ fn futures_binds_all_sixteen_defaults() {
 
     // 12 change_position_mode: refused while a position is open, sent when flat
     let refused = drive(rt, venue.change_position_mode(true, None)).unwrap_err();
+    assert_eq!(refused.name, source["rejection"]["name"].as_str().unwrap());
     assert_eq!(
         refused.message,
-        "Cannot update position mode with open positions"
+        source["rejection"]["message"].as_str().unwrap()
     );
     assert!(!sent(
         &wire.take(),
@@ -342,13 +373,31 @@ fn futures_binds_all_sixteen_defaults() {
         3,
         "detail, one snapshot shard and private sockets dial"
     );
-    assert!(
-        rt.errors
-            .borrow()
+    assert_eq!(emitted.borrow().len(), 2, "preflight and catch each emit");
+    for (actual, expected) in emitted
+        .borrow()
+        .iter()
+        .zip(source["events"].as_array().unwrap())
+    {
+        assert!(
+            actual.strict_equals(&Js::str(expected.as_str().unwrap())),
+            "native error event: {actual:?}"
+        );
+    }
+    assert_eq!(
+        rt.errors.borrow().len(),
+        2,
+        "preflight and catch each report"
+    );
+    assert_eq!(
+        *rt.errors.borrow(),
+        source["reports"]
+            .as_array()
+            .unwrap()
             .iter()
-            .all(|e| e == "Cannot update position mode with open positions"),
-        "only the refused mode change reports: {:?}",
-        rt.errors.borrow()
+            .map(Value::to_string)
+            .collect::<Vec<_>>(),
+        "raw Error report projection matches the constructed TS exchange"
     );
     // Socket listeners route to the public socket and return a working cleanup.
     let candles = venue

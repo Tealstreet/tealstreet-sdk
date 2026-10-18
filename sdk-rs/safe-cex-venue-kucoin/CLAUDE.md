@@ -318,3 +318,11 @@ receives eight malformed/coercion values between distinct good rows. Every
 native Ticker number is compared by bits with the constructed TS exchange and
 DefaultStore. The shared control runner independently misroutes futures and
 Spot bid fields and requires compiled assertion failures and restored passes.
+
+The constructed sixteen-defaults witness compares refused position-mode errors
+with the maintained exchange, actual HTTP adapter and telemetry sink. TS emits
+and reports twice: its preflight creates one Error, then throws a fresh Error
+which the catch reports unchanged. Native event messages are checked before JSON;
+both raw report objects serialize as `{}` because Error fields are non-enumerable.
+The witness fixes both report/event counts independently and preserves the actual
+position read and absence of a mode write.
