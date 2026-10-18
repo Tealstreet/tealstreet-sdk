@@ -63,7 +63,9 @@ and exact restored passes.
 
 The reviewed nested `copy` and `present` bodies are byte-identical before and
 after 9225c237ef. Its two surrounding deletion calls propagate their existing
-Results; only the helpers' enclosing-file fingerprints are refreshed.
+Results. The canonical scan also refuses the local query glob import; its four
+used names are now explicit module imports. Both helpers and query behavior are
+unchanged, and the enclosing-file fingerprints cover this reviewed import edit.
 
 Run the added capabilities serially from `sdk-rs`:
 
