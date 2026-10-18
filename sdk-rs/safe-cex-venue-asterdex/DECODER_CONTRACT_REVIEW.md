@@ -20,7 +20,8 @@ whole-package accepted-set gate.
 | CheckParams | 9 | 30 |
 | ApproveParams | 6 | 24 |
 
-The 130 direct fields expand nested records and all seventeen core order fields.
+All 130 direct fields are listed above. Projections also expand nested records
+and all seventeen core order fields.
 Each of the 738 independently authored observations executes actual production
 Deserialize through owned Value, qualified borrowed Value, direct JSON text and
 qualified text Deserializer plus end-of-input verification. Native projections
@@ -143,3 +144,10 @@ The refreshed three ordinary workflow regressions, 738 actual-source observation
 150 runtime null comparisons and local parity pass after this merge. Core optional
 model fields in these records are observed through their JSON presence/value;
 retained native undefined admission is outside this JSON decoder corpus.
+
+The refreshed selected runner passes eleven production-native owners with zero
+classifications or failed owners. Replacing both workflow source files with
+master7d76523624f4 compiles and fails all three ordinary regressions: the two DTOs
+accept their complete arrays, and ExecutionOrder rejects decimals with
+`invalid type: map, expected f64`. Exact restoration passes all three. The required
+all-features cancellation inventory also passes.
