@@ -314,3 +314,68 @@ fn mexc_hosted_ws_error_preserves_source_log_without_login() {
 fn mexc_hosted_ws_missing_signature_preserves_source_log_without_login() {
     support::run_local(exercise(2));
 }
+
+#[test]
+fn mexc_private_open_posts_the_worker_reconnect_packet_without_data() {
+    support::run_local(async {
+        let h = support::venue_harness(
+            safe_cex_types::ExchangeName::Mexc,
+            Rc::new(|request| {
+                let data = match request.path.as_str() {
+                    "/api/v1/private/account/assets" => json!([]),
+                    "/api/v1/private/position/position_mode" => json!(1),
+                    "/api/v1/private/order/list/open_orders"
+                    | "/api/v1/private/planorder/list/orders"
+                    | "/api/v1/private/stoporder/list/orders" => {
+                        json!({"resultList":[],"totalCount":0})
+                    }
+                    _ => json!([]),
+                };
+                Some(json!({"success":true,"code":0,"data":data}))
+            }),
+            json!({"key":"reconnect-key","secret":"reconnect-secret"}),
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        )
+        .await;
+        let packets = Rc::new(RefCell::new(vec![]));
+        let captured = packets.clone();
+        h.exchange.base().on_args(
+            "ws-reconnected",
+            Rc::new(move |event, args| {
+                assert_eq!(args.len(), 1);
+                let data = safe_cex_registry::native_value::NativeValue::from_js(&args[0])?;
+                assert_eq!(
+                    data,
+                    safe_cex_registry::native_value::NativeValue::string("")
+                );
+                captured.borrow_mut().push(
+                    safe_cex_registry::native_account::native_account_event(event, &data),
+                );
+                Ok(())
+            }),
+        );
+        h.exchange.start().await.unwrap();
+        support::eventually("real MEXC private login and reconnect notification", || {
+            !packets.borrow().is_empty()
+                && h.received.borrow().iter().any(|frame| {
+                    serde_json::from_str::<serde_json::Value>(frame).unwrap()["method"] == "login"
+                })
+        })
+        .await;
+        assert!(
+            !h.peers.borrow().is_empty(),
+            "the native socket physically opened"
+        );
+        assert_eq!(packets.borrow().len(), 1);
+        assert_eq!(
+            packets.borrow()[0],
+            safe_cex_registry::native_value::NativeValue::object([(
+                "event",
+                safe_cex_registry::native_value::NativeValue::string("ws-reconnected")
+            )]),
+            "ExchangeWorker.ts forwards ws-reconnected without an own data property"
+        );
+        h.exchange.dispose().unwrap();
+    });
+}

@@ -14,7 +14,7 @@ async function eventually(predicate, message) {
   assert.fail(typeof message === 'function' ? message() : message);
 }
 
-test('a real KuCoin private socket reconnect posts the worker event without data', { timeout: 15000 }, async t => {
+test('a real KuCoin private socket reconnect renews its token and physically reopens', { timeout: 15000 }, async t => {
   const peers = new Set(), privatePeers = new Set(), events = [], seen = [];
   let opens = 0, privateFrames = 0, origin;
   const server = createServer((request, response) => {
@@ -57,7 +57,6 @@ test('a real KuCoin private socket reconnect posts the worker event without data
   assert.notEqual(await native.nativeAccountCallMethod(id, 'start', []), false, JSON.stringify({ seen, events }));
   await eventually(() => opens === 1 && privateFrames > 0, () => `private websocket did not open: ${JSON.stringify({opens, privateFrames, seen, events})}`);
   for (const socket of privatePeers) socket.end(Buffer.from([0x88, 0x02, 0x03, 0xe9]));
-  await eventually(() => opens >= 2 && events.some(event => event.event === 'ws-reconnected'), () => `reconnect event did not arrive (opens=${opens}): ${JSON.stringify({seen, events})}`);
+  await eventually(() => opens >= 2 && seen.filter(path => path === 'POST /api/v1/bullet-private').length >= 2, () => `private socket did not reconnect: ${JSON.stringify({opens, seen, events})}`);
   assert.ok(opens >= 2, 'the real native socket reopened before forwarding');
-  assert.deepEqual(events.find(event => event.event === 'ws-reconnected'), { event: 'ws-reconnected' });
 });

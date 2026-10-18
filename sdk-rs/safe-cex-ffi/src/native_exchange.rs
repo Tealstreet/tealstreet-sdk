@@ -17,7 +17,7 @@ use napi::{
 };
 use safe_cex_registry::native_account::{
     NativeAccount, NativeAccountFuture, NativeAccountSpec, native_account_call,
-    native_account_watch, open_native_account,
+    native_account_event, native_account_watch, open_native_account,
 };
 use safe_cex_registry::native_value::NativeValue;
 use std::{
@@ -315,10 +315,7 @@ fn open(
                 event_startup.cancel(&account);
             }
             on_event.call(
-                JsData(NativeValue::object([
-                    ("event", NativeValue::string(event)),
-                    ("data", data.clone()),
-                ])),
+                JsData(native_account_event(event, data)),
                 ThreadsafeFunctionCallMode::NonBlocking,
             );
         }),
