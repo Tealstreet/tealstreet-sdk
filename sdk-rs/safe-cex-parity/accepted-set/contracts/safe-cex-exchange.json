@@ -31391,7 +31391,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"latency\",Js::Number(n))]),false).unwrap(); serde_json::json!(store.native_value(\"latency\").unwrap().to_number().unwrap()) }",
+        "call": "{ let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"latency\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); serde_json::json!(store.native_value(\"latency\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -31469,7 +31469,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"messageHandlerStats\",Js::Number(n))]),false).unwrap(); let v=store.message_handler_stats().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"messageHandlerStats\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=store.message_handler_stats().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -31547,7 +31547,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"starkConfig\",Js::Number(n))]),false).unwrap(); let v=store.stark_config().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"starkConfig\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=store.stark_config().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -31625,7 +31625,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"zkLinkConfig\",Js::Number(n))]),false).unwrap(); let v=store.zk_link_config().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"zkLinkConfig\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=store.zk_link_config().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -31703,7 +31703,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"userData\",Js::Number(n))]),false).unwrap(); let v=store.user_data().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"userData\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=store.user_data().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -31781,7 +31781,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"socketHealth\",Js::Number(n))]),false).unwrap(); let v=store.socket_health().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"socketHealth\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=store.socket_health().unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -31939,7 +31939,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::set_setting(&store,\"witness\",n==7.0).unwrap(); serde_json::json!(store.native_value(\"options\").unwrap().get(\"witness\").unwrap().truthy()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::set_setting(&store,\"witness\",n==7.0).unwrap(); serde_json::json!(store.native_value(\"options\").unwrap().get(\"witness\").unwrap().truthy()) }",
         "cases": [
           {
             "input": 7,
@@ -32017,7 +32017,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let id=n.to_string(); store.update_native(&Js::object(vec![(\"orders\",Js::array(vec![Js::object(vec![(\"id\",Js::str(\"A\"))]),Js::object(vec![(\"id\",Js::str(&id))])]))]),false).unwrap(); Store::remove_order(&store,\"A\").unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"id\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let id=n.to_string(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"orders\",crate::js_runtime::value::Js::array(vec![crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(\"A\"))]),crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(&id))])]))]),false).unwrap(); Store::remove_order(&store,\"A\").unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"id\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -32103,7 +32103,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let id=n.to_string(); store.update_native(&Js::object(vec![(\"orders\",Js::array(vec![Js::object(vec![(\"id\",Js::str(\"A\"))]),Js::object(vec![(\"id\",Js::str(&id))])]))]),false).unwrap(); Store::remove_orders(&store,&[\"A\"]).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"id\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let id=n.to_string(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"orders\",crate::js_runtime::value::Js::array(vec![crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(\"A\"))]),crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(&id))])]))]),false).unwrap(); Store::remove_orders(&store,&[\"A\"]).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"id\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -32190,7 +32190,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::update_order_status(&store,\"A\",status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::update_order_status(&store,\"A\",status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>().into()) }",
         "cases": [
           {
             "input": 7,
@@ -32285,7 +32285,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::update_orders_status(&store,&[\"A\"],status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::update_orders_status(&store,&[\"A\"],status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>().into()) }",
         "cases": [
           {
             "input": 7,
@@ -32380,7 +32380,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::mark_orders_terminal(&store,&[\"A\"],status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let status=if n==7.0 {safe_cex_types::OrderStatus::Canceled}else{safe_cex_types::OrderStatus::Closed}; Store::mark_orders_terminal(&store,&[\"A\"],status).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"status\").unwrap().to_js_string().unwrap()==\"canceled\".encode_utf16().collect::<Vec<_>>().into()) }",
         "cases": [
           {
             "input": 7,
@@ -32481,7 +32481,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"amount\",n); Store::update_order(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"amount\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"amount\",n); Store::update_order(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"amount\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -32582,7 +32582,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"entryPrice\",n); Store::update_position(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"positions\").unwrap().get(\"0\").unwrap().get(\"entryPrice\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"entryPrice\",n); Store::update_position(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"positions\").unwrap().get(\"0\").unwrap().get(\"entryPrice\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -32683,7 +32683,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"last\",n); Store::update_ticker(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"tickers\").unwrap().get(\"0\").unwrap().get(\"last\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"last\",n); Store::update_ticker(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"tickers\").unwrap().get(\"0\").unwrap().get(\"last\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -32784,7 +32784,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"contractSize\",n); Store::update_market(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"markets\").unwrap().get(\"0\").unwrap().get(\"contractSize\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"contractSize\",n); Store::update_market(&store,\"A\",&patch).unwrap(); serde_json::json!(store.native_value(\"markets\").unwrap().get(\"0\").unwrap().get(\"contractSize\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -32891,7 +32891,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"entryPrice\",n); Store::update_positions(&store,&[(Some(\"A\".into()),patch)]).unwrap(); serde_json::json!(store.native_value(\"positions\").unwrap().get(\"0\").unwrap().get(\"entryPrice\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let mut patch=safe_cex_store::model_patch::ModelPatch::default(); patch.set_number(\"entryPrice\",n); Store::update_positions(&store,&[(Some(\"A\".into()),patch)]).unwrap(); serde_json::json!(store.native_value(\"positions\").unwrap().get(\"0\").unwrap().get(\"entryPrice\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -32992,7 +32992,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let order=serde_json::from_value(serde_json::json!({\"id\":\"N\",\"symbol\":\"S\",\"amount\":n,\"filled\":0,\"remaining\":n,\"lastUpdate\":0})).unwrap(); Store::set_orders_for_symbol(&store,\"S\",vec![order]).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"amount\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); let order=serde_json::from_value(serde_json::json!({\"id\":\"N\",\"symbol\":\"S\",\"amount\":n,\"filled\":0,\"remaining\":n,\"lastUpdate\":0})).unwrap(); Store::set_orders_for_symbol(&store,\"S\",vec![order]).unwrap(); serde_json::json!(store.native_value(\"orders\").unwrap().get(\"0\").unwrap().get(\"amount\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33081,7 +33081,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_stark_config(&store,Some(serde_json::json!(n))).unwrap(); serde_json::json!(store.native_value(\"starkConfig\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_stark_config(&store,Some(serde_json::json!(n))).unwrap(); serde_json::json!(store.native_value(\"starkConfig\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33170,7 +33170,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_zk_link_config(&store,Some(safe_cex_types::retained_json::RetainedJsonInput::Float(n))).unwrap(); serde_json::json!(store.native_value(\"zkLinkConfig\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_zk_link_config(&store,Some(safe_cex_types::retained_json::RetainedJsonInput::Float(n))).unwrap(); serde_json::json!(store.native_value(\"zkLinkConfig\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33259,7 +33259,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_user_data(&store,Some(serde_json::json!(n))).unwrap(); serde_json::json!(store.native_value(\"userData\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_user_data(&store,Some(serde_json::json!(n))).unwrap(); serde_json::json!(store.native_value(\"userData\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33362,7 +33362,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_socket_health(&store,&serde_json::json!({\"witness\":n}).as_object().unwrap().clone()).unwrap(); serde_json::json!(store.native_value(\"socketHealth\").unwrap().get(\"witness\").unwrap().to_number().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); Store::update_socket_health(&store,&serde_json::json!({\"witness\":n}).as_object().unwrap().clone()).unwrap(); serde_json::json!(store.native_value(\"socketHealth\").unwrap().get(\"witness\").unwrap().to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33445,7 +33445,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"messageHandlerStats\",Js::Number(n))]),false).unwrap(); let v=Store::message_handler_stats(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"messageHandlerStats\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=Store::message_handler_stats(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33528,7 +33528,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"starkConfig\",Js::Number(n))]),false).unwrap(); let v=Store::stark_config(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"starkConfig\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=Store::stark_config(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33611,7 +33611,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"zkLinkConfig\",Js::Number(n))]),false).unwrap(); let v=Store::zk_link_config(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"zkLinkConfig\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=Store::zk_link_config(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33694,7 +33694,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"userData\",Js::Number(n))]),false).unwrap(); let v=Store::user_data(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"userData\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=Store::user_data(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33777,7 +33777,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&Js::object(vec![(\"socketHealth\",Js::Number(n))]),false).unwrap(); let v=Store::socket_health(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::Js::object(vec![(\"socketHealth\",crate::js_runtime::value::Js::Number(n))]),false).unwrap(); let v=Store::socket_health(&store).unwrap().unwrap(); serde_json::json!(v.as_f64().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -33880,7 +33880,7 @@
         },
         "input": "observed",
         "reason": "Direct production Store trait entrypoint on the actual canonical graph, observing its reached native fields after the operation; no owner serialization or substitute implementation.",
-        "call": "{ use crate::js_runtime::value::{Js,from_json}; use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); store.native_value(\"tickersBySymbol\").unwrap().set(\"W\",Js::object(vec![(\"id\",Js::str(&n.to_string()))])).unwrap(); let found=Store::lookup_ticker_by_symbol(&store,\"W\").unwrap(); serde_json::json!(found.update_id().unwrap().unwrap().parse::<f64>().unwrap()) }",
+        "call": "{ use safe_cex_store::Store; let store=$type::new(); let n=$value.as_f64().unwrap(); store.update_native(&crate::js_runtime::value::from_json(&serde_json::json!({\"orders\":[{\"id\":\"A\",\"symbol\":\"S\",\"amount\":1,\"filled\":0,\"remaining\":1,\"lastUpdate\":0,\"status\":\"open\"}],\"positions\":[{\"id\":\"A\",\"symbol\":\"S\",\"entryPrice\":0,\"notional\":0,\"leverage\":1,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0}],\"tickers\":[{\"id\":\"A\",\"symbol\":\"S\",\"bid\":0,\"ask\":0,\"last\":0,\"mark\":0,\"index\":0,\"percentage\":0,\"openInterest\":0,\"fundingRate\":0,\"fundingTime\":0,\"volume\":0,\"quoteVolume\":0}],\"markets\":[{\"id\":\"A\",\"symbol\":\"S\",\"base\":\"B\",\"quote\":\"Q\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":10},\"leverage\":{\"min\":1,\"max\":10}}}]})),false).unwrap(); store.native_value(\"tickersBySymbol\").unwrap().set(\"W\",crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(&n.to_string()))])).unwrap(); let found=Store::lookup_ticker_by_symbol(&store,\"W\").unwrap(); serde_json::json!(found.update_id().unwrap().unwrap().parse::<f64>().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34052,7 +34052,7 @@
     },
     "category": "decoder",
     "evidence": "Executes the production preserving-undefined projection / typed patch admission directly, before observing native number bits and changed own fields. Full model/undefined/getter cases remain in canonical_native_store.",
-    "call": "{ use crate::js_runtime::value::Js; let n=$value.as_f64().unwrap(); let v: f64=$type(&Js::Number(n)).unwrap(); serde_json::json!({\"bits\":v.to_bits().to_string()}) }",
+    "call": "{ let n=$value.as_f64().unwrap(); let v: f64=$type(&crate::js_runtime::value::Js::Number(n)).unwrap(); serde_json::json!({\"bits\":v.to_bits().to_string()}) }",
     "cases": [
       {
         "input": 7.5,
@@ -34202,7 +34202,7 @@
     },
     "category": "decoder",
     "evidence": "Executes the production preserving-undefined projection / typed patch admission directly, before observing native number bits and changed own fields. Full model/undefined/getter cases remain in canonical_native_store.",
-    "call": "{ use crate::js_runtime::value::{Js,from_typed}; use safe_cex_store::model_patch::ModelPatch; let row=from_typed(&safe_cex_types::Ticker {id:\"A\".into(),symbol:\"A\".into(),bid:0.0,ask:0.0,last:0.0,mark:0.0,index:0.0,mid_price:None,percentage:0.0,open_interest:0.0,funding_rate:0.0,funding_time:0.0,volume:0.0,quote_volume:0.0,timestamp:None,info:None}).unwrap(); let mut patch=ModelPatch::default(); patch.set_number(\"last\",$value.as_f64().unwrap()); let v=$type::<safe_cex_types::Ticker>(&row,&patch).unwrap(); serde_json::json!({\"bits\":v.get(\"last\").unwrap().to_number().unwrap().to_bits().to_string(),\"freeOwn\":v.has_own(\"bid\")}) }",
+    "call": "{ use safe_cex_store::model_patch::ModelPatch; let row=crate::js_runtime::value::from_typed(&safe_cex_types::Ticker {id:\"A\".into(),symbol:\"A\".into(),bid:0.0,ask:0.0,last:0.0,mark:0.0,index:0.0,mid_price:None,percentage:0.0,open_interest:0.0,funding_rate:0.0,funding_time:0.0,volume:0.0,quote_volume:0.0,timestamp:None,info:None}).unwrap(); let mut patch=ModelPatch::default(); patch.set_number(\"last\",$value.as_f64().unwrap()); let v=$type::<safe_cex_types::Ticker>(&row,&patch).unwrap(); serde_json::json!({\"bits\":v.get(\"last\").unwrap().to_number().unwrap().to_bits().to_string(),\"freeOwn\":v.has_own(\"bid\")}) }",
     "cases": [
       {
         "input": 7.5,
@@ -34320,7 +34320,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.invoke(\"update\",&[Js::object(vec![(\"latency\",Js::Number(n))])]).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.invoke(\"update\",&[crate::js_runtime::value::Js::object(vec![(\"latency\",crate::js_runtime::value::Js::Number(n))])]).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34396,7 +34396,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.replace_field(\"latency\",Js::Number(n)).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.replace_field(\"latency\",crate::js_runtime::value::Js::Number(n)).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34487,7 +34487,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(\"A\")),(\"amount\",crate::js_runtime::value::Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();let v=graph.find_row(\"orders\",&crate::js_runtime::value::Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34590,7 +34590,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();graph.update_one(\"orders\",&Js::object(vec![(\"id\",Js::str(\"A\"))]),&Js::object(vec![(\"amount\",Js::Number(n+1.0))])).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(\"A\")),(\"amount\",crate::js_runtime::value::Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();graph.update_one(\"orders\",&crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(\"A\"))]),&crate::js_runtime::value::Js::object(vec![(\"amount\",crate::js_runtime::value::Js::Number(n+1.0))])).unwrap();let v=graph.find_row(\"orders\",&crate::js_runtime::value::Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34672,7 +34672,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.replace_field(\"latency\",Js::Number(n)).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); let n=$value.as_f64().unwrap(); graph.replace_field(\"latency\",crate::js_runtime::value::Js::Number(n)).unwrap(); let v=graph.get(\"latency\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34745,7 +34745,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); for _ in 0..($value.as_u64().unwrap()){ graph.record_request_outcome(\"ok\").unwrap(); } let v=graph.get(\"requestStats\").unwrap().get(\"ok\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); for _ in 0..($value.as_u64().unwrap()){ graph.record_request_outcome(\"ok\").unwrap(); } let v=graph.get(\"requestStats\").unwrap().get(\"ok\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34839,7 +34839,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(\"A\")),(\"amount\",crate::js_runtime::value::Js::Number(n))]); graph.add_one(\"orders\",&row,false).unwrap();let v=graph.find_row(\"orders\",&crate::js_runtime::value::Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
@@ -34933,7 +34933,7 @@
         },
         "input": "observed",
         "reason": "Executes the actual canonical Store operation and observes the reached native value without serializing the owner or an intermediate typed row.",
-        "call": "{ use crate::js_runtime::value::Js; let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=Js::object(vec![(\"id\",Js::str(\"A\")),(\"amount\",Js::Number(n))]); graph.upsert_many(\"orders\",&Js::array(vec![row]),true).unwrap();let v=graph.find_row(\"orders\",&Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
+        "call": "{ let graph=$type::new(); let n=$value.as_f64().unwrap(); let row=crate::js_runtime::value::Js::object(vec![(\"id\",crate::js_runtime::value::Js::str(\"A\")),(\"amount\",crate::js_runtime::value::Js::Number(n))]); graph.upsert_many(\"orders\",&crate::js_runtime::value::Js::array(vec![row]),true).unwrap();let v=graph.find_row(\"orders\",&crate::js_runtime::value::Js::str(\"A\")).unwrap().get(\"amount\").unwrap(); serde_json::json!(v.to_number().unwrap()) }",
         "cases": [
           {
             "input": 7,
