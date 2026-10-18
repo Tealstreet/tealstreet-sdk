@@ -280,7 +280,9 @@ fn retained_config_uses_the_production_store_update_without_json_copy() {
         let config = native.zk_link_config().expect("native config committed");
         observe(&from_typed(&*config).unwrap(), &case["stored"]);
         assert!(
-            native.serialize().zk_link_config.is_none(),
+            safe_cex_store::Store::serialize(native.as_ref())
+                .zk_link_config
+                .is_none(),
             "source snapshot omits config"
         );
     }
