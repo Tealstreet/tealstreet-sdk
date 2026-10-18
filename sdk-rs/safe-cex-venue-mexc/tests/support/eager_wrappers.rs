@@ -8,7 +8,7 @@ fn load_market(
     venue: &safe_cex_venue_mexc::exchange::MexcExchange,
     rt: &support::Runtime,
     wire: &support::Wire,
-    store: &safe_cex_store::store::DefaultStore,
+    store: &safe_cex_exchange::native_store::DefaultStore,
 ) {
     script_venue(wire);
     let markets = drive(rt, venue.fetch_markets()).unwrap();
@@ -48,7 +48,7 @@ fn eager_metadata_notifies_before_returning_its_rejected_waiter() {
         "metadata source prefix notifies before SDK waiter polling"
     );
     assert_eq!(
-        store.fetched_leverage()["BTCUSDT"].buy_leverage,
+        store.fetched_leverage().unwrap()["BTCUSDT"].buy_leverage,
         20.0,
         "commit precedes throw"
     );
@@ -78,14 +78,14 @@ fn eager_metadata_held_request_finishes_after_waiter_drop() {
     );
     rt.pump();
     assert!(
-        !store.fetched_leverage().contains_key("BTCUSDT"),
+        !store.fetched_leverage().unwrap().contains_key("BTCUSDT"),
         "held response fences continuation"
     );
     drop(waiter);
     wire.release_responses();
     rt.pump();
-    assert_eq!(store.markets()[0].limits.leverage.max, 60.0);
-    let fetched = store.fetched_leverage()["BTCUSDT"].clone();
+    assert_eq!(store.markets().unwrap()[0].limits.leverage.max, 60.0);
+    let fetched = store.fetched_leverage().unwrap()["BTCUSDT"].clone();
     assert_eq!(
         (fetched.buy_leverage, fetched.sell_leverage),
         (31.0, 12.0),
@@ -126,12 +126,15 @@ fn eager_unit_cancel_commits_after_held_response_and_waiter_drop() {
         sent(&calls(&wire), "POST", CANCEL_ALL),
         "assembly unit starts before waiter polling"
     );
-    assert_eq!(store.orders()[0].status, safe_cex_types::OrderStatus::Open);
+    assert_eq!(
+        store.orders().unwrap()[0].status,
+        safe_cex_types::OrderStatus::Open
+    );
     drop(waiter);
     wire.release_responses();
     rt.pump();
     assert_eq!(
-        store.orders()[0].status,
+        store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Canceled
     );
     assert!(calls(&wire).is_empty());
@@ -254,7 +257,10 @@ fn eager_metadata_ready_http_still_fences_throwing_store_continuation() {
     );
     assert_eq!(count.get(), 2);
     assert_eq!(later.get(), 0, "throw aborts each notification fanout");
-    assert_eq!(store.fetched_leverage()["BTCUSDT"].sell_leverage, 20.0);
+    assert_eq!(
+        store.fetched_leverage().unwrap()["BTCUSDT"].sell_leverage,
+        20.0
+    );
 }
 
 #[test]
@@ -277,7 +283,10 @@ fn eager_metadata_retains_the_constructed_receiver_until_http_finishes() {
     );
     wire.release_responses();
     rt.pump();
-    assert_eq!(store.fetched_leverage()["BTCUSDT"].buy_leverage, 31.0);
+    assert_eq!(
+        store.fetched_leverage().unwrap()["BTCUSDT"].buy_leverage,
+        31.0
+    );
     assert!(
         receiver.upgrade().is_none(),
         "completed method releases its receiver"
