@@ -4126,6 +4126,7 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4453,6 +4454,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 3.0.7",
+ "tokio",
 ]
 
 [[package]]

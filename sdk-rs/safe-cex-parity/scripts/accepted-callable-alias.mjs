@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { cryptocomPreparedAliasProbe } from './accepted-cryptocom-prepared-alias.mjs';
 import { identityAliasProbe } from './accepted-identity-alias.mjs';
 import { reviewedGenericAliasProbe } from './accepted-reviewed-aliases.mjs';
 import { reviewedFunctionPointerAliasProbe } from './accepted-function-pointer-alias.mjs';
 import { reviewedNapiAliasProbe } from './accepted-napi-alias.mjs';
+import { wooBookLevelArrayProbe } from './accepted-woo-alias.mjs';
 import { weexKlineTupleProbe } from './accepted-weex-kline-alias.mjs';
 import { localFutureAliasProbe } from './accepted-future-alias.mjs';
 import { loaderFutureAliasProbe } from './accepted-loader-future.mjs';
@@ -33,10 +35,14 @@ function boundedAst(node, parameters) {
   for (const value of Object.values(node)) boundedAst(value, parameters);
 }
 export function genericAliasProbe(alias, contract, context) {
+  const prepared = cryptocomPreparedAliasProbe(alias, contract, context);
+  if (prepared) return prepared;
   const napi = reviewedNapiAliasProbe(alias, contract, context);
   if (napi) return napi;
   const hosted = hostedSignerTupleProbe(alias, contract, context);
   if (hosted) return hosted;
+  const woo = wooBookLevelArrayProbe(alias, contract, context);
+  if (woo) return woo;
   const weex = weexKlineTupleProbe(alias, contract, context);
   if (weex) return weex;
   const pointer = reviewedFunctionPointerAliasProbe(alias, contract, context);

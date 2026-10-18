@@ -13,6 +13,16 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
 
+Public socket owner receipts use `requiredFeatures: ["native"]`: the default
+inventory explicitly records unexecuted native-gated owners, then the canonical
+driver executes production NativeRuntime/ExchangeOwner observations. Callbacks,
+core handler state and binary64 bits are read before reporting; snapshot cases
+use actual reqwest HTTP against loopback. This is finite payload coverage, not
+arbitrary object/prototype or complete feature-matrix equivalence. Five unused
+family wrappers were retired; ExchangeOwner already constructed PublicSocket
+with PublicKind directly. Native observation fixtures use the existing Tokio
+runtime dependency only under the native feature.
+
 `scripts/public-dispatch-contracts.mjs` uses the maintained compiler driver with
 four exact owner filters for `public_dispatch::{Handlers,dispatch_binance_message}`
 and `ticker_capture::{Capture,lookup}`. The three raw-key/frame operations have
@@ -153,6 +163,17 @@ shared `loadPolicy` API; never restore deleted flat maps. See the
 This selected native/default scope does not cover other owners or the feature
 matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
 and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.
+
+The public `CancelOrderHandle` alias retains the strict map-only Order decoder
+through `Rc<RefCell<Order>>`. Its native decoder observations inspect fields,
+numeric bits, optional presence and shared-cell mutation before projection.
+The constructed `private_classes` test `native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symbols`
+holds both signed Futures DELETEs, then checks each successful category and the
+untouched symbol in the actual Store. Its source witness constructs the actual
+TS parent, Store and API clients and scripts only terminal Axios I/O. PM/Spot
+do not use this handle alias.
+`scripts/cancel-order-handle-controls.py` breaks the live symbol filter, requires
+that compiled native assertion to fail and restores exact source bytes for GREEN.
 
 Spot order formatting consumes BaseExchange's client-ID resolution and final
 native-count assertion directly. Its market snapshot is cloned before errors
@@ -853,6 +874,11 @@ public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
 
+PM stale-snapshot warnings retain source template units through SnapshotCall into
+the canonical Base log_value path. The native private_rest_native repeated-error
+witness compares signed HTTP rejection/Store fallback, console arguments and log
+event units against both maintained PM fetchOrders and BaseExchange.log bodies.
+
 ### Canonical private socket construction
 
 ExchangeOwner constructs PrivateSocket directly for Futures, PM and Spot. The
@@ -865,6 +891,20 @@ family selection and HMAC payload forwarding, requires named compiled failures,
 then restores exact production bytes and requires passes. These execution proofs
 do not classify the remaining Auth/PrivateState raw APIs or erase the documented
 UTF-8 frame boundary.
+
+`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
+`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
+including full dependency discovery and actual compiler features, then checks the
+one resulting classification receipt. It does not claim decoder execution;
+`private_owner_binding` and its independently compiled controls establish the
+separate real constructor/Store/authentication effects described above.
+
+`Auth` and `PrivateState` retain executed raw API contracts gated by the real
+native Cargo feature. The default receipt is explicitly unobserved; the canonical
+driver executes fresh native observations over production native_dependencies and
+ExchangeOwner. See [PRIVATE_NATIVE_OWNER_REVIEW.md](PRIVATE_NATIVE_OWNER_REVIEW.md)
+for the six actual APIs, finite native effects and independent compiled controls.
+Do not replace these raw observations with typed labels or default mock parents.
 
 The standalone `delegated_methods` extraction layer has no production caller and
 is retired with its options alias and mock-only oracle. Keep the six TypeScript
@@ -886,6 +926,12 @@ parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the type
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
 
+The five `order_batches` function contracts distinguish static endpoint and native
+POST-forwarding roles from executed dense-array, iterable-guard and ID outputs.
+`ORDER_BATCH_CONTRACT_REVIEW.md` documents their finite native profiles, actual
+signed bulk-placement witness, compiled controls and canonical scoped measure.
+Keep the three existing callable alias records and their separate evidence.
+
 The exchange assembly's legacy JSON error port forwards the selected raw value
 to BaseExchange. Do not String-coerce it first: Base distinguishes strings,
 falsy values, objects and primitives when formatting and reporting an error.
@@ -905,3 +951,24 @@ observations are compared with the maintained TS constructors. The ordinary
 private_classes source-case guard keeps all 164 cases live in CI. Preserve the
 208 constructed native Store cases and seven independent compiled body controls
 when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
+
+The four orderbook function contracts execute the real snapshot, borrowed update
+selector, apply algorithm and private indexed-cell reader. Native number bits,
+sequence state, borrowed record identity and partial mutation are observed before
+JSON output. `scripts/orderbook-function-source.cjs` derives 123 cases from the
+maintained TypeScript functions; the ordinary `orderbook_function_contracts` target
+keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell's
+immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
+requires four independent compiled faults to fail actual constructed native
+socket/HTTP tests, with exact source restoration and a passing rerun after each.
+
+The nine public listener functions have individual typed capability role reviews
+in PUBLIC_LISTENER_FUNCTION_REVIEW.md. Their classification receipts do not
+execute decoders. The native two-subscription witness constructs the actual
+Futures/PM/Spot owner and inspects the live ListenerHost handler accessor, parser
+identity/order, independent books, native topic counts and sibling-safe cleanup.
+Outbound fields are checked on the real socket wire. Keep all nine independent
+production-body controls in scripts/public-listener-function-controls.py, with
+named native failures and byte-exact restoration passes. The canonical scoped
+runner is scripts/public-listener-function-contracts.mjs; the seven existing
+alias reviews and separate Book decoder remain unchanged.

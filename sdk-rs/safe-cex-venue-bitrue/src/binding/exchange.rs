@@ -19,6 +19,10 @@ use safe_cex_store::Store;
 use safe_cex_types::*;
 use std::{cell::RefCell, rc::Rc};
 
+#[cfg(test)]
+#[path = "../../tests/support/receiver_tests.rs"]
+mod receiver_tests;
+
 pub struct BitrueDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Rc<dyn JsHttpHost>,
