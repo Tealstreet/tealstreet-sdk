@@ -141,6 +141,20 @@ impl ExchangeError {
     pub fn retained_response_input(&self) -> Option<RetainedJsonInput> {
         let mut source: Option<&(dyn std::error::Error + 'static)> = Some(self);
         while let Some(error) = source {
+            // source() exposes the opaque cause directly; retain access to the
+            // enclosing Store response without copying it into error metadata.
+            if let Some(exchange) = error.downcast_ref::<Self>()
+                && !exchange
+                    .origin
+                    .as_ref()
+                    .is_some_and(|origin| origin.error().is::<RetainedResponseOrigin>())
+                && let Some(response) = exchange
+                    .store_subscriber_cause
+                    .as_ref()
+                    .and_then(safe_cex_types::StoreSubscriberError::response)
+            {
+                return Some(response.clone().into());
+            }
             if let Some(origin) = error.downcast_ref::<RetainedResponseOrigin>() {
                 return Some(origin.response.clone());
             }

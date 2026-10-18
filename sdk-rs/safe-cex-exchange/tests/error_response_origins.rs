@@ -116,8 +116,19 @@ fn api_response_wrapper_keeps_a_store_subscriber_cause_on_the_source_chain() {
     use std::rc::Rc;
     let original = Rc::new(std::io::Error::other("original subscriber failure"));
     let mut error = ExchangeError::new("outer");
-    error.store_subscriber_cause =
-        Some(safe_cex_types::StoreSubscriberError::new("subscriber").with_cause(original.clone()));
+    let subscriber_response = json!({"data":{"tag":"subscriber response"}});
+    error.store_subscriber_cause = Some(
+        safe_cex_types::StoreSubscriberError::with_response(
+            "subscriber",
+            subscriber_response.clone(),
+        )
+        .with_cause(original.clone()),
+    );
+    assert_eq!(
+        error.retained_response_input(),
+        Some(subscriber_response.into()),
+        "subscriber envelope keeps its response before the opaque source",
+    );
     let response = Input::Object(vec![("data".encode_utf16().collect(), Input::Float(-0.0))]);
     let error = error.with_retained_response(response.clone());
     assert_eq!(error.retained_response_input(), Some(response));

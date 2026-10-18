@@ -3268,7 +3268,7 @@ fn mexc_cancel_transport_projection_finding() {
         "MEXC cancellation native code retained"
     );
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["message"],
+        error.response_json_view().as_ref().unwrap()["data"]["message"],
         "response detail",
         "MEXC cancellation native response retained"
     );
@@ -3465,7 +3465,7 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
             "MEXC REST native context {name}"
         );
         assert_eq!(
-            error.response.as_ref().unwrap()["data"]["marker"],
+            error.response_json_view().as_ref().unwrap()["data"]["marker"],
             7,
             "MEXC REST metadata snapshot view {name}"
         );
@@ -4712,7 +4712,7 @@ fn mexc_ohlcv_retains_rejected_transport_origin() {
         "MEXC OHLCV original transport message"
     );
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["message"],
+        error.response_json_view().as_ref().unwrap()["data"]["message"],
         "server detail",
         "MEXC OHLCV retained server response"
     );
