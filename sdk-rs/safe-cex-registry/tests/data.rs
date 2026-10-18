@@ -203,7 +203,7 @@ fn gateway_whole_frame_validation_divergence_is_explicit() {
 fn registry_descriptors_and_registered_name_order_match_reviewed_snapshot() {
     use safe_cex_registry::registry::{EXCHANGE_REGISTRY, get_registered_exchange_names};
     let expected: Value = serde_json::from_str(include_str!("fixtures/registry.json")).unwrap();
-    assert_eq!(expected.as_array().unwrap().len(), 48);
+    assert_eq!(expected.as_array().unwrap().len(), 49);
     assert_eq!(serde_json::to_value(EXCHANGE_REGISTRY).unwrap(), expected);
     let names: Vec<_> = expected
         .as_array()
