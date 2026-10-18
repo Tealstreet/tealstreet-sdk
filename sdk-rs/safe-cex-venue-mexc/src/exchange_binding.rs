@@ -295,7 +295,8 @@ impl Host {
                     ))
                 })),
                 None,
-            );
+            )
+            .expect("fresh extensible accessor target");
         }
         {
             let venue = Rc::downgrade(venue);
@@ -308,7 +309,8 @@ impl Host {
                     Ok(Js::Bool(Exchange::is_public_data_only(venue.as_ref())))
                 })),
                 None,
-            );
+            )
+            .expect("fresh extensible accessor target");
         }
         {
             let read = Rc::downgrade(venue);
@@ -326,7 +328,8 @@ impl Host {
                     }
                     Ok(())
                 })),
-            );
+            )
+            .expect("fresh extensible accessor target");
         }
         let members: &[(&str, Member)] = &[
             ("log", |h, a| {

@@ -13,14 +13,16 @@ fn local_utf16_error_metadata_uses_the_retained_cause_without_repeating_getters(
     let reads = Rc::new(Cell::new(0));
     let seen = reads.clone();
     let value = safe_cex_exchange::js_runtime::value::error_object("Error", "seed");
-    value.define_accessor(
-        "message",
-        Some(Rc::new(move |_| {
-            seen.set(seen.get() + 1);
-            Ok(Js::utf16(&[0xd800, 120, 0xdc00]))
-        })),
-        None,
-    );
+    value
+        .define_accessor(
+            "message",
+            Some(Rc::new(move |_| {
+                seen.set(seen.get() + 1);
+                Ok(Js::utf16(&[0xd800, 120, 0xdc00]))
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     let mut error = Thrown::new(value).to_exchange_error();
     assert_eq!(reads.get(), 1, "read the original message exactly once");
     let origin = error.origin.clone().expect("original native cause");
@@ -82,14 +84,18 @@ fn retained_native_errors_keep_their_complete_metadata() {
 fn throwing_code_getters_report_their_cause_without_recursing() {
     let thrown = Thrown::error("Error", "original failure");
     let cause = Thrown::type_error("code getter failed");
-    cause.value.define_accessor(
-        "code",
-        Some(Rc::new(|_| panic!("cause code must not be read"))),
-        None,
-    );
+    cause
+        .value
+        .define_accessor(
+            "code",
+            Some(Rc::new(|_| panic!("cause code must not be read"))),
+            None,
+        )
+        .expect("test accessor target permits definition");
     thrown
         .value
-        .define_accessor("code", Some(Rc::new(move |_| Err(cause.clone()))), None);
+        .define_accessor("code", Some(Rc::new(move |_| Err(cause.clone()))), None)
+        .expect("test accessor target permits definition");
     let error = thrown.to_exchange_error();
     assert_eq!(error.name, "TypeError");
     assert_eq!(error.message, "code getter failed");

@@ -79,7 +79,8 @@ pub(super) fn map(entries: Entries, clear: Rc<dyn Fn()>) -> Js {
         "size",
         Some(Rc::new(move |_| Ok(Js::Number(read()?.len() as f64)))),
         None,
-    );
+    )
+    .expect("fresh extensible accessor target");
     for name in ["get", "has"] {
         let read = entries.clone();
         map.define(
@@ -123,7 +124,8 @@ pub(super) fn set(values: Rc<dyn Fn() -> Vec<Js>>, clear: Rc<dyn Fn()>) -> Js {
         "size",
         Some(Rc::new(move |_| Ok(Js::Number(read().len() as f64)))),
         None,
-    );
+    )
+    .expect("fresh extensible accessor target");
     set.define(
         "has",
         Js::function("has", move |_, args| {

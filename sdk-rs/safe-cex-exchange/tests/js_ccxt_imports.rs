@@ -127,22 +127,24 @@ fn installed_ccxt_imports_preserve_repeated_reads_original_values_and_coercion_o
         Js::Object(o) => Rc::downgrade(o),
         _ => unreachable!(),
     };
-    value.define_accessor(
-        "toString",
-        Some(Rc::new(move |_| {
-            observed.borrow_mut().push("string:get".into());
-            let observed = observed.clone();
-            let weak_value = weak_value.clone();
-            Ok(Js::function("toString", move |this, _| {
-                let value = Js::Object(weak_value.upgrade().unwrap());
-                observed
-                    .borrow_mut()
-                    .push(format!("string:call:{}", this.same_reference(&value)));
-                Ok(Js::utf16(&[0xd800]))
-            }))
-        })),
-        None,
-    );
+    value
+        .define_accessor(
+            "toString",
+            Some(Rc::new(move |_| {
+                observed.borrow_mut().push("string:get".into());
+                let observed = observed.clone();
+                let weak_value = weak_value.clone();
+                Ok(Js::function("toString", move |this, _| {
+                    let value = Js::Object(weak_value.upgrade().unwrap());
+                    observed
+                        .borrow_mut()
+                        .push(format!("string:call:{}", this.same_reference(&value)));
+                    Ok(Js::utf16(&[0xd800]))
+                }))
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     let observed = log.clone();
     let key = Js::object(vec![(
         "toString",
@@ -166,21 +168,24 @@ fn installed_ccxt_imports_preserve_repeated_reads_original_values_and_coercion_o
             })
         })),
         None,
-    );
+    )
+    .expect("test accessor target permits definition");
     let result = g
         .call_method("safeString", vec![o, key, token.clone()])
         .unwrap();
     let throwing = Js::object(vec![]);
     let observed = log.clone();
     let rejected = token.clone();
-    throwing.define_accessor(
-        "toString",
-        Some(Rc::new(move |_| {
-            observed.borrow_mut().push("throw:get".into());
-            Err(Thrown::new(rejected.clone()))
-        })),
-        None,
-    );
+    throwing
+        .define_accessor(
+            "toString",
+            Some(Rc::new(move |_| {
+                observed.borrow_mut().push("throw:get".into());
+                Err(Thrown::new(rejected.clone()))
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     let thrown = g
         .call_method("numberToString", vec![throwing])
         .unwrap_err()
@@ -215,7 +220,8 @@ fn installed_ccxt_imports_preserve_repeated_reads_original_values_and_coercion_o
         "x",
         Some(Rc::new(|_| panic!("function is not a TS object operand"))),
         None,
-    );
+    )
+    .expect("test accessor target permits definition");
     let function_default = g
         .call_method("safeString", vec![f, Js::str("x"), token.clone()])
         .unwrap()

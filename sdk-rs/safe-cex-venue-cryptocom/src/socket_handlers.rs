@@ -1051,28 +1051,32 @@ mod accepted_helpers {
     }
     fn property(receiver: &Js, key: &str, value: Js, events: Trace, event: &'static str) {
         let expected = receiver.clone();
-        receiver.define_accessor(
-            key,
-            Some(Rc::new(move |this| {
-                assert!(
-                    this.same_reference(&expected),
-                    "socket property native receiver"
-                );
-                events.borrow_mut().push(event);
-                Ok(value.clone())
-            })),
-            None,
-        );
+        receiver
+            .define_accessor(
+                key,
+                Some(Rc::new(move |this| {
+                    assert!(
+                        this.same_reference(&expected),
+                        "socket property native receiver"
+                    );
+                    events.borrow_mut().push(event);
+                    Ok(value.clone())
+                })),
+                None,
+            )
+            .expect("fresh extensible accessor target");
     }
     fn failing(receiver: &Js, key: &str, error: Js, events: Trace, event: &'static str) {
-        receiver.define_accessor(
-            key,
-            Some(Rc::new(move |_| {
-                events.borrow_mut().push(event);
-                Err(Thrown::new(error.clone()))
-            })),
-            None,
-        );
+        receiver
+            .define_accessor(
+                key,
+                Some(Rc::new(move |_| {
+                    events.borrow_mut().push(event);
+                    Err(Thrown::new(error.clone()))
+                })),
+                None,
+            )
+            .expect("fresh extensible accessor target");
     }
     #[test]
     fn get_native_contract() {

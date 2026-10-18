@@ -953,14 +953,16 @@ mod accepted_runtime_helpers {
         }
     }
     fn property(receiver: &Js, key: &str, value: Js, trace: Trace) {
-        receiver.define_accessor(
-            key,
-            Some(Rc::new(move |_| {
-                trace.borrow_mut().push("get");
-                Ok(value.clone())
-            })),
-            None,
-        );
+        receiver
+            .define_accessor(
+                key,
+                Some(Rc::new(move |_| {
+                    trace.borrow_mut().push("get");
+                    Ok(value.clone())
+                })),
+                None,
+            )
+            .expect("fresh extensible accessor target");
     }
     #[test]
     fn get_native_contract() {
@@ -975,11 +977,13 @@ mod accepted_runtime_helpers {
         assert_eq!(*trace.borrow(), ["get"], "runtime helper get trace");
         let error = token();
         let kept = error.clone();
-        object.define_accessor(
-            "bad",
-            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
-            None,
-        );
+        object
+            .define_accessor(
+                "bad",
+                Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         thrown(get(&h, &object, "bad"), &error);
     }
     #[test]
@@ -1003,11 +1007,13 @@ mod accepted_runtime_helpers {
         let error = token();
         let kept = error.clone();
         let object = token();
-        object.define_accessor(
-            "item",
-            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
-            None,
-        );
+        object
+            .define_accessor(
+                "item",
+                Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         thrown(optional(&h, object, "item"), &error);
     }
     fn method_probe(own_call: bool) {
@@ -1045,11 +1051,13 @@ mod accepted_runtime_helpers {
         );
         let error = token();
         let kept = error.clone();
-        receiver.define_accessor(
-            "bad",
-            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
-            None,
-        );
+        receiver
+            .define_accessor(
+                "bad",
+                Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         let got = if own_call {
             own(&h, &receiver, "bad", || panic!("args after getter error"))
         } else {
@@ -1113,11 +1121,13 @@ mod accepted_runtime_helpers {
         );
         let error = token();
         let kept = error.clone();
-        globals.define_accessor(
-            "bad",
-            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
-            None,
-        );
+        globals
+            .define_accessor(
+                "bad",
+                Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         thrown(
             global(&h, "bad", || panic!("args after global getter error")),
             &error,
@@ -1245,11 +1255,13 @@ mod accepted_runtime_helpers {
         );
         let error = token();
         let kept = error.clone();
-        store.define_accessor(
-            "update",
-            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
-            None,
-        );
+        store
+            .define_accessor(
+                "update",
+                Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         match update(&h, &receiver, || panic!("fields after getter error")) {
             Err(e) => same(e.value, &error),
             Ok(_) => panic!("runtime helper update swallowed error"),
