@@ -1,6 +1,7 @@
 //! BingX registry construction and signed lifecycle over real native local HTTP/WS.
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
+use safe_cex_transport::RestAdapter;
 use safe_cex_types::{ExchangeName, PlaceOrderOpts};
 use serde_json::{Value, json};
 use std::rc::Rc;
@@ -33,6 +34,237 @@ fn routes(request: &Seen) -> Option<Value> {
         _ => return None,
     };
     Some(json!({"code":0,"data":data}))
+}
+
+#[derive(Default)]
+struct ListenKeyGate {
+    calls: std::sync::atomic::AtomicUsize,
+    entered: std::sync::atomic::AtomicBool,
+    release: tokio::sync::Notify,
+}
+
+struct HeldListenKeyAdapter {
+    inner: safe_cex_transport::native::ReqwestAdapter,
+    origin: String,
+    gate: std::sync::Arc<ListenKeyGate>,
+}
+impl RestAdapter for HeldListenKeyAdapter {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move {
+            self.execute_with_receipt(request)
+                .await
+                .map(|receipt| receipt.response)
+        })
+    }
+    fn execute_with_receipt(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
+        use std::sync::atomic::Ordering;
+        let held = request.method.eq_ignore_ascii_case("POST")
+            && request.url.ends_with("/openApi/user/auth/userDataStream")
+            && self.gate.calls.fetch_add(1, Ordering::SeqCst) == 1;
+        request.base_url = request.base_url.map(|url| rewrite(&url, &self.origin));
+        if request.url.starts_with("http") {
+            request.url = rewrite(&request.url, &self.origin);
+        }
+        Box::pin(async move {
+            let receipt = self.inner.execute_with_receipt(request).await?;
+            if held {
+                self.gate.entered.store(true, Ordering::SeqCst);
+                self.gate.release.notified().await;
+            }
+            Ok(receipt)
+        })
+    }
+}
+
+#[test]
+fn native_listen_key_rebuild_resumes_after_io_wake_and_ignores_old_wire_close() {
+    use futures_util::{SinkExt, StreamExt};
+    use safe_cex_registry::{
+        native_host::{hyperliquid_rate_limiter, native_venue_host_with},
+        rust_venues::rust_constructor,
+    };
+    use std::{
+        cell::{Cell, RefCell},
+        sync::{Arc, atomic::Ordering},
+        time::Duration,
+    };
+    use tokio::{net::TcpListener, sync::mpsc};
+    use tokio_tungstenite::tungstenite::Message;
+    run_local(async {
+        let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ws = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_origin = format!("http://{}", http.local_addr().unwrap());
+        let ws_origin = format!("ws://{}", ws.local_addr().unwrap());
+        let seen = Rc::new(RefCell::new(vec![]));
+        let keys = Rc::new(Cell::new(0));
+        tokio::task::spawn_local(serve_http(
+            http,
+            Rc::new(move |request| {
+                if request.method == "POST" && request.path == "/openApi/user/auth/userDataStream" {
+                    keys.set(keys.get() + 1);
+                    return Some(
+                        json!({"listenKey":if keys.get() == 1 {"bingx-native-key"} else {"fresh-key"}}),
+                    );
+                }
+                routes(request)
+            }),
+            seen.clone(),
+        ));
+        let peers = Rc::new(RefCell::new(
+            Vec::<(String, mpsc::UnboundedSender<Message>)>::new(),
+        ));
+        let captured = peers.clone();
+        let close_written = Rc::new(Cell::new(false));
+        let closed = close_written.clone();
+        tokio::task::spawn_local(async move {
+            loop {
+                let (stream, _) = ws.accept().await.unwrap();
+                let peers = captured.clone();
+                let closed = closed.clone();
+                tokio::task::spawn_local(async move {
+                    let path = Rc::new(RefCell::new(String::new()));
+                    let capture = path.clone();
+                    let socket = tokio_tungstenite::accept_hdr_async(stream, move |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+                        *capture.borrow_mut() = request.uri().to_string();
+                        Ok(response)
+                    }).await.unwrap();
+                    let old_private = path.borrow().contains("listenKey=bingx-native-key");
+                    let (mut sink, mut source) = socket.split();
+                    let (push, mut outgoing) = mpsc::unbounded_channel::<Message>();
+                    peers
+                        .borrow_mut()
+                        .push((path.borrow().clone(), push.clone()));
+                    tokio::task::spawn_local(async move {
+                        while let Some(message) = outgoing.recv().await {
+                            if message.is_close() {
+                                sink.flush()
+                                    .await
+                                    .expect("flush the real Close acknowledgement");
+                                if old_private {
+                                    closed.set(true);
+                                }
+                                break;
+                            }
+                            sink.send(message)
+                                .await
+                                .expect("send the real private frame");
+                        }
+                    });
+                    while let Some(message) = source.next().await {
+                        let message = message.expect("read the real native socket frame");
+                        if message.is_close() {
+                            push.send(Message::Close(None)).unwrap();
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        let gate = Arc::new(ListenKeyGate::default());
+        let control = gate.clone();
+        let adapters = Rc::new(move || {
+            let inner = safe_cex_transport::native::reqwest_adapter().map_err(|error| {
+                safe_cex_exchange::runtime::ExchangeError::new(error.to_string())
+            })?;
+            Ok(Arc::new(HeldListenKeyAdapter {
+                inner,
+                origin: http_origin.clone(),
+                gate: control.clone(),
+            }) as Arc<dyn safe_cex_transport::RestAdapter>)
+        });
+        let runtime = Rc::new(LocalDial {
+            inner: safe_cex_exchange::native::native_runtime(),
+            origin: ws_origin,
+        });
+        let host = native_venue_host_with(runtime, adapters, hyperliquid_rate_limiter());
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let exchange = rust_constructor(&ExchangeName::Bingx, host)
+            .unwrap()
+            .construct(
+                ExchangeName::Bingx,
+                serde_json::from_value(json!({"key":"native-key","secret":SECRET})).unwrap(),
+                store,
+            )
+            .unwrap();
+        exchange.start().await.unwrap();
+        eventually("initial native private socket", || {
+            peers
+                .borrow()
+                .iter()
+                .any(|(path, _)| path.contains("listenKey=bingx-native-key"))
+        })
+        .await;
+        let old = peers
+            .borrow()
+            .iter()
+            .find(|(path, _)| path.contains("listenKey=bingx-native-key"))
+            .unwrap()
+            .1
+            .clone();
+        old.send(Message::text(json!({"e":"listenKeyExpired"}).to_string()))
+            .unwrap();
+        let held_and_closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while !gate.entered.load(Ordering::SeqCst) || !close_written.get() {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await;
+        assert!(
+            held_and_closed.is_ok(),
+            "held={}, close={}, calls={}, peers={:?}, seen={:?}",
+            gate.entered.load(Ordering::SeqCst),
+            close_written.get(),
+            gate.calls.load(Ordering::SeqCst),
+            peers
+                .borrow()
+                .iter()
+                .map(|(path, _)| path)
+                .collect::<Vec<_>>(),
+            seen.borrow()
+        );
+        tokio::time::sleep(Duration::from_millis(3100)).await;
+        assert_eq!(
+            gate.calls.load(Ordering::SeqCst),
+            2,
+            "no duplicate listen-key request while the real response is held"
+        );
+        gate.release.notify_one();
+        eventually(
+            "replacement native private socket after its IO wake",
+            || {
+                peers
+                    .borrow()
+                    .iter()
+                    .any(|(path, _)| path.contains("listenKey=fresh-key"))
+            },
+        )
+        .await;
+        assert_eq!(gate.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            seen.borrow()
+                .iter()
+                .filter(|request| request.method == "POST"
+                    && request.path == "/openApi/user/auth/userDataStream")
+                .count(),
+            2
+        );
+        assert_eq!(
+            peers
+                .borrow()
+                .iter()
+                .filter(|(path, _)| path.contains("listenKey="))
+                .count(),
+            2,
+            "one replacement physical private socket"
+        );
+        exchange.dispose().unwrap();
+    });
 }
 #[test]
 fn bingx_native_signed_get_query_keeps_the_source_qs_sort() {
