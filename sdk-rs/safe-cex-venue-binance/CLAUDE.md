@@ -671,6 +671,15 @@ compares five signed request outcomes, including mixed-case weight/retry headers
 against actual maintained TS guards with installed Axios. Its only request stub
 is the terminal RestAdapter; the factories, signer and response guards are live.
 
+The request-weight `Failure` and `HeaderGetter` aliases retain native error and
+bound header-reader capabilities. Their compiler receipts classify the actual
+alias traits; they do not execute a decoder or the callback. The existing native
+`production_native_request_weight_callbacks_observe_success_and_rejection` test
+constructs the real parent and compares five signed HTTP outcomes to TS/Axios.
+`scripts/header-alias-controls.py` independently corrupts the production header
+argument and rejection-response forwarding, requires compiled named failures,
+and restores exact source bytes before requiring a pass.
+
 The twenty history/API/lifecycle capabilities have individual source-role records
 and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
 Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls

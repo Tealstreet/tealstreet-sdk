@@ -12389,6 +12389,136 @@
       }
     }
   },
+  "safe_cex_venue_binance::request_weight::Failure": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::runtime::ExchangeError",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "reason": "This Rc holds the native ExchangeError produced by a request or header callback. Its underlying error type has no Deserialize implementation; the holder forwards an existing failure rather than admitting a wire model.",
+    "evidence": "request_weight.rs and NativeImports/native client request composition use this actual alias. production_native_request_weight_callbacks_observe_success_and_rejection constructs NativeImports/ExchangeOwner and observes signed success and HTTP429 requests, retained response status/code and request-weight state. Canonical missing-contract receipts fail both actual aliases before these rows. The native parent witness and two independent compiled native_host header/rejection forwarding faults pass after exact restorations; scripts/header-alias-controls.py enforces the named assertions. Alias trait receipts classify capabilities separately from that execution evidence."
+  },
+  "safe_cex_venue_binance::request_weight::HeaderGetter": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "core::option::Option",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "serde_json::value::Value",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "reason": "This executable Rc callback is bound to the original response header receiver. Its ASCII header-name argument selects an existing optional JSON header value; it does not parse a serialized representation or construct a decoded model. The callable itself has no Deserialize implementation.",
+    "evidence": "NativeImports::weight_header_get_member captures the actual native response header get function and binds its original receiver. The existing constructed-parent request-weight test observes mixed-case used-weight/retry-after names, success and HTTP429 callbacks through the actual native client. This review covers the declared Option<Value> header-result boundary. Canonical missing-contract receipts fail both actual aliases before these rows. The native parent witness and two independent compiled native_host header/rejection forwarding faults pass after exact restorations; scripts/header-alias-controls.py enforces the named assertions. Alias trait receipts classify capabilities separately from that execution evidence."
+  },
   "safe_cex_venue_binance::request_weight::Observer": {
     "category": "non-decoder",
     "evidence": "The actual ExchangeOwner::new native constructor installs this configured response-observer capability through install_guards. The real native request-weight regression drives successful and rejected HTTP responses through the actual NativeImports interceptor chain and observes reconciliation pause deadlines.",
