@@ -1,4 +1,5 @@
 //! Child-module witness accesses the actual constructed receiver, without a test API.
+use safe_cex_store::Store;
 #[allow(
     dead_code,
     reason = "primitive constructed fixture offers other workflow operations"
@@ -62,7 +63,7 @@ fn actual_map_order_receiver_retains_opaque_native_info() {
     assert_eq!(order.amount, 2.);
     assert_eq!(order.filled, 1.);
     store.add_or_update_order(order).unwrap();
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let opaque = orders[0].info.as_ref().unwrap().get("opaque").unwrap();
     assert!(matches!(opaque.get("unset"), Some(Input::Undefined)));
     assert_eq!(

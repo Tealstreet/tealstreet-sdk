@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::JsNumberInput;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{
     Order, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType,
 };
@@ -346,19 +347,20 @@ fn futures_orders_live_source() {
                 }
                 if flag(case, "alias") {
                     aliases += 1;
+                    let stored = store.orders().unwrap();
                     assert_ne!(
                         values.as_ptr(),
-                        store.orders().as_ptr(),
+                        stored.as_ptr(),
                         "ORDERS CHOSEN owned fallback"
                     );
                     assert_eq!(
                         case["storeAfterAlias"][0]["id"], "ALIASED",
                         "ORDERS source alias witness"
                     );
-                    let before = store.orders()[0].id.clone();
+                    let before = store.orders().unwrap()[0].id.clone();
                     values[0].id = "NATIVE-ONLY".into();
                     assert_eq!(
-                        store.orders()[0].id,
+                        store.orders().unwrap()[0].id,
                         before,
                         "ORDERS CHOSEN fallback mutation isolation"
                     );
@@ -367,6 +369,7 @@ fn futures_orders_live_source() {
         }
         for (native, expected) in store
             .orders()
+            .unwrap()
             .iter()
             .zip(case["storeBefore"].as_array().unwrap())
         {

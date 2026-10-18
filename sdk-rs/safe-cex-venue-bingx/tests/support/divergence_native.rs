@@ -156,7 +156,7 @@ fn real_tick_starts_selected_read_before_return() {
         "disposal after entry cannot suppress the already-started read"
     );
     assert!(
-        !h.store.loaded().orders,
+        !h.store.loaded().unwrap().orders,
         "post-await disposal guard prevents Store writes"
     );
 }

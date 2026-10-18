@@ -3,10 +3,11 @@
 use safe_cex_exchange::{
     exchange::Exchange,
     native::{NativeHttpHost, native_runtime},
+    native_store::DefaultStore,
     socket_lifecycle::SocketSlot,
     websocket::WsRuntime,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore, virtual_clock::VIRTUAL_CLOCK};
+use safe_cex_store::{Store, StoreUpdate, virtual_clock::VIRTUAL_CLOCK};
 use safe_cex_transport::rate_limit::RateLimitClock;
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::ExchangeName;
@@ -97,6 +98,7 @@ async fn observe(name: ExchangeName) {
         let previous = RefCell::new(
             store
                 .tickers()
+                .unwrap()
                 .iter()
                 .map(|ticker| (ticker.last.to_bits(), ticker.bid.to_bits()))
                 .collect::<Vec<_>>(),
@@ -133,7 +135,7 @@ async fn observe(name: ExchangeName) {
             case["notifications"].as_u64().unwrap(),
             "{case}"
         );
-        let tickers = store.tickers();
+        let tickers = store.tickers().unwrap();
         for (ticker, expected) in tickers.iter().zip(case["result"].as_array().unwrap()) {
             assert_eq!(ticker.last, expected["last"].as_f64().unwrap(), "{case}");
             assert_eq!(ticker.bid, expected["bid"].as_f64().unwrap(), "{case}");

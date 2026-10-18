@@ -3,11 +3,14 @@ use safe_cex_store::{Store, StoreMutationError, StoreUpdate};
 use safe_cex_types::{FetchedLeverage, MarginType, Position, PositionMode, PositionSide};
 use std::collections::HashSet;
 // ts: KucoinSpotExchange.fetchPositions
-pub fn fetch_positions(store: &dyn Store, symbols: Option<&[String]>) -> Vec<Position> {
+pub fn fetch_positions(
+    store: &dyn Store,
+    symbols: Option<&[String]>,
+) -> Result<Vec<Position>, safe_cex_types::StoreReadError> {
     let selected =
         symbols.map(|symbols| symbols.iter().map(String::as_str).collect::<HashSet<_>>());
-    store
-        .markets()
+    Ok(store
+        .markets()?
         .iter()
         .filter(|market| {
             market.active
@@ -34,7 +37,7 @@ pub fn fetch_positions(store: &dyn Store, symbols: Option<&[String]>) -> Vec<Pos
             last_update: (None).into(),
             option: (None).into(),
         })
-        .collect()
+        .collect())
 }
 // ts: KucoinSpotExchange.fetchSymbolMaxLeverage
 pub fn fetch_symbol_max_leverage(_symbol: &str) -> f64 {
@@ -47,7 +50,7 @@ pub fn set_leverage(
     _leverage: f64,
     _side: Option<PositionSide>,
 ) -> Result<(), StoreMutationError> {
-    let mut fetched = store.fetched_leverage().clone();
+    let mut fetched = store.fetched_leverage()?.clone();
     fetched.insert(
         symbol.to_owned(),
         FetchedLeverage {

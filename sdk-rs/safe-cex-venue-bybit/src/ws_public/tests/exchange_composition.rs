@@ -806,7 +806,7 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
         };
         let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
         assert_eq!(
-            venue.get_ticker_symbols_for_category(category),
+            venue.get_ticker_symbols_for_category(category).unwrap(),
             expected,
             "quote filter and active fallback case {index}"
         );
@@ -1065,7 +1065,11 @@ fn protective_side_matches_source_coercion_and_exact_one_position() {
             let primitive =
                 !case["order"].is_null() && !case["order"].is_object() && !case["order"].is_array();
             assert_eq!(
-                record_return(venue.infer_protective_order_side(&case["order"])).unwrap_err(),
+                {
+                    let error = record_return(venue.infer_protective_order_side(&case["order"]))
+                        .unwrap_err();
+                    format!("{}: {}", error.name, error.message)
+                },
                 if primitive {
                     "TypeError: Bybit field lookup requires an object"
                 } else {
@@ -1544,11 +1548,15 @@ fn opposite_position_matches_source_signed_contracts() {
             safe_cex_types::OrderSide::Sell
         };
         assert_eq!(
-            json!(venue.has_full_sized_position_opposite_side(
-                "BTCUSD",
-                side,
-                case["amount"].as_f64().unwrap()
-            )),
+            json!(
+                venue
+                    .has_full_sized_position_opposite_side(
+                        "BTCUSD",
+                        side,
+                        case["amount"].as_f64().unwrap()
+                    )
+                    .unwrap()
+            ),
             case["expected"],
             "OPPOSITE inverse native size case {index}: {case}"
         );
@@ -1625,7 +1633,8 @@ fn opposite_position_matches_source_signed_contracts() {
                 symbol,
                 side,
                 amount.parse().unwrap()
-            )),
+            ))
+            .unwrap(),
             expected,
             "OPPOSITE native boolean {index}"
         );

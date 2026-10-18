@@ -456,7 +456,7 @@ impl StreamLifecycleHost for Rt {
                 .map_err(store_error),
             UndefinedProperty::PresentUndefined => {
                 let mut health = store
-                    .socket_health()
+                    .socket_health()?
                     .and_then(|current| current.as_object().cloned())
                     .unwrap_or_default();
                 health.shift_remove("privateDegradedReason");

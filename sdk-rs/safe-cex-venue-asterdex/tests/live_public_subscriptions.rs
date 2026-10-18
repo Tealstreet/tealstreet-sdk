@@ -1,11 +1,11 @@
 #[path = "support/subscription_runtime.rs"]
 mod host;
 use host::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::ExchangeError,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, OrderBook};
 use safe_cex_venue_asterdex::{
     public_subscriptions::{

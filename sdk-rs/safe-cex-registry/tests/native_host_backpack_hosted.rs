@@ -145,7 +145,7 @@ fn backpack_secretless_private_auth_preserves_actual_source_failure_and_log() {
         let mut base = BaseExchange::new(
             ExchangeName::Backpack,
             serde_json::from_value(json!({"key":"hosted-public-key","secret":""})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             runtime,
             ExchangeSettings::default(),
         );

@@ -519,7 +519,10 @@ fn okx_native_order_reads_handle_rejection_after_successful_aggregation() {
         );
         assert_eq!(orders[0].id, "native-order");
         assert_eq!(orders[0].symbol, "BTCUSDT");
-        assert!(h.store.orders().is_empty(), "source fetchOrders is a read");
+        assert!(
+            h.store.orders().unwrap().is_empty(),
+            "source fetchOrders is a read"
+        );
         let algorithm_requests = h
             .seen
             .borrow()

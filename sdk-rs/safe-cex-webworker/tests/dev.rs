@@ -3,6 +3,7 @@ mod runtime;
 #[path = "support/ws_runtime.rs"]
 mod ws_runtime;
 use runtime::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
@@ -10,7 +11,6 @@ use safe_cex_exchange::{
     websocket::{BaseWebSocket, WsProtocol},
     ws_parent::WsExchangeParent,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_webworker::{dev::DevHandler, payload::StoreWorkerPayload};
 use serde_json::{Value, json};

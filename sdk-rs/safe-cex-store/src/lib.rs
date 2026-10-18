@@ -1,5 +1,7 @@
 //! Store-shaped mirrors. Behavioral reference: packages/safe-cex/CLAUDE.md.
 pub mod account_environment;
+pub mod balance_handle;
+pub use balance_handle::{BalanceHandle, BalanceReference};
 pub mod config;
 pub mod dictionary_write;
 pub mod incremental_fills;

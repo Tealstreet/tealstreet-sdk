@@ -3,7 +3,8 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_typed},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Order, OrderStatus, StoreSubscriberError};
 use serde_json::json;
 use std::{cell::Cell, rc::Rc};
@@ -30,10 +31,10 @@ fn terminal(
 fn terminal_memory_precedes_orders_and_filters_only_matching_stale_ids() {
     for status in [OrderStatus::Closed, OrderStatus::Canceled] {
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         terminal(&facade, "future-🚀", status).unwrap();
         assert!(
-            native.orders().is_empty(),
+            native.orders().unwrap().is_empty(),
             "marking an absent ID adds no order"
         );
         Store::update(
@@ -48,6 +49,7 @@ fn terminal_memory_precedes_orders_and_filters_only_matching_stale_ids() {
         assert_eq!(
             native
                 .orders()
+                .unwrap()
                 .iter()
                 .map(|o| o.id.as_str())
                 .collect::<Vec<_>>(),
@@ -56,7 +58,7 @@ fn terminal_memory_precedes_orders_and_filters_only_matching_stale_ids() {
         );
         terminal(&facade, "live", status).unwrap();
         assert_eq!(
-            native.orders()[0].status,
+            native.orders().unwrap()[0].status,
             status,
             "JS terminal bridge commits requested native status"
         );
@@ -70,12 +72,12 @@ fn terminal_memory_precedes_orders_and_filters_only_matching_stale_ids() {
         )
         .unwrap();
         assert_eq!(
-            native.orders()[0].status,
+            native.orders().unwrap()[0].status,
             status,
             "JS terminal bridge refuses stale reopen"
         );
         assert_eq!(
-            native.orders()[1].status,
+            native.orders().unwrap()[1].status,
             OrderStatus::Open,
             "JS terminal memory leaves unrelated IDs unchanged"
         );
@@ -94,7 +96,7 @@ fn terminal_subscriber_error_preserves_committed_status_response_and_origin() {
         false,
     )
     .unwrap();
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     let calls = Rc::new(Cell::new(0));
     let seen = calls.clone();
     let response = json!({"data":{"msg":"terminal observer failed"}});
@@ -125,7 +127,7 @@ fn terminal_subscriber_error_preserves_committed_status_response_and_origin() {
         .expect_err("JS terminal bridge must propagate subscriber failure")
         .to_exchange_error();
     assert_eq!(
-        native.orders()[0].status,
+        native.orders().unwrap()[0].status,
         OrderStatus::Closed,
         "subscriber failure retains terminal commit"
     );
@@ -160,7 +162,7 @@ fn terminal_subscriber_error_preserves_committed_status_response_and_origin() {
 #[test]
 fn terminal_typed_ids_refuse_lone_surrogates_before_mutation() {
     let native = Rc::new(DefaultStore::new());
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     let error = facade
         .call_method(
             "markOrdersTerminal",
@@ -186,7 +188,7 @@ fn terminal_typed_ids_refuse_lone_surrogates_before_mutation() {
     )
     .unwrap();
     assert_eq!(
-        native.orders().len(),
+        native.orders().unwrap().len(),
         1,
         "refused ID must not record a replacement-character terminal key"
     );

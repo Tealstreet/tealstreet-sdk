@@ -70,10 +70,8 @@ fn fixture(row: &Value, id: &str) -> (Rc<ChaserOrderInstance>, Rc<test_store::Te
         capabilities: Default::default(),
     });
     let options:ChaserOrderOptions=serde_json::from_value(json!({"symbol":"BTC","size":3,"side":row["side"],"maxAttempts":1,"delay":100,"reduceOnly":row["reduceOnly"]})).unwrap();
-    let instance = Rc::new(ChaserOrderInstance::new(
-        venue,
-        Rc::new(RefCell::new(options)),
-    ));
+    let instance =
+        Rc::new(ChaserOrderInstance::new(venue, Rc::new(RefCell::new(options))).unwrap());
     instance.set_current_order_ids(serde_json::from_value(row["ids"].clone()).unwrap());
     if row["stopped"] == true {
         instance.mark_complete(Some("prior"));
@@ -121,7 +119,7 @@ fn tracked_orders_completion_and_logs_match_live_manager_and_pin_alias_boundary(
             }),
         );
         assert_eq!(
-            numeric(serde_json::to_value(get_current_orders(&instance)).unwrap()),
+            numeric(serde_json::to_value(get_current_orders(&instance).unwrap()).unwrap()),
             numeric(row["selection"].clone()),
             "TRACKED-ORDERS row {index}"
         );
@@ -142,7 +140,7 @@ fn tracked_orders_completion_and_logs_match_live_manager_and_pin_alias_boundary(
         }
     }
     let (instance, store) = fixture(&data["reentrant"], "id");
-    let mut selected: Vec<Order> = get_current_orders(&instance);
+    let mut selected: Vec<Order> = get_current_orders(&instance).unwrap();
     store.data.borrow_mut().orders[0].status = safe_cex_types::OrderStatus::Closed.into();
     selected[0].price = 42.0.into();
     assert_eq!(

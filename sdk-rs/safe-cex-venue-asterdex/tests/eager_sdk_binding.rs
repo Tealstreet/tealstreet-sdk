@@ -1,7 +1,7 @@
 //! Public SDK scheduling through NativeRuntime, signed HTTP and the production binding.
 #![cfg(not(target_arch = "wasm32"))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::Exchange, js_runtime::client, native::native_runtime};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
 use serde_json::{Value, json};
@@ -198,11 +198,11 @@ fn dropped_typed_and_unit_waiters_keep_signed_http_and_store_continuations_alive
         drop(venue.change_position_mode(true, None));
         let first = request(&received).await;
         let second = request(&received).await;
-        assert!(!store.options().is_hedged, "held HTTP must suspend the source Store update");
+        assert!(!store.options().unwrap().is_hedged, "held HTTP must suspend the source Store update");
         release.send(()).unwrap();
         let third = request(&received).await;
         assert_eq!(json!([first, second, third]), source["requests"]);
-        assert_eq!(store.options().is_hedged, source["hedged"].as_bool().unwrap());
+        assert_eq!(store.options().unwrap().is_hedged, source["hedged"].as_bool().unwrap());
         venue.dispose().unwrap();
     });
     server.join().unwrap();

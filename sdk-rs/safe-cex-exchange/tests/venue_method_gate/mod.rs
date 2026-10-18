@@ -1,5 +1,6 @@
 //! Literal standard-method lookup coverage against the actual native JS host.
 use super::{Names, assert_ratchet, files, fs, literal, previous_baseline, skip};
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     js_runtime::{
         client, globals, library,
@@ -9,7 +10,6 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
-use safe_cex_store::store::DefaultStore;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
