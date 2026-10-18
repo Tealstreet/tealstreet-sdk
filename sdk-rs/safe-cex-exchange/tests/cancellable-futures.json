@@ -1750,14 +1750,14 @@
       "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged. Reviewed the synchronous HTTP_STATS request observation: its Mutex guard ends before returning the original config; no new async boundary or owned reservation is introduced."
     },
     {
-      "owner": "src/js_runtime/globals.rs::resolve_promise",
+      "owner": "src/js_runtime/promise.rs::resolve_promise",
       "boundaries": [
         "async-block"
       ],
-      "producer_sha256": "3281225f36ba1c41a6fa78d30c1ea44767a3ae3dfc159fed230b8a011d8f1928",
+      "producer_sha256": "2b4abf98a8617c2eb112bfb3a09829ce8388e8d33f903b503a820362e127c25d",
       "classification": "delegated",
       "delegate": "src/js_runtime/jobs.rs::Jobs::spawn / OwnedTasks driver",
-      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup."
+      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup. The unchanged resolution algorithm now lives in promise core and serves the constructor, static resolve and serial helpers; only module qualification and the resolving-functions helper name changed."
     },
     {
       "owner": "src/js_runtime/jobs.rs::Driver as Future::poll",
@@ -1766,7 +1766,7 @@
       ],
       "producer_sha256": "f817e196a48d2508b97d7dd87717bbfc5b1786e2f6e0c7deb281d68104f72850",
       "classification": "guarded",
-      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced.",
+      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
@@ -1778,7 +1778,7 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
+          "sha256": "5665667ddb949cf842f1af0132a5a49124ccc250908ab83309e2c5c6cb0e58cf"
         }
       ],
       "witnesses": [
@@ -1800,7 +1800,7 @@
       ],
       "producer_sha256": "9bebf021f3754b4f9996de1597b53217ef5e078f871bb932e0740a9679fea446",
       "classification": "guarded",
-      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced.",
+      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
@@ -1812,7 +1812,7 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
+          "sha256": "5665667ddb949cf842f1af0132a5a49124ccc250908ab83309e2c5c6cb0e58cf"
         }
       ],
       "witnesses": [
@@ -1922,13 +1922,14 @@
         "await",
         "async-block",
         "await",
+        "await",
         "async-block",
         "async-block",
         "await"
       ],
-      "producer_sha256": "991f58f20522f022ae6b5cdca3d5a8e6a81d00d0f84e1a6760eb2ce3eb03f40b",
+      "producer_sha256": "f6c765e86e987fb42eae7ead78e03f4af4e9eb83ba1f7fbfaa5a875d14289d13",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical. Reviewed shared throttle installation: the added callback is synchronous and creates no new await or Promise; the same seven async boundaries and Promise/loop captures remain unchanged. Throttle delegates timer ownership/cancellation to Scope.set_timeout/clear_timeout, exercised by js_throttle native scheduling/cancel traces and the existing Scope timer regression. Reviewed #533 qs options: the only change inside this installer forwards argument 1 into the synchronous stringify helper; all seven async boundaries and captured Promise/loop ownership are unchanged. Reviewed #554 synced dayjs clock getter: a synchronous func now reads VIRTUAL_CLOCK and constructs the date value; it captures no future, timer, task or shared lifecycle latch. The same seven async boundaries and Promise/loop captures remain unchanged. Reviewed orderbook totals repair: the synchronous callback captures both sides before traversal, re-reads live lengths/rows and uses existing fallible JS addition. It creates no future, task, timer, registration or lifecycle slot; all seven async boundaries and Promise/loop captures remain unchanged. Primitive RHS validation and lodash throttle option guards are synchronous; the get-key repair adds no future, task, or owned latch. Reviewed #453 builtin integration: the installer now calls synchronous dayjs_from to construct the offset-aware Dayjs value; UTC-offset/start-boundary helpers capture values without adding a future, timer or lifecycle slot. The same seven async boundaries and captured Promise/loop ownership remain unchanged."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to the existing Promise/Jobs owner; no exchange in-flight slot or shared borrow spans an await. The serial repair adds one awaited input before the existing callback-result await, for eight syntactic async boundaries. Each serial invocation retains its original input/callback/receiver and local output; the scope privately roots the module while exported functions capture it weakly. Canonical Promise.resolve owns thenable jobs through the existing FIFO driver. Existing throttle timer ownership remains delegated to Scope.set_timeout/clear_timeout. Native installed-package and module-release witnesses verify settlement, escaped exports and absence of scope/module cycles."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
@@ -1959,7 +1960,7 @@
       ],
       "producer_sha256": "bc78c9feff8d698f837025580deeed6e292cf29f8efe9da1894a88ee9134ce08",
       "classification": "guarded",
-      "reason": "The queue eagerly polls the body with its actual readiness waker, then independently owns its continuation and settlement. Dropping the observer preserves execution; host driver discard releases polled and unpolled captures.",
+      "reason": "The queue eagerly polls the body with its actual readiness waker, then independently owns its continuation and settlement. Dropping the observer preserves execution; host driver discard releases polled and unpolled captures. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
@@ -1971,7 +1972,7 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
+          "sha256": "5665667ddb949cf842f1af0132a5a49124ccc250908ab83309e2c5c6cb0e58cf"
         }
       ],
       "witnesses": [
@@ -2005,14 +2006,14 @@
       ],
       "producer_sha256": "eff35b2f043324da15e43a0e30a4dae28fc50e5d44f2ecb8191177d84255a707",
       "classification": "guarded",
-      "reason": "Each PromiseWait owns one id-keyed waker registration. Drop removes only that registration and destroys the removed waker after releasing the state borrow. Settled values queue one continuation without adding a pending waiter.",
+      "reason": "Each PromiseWait owns one id-keyed waker registration. Drop removes only that registration and destroys the removed waker after releasing the state borrow. Settled values queue one continuation without adding a pending waiter. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint.",
       "witnesses": [
         "tests/js_runtime.rs::dropped_promise_wait_releases_its_waker"
       ],
       "source_dependencies": [
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
+          "sha256": "5665667ddb949cf842f1af0132a5a49124ccc250908ab83309e2c5c6cb0e58cf"
         }
       ],
       "guards": [

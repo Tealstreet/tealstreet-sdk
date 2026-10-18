@@ -1699,3 +1699,29 @@ HTTP_STATS singleton after proxy authorization, including rejected HTTP statuses
 Its normal response interceptor preserves the source absence of recordError.
 The native runtime request-counter regression uses actual HTTP200/404 receipts;
 it fails with an unchanged total on the previous factory.
+
+Native host objects retain one opaque Rc<dyn Any> on their canonical ObjectData.
+Js::host_object creates the ordinary reference, and resource<T> downcasts only its
+own attachment; prototypes and object spread never transfer that native slot.
+Ordinary descriptors, reflection, freeze and explicit JSON use the existing JS
+property operations, with the resource excluded from those property views.
+The native resource target checks original Rc identity, number bits, type refusal,
+private-slot mutation through freeze, inherited getter receivers and final release.
+Independent dropped-retention and leaked-retention faults must compile, fail named
+assertions, restore exact source and pass. This adds no native resource wire codec
+and does not switch a Hyperliquid consumer or change default prototype policy.
+
+The installed p-iteration serial helpers read live lengths and inherited slots,
+await each input and callback result, and preserve sparse result indices. Callback
+`call` lookup precedes the input read. Falsy thisArg values select the original
+CommonJS module receiver; the shared scope roots that module while exported
+functions hold weak references. Both pre-publication and live installation use
+that same scope-owned root. `tests/js_series_iteration.rs` compares forty-eight actual
+installed-package cases and checks escaped exports, signed-zero stringify and
+scope/module release; its three compiled mutation controls restore exact source.
+
+Promise.resolve and the installed Promise constructor share the core thenable
+resolution operation. Serial helpers use it before awaiting input and callback
+results, preserving synchronous then lookup, deferred invocation, first-call
+settlement and original rejection identity. General direct await/async-return
+and combinator adoption remains a separately recorded follow-up after #901.

@@ -24111,6 +24111,56 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "host_object",
+          "signature": {
+            "inputs": [
+              [
+                "resource",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::any::Any",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Retains an already existing Rc<dyn Any> native capability on the sole ordinary ObjectData referent; no serialized/raw input is parsed or coerced and no new client/socket/signer is constructed. Native tests/js_native_resources.rs executes exact Rc/type/alias/number-bit observations, property and JSON invisibility, and final release with compiled retention/leak controls. This classifies only the native attachment constructor, not arbitrary resource behavior or transport execution."
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "function",
           "signature": {
             "inputs": [

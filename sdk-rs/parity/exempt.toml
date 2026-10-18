@@ -7556,3 +7556,11 @@ reason = "Native Serde record hint retains an own undefined zkLinkConfig update 
 [[exempt]]
 rs = "safe-cex-types/src/retained_json/native.rs::Input::decode_native"
 reason = "Shared native Serde reader moved below Num so nested retained model variants and the production JS bridge use one decoder. The raw tree is canonical RetainedJsonInput; no JSON reconstruction or new TypeScript policy."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::host_object"
+reason = "Native host ABI allocation: stores an already existing opaque Rc<dyn Any> on the canonical ordinary object referent. Client/socket/cache/wallet algorithms keep their source mappings; this Rust storage operation has no standalone TypeScript declaration. Actual native identity, type, hidden-slot and lifetime witnesses cover the retention capability."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::resource"
+reason = "Native host ABI typed lookup: clones and downcasts only this ordinary object's immutable opaque Rc attachment, preserving the original native owner and returning None for wrong types or other receivers. This Rust type-erasure observation has no standalone TypeScript declaration; inherited properties and object spread do not transfer it."
