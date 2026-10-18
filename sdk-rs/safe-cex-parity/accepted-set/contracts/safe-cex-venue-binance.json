@@ -1,4 +1,98 @@
 {
+  "safe_cex_venue_binance::class_flags::LiveFlag": {
+    "shape": "typed",
+    "evidence": "src/class_flags.rs carries a callback or bool Cell without Deserialize. The actual native ExchangeOwner installs live Base disposal and snapshot-stale readers. tests/support/live_flag_binding.rs executes signed held Futures/PM HTTP requests, then directly checks live guards, Store order contents/loaded state and actual Base disposal; its second native test checks both Cell values and later writes. scripts/live-flag-controls.py independently compiles a broken live reader and inverted Cell conversion, requires the corresponding named native assertion to fail, restores exact production bytes and requires the same tests to pass. The accepted-set receipt classifies these two typed constructors; it does not execute a decoder or replace the separate native binding witnesses.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "read",
+          "signature": {
+            "inputs": [
+              [
+                "get",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [],
+                                          "output": {
+                                            "primitive": "bool"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Captures an existing bool callback; execution reads the live owner instead of parsing external data."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "core::cell::Cell",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "primitive": "bool"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Moves an already typed bool Cell into local state, without decoding a representation."
+      }
+    ]
+  },
   "safe_cex_venue_binance::ticker_capture::Capture": {
     "shape": "typed",
     "evidence": "ticker_capture::Capture::new receives only an already constructed Rc<dyn Store>, retains it weakly, builds native ticker cells and subscribes to Store changes. It neither parses raw input nor implements Deserialize. The real constructed native_dependencies class test production_native_ticker_capture_aliases_retain_cells_and_replace_generations asserts immediate updates before any dictionary reread, generation replacement, stable row identity and all three venue paths. Its compiled subscription-refresh removal control must fail; this typed classification itself is not a decoder execution receipt.",

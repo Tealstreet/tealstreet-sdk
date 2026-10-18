@@ -758,6 +758,10 @@ holds a listen-key request, drops the original settlement and observes both
 clones before invoking a cloned reconnect arrow. These reviews do not classify
 raw-input decoders or widen accepted representations.
 
+LiveFlag constructor receipts classify typed callback/Cell state. Native retry
+proofs live in tests/support/live_flag_binding.rs; live-flag-controls.py requires
+independent compiled reader/conversion failures and exact source restorations.
+
 
 The private REST continuation aliases have finite native evidence in
 `tests/support/snapshot_future_binding.rs`. The actual PM exchange starts the
@@ -800,6 +804,7 @@ distinguishes transport rejection from malformed fulfilled-body validation.
 `scripts/snapshot-rejection-fixture-control.py` compiles the old fulfilled fixture,
 requires that assertion to fail and restores the genuine rejection path. This is
 a fixture-semantics check, separate from the two production continuation controls.
+
 
 The legacy `public_message`, `private_message`, `spot_public_message` and
 `public_candle_delegate` callback extractions have no production callers and were

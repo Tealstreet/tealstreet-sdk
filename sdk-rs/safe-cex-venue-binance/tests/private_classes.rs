@@ -5642,6 +5642,10 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
     }
 }
 
+#[cfg(feature = "native")]
+#[path = "support/live_flag_binding.rs"]
+mod live_flag_binding;
+
 #[test]
 #[cfg(feature = "native")]
 fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
