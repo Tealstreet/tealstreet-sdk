@@ -7682,6 +7682,10 @@ rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::spawn_classified"
 reason = "Optional host diagnostic spawn annotation; its default delegates to the existing spawn_local operation. Native replay hosts alone observe pending leaves and wakeups. Ordinary native accounts and other runtime implementations keep the original task scheduling and ownership; no exchange method parity is claimed."
 
 [[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::task_work_started"
+reason = "Host diagnostic phase transition for an explicitly reviewed timer entering asynchronous callback work. Remaining work blocks drain even when the callback awaits another timer; default hosts do nothing. Actual native timer/async-callback and captured Binance replay regressions validate this receipt metadata, not a TS exchange operation."
+
+[[exempt]]
 rs = "safe-cex-exchange/src/replay_clock.rs::ReplayClock"
 reason = "Native-only diagnostic host clock state for isolated deterministic replay. Production native accounts never select this host implicitly. The Rust replay_clock regression compares actual runtime timer callbacks and VirtualClock host readings."
 

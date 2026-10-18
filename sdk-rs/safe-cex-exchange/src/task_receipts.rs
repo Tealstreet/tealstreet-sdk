@@ -7,7 +7,7 @@ use std::{
     rc::{Rc, Weak},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::{Wake, Waker},
 };
@@ -26,6 +26,7 @@ pub(crate) struct Tasks {
 }
 pub(crate) struct State {
     kind: Option<RuntimeTaskKind>,
+    finite_callback: AtomicBool,
     status: AtomicUsize,
 }
 pub(crate) struct Registration {
@@ -43,6 +44,7 @@ impl Drop for Registration {
 pub(crate) fn register(owner: &Rc<RefCell<Tasks>>, kind: Option<RuntimeTaskKind>) -> Registration {
     let state = Arc::new(State {
         kind,
+        finite_callback: AtomicBool::new(false),
         status: AtomicUsize::new(ACTIVE),
     });
     let mut tasks = owner.borrow_mut();
@@ -124,6 +126,7 @@ pub(crate) fn waiting(kind: RuntimeTaskKind) {
     with_current(|current| {
         if let Some((state, version)) = current.borrow().as_ref()
             && state.kind == Some(kind)
+            && !state.finite_callback.load(Ordering::SeqCst)
         {
             let status = match kind {
                 RuntimeTaskKind::Timer => TIMER,
@@ -140,6 +143,17 @@ pub(crate) fn waiting(kind: RuntimeTaskKind) {
     });
 }
 
+pub(crate) fn work_started() {
+    with_current(|current| {
+        if let Some((state, _)) = current.borrow().as_ref()
+            && state.kind == Some(RuntimeTaskKind::Timer)
+        {
+            state.finite_callback.store(true, Ordering::SeqCst);
+            state.status.fetch_and(!STATUS_MASK, Ordering::SeqCst);
+        }
+    });
+}
+
 pub(crate) fn receipt(owner: &Rc<RefCell<Tasks>>) -> serde_json::Value {
     let tasks = owner.borrow();
     let mut unknown = 0;
@@ -149,6 +163,10 @@ pub(crate) fn receipt(owner: &Rc<RefCell<Tasks>>) -> serde_json::Value {
     let mut sockets = 0;
     let mut drivers = 0;
     for state in tasks.entries.values() {
+        if state.finite_callback.load(Ordering::SeqCst) {
+            finite += 1;
+            continue;
+        }
         match (
             state.kind,
             state.status.load(Ordering::SeqCst) & STATUS_MASK,

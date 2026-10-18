@@ -1261,23 +1261,27 @@ impl ExchangeImports for NativeImports {
         }
         let delay = interval.filter(|v| *v > 0.0).unwrap_or(5_000.0);
         let reporter = runtime.clone();
-        self.runtime.spawn_local(Box::pin(async move {
-            if runtime.sleep(delay as u64).await.is_err() {
-                return;
-            }
-            // setTimeout(fn, 0): the tick runs on its own scheduler turn.
-            let _ = runtime.sleep(0).await;
-            let result = match callback() {
-                Ok(future) => future.await.map(|_| ()),
-                Err(error) => Err(error),
-            };
-            if let Err(error) = result {
-                reporter.report_exception(
-                    &error,
-                    &serde_json::json!({"operation":"binance tick loop"}).into(),
-                );
-            }
-        }));
+        self.runtime.spawn_classified(
+            safe_cex_exchange::runtime::RuntimeTaskKind::Timer,
+            Box::pin(async move {
+                if runtime.sleep(delay as u64).await.is_err() {
+                    return;
+                }
+                runtime.task_work_started();
+                // setTimeout(fn, 0): the tick runs on its own scheduler turn.
+                let _ = runtime.sleep(0).await;
+                let result = match callback() {
+                    Ok(future) => future.await.map(|_| ()),
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = result {
+                    reporter.report_exception(
+                        &error,
+                        &serde_json::json!({"operation":"binance tick loop"}).into(),
+                    );
+                }
+            }),
+        );
         Ok(())
     }
 }

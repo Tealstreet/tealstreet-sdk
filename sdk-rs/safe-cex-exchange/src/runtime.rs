@@ -424,6 +424,9 @@ pub trait ExchangeRuntime {
     ) -> Box<dyn ExchangeTask> {
         self.spawn_local(future)
     }
+    /// A reviewed timer has entered asynchronous callback work. Its remaining
+    /// lifetime blocks drain, including any timer waits inside that callback.
+    fn task_work_started(&self) {}
     /// Original console arguments, including native Error references. Hosts must
     /// observe these values before choosing a terminal or telemetry representation.
     fn console_values(&self, severity: &str, values: &[Js]);

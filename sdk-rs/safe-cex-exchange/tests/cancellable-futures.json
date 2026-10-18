@@ -2283,9 +2283,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "048f152c708663808a27251ceb0570e69f32485381015fe7cb57fce6f1abeb89",
+      "producer_sha256": "ff38922dc0411b12052b8f44766b17af7496935a9a5858d8458d072cd30e54e8",
       "classification": "no-owned-latch",
-      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged. Reviewed #1094: Network failure returns a closed NativeWsSocket carrying Error/Close for existing core-owned event dispatch; admission failures retain their typed origin. No task or reader/writer is started on failure; successful handshake ownership and cancellation are unchanged."
+      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged. Reviewed #1094: Network failure returns a closed NativeWsSocket carrying Error/Close for existing core-owned event dispatch; admission failures retain their typed origin. No task or reader/writer is started on failure; successful handshake ownership and cancellation are unchanged. Ordinary socket futures bypass the replay-only observer wrapper; diagnostic observation flags add no task or owner."
     },
     {
       "owner": "src/native.rs::NativeRuntime::spawn_observed",
@@ -2308,7 +2308,7 @@
       "source_dependencies": [
         {
           "file": "src/task_receipts.rs",
-          "sha256": "8123680a023485c4b570de246d042e44797bebe3d170c0f01b2282f924d38c87"
+          "sha256": "f8fec391e1a2bdfa10575f3025201ef62ec2bcd580ed129501969c4793c915de"
         }
       ]
     },
@@ -2319,9 +2319,9 @@
         "future-return",
         "poll-fn"
       ],
-      "producer_sha256": "8d29fd3c161b303fc2e8dfdb4f1b65bb22a7b69463608b9a06898699fe19ccca",
+      "producer_sha256": "a0caa00743305573a2bbb7a66a4b87ca0a8e431781e368c9ab6a6603bea4cccf",
       "classification": "no-owned-latch",
-      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future. Reviewed #1094: the failed-network variant returns ready Error then Close futures and an unregistered terminal pending future, with no Open, waiter, task or new cancellation latch. Successful socket reads and existing termination ownership are unchanged; real native HTTP400/invalid-URL coverage is ws_lifecycle::native_failed_upgrade_delivers_error_then_close_without_open. Reviewed raw-task receipt instrumentation: diagnostic classification/pending-leaf observations add no scheduling turn; existing producer ownership, cancellation guards and cleanup remain. Native unpolled cancellation and pending timer/socket tests execute the registration lifetime."
+      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future. Reviewed #1094: the failed-network variant returns ready Error then Close futures and an unregistered terminal pending future, with no Open, waiter, task or new cancellation latch. Successful socket reads and existing termination ownership are unchanged; real native HTTP400/invalid-URL coverage is ws_lifecycle::native_failed_upgrade_delivers_error_then_close_without_open. Reviewed raw-task receipt instrumentation: diagnostic classification/pending-leaf observations add no scheduling turn; existing producer ownership, cancellation guards and cleanup remain. Native unpolled cancellation and pending timer/socket tests execute the registration lifetime. Ordinary socket futures bypass the replay-only observer wrapper; diagnostic observation flags add no task or owner."
     },
     {
       "owner": "src/native.rs::NativeWsSocket::next_native_event",

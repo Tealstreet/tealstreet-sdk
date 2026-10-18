@@ -59,11 +59,14 @@ fn timer_wakeup_and_pending_callback_block_until_completion() {
         let entered = Rc::new(Cell::new(false));
         let callback = entered.clone();
         let sleep = runtime.sleep(100);
+        let callback_runtime = runtime.clone();
         let _task = runtime.spawn_classified(
             RuntimeTaskKind::Timer,
             Box::pin(async move {
                 sleep.await.unwrap();
+                callback_runtime.task_work_started();
                 callback.set(true);
+                callback_runtime.sleep(1000).await.unwrap();
                 receive.await.unwrap();
             }),
         );
@@ -77,6 +80,12 @@ fn timer_wakeup_and_pending_callback_block_until_completion() {
             .unwrap();
         settle().await;
         assert!(entered.get());
+        assert_eq!(replay_raw_tasks(&runtime)["blocking"], 1);
+        assert_eq!(replay_raw_tasks(&runtime)["finite"], 1);
+        replay_clock::advance(runtime.replay_clock.as_ref().unwrap(), 1100.0)
+            .await
+            .unwrap();
+        settle().await;
         assert_eq!(replay_raw_tasks(&runtime)["blocking"], 1);
         send.send(()).unwrap();
         settle().await;

@@ -374,6 +374,9 @@ impl ExchangeRuntime for NativeRuntime {
     ) -> Box<dyn ExchangeTask> {
         self.spawn_observed(Some(kind), future)
     }
+    fn task_work_started(&self) {
+        crate::task_receipts::work_started();
+    }
     fn console_values(&self, severity: &str, message: &[crate::js_runtime::value::Js]) {
         let rendered = crate::runtime::console_text(message);
         let message = rendered.as_str();
@@ -474,7 +477,7 @@ impl WsRuntime for NativeRuntime {
                     return Err(error);
                 }
             };
-            Ok(Rc::new(native_ws_socket(socket)) as Rc<dyn WsSocket>)
+            Ok(Rc::new(native_ws_socket(socket, replay)) as Rc<dyn WsSocket>)
         })
     }
     fn headers_capable(&self) -> bool {
@@ -503,14 +506,17 @@ struct NativeWsSocket {
     inner: Result<Rc<NativeSocket>, String>,
     opened: Rc<Cell<bool>>,
     ended: Rc<Cell<bool>>,
+    observe_tasks: bool,
 }
 fn native_ws_socket(
     inner: Result<NativeSocket, safe_cex_transport::TransportError>,
+    observe_tasks: bool,
 ) -> NativeWsSocket {
     NativeWsSocket {
         inner: inner.map(Rc::new).map_err(|error| error.to_string()),
         opened: Rc::new(Cell::new(false)),
         ended: Rc::new(Cell::new(false)),
+        observe_tasks,
     }
 }
 impl NativeWsSocket {
@@ -567,6 +573,9 @@ impl WsSocket for NativeWsSocket {
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
         let mut event = self.next_native_event();
+        if !self.observe_tasks {
+            return event;
+        }
         Box::pin(std::future::poll_fn(move |cx| {
             let result = event.as_mut().poll(cx);
             if result.is_pending() {

@@ -59,6 +59,8 @@ test('drain refuses queued, missing, duplicate, extra socket and unread control 
     transport: [{ url, counts: { message: 1, ping: 1, pong: 0, close: 0 } }],
   };
   assert.equal(verifyDrain(tape, expected, receipt), true);
+  assert.equal(verifyDrain(tape, expected, { ...receipt, rawTasks: undefined }), false);
+  assert.equal(verifyDrain(tape, expected, { ...receipt, pendingJobs: undefined }), false);
   assert.equal(verifyDrain(tape, expected, { ...receipt, pendingJobs: 1 }), false);
   assert.equal(verifyTransportDrain(tape, receipt), true);
   for (const [consumed, processed] of [
