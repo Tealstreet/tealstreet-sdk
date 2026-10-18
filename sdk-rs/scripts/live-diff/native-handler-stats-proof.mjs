@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { deserialize } from 'node:v8';
 import { fileURLToPath } from 'node:url';
+import { differences } from './compare.mjs';
 const [redPath, greenPath, bundlePath] = process.argv.slice(2);
 assert(redPath && greenPath && bundlePath, 'usage: proof RED.json GREEN.json original.bundle.v8');
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -51,11 +52,34 @@ function read(path) {
   completeEqual(outputs['rust-1'], outputs['rust-2']);
   return { report, outputs };
 }
+// These are OPEN order-only FIXes owned separately. Pin each exact old/new
+// observation rather than sorting keys or claiming ordered output parity.
+const storeTS = ['latency','balance','tickers','displayedPositions','displayedMargin','ordersRisk','activeChasers','activeTWAPs','messageHandlerStats','requestStats','fetchedLeverage','loaded','options','updateIds','socketHealth','zkLinkConfig'];
+const storeRust = ['latency','balance','tickers','zkLinkConfig','displayedPositions','displayedMargin','ordersRisk','activeChasers','activeTWAPs','loaded','options','updateIds','messageHandlerStats','requestStats','fetchedLeverage','socketHealth'];
+const tickerTS = ['id','symbol','bid','ask','last','volume','quoteVolume','mark','index','percentage','openInterest','fundingRate','fundingTime'];
+const tickerRust = ['id','symbol','bid','ask','last','mark','index','percentage','openInterest','fundingRate','fundingTime','volume','quoteVolume'];
+const expectedOrder = [];
+for (let output = 0; output < 2; output++) {
+  expectedOrder.push({path:`$.${output}.data`,ts:storeTS,rust:storeRust});
+  for (let row = 0; row < 89; row++) expectedOrder.push({path:`$.${output}.data.tickers.${row}`,ts:tickerTS,rust:tickerRust});
+}
+function orderDeltas(a, b, path='$', seen=new WeakMap(), out=[]) {
+  if (!a || typeof a !== 'object') return out;
+  if (seen.get(a) === b) return out;
+  seen.set(a, b);
+  const x=Reflect.ownKeys(a), y=Reflect.ownKeys(b);
+  if (x.length !== y.length || x.some((key,index) => key !== y[index])) out.push({path,ts:x,rust:y});
+  for (const key of x) orderDeltas(a[key],b[key],path+'.'+key,seen,out);
+  return out;
+}
 const red = read(redPath), green = read(greenPath);
 assert.deepEqual(red.report.parity.combined.diffs, [{path:'$.1.data.messageHandlerStats.public.pong.hadHandlers', ts:true, rust:false}]);
 assert.equal(red.outputs['ts-1'][1].data.messageHandlerStats.public.pong.hadHandlers, true);
 assert.equal(red.outputs['rust-1'][1].data.messageHandlerStats.public.pong.hadHandlers, false);
 assert.deepEqual(green.report.parity.combined.diffs, []);
-completeEqual(green.outputs['ts-1'], green.outputs['rust-1']);
+assert.deepEqual(green.outputs['ts-1'], green.outputs['rust-1'], 'all values and own-property presence');
+assert.deepEqual(differences(red.outputs['ts-1'],red.outputs['rust-1']),red.report.parity.combined.diffs);
+for (const phase of [red,green]) assert.deepEqual(orderDeltas(phase.outputs['ts-1'],phase.outputs['rust-1']),expectedOrder);
+assert.equal(expectedOrder.length,180);
 completeEqual(red.outputs['ts-1'], green.outputs['ts-1']);
-console.log('PASS: recorded three-frame Apex binding RED -> whole-output GREEN, ordered own properties and strict drains');
+console.log('PASS: recorded three-frame Apex pong value RED -> GREEN, complete value/presence equality and strict drains; all 180 inherited order-only FIXes unchanged. No ordered whole-output or full-minute parity claim.');

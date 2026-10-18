@@ -60,3 +60,20 @@ Run `python3 safe-cex-exchange/scripts/native-handler-stats-controls.py --logs A
 from `sdk-rs`, with the normal isolated TypeScript compiler environment. Each
 family must fail its named binding assertion under a compiled reader-bypass fault,
 then pass after exact source restoration. Do not run concurrent Cargo during it.
+
+The original three-frame bundle SHA256 is
+`4acfab66eea4b2e2df457b477f2d1384a8e3dcdea3bb9e286a4cce4be1ba1aaf`.
+The full production napi registry build at `1cdf108ee389d811995ae148dcc109ace0598ecd`
+(addon SHA256 `b77df9bc7221226c064725c02c6671219c3114644beea152194fa4b0a1638969`)
+strictly drains all three frames, with zero pending/unknown/finite/ready/blocking
+work. Both fresh native runs and both TS runs repeat their complete two-output
+sequences. The pong flag changes from false to true and all output values and
+own-property presence match TS. An independent live-diff-lane replay confirms it.
+
+Order-only differences remain OPEN: the two Store top-level key sequences and
+all 178 ticker key sequences (89 rows in each output) differ from TS. They are
+exactly the same 180 deltas on baseline and candidate, assigned separately to
+codex-4ri6pb. `scripts/live-diff/native-handler-stats-proof.mjs` pins every path
+and both key arrays before and after. It neither sorts nor normalizes outputs,
+and makes no ordered whole-output claim. The runner's overall startup-only
+coverage remains incomplete; only this recorded pong value fix is GREEN.
