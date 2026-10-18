@@ -50,11 +50,20 @@ fn run(future: impl Future<Output = ()>) {
         .block_on(tokio::task::LocalSet::new().run_until(future));
 }
 fn venue(name: ExchangeName) -> Rc<BybitExchange> {
-    let runtime = native_runtime();
-    BybitExchange::create(
+    venue_with_options(
         name,
         serde_json::from_value(serde_json::json!({"key":"", "secret":"", "publicDataOnly":true}))
             .unwrap(),
+    )
+}
+fn venue_with_options(
+    name: ExchangeName,
+    options: safe_cex_types::ExchangeOptions,
+) -> Rc<BybitExchange> {
+    let runtime = native_runtime();
+    BybitExchange::create(
+        name,
+        options,
         Rc::new(DefaultStore::new()),
         BybitDependencies {
             runtime,
@@ -763,6 +772,237 @@ fn divergence_sdk_account_starts_original_client_before_waiter_poll() {
             result.affiliate_id.as_ref().and_then(|v| v.as_deref()),
             Some("91")
         );
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn hyro_divergence_account_configuration_receivers() {
+    if crate::types::HYROTRADER_PROD_URL["livenet"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty()
+    {
+        let directory =
+            std::env::temp_dir().join(format!("bybit-hyro-account-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("configured.log");
+        let log = std::fs::File::create(&path).unwrap();
+        let mut child =
+            std::process::Command::new(std::env::var_os("CARGO").unwrap_or("cargo".into()))
+                .args([
+                    "test",
+                    "--locked",
+                    "-p",
+                    "safe-cex-venue-bybit",
+                    "--lib",
+                    "hyro_divergence_account_configuration_receivers",
+                    "--jobs",
+                    "1",
+                    "--",
+                    "--test-threads=1",
+                    "--nocapture",
+                ])
+                .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
+                .env("CARGO_INCREMENTAL", "0")
+                .env(
+                    "NEXT_PUBLIC_HYROTRADER_PROD_REST_URL",
+                    "https://hyro-audit.example",
+                )
+                .env(
+                    "NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL",
+                    "https://hyro-sim-audit.example",
+                )
+                .stdout(std::process::Stdio::from(log.try_clone().unwrap()))
+                .stderr(std::process::Stdio::from(log))
+                .spawn()
+                .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(600);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                let output = std::fs::read_to_string(&path).unwrap();
+                assert!(status.success(), "configured Hyro audit failed: {output}");
+                assert!(output.contains("1 passed; 0 failed"));
+                return;
+            }
+            if Instant::now() > deadline {
+                child.kill().expect("stop timed-out configured Hyro audit");
+                child.wait().unwrap();
+                panic!("configured Hyro audit timed out: {}", path.display());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    run(async {
+        for mode in ["production", "demo"] {
+            let options = serde_json::from_value(serde_json::json!({
+                "key":"", "secret":"", "publicDataOnly":true,
+                "enableOptionMarkets":true, "enableInverseMarkets":true,
+                "extra":{"hyrotraderMode":mode}
+            }))
+            .unwrap();
+            let exchange = venue_with_options(ExchangeName::Hyrotrader, options);
+            let this = &exchange.js.get().unwrap().this;
+            for name in ["optionsEnabled", "inverseEnabled"] {
+                assert!(
+                    this.call_method(name, vec![])
+                        .unwrap()
+                        .strict_equals(&Js::Bool(false)),
+                    "hyro_capability_flags_ignore_optins"
+                );
+            }
+            let poison = Js::object(vec![]);
+            poison
+                .define_accessor(
+                    "startTime",
+                    Some(Rc::new(|_| panic!("empty range must ignore arguments"))),
+                    None,
+                )
+                .unwrap();
+            let first = this
+                .call_method(
+                    "fetchIncomeHistoryRange",
+                    vec![
+                        poison.clone(),
+                        Js::Number(f64::NAN),
+                        Js::String(vec![0xd800].into()),
+                    ],
+                )
+                .unwrap();
+            let second = this
+                .call_method("fetchIncomeHistoryRange", vec![poison])
+                .unwrap();
+            assert!(
+                !first.strict_equals(&second),
+                "fresh source Promise per call"
+            );
+            let first = await_js(&exchange.base.runtime, first).await.unwrap();
+            let second = await_js(&exchange.base.runtime, second).await.unwrap();
+            assert_eq!(
+                first.array_values().unwrap().len(),
+                0,
+                "hyro_empty_income_range"
+            );
+            assert!(!first.strict_equals(&second), "fresh empty array per call");
+            let messages = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let seen = messages.clone();
+            this.define(
+                "emitAndLogError",
+                Js::function("emitAndLogError", move |_, args| {
+                    seen.borrow_mut().push(arg(&args, 0));
+                    Ok(Js::Undefined)
+                }),
+            )
+            .unwrap();
+            let balance = Js::object(vec![
+                ("total", Js::Number(-0.0)),
+                ("opaque", Js::String(vec![0xd800].into())),
+            ]);
+            let result_balance = balance.clone();
+            this.define(
+                "fetchBalance",
+                Js::function("fetchBalance", move |_, _| Ok(result_balance.clone())),
+            )
+            .unwrap();
+            let result = this.call_method("validateAccount", vec![]).unwrap();
+            let result = await_js(&exchange.base.runtime, result).await.unwrap();
+            assert!(result.get("balance").unwrap().strict_equals(&balance));
+            assert!(result.get("error").unwrap().strict_equals(&Js::str("")));
+            let published = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let observed = published.clone();
+            this.get("store")
+                .unwrap()
+                .define(
+                    "update",
+                    Js::function("update", move |_, args| {
+                        observed.borrow_mut().push(arg(&args, 0));
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+            for disposed in [false, true] {
+                let pending = safe_cex_exchange::js_runtime::promise::Promise::pending(
+                    &exchange.base.runtime,
+                );
+                let request = pending.clone();
+                let calls = Rc::new(Cell::new(0));
+                let count = calls.clone();
+                this.define(
+                    "fetchBalance",
+                    Js::function("fetchBalance", move |_, _| {
+                        count.set(count.get() + 1);
+                        Ok(Js::Promise(request.clone()))
+                    }),
+                )
+                .unwrap();
+                let result = this.call_method("fetchMarginAccountInfos", vec![]).unwrap();
+                assert_eq!(calls.get(), 1, "Hyro balance begins before caller polling");
+                let before = published.borrow().len();
+                if disposed {
+                    exchange.base.dispose().unwrap();
+                }
+                pending.settle(Ok(balance.clone()));
+                let settled = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    await_js(&exchange.base.runtime, result),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert!(settled.is_undefined());
+                assert_eq!(
+                    published.borrow().len(),
+                    before + usize::from(!disposed),
+                    "hyro_margin_disposal_guard"
+                );
+                if !disposed {
+                    assert!(
+                        published
+                            .borrow()
+                            .last()
+                            .unwrap()
+                            .get("balance")
+                            .unwrap()
+                            .strict_equals(&balance)
+                    );
+                }
+            }
+        }
+        let exchange = venue(ExchangeName::Hyrotrader);
+        let this = &exchange.js.get().unwrap().this;
+        let rt = exchange.js.get().unwrap();
+        let prototype = rt.global("Error").unwrap().get("prototype").unwrap();
+        let reason = Js::object(vec![("message", Js::String(vec![0xd800, 0x61].into()))]);
+        rt.global("Object")
+            .unwrap()
+            .call_method("setPrototypeOf", vec![reason.clone(), prototype])
+            .unwrap();
+        let rejected = reason.clone();
+        this.define(
+            "fetchBalance",
+            Js::function("fetchBalance", move |_, _| {
+                Err(Thrown::new(rejected.clone()))
+            }),
+        )
+        .unwrap();
+        let logged = Rc::new(RefCell::new(Js::Undefined));
+        let sink = logged.clone();
+        this.define(
+            "emitAndLogError",
+            Js::function("emitAndLogError", move |_, args| {
+                *sink.borrow_mut() = arg(&args, 0);
+                Ok(Js::Undefined)
+            }),
+        )
+        .unwrap();
+        let result = this.call_method("validateAccount", vec![]).unwrap();
+        let result = await_js(&exchange.base.runtime, result).await.unwrap();
+        assert_eq!(
+            units(&result.get("error").unwrap()),
+            [0xd800, 0x61],
+            "hyro_error_prototype_message"
+        );
+        assert_eq!(units(&logged.borrow()), [0xd800, 0x61]);
         exchange.base.dispose().unwrap();
     });
 }
