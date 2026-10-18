@@ -128,3 +128,46 @@ test('reviewed generic aliases return only their spec-owned fixed instantiation'
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, unsized: true } }), /only rootless dyn targets are unsized/);
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, extra: 1 } }), /unsupported spec fields/);
 });
+
+test('Crypto.com registered prepared tuple preserves its exact compiler pair and refusals', async () => {
+  const name = 'safe_cex_venue_cryptocom::native_bindings::Prepared';
+  const generics = {params:[{name:'V',kind:{type:{bounds:[],default:null,is_synthetic:false}}}],where_predicates:[]};
+  const tuple = {tuple:[{generic:'V'},{generic:'V'}]};
+  const alias = {name,ident:'Prepared',span:{filename:'safe-cex-venue-cryptocom/src/native_bindings.rs'},generics,rawTarget:tuple,target:tuple};
+  const contract = {category:'decoder',evidence:'Exact fixed prepared-pair control.',generics,rawTarget:tuple,target:tuple};
+  const context = {macroOrigins:['serde_json'],externalTypeAliases:[]};
+  const probe = genericAliasProbe(alias, contract, context);
+  assert.equal(probe.probeKind, 'reviewed-cryptocom-prepared');
+  assert.equal(probe.canonical, 'tuple');
+  assert.equal(probe.suffix, '<::safe_cex_types::retained_json::RetainedJsonInput>');
+  assert.equal(probe.expectedType, '(::safe_cex_types::retained_json::RetainedJsonInput,::safe_cex_types::retained_json::RetainedJsonInput)');
+  assert.throws(() => genericAliasProbe({...alias,name:'unreviewed::Prepared'}, contract, context), /source must directly name its type parameter/);
+  for (const mutate of [
+    a => {a.span.filename='different.rs';},
+    a => {a.ident='Different';},
+    a => {a.generics.params[0].kind.type.bounds.push({outlives:"'static"});},
+    a => {a.rawTarget.tuple.push({generic:'V'});},
+    a => {a.target.tuple[1]={primitive:'bool'};},
+  ]) {
+    const item=structuredClone(alias);mutate(item);
+    assert.throws(() => genericAliasProbe(item, contract, context), /reviewed prepared-call tuple/);
+  }
+  for (const key of ['instantiation','aliasProbeExpected','aliasProbeKind','aliasProbeSuffix','nativeCanonical']) {
+    assert.throws(() => genericAliasProbe(alias,{...contract,[key]:'redirect'},context), /caller cannot supply/);
+  }
+  assert.throws(() => genericAliasProbe(alias,contract,{...context,macroOrigins:[]}), /actual compiler context required/);
+  assert.throws(() => genericAliasProbe(alias,contract,{...context,externalTypeAliases:null}), /actual compiler context required/);
+  const {cryptocomPreparedAliasProbe} = await import('./accepted-cryptocom-prepared-alias.mjs');
+  const registered = loadPolicy('generic-aliases')[name];
+  for (const change of [
+    spec => {spec.unsized=true;},
+    spec => {spec.canonical='alloc::rc::Rc';},
+    spec => {spec.suffix='<T,U>';},
+    spec => {spec.expectedType='';},
+    spec => {spec.extra='unreviewed';},
+  ]) {
+    const spec=structuredClone(registered);change(spec);
+    assert.throws(() => cryptocomPreparedAliasProbe(alias,contract,context,{[name]:spec}), /reviewed prepared-call tuple/);
+  }
+  assert.equal(cryptocomPreparedAliasProbe(alias,contract,context,{}),undefined);
+});
