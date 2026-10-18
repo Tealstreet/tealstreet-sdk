@@ -938,6 +938,7 @@ pub fn transform_market(
     let max = extract_filter_value(&filters, "LOT_SIZE", "maxQty")
         .map_err(|e| (e.name, e.message.to_owned()))?;
     Ok(Market {
+        runtime: Default::default(),
         id: market.symbol.clone(),
         symbol: market.symbol.clone(),
         pretty_symbol: None,
@@ -945,8 +946,14 @@ pub fn transform_market(
         quote: market.quote_asset.clone(),
         active: market.status == "TRADING",
         contract_size: Some(1.0),
-        precision: MarketPrecision { price, amount },
+        precision: MarketPrecision {
+            base: None,
+            quote: None,
+            price,
+            amount,
+        },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount { min, max },
             leverage: MarketLimitsLeverage {
                 min: 1.0,

@@ -47,9 +47,9 @@ impl<'de> Deserializer<'de> for NativeInput {
         match self.0 {
             Input::Undefined | Input::Null => visitor.visit_unit(),
             Input::Bool(value) => visitor.visit_bool(value),
-            Input::Text(value) => {
-                visitor.visit_string(String::from_utf16(&value).map_err(de::Error::custom)?)
-            }
+            // Only the typed String view is well-formed. Retained native fields
+            // take the newtype/payload branch below and keep the original units.
+            Input::Text(value) => visitor.visit_string(String::from_utf16_lossy(&value)),
             Input::Float(value) => {
                 if !value.is_finite()
                     && std::any::type_name::<V::Value>()
@@ -80,13 +80,11 @@ impl<'de> Deserializer<'de> for NativeInput {
                                 && key.iter().copied().eq("zkLinkConfig".encode_utf16()))
                     })
                     .map(|(key, value)| {
-                        Ok((
-                            String::from_utf16(&key).map_err(de::Error::custom)?,
+                        (
+                            String::from_utf16_lossy(&key),
                             NativeInput(value, self.1.child()),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?
-                    .into_iter(),
+                        )
+                    }),
             )
             .deserialize_any(visitor),
         }
@@ -128,26 +126,18 @@ impl<'de> Deserializer<'de> for NativeInput {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match self.0 {
-            Input::Text(value) => visitor.visit_enum(
-                String::from_utf16(&value)
-                    .map_err(de::Error::custom)?
-                    .into_deserializer(),
-            ),
-            Input::Object(values) if values.len() == 1 => {
-                de::value::MapAccessDeserializer::new(de::value::MapDeserializer::new(
-                    values
-                        .into_iter()
-                        .map(|(key, value)| {
-                            Ok((
-                                String::from_utf16(&key).map_err(de::Error::custom)?,
-                                NativeInput(value, self.1.child()),
-                            ))
-                        })
-                        .collect::<Result<Vec<_>, Error>>()?
-                        .into_iter(),
-                ))
-                .deserialize_enum(name, variants, visitor)
+            Input::Text(value) => {
+                visitor.visit_enum(String::from_utf16_lossy(&value).into_deserializer())
             }
+            Input::Object(values) if values.len() == 1 => de::value::MapAccessDeserializer::new(
+                de::value::MapDeserializer::new(values.into_iter().map(|(key, value)| {
+                    (
+                        String::from_utf16_lossy(&key),
+                        NativeInput(value, self.1.child()),
+                    )
+                })),
+            )
+            .deserialize_enum(name, variants, visitor),
             _ => Err(de::Error::custom(
                 "expected string or externally tagged enum object",
             )),
