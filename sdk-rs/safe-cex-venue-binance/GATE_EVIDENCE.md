@@ -1850,6 +1850,11 @@ Merged extractor text explicitly reports `Would update 0 manifests; 0 added, 0 o
 
 ## Futures and PM order throttle/refresh slice (2026-10-14)
 
+> Historical helper-only evidence: the duplicate generic module, oracle and tests
+> were retired on 2026-10-18 after confirming no production caller. The surviving
+> assembled class now has the independent native `order_throttle_binding` witness
+> and `live-order-throttle-controls.py`; the figures below describe the old helper.
+
 Moved **4 pending -> ported, 0 -> divergent**, keyed tomllib census over the
 Binance manifest directory: **133/22/131 -> 137/22/127**. Immediate reviewed
 integration parent actually built on: `cc3d25150b320656935009943f72d17b27e380a0` (PR7508).
@@ -1983,84 +1988,6 @@ exited **0**. The candidate function/control numbers retain their original
 `c4f08d7f3d0ad44f3d99777b801bab06730f3881` SHA; they are not relabeled as rerun at the merge SHA.
 Own code, source/oracle/manifests and shared dependencies are byte-unchanged, so tests/cargo/control exits remain attached to the candidate SHA. Tests/cargo/controls/rustfmt were not rerun here.
 Merged extractor text explicitly reports `Would update 0 manifests; 0 added, 0 orphaned symbols.`, exit0; diff check exit0. Keyed tomllib census against the fetched integration still moves4 pending->ported,0->divergent. Full records are committed in `POSITION_REFRESH_FINAL_MERGE_GATE_EXITS.json`; the previous enumeration floor and unrun checks/composition limits still apply.
-
-
-## Eight public ticker event handler ports (2026-10-14)
-
-Moved **8 pending -> ported, 0 -> divergent**, keyed tomllib census over all
-Binance manifests: **141/22/123 -> 149/22/115**. Immediate reviewed integration
-parent actually built on: `c39794931d672a4d8632e8db147f46e28dffb6b3` (PR7526). No unreviewed
-feature branch was used as the base. Candidate gate SHA:
-`bf8870d1141d9d46030000724ae18438c6ea2c58`. `PUBLIC_TICKER_GATE_EXITS.json` commits exact commands,
-exits, full outputs and fourteen byte-restored input hashes bound to that SHA.
-
-Ported Futures/PM market ticker and mark-price handlers, Futures/PM public
-book-ticker handlers, and Spot public ticker/book handlers. Each independently
-implemented body captures its live dictionary once, rereads live event length/
-entries, skips all JS-falsy lookup results, captures the current Store method and
-receiver before ordered field parsing, and forwards original ticker handles.
-Spot reads c separately for last/mark/index. Shared real get-key/String/parseFloat
-preserve missing-field NaN, aliases P/p and T/t, numeric prefixes, JSON coercion
-errors, and partial effects. The source oracle executes actual eight bodies,
-actual get-key/lodash and the actual BaseWebSocket.store getter.
-
-Scoped `public_ticker_events` target with configured TypeScript and
-`--include-ignored`: baseline and final restore **8 passed, 0 failed, 0 ignored,
-exit0**. Eight native first-field+1 controls compiled and failed named
-case0/row0/field0 assertions, **exit101**: ticker **13.3 vs12.3**, mark
-**14.1 vs13.1**, book bid **13.2 vs12.2** across all eight targets. Spot's control
-changes only its first c read. Two independent actual TS Futures-ticker and
-Spot-book first-field+1 controls completed all twenty-eight native cases each,
-then failed decoded source case0 first-field assertions, **exit101**. No selected
-survivor. Each mutation restored in finally; fourteen inputs matched their
-committed original bytes after all gates. Native field bits/NaN, schema order/
-counts, ticker/dictionary identity, receivers, unchanged model fields, live array/
-dictionary effects and original/generated error assertions precede source
-comparisons. No native roundtrip or re-encoded-byte assertion.
-
-Scoped Binance cargo check (`--all-targets --jobs2`), extractor check, three-file
-rustfmt and diff check each **exit0**. Extractor text explicitly says
-`Would update 0 manifests; 0 added, 0 orphaned symbols.` Both manifest writer runs
-measured exit0 with `Updated 3 manifests; 0 added, 0 orphaned symbols.` Initial
-uncommitted target run also passed8/0/0; no preliminary failure or survivor was
-observed. Read-only sub-agent body, runner and manifest reviews approved.
-
-Enumeration is a **224-case floor**, eight handlers each28, stopping
-`false-ticker`. Ten selected compiling controls stop at iteration ten, Spot book
-source case0; mutated tests stop at their named case0 failure. Native input events
-are undefined or decoded JSON cells with stock prototypes, and callbacks provide
-live dictionary capture/lookup (all JS-falsy entries normalize to None) and current
-Store method/receiver capture plus invocation. Own undefined-valued fields,
-non-JSON mutation/coercion, executable property hooks, inherited dictionary lookup
-or access beyond configured callbacks, and concrete class/Store/dictionary wiring
-remain pending. Full crate suites, workspace builds, host clippy, wasm clippy, CI,
-whole-venue and cross-engine audits were **not run**. No whole-149-row proof claim.
-
-
-### Public ticker integration merge-down preservation
-
-Merged integration `142cece1de89a061be37dca307d0a13b8b09471c` down. Preservation/extractor gate SHA:
-`482dca82ba6a173d31154f12542111e6f3fe10ba`. Actual `git diff --exit-code bf8870d1141d9d46030000724ae18438c6ea2c58 HEAD -- <Binance>/src <Binance>/tests`
-exited **0**. Source/oracle/manifests comparison exited **0**;
-shared dependency comparison exited **1**. Candidate function/control exits
-retain their original `bf8870d1141d9d46030000724ae18438c6ea2c58` SHA and are not relabeled as rerun.
-Changed gate inputs triggered fresh scoped public_ticker_events tests (8/0/0, exit0) at the merge SHA. Controls and rustfmt were not rerun.
-Changed shared dependencies triggered a fresh scoped Binance cargo check, exit0, at the merge SHA.
-Merged extractor exit0 explicitly reports `Would update 0 manifests; 0 added, 0 orphaned symbols.` Diff check exit0. Keyed tomllib census against fetched integration still moves8 pending->ported,0->divergent. Full commands/exits/outputs/hashes committed in `PUBLIC_TICKER_MERGE_GATE_EXITS.json`; earlier scope/floor/non-claims remain unchanged.
-
-
-### Public ticker final merge-down preservation
-
-Final fetch merged integration `4fa402f6fb4890a9ebd0d2ccf585f720c6f3a10a` down. Preservation/extractor
-gate SHA: `af679981fd836295052ca94d2404d59ca32ae50c`. Actual code/tests, fourteen source/oracle inputs and shared
-dependency diffs against `482dca82ba6a173d31154f12542111e6f3fe10ba` each exited **0**, preserving the refreshed
-8/0/0 tests and scoped cargo exits at `482dca82ba6a173d31154f12542111e6f3fe10ba`. Ten control
-measurements remain attached to `bf8870d1141d9d46030000724ae18438c6ea2c58`.
-Tests/cargo/controls/rustfmt were not rerun here. Final extractor exit0 explicitly
-reports `Would update 0 manifests; 0 added, 0 orphaned symbols.` Diff check exit0.
-Keyed tomllib against fetched integration still moves8 pending->ported,0->divergent:
-149/22/115. Full records/hashes/commands/limits are committed in
-`PUBLIC_TICKER_FINAL_MERGE_GATE_EXITS.json`. Earlier scope/floor/non-claims remain.
 
 
 ## Nine message entry and market candle forwarding rows (2026-10-14)

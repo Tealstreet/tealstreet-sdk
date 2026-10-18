@@ -17,7 +17,7 @@ use safe_cex_transport::{
     rate_limit::RateLimitClock,
     retry::{ClassifiedRequest, ReadClassification},
 };
-use safe_cex_types::ExchangeName;
+use safe_cex_types::{ExchangeName, retained_json::RetainedJsonInput as Input};
 use serde_json::{Map, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -388,9 +388,7 @@ impl Client {
         match result {
             Err(_) => ProbeResult::Failed,
             Ok(execution) => {
-                let Ok(data) = response_data(&execution.receipt.response.body) else {
-                    return ProbeResult::Failed;
-                };
+                let data = response_data(&execution.receipt.response.body);
                 if get_bybit_response_meta(&data).is_success {
                     ProbeResult::Mismatch(probe.diagnostic.clone())
                 } else {
@@ -403,9 +401,9 @@ impl Client {
     async fn maybe_prepend_env_mismatch(
         self: &Rc<Self>,
         code: Option<f64>,
-        message: Option<String>,
+        message: Option<Vec<u16>>,
         request: &RestRequest,
-    ) -> Result<Option<String>, RestFailure> {
+    ) -> Result<Option<Vec<u16>>, RestFailure> {
         if !matches!(code, Some(10003. | 401. | 403.)) {
             return Ok(message);
         }
@@ -413,7 +411,10 @@ impl Client {
             Some(message) if !message.is_empty() => message,
             other => return Ok(other),
         };
-        if message.contains(crate::api::BYBIT_ENV_MISMATCH_MESSAGE_PREFIX) {
+        let prefix: Vec<_> = crate::api::BYBIT_ENV_MISMATCH_MESSAGE_PREFIX
+            .encode_utf16()
+            .collect();
+        if message.windows(prefix.len()).any(|window| window == prefix) {
             return Ok(Some(message));
         }
         match self
@@ -421,7 +422,12 @@ impl Client {
             .await
             .map_err(|error| RestFailure::pre_transmit(error.to_string(), request.clone()))?
         {
-            ProbeResult::Mismatch(diagnostic) => Ok(Some(format!("{diagnostic} [{message}]"))),
+            ProbeResult::Mismatch(diagnostic) => {
+                let mut prefixed: Vec<_> = format!("{diagnostic} [").encode_utf16().collect();
+                prefixed.extend(message);
+                prefixed.push(93);
+                Ok(Some(prefixed))
+            }
             ProbeResult::NoMismatch | ProbeResult::Failed => Ok(Some(message)),
         }
     }
@@ -432,14 +438,7 @@ impl Client {
     ) -> Result<Execution, RestFailure> {
         let request = &execution.receipt.config;
         let response = &mut execution.receipt.response;
-        let mut data = response_data(&response.body).map_err(|error| RestFailure {
-            code: None,
-            transport_error: None,
-            message: format!("Bybit response representation refused: {error}"),
-            response: Some(Box::new(response.clone())),
-            request: Box::new(request.clone()),
-            context: None,
-        })?;
+        let mut data = response_data(&response.body);
         let meta = get_bybit_response_meta(&data);
         if !meta.has_explicit_status && response.status >= 400 {
             let blocked = crate::api_request::blocked_by_cdn(&data);
@@ -454,22 +453,21 @@ impl Client {
                 self.record_auth_failure(request)?;
                 self.maybe_prepend_env_mismatch(
                     Some(f64::from(response.status)),
-                    Some(message),
+                    Some(message.encode_utf16().collect()),
                     request,
                 )
                 .await?
             } else {
-                Some(message)
+                Some(message.encode_utf16().collect())
             };
             let mut body = body;
-            body.insert("retCode".into(), Value::from(response.status));
-            data = Value::Object(body);
+            body.push((
+                "retCode".encode_utf16().collect(),
+                Input::Float(f64::from(response.status)),
+            ));
+            data = Input::Object(body);
             set_message(&mut data, message);
-            response.body = RestResponseBody::Transformed(
-                safe_cex_types::retained_json::RetainedJsonInput::from_value(data).map_err(
-                    |error| RestFailure::pre_transmit(error.to_string(), request.clone()),
-                )?,
-            );
+            response.body = RestResponseBody::Transformed(data);
             return Ok(execution);
         }
         if execution.flags.env_probe {
@@ -503,19 +501,11 @@ impl Client {
                 .maybe_prepend_env_mismatch(meta.ret_code, meta.ret_msg.clone(), request)
                 .await?;
             set_message(&mut data, message);
-            response.body = RestResponseBody::Transformed(
-                safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone())
-                    .map_err(|error| {
-                        RestFailure::pre_transmit(error.to_string(), request.clone())
-                    })?,
-            );
+            response.body = RestResponseBody::Transformed(data.clone());
         }
         let final_meta = get_bybit_response_meta(&data);
-        if safe_cex_num::js_truthy(Some(&data))
-            && final_meta.has_explicit_status
-            && !final_meta.is_success
-        {
-            let message = final_meta.ret_msg.as_deref().unwrap_or("");
+        if data.is_truthy() && final_meta.has_explicit_status && !final_meta.is_success {
+            let message = final_meta.ret_msg.as_deref().unwrap_or(&[]);
             if crate::api::is_bybit_clock_sync_ret_msg(message) {
                 if !execution.flags.clock_retry {
                     let server = crate::api::parse_bybit_server_timestamp(message);
@@ -543,8 +533,19 @@ impl Client {
                     self.emit_error("Server was unavailable for a request, retrying...", request)?;
                 }
                 if !is_auth_code(meta.ret_code) {
-                    self.runtime
-                        .console("error", &format!("{} error {}", self.label, data));
+                    self.runtime.console(
+                        "error",
+                        &format!(
+                            "{} error {}",
+                            self.label,
+                            data.json_stringify()
+                                .map_err(|fault| RestFailure::from_transport(
+                                    TransportError::JavaScript(fault),
+                                    request.clone()
+                                ))?
+                                .unwrap_or_else(|| "undefined".into())
+                        ),
+                    );
                 }
             }
         }
@@ -555,46 +556,62 @@ impl Client {
 fn is_auth_code(code: Option<f64>) -> bool {
     matches!(code, Some(10003. | 10004. | 10005. | 10010. | 33004.))
 }
-fn response_data(body: &RestResponseBody) -> Result<Value, serde_json::Error> {
-    body.clone().into_data().into_value()
+fn response_data(body: &RestResponseBody) -> Input {
+    body.clone().into_data()
 }
 
-// A string body (CloudFront's HTML page) would spread into one key per character.
-fn spread_data(data: &Value) -> Map<String, Value> {
+fn spread_data(data: &Input) -> Vec<(Vec<u16>, Input)> {
     match data {
-        Value::Object(map) => safe_cex_num::js_own_keys(map.keys().map(String::as_str))
-            .into_iter()
-            .map(|key| (key.to_owned(), map[key].clone()))
-            .collect(),
-        Value::Array(values) => values
+        Input::Object(map) => safe_cex_types::js_coercion::js_own_keys_utf16(
+            map.iter().map(|(key, _)| key.as_slice()),
+        )
+        .into_iter()
+        .map(|key| {
+            (
+                key.to_vec(),
+                map.iter()
+                    .rev()
+                    .find(|(name, _)| name == key)
+                    .unwrap()
+                    .1
+                    .clone(),
+            )
+        })
+        .collect(),
+        Input::Array(values) => values
             .iter()
             .enumerate()
-            .map(|(index, value)| (index.to_string(), value.clone()))
+            .map(|(index, value)| (index.to_string().encode_utf16().collect(), value.clone()))
             .collect(),
-        _ => Map::new(),
+        _ => Vec::new(),
     }
 }
-fn set_message(data: &mut Value, message: Option<String>) {
+fn set_message(data: &mut Input, message: Option<Vec<u16>>) {
     if let Some(object) = data.as_object_mut() {
+        let key: Vec<_> = "retMsg".encode_utf16().collect();
         if let Some(message) = message {
-            object.insert("retMsg".into(), Value::String(message));
+            if let Some((_, value)) = object.iter_mut().rev().find(|(name, _)| name == &key) {
+                *value = Input::Text(message);
+            } else {
+                object.push((key, Input::Text(message)));
+            }
         } else {
-            object.remove("retMsg");
+            object.retain(|(name, _)| name != &key);
         }
     }
 }
 
-fn raw_response_unavailable(data: &Value) -> Result<bool, safe_cex_num::JsCoercionError> {
+fn raw_response_unavailable(data: &Input) -> Result<bool, safe_cex_num::JsCoercionError> {
     let traffic = "There might be too much traffic or a configuration error";
     match data.get("raw_response") {
-        Some(Value::String(text)) => Ok(text.contains(traffic)),
-        Some(Value::Array(values)) => {
-            Ok(values.iter().any(|value| value.as_str() == Some(traffic)))
-        }
-        Some(Value::Object(object))
-            if object
+        Some(Input::Text(text)) => Ok(text
+            .windows(traffic.len())
+            .any(|window| window.iter().copied().eq(traffic.encode_utf16()))),
+        Some(Input::Array(values)) => Ok(values.iter().any(|value| value.text_equals(traffic))),
+        Some(value @ Input::Object(_))
+            if value
                 .get("includes")
-                .is_some_and(|method| !method.is_null()) =>
+                .is_some_and(|method| !method.is_nullish()) =>
         {
             Err(safe_cex_num::JsCoercionError {
                 name: "TypeError",
@@ -641,15 +658,15 @@ fn retry_bybit<'a>(
             let retry = if network {
                 error.request.url != "/v5/market/instruments-info"
             } else {
-                let rejected = !signature_retry.get()
-                    && error.response.as_deref().is_some_and(|response| {
-                        response
-                            .body
-                            .clone()
-                            .into_data()
-                            .into_value()
-                            .is_ok_and(|data| crate::api::is_bybit_sign_rejection(&data))
-                    });
+                let rejected = if !signature_retry.get() {
+                    if let Some(response) = error.response.as_deref() {
+                        crate::api::is_bybit_sign_rejection(&response.body.clone().into_data())
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 if rejected {
                     signature_retry.set(true);
                 }

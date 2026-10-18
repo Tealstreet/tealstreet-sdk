@@ -10,7 +10,9 @@ use crate::error_reporting::{
     record_http_failure,
 };
 use crate::external::ExternalPublicData;
-use crate::js_runtime::value::{Js, from_json, from_typed, to_json, to_typed};
+use crate::js_runtime::value::{
+    Js, from_json, from_retained_input, from_typed, to_json, to_retained_input, to_typed,
+};
 use crate::lifecycle::{SignerWaitGuard, SignerWaiter, WatchdogGuard, WatchdogOwner};
 use crate::order_operations::order_options;
 use crate::snapshots::{AccountMarketOverlay, MarketChanges, PositionFetch, market_changes};
@@ -1019,7 +1021,7 @@ impl BaseExchange {
         &self,
         input: ExchangeErrorInput,
         msg: Option<&str>,
-        extra_data: Option<&Value>,
+        extra_data: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         use crate::js_runtime::value::{Thrown, error_object};
         let (source, mut host_error) = match input {
@@ -1060,36 +1062,34 @@ impl BaseExchange {
             return Ok(());
         }
         let extra = extra_data
-            .and_then(Value::as_object)
+            .filter(|value| value.is_object())
             .cloned()
-            .unwrap_or_default();
-        let suppress = extra.get("suppressConsoleLog") == Some(&Value::Bool(true));
+            .map(from_retained_input)
+            .unwrap_or_else(|| Js::object(vec![]));
+        let suppress = extra
+            .get("suppressConsoleLog")?
+            .strict_equals(&Js::Bool(true));
         if !suppress {
             self.runtime
                 .console_values("error", &[Js::str("exchange error"), source.clone()]);
             self.runtime.console_values("trace", &[]);
         }
-        let sentry_tags = extra
-            .get("sentryTags")
-            .filter(|v| v.is_object() || v.is_array())
-            .map(from_json)
-            .unwrap_or_else(|| Js::object(vec![]));
-        let sentry_extra = extra
-            .get("sentryExtra")
-            .filter(|v| v.is_object() || v.is_array())
-            .map(from_json)
-            .unwrap_or_else(|| Js::object(vec![]));
-        let legacy = from_json(&Value::Object(
-            extra
-                .into_iter()
-                .filter(|(key, _)| {
-                    !matches!(
-                        key.as_str(),
-                        "sentryTags" | "sentryExtra" | "suppressConsoleLog"
-                    )
-                })
-                .collect(),
-        ));
+        let sentry_tags = extra.get("sentryTags")?;
+        let sentry_tags = if sentry_tags.is_object() {
+            sentry_tags
+        } else {
+            Js::object(vec![])
+        };
+        let sentry_extra = extra.get("sentryExtra")?;
+        let sentry_extra = if sentry_extra.is_object() {
+            sentry_extra
+        } else {
+            Js::object(vec![])
+        };
+        let legacy = extra.spread_object()?;
+        for key in ["sentryTags", "sentryExtra", "suppressConsoleLog"] {
+            legacy.delete(&key.encode_utf16().collect::<Vec<_>>());
+        }
         let msg = msg.filter(|text| !text.is_empty()).map(Js::str);
         let context = Js::object(vec![]);
         let (formatted, error_object) = if !source.truthy() || source.is_string() {
@@ -1106,9 +1106,7 @@ impl BaseExchange {
             let error = error_object("Error", "");
             error.set("message", formatted.clone())?;
             error.set("name", Js::str("ExchangeError"))?;
-            let mut typed = ExchangeError::new(formatted.to_display());
-            typed.name = "ExchangeError".into();
-            host_error = Some(typed);
+            host_error = Some(Thrown::new(error.clone()).to_exchange_error());
             (formatted, error)
         } else {
             let formatted =
@@ -1203,10 +1201,11 @@ impl BaseExchange {
         } else {
             let report = Js::object(vec![("tags", tags), ("extra", data)]);
             if let Some(error) = host_error {
-                self.runtime.report_exception(&error, &to_json(&report)?);
+                self.runtime
+                    .report_exception(&error, &to_retained_input(&report)?);
             } else if error_object.truthy() {
                 self.runtime
-                    .report_raw_exception(&error_object, &to_json(&report)?);
+                    .report_raw_exception(&error_object, &to_retained_input(&report)?);
             }
         }
         let enhanced_context = if source.type_of() == "object" && !source.is_nullish() {
@@ -1317,7 +1316,10 @@ impl BaseExchange {
         let waiter = Rc::new(SignerWaiter {
             settled: Cell::new(false),
             on_error: Box::new(move |error| {
-                runtime.report_exception(error, &json!({"operation":"remote signer availability"}))
+                runtime.report_exception(
+                    error,
+                    &json!({"operation":"remote signer availability"}).into(),
+                )
             }),
             identity,
             on_finish: Box::new(move || {
@@ -1438,25 +1440,18 @@ impl BaseExchange {
         if self.settings.client_order_id_rule.is_none() {
             return Ok(ClientOrderLookup::NotFound { definitive: false });
         }
-        if let Some(order) = self
-            .store
-            .orders()
-            .iter()
-            .find(|order| order.symbol == symbol && order_carries_client_order_id(order, id))
-            .cloned()
-        {
-            return Ok(ClientOrderLookup::Found(Box::new(order)));
+        for order in self.store.orders().iter() {
+            if order.symbol == symbol && order_carries_client_order_id(order, id)? {
+                return Ok(ClientOrderLookup::Found(Box::new(order.clone())));
+            }
         }
         let orders = venue.fetch_orders(Some(vec![symbol.into()])).await?;
-        Ok(
-            match orders
-                .into_iter()
-                .find(|order| order.symbol == symbol && order_carries_client_order_id(order, id))
-            {
-                Some(order) => ClientOrderLookup::Found(Box::new(order)),
-                None => ClientOrderLookup::NotFound { definitive: false },
-            },
-        )
+        for order in orders {
+            if order.symbol == symbol && order_carries_client_order_id(&order, id)? {
+                return Ok(ClientOrderLookup::Found(Box::new(order)));
+            }
+        }
+        Ok(ClientOrderLookup::NotFound { definitive: false })
     }
 
     pub async fn cancel_symbol_orders<E: Exchange + ?Sized>(
@@ -2098,7 +2093,7 @@ impl BaseExchange {
                 if let Err(error) = exchange.audit_socket_health() {
                     exchange
                         .runtime
-                        .report_exception(&error, &json!({"operation":"socket watchdog"}));
+                        .report_exception(&error, &json!({"operation":"socket watchdog"}).into());
                     return;
                 }
                 exchange.start_watchdog();

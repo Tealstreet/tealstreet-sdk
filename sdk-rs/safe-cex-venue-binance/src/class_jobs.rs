@@ -129,7 +129,7 @@ pub fn detach<T: Clone + 'static>(runtime: Rc<dyn ExchangeRuntime>, settlement: 
             if let Err(error) = reaction(settlement).await {
                 reporter.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance detached class job"}),
+                    &serde_json::json!({"operation":"binance detached class job"}).into(),
                 );
             }
             Ok(())
@@ -167,7 +167,7 @@ fn schedule_unobserved<T: Clone + 'static>(state: &Rc<RefCell<State<T>>>) {
             if let Some(error) = error {
                 reporter.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance unobserved class settlement"}),
+                    &serde_json::json!({"operation":"binance unobserved class settlement"}).into(),
                 );
             }
             Ok(())

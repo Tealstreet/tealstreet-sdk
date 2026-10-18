@@ -147,7 +147,7 @@ fn fixture_options(opts: ExchangeOptions) -> Harness {
 fn order() -> Order {
     let mut wire = raw_order();
     wire["orderId"] = json!("9007199254740993");
-    safe_cex_venue_bingx::private_events::map_order(&wire, &[], 1700000000000.0)
+    safe_cex_venue_bingx::private_events::map_order(&wire.clone().into(), &[], 1700000000000.0)
         .unwrap()
         .unwrap()
 }
@@ -862,7 +862,7 @@ fn native_synced_clock_reaches_all_order_mapping_paths() {
     ));
     let mut raw = raw_order();
     raw["clientOrderId"] = json!("original-clock-client");
-    let original = safe_cex_venue_bingx::private_events::map_order(&raw, &[], 0.0)
+    let original = safe_cex_venue_bingx::private_events::map_order(&raw.clone().into(), &[], 0.0)
         .unwrap()
         .unwrap();
     h.store.add_or_update_order(original.clone()).unwrap();

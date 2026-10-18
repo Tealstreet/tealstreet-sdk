@@ -8668,7 +8668,7 @@
     "evidence": "Individually reviewed the actual named function body and its mapped source operation. This exact compiler signature receives a native role-classification receipt. Existing algorithm/binding source tests provide separate behavioral evidence; the role receipt does not claim decoder execution or exempt invoked normalizers, response codecs or neighboring owners."
   },
   "safe_cex_venue_bitget::orders::aliases": {
-    "category": "non-decoder",
+    "category": "decoder",
     "api": {
       "kind": "function",
       "name": "aliases",
@@ -8682,7 +8682,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -8723,7 +8723,7 @@
                         "is_mutable": false,
                         "type": {
                           "resolved_path": {
-                            "path": "serde_json::value::Value",
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
                             "args": null
                           }
                         }
@@ -8752,8 +8752,32 @@
         "where_predicates": []
       }
     },
-    "reason": "Selects and borrows an existing Value property using source truthiness and final-key fallback, without constructing a normalized Order.",
-    "evidence": "Individually reviewed the actual named function body and its mapped source operation. This exact compiler signature receives a native role-classification receipt. Existing algorithm/binding source tests provide separate behavioral evidence; the role receipt does not claim decoder execution or exempt invoked normalizers, response codecs or neighboring owners."
+    "evidence": "Source truthy alias selection keeps borrowed retained identity, including native undefined/null presence and signed zero. Actual mapper source corpus and three constructed variants exercise this selector; this direct native contract separately pins its borrowed pointer and chosen key.",
+    "call": "{use safe_cex_types::retained_json::RetainedJsonInput as I;let row=I::from($value.clone());let out=$type(&row,&[\"first\",\"last\"]);serde_json::json!({\"present\":out.is_some(),\"last\":out.is_some_and(|v|std::ptr::eq(v,row.get(\"last\").unwrap())),\"numberBits\":out.and_then(I::as_f64).map(|n|format!(\"{:016x}\",n.to_bits()))})}",
+    "cases": [
+      {
+        "input": {
+          "first": 0,
+          "last": 7
+        },
+        "output": {
+          "present": true,
+          "last": true,
+          "numberBits": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "first": 2,
+          "last": 7
+        },
+        "output": {
+          "present": true,
+          "last": false,
+          "numberBits": "4000000000000000"
+        }
+      }
+    ]
   },
   "safe_cex_venue_bitget::orders::typed": {
     "category": "non-decoder",
@@ -8803,7 +8827,21 @@
                 "args": [
                   {
                     "type": {
-                      "generic": "T"
+                      "resolved_path": {
+                        "path": "safe_cex_types::model_field::ModelField",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
                     }
                   },
                   {
@@ -17129,7 +17167,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -17176,8 +17214,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Reviewed shared fallible String and parseFloat semantics, including signed zero and retention of nonfinite parsed results. Invoke the actual native function and inspect native outputs; do not serialize/redecode a result owner.",
-    "call": "{let input=if $value[\"missing\"]==true{None}else{Some(&$value[\"value\"])};match $type(input){Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits())}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "evidence": "Reviewed shared fallible String and parseFloat semantics, including signed zero and retention of nonfinite parsed results. Invoke the actual native function and inspect native outputs; do not serialize/redecode a result owner. Canonical retained Input is passed directly; final observations retain the exact prior outputs.",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value[\"value\"].clone());let input=if $value[\"missing\"]==true{None}else{Some(&retained)};match $type(input){Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits())}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
     "cases": [
       {
         "input": {
@@ -17230,7 +17268,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -17246,7 +17284,29 @@
           ]
         ],
         "output": {
-          "primitive": "f64"
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
         },
         "is_c_variadic": false
       },
@@ -17255,8 +17315,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Reviewed String/Number-only selection and existing finite helper default zero; booleans and nonfinite inputs do not undergo general Number coercion. Invoke the actual native function and inspect native outputs; do not serialize/redecode a result owner.",
-    "call": "{let input=if $value[\"missing\"]==true{None}else{Some(&$value[\"value\"])};let number=$type(input);serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits())})}",
+    "evidence": "Reviewed String/Number-only selection and existing finite helper default zero; booleans and nonfinite inputs do not undergo general Number coercion. Invoke the actual native function and inspect native outputs; do not serialize/redecode a result owner. Canonical retained Input is passed directly; final observations retain the exact prior outputs.",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value[\"value\"].clone());let input=if $value[\"missing\"]==true{None}else{Some(&retained)};let number=$type(input).unwrap();serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits())})}",
     "cases": [
       {
         "input": {
@@ -17341,7 +17401,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -17424,8 +17484,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Reviewed raw key String coercion before shared prototype-aware lookup and Copy projection of actual typed table entries. Inherited hits stay distinct from missing. Invoke the actual native function and inspect native outputs; do not serialize/redecode a result owner.",
-    "call": "{let input=if $value[\"missing\"]==true{None}else{Some(&$value[\"value\"])};let hit=$type(&[(\"native-a\",17u16),(\"native-b\",29u16)],input).unwrap();match hit{safe_cex_num::TableHit::Mapped(n)=>serde_json::json!({\"kind\":\"mapped\",\"number\":n}),safe_cex_num::TableHit::Inherited(member)=>serde_json::json!({\"kind\":\"inherited\",\"text\":member.js_string()}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"kind\":\"missing\"})}}",
+    "evidence": "Reviewed raw key String coercion before shared prototype-aware lookup and Copy projection of actual typed table entries. Inherited hits stay distinct from missing. Invoke the actual native function and inspect native outputs; do not serialize/redecode a result owner. Canonical retained Input is passed directly; final observations retain the exact prior outputs.",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value[\"value\"].clone());let input=if $value[\"missing\"]==true{None}else{Some(&retained)};let hit=$type(&[(\"native-a\",17u16),(\"native-b\",29u16)],input).unwrap();match hit{safe_cex_num::TableHit::Mapped(n)=>serde_json::json!({\"kind\":\"mapped\",\"number\":n}),safe_cex_num::TableHit::Inherited(member)=>serde_json::json!({\"kind\":\"inherited\",\"text\":member.js_string()}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"kind\":\"missing\"})}}",
     "cases": [
       {
         "input": {
@@ -21345,16 +21405,32 @@
           [
             "opts",
             {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "safe_cex_types::PlaceOrderOpts",
-                    "args": null
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
                   }
                 }
-              }
+              ]
             }
           ],
           [
@@ -21466,6 +21542,41 @@
       },
       "generics": {
         "params": [
+          {
+            "name": "impl Into<PreparedOrderOpts>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
           {
             "name": "impl FnMut(String)",
             "kind": {
@@ -31486,7 +31597,7 @@
       }
     },
     "evidence": "Reviewed source truthy raw planType lookup including aliases/inherited hits before typed immutable-order fallbacks. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners.",
-    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }let mut order=fx::order();order.info=Some(serde_json::json!({\"planType\":$value}));match $type(&order,&[],None,|_|{}).unwrap(){safe_cex_num::TableHit::Mapped(plan)=>serde_json::json!({\"kind\":\"mapped\",\"plan\":plan}),safe_cex_num::TableHit::Inherited(_)=>serde_json::json!({\"kind\":\"inherited\"}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"kind\":\"missing\"})}}",
+    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }let mut order=fx::order();order.info=safe_cex_types::retained_json::RetainedJsonInput::from(serde_json::json!({\"planType\":$value})).into();match $type(&order,&[],None,|_|{}).unwrap(){safe_cex_num::TableHit::Mapped(plan)=>serde_json::json!({\"kind\":\"mapped\",\"plan\":plan}),safe_cex_num::TableHit::Inherited(_)=>serde_json::json!({\"kind\":\"inherited\"}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"kind\":\"missing\"})}}",
     "cases": [
       {
         "input": "psl",
@@ -31539,7 +31650,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -31668,8 +31779,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Reviewed this separate order mapper body: alias priority, protocol status/type/side projection, numeric fields, clock timing and linear remaining subtraction and typed projection. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners.",
-    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }let rows=$type(Some($value),\"USDT-FUTURES\",||33.0).unwrap();serde_json::json!({\"rows\":rows.into_iter().map(|r|serde_json::json!({\"id\":r.id,\"symbol\":r.symbol,\"open\":r.status==safe_cex_types::OrderStatus::Open,\"limit\":r.r#type==safe_cex_types::OrderType::Limit,\"buy\":r.side==safe_cex_types::OrderSide::Buy,\"priceBits\":format!(\"{:016x}\",r.price.to_bits()),\"amountBits\":format!(\"{:016x}\",r.amount.to_bits()),\"filledBits\":format!(\"{:016x}\",r.filled.to_bits()),\"remainingBits\":format!(\"{:016x}\",r.remaining.to_bits()),\"nativeRemainingBits\":r.extra.and_then(|e|e.remaining_native).map(|n|format!(\"{:016x}\",n.to_bits())),\"clockBits\":format!(\"{:016x}\",r.last_update.to_bits())})).collect::<Vec<_>>()})}",
+    "evidence": "Reviewed this separate order mapper body: alias priority, protocol status/type/side projection, numeric fields, clock timing and linear remaining subtraction and typed projection. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners. Actual constructor regression compiled RED on prior whole-row JSON projection and GREEN for Classic/USDC/inverse. Every existing numeric field observation remains, plus native info UTF16, NaN, negative zero and own Undefined before projection.",
+    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }use safe_cex_types::retained_json::RetainedJsonInput as I;let mut retained=I::from($value.clone());retained.as_object_mut().unwrap().extend([(\"opaque\".encode_utf16().collect(),I::Text(vec![0xd800,65,0xdc00])),(\"nan\".encode_utf16().collect(),I::Float(f64::NAN)),(\"zero\".encode_utf16().collect(),I::Float(-0.0)),(\"undefined\".encode_utf16().collect(),I::Undefined)]);let rows=$type(Some(&retained),\"USDT-FUTURES\",||33.0).unwrap();serde_json::json!({\"rows\":rows.into_iter().map(|r|{let info=r.info.as_ref().unwrap();assert_eq!(info.get(\"opaque\").unwrap().as_text().unwrap(),&[0xd800,65,0xdc00]);assert!(info.get(\"nan\").unwrap().as_f64().unwrap().is_nan());assert_eq!(info.get(\"zero\").unwrap().as_f64().unwrap().to_bits(),(-0.0_f64).to_bits());assert!(matches!(info.get(\"undefined\"),Some(I::Undefined)));serde_json::json!({\"id\":r.id,\"symbol\":r.symbol,\"open\":r.status==safe_cex_types::OrderStatus::Open,\"limit\":r.r#type==safe_cex_types::OrderType::Limit,\"buy\":r.side==safe_cex_types::OrderSide::Buy,\"priceBits\":format!(\"{:016x}\",r.price.to_number().to_bits()),\"amountBits\":format!(\"{:016x}\",r.amount.to_bits()),\"filledBits\":format!(\"{:016x}\",r.filled.to_bits()),\"remainingBits\":format!(\"{:016x}\",r.remaining.to_bits()),\"nativeRemainingBits\":r.extra.and_then(|e|e.remaining_native).map(|n|format!(\"{:016x}\",n.to_bits())),\"clockBits\":format!(\"{:016x}\",r.last_update.to_bits()),\"nativeInfo\":true})}).collect::<Vec<_>>()})}",
     "cases": [
       {
         "input": {
@@ -31695,7 +31806,8 @@
               "filledBits": "3fe0000000000000",
               "remainingBits": "3ff8000000000000",
               "nativeRemainingBits": null,
-              "clockBits": "4040800000000000"
+              "clockBits": "4040800000000000",
+              "nativeInfo": true
             }
           ]
         }
@@ -31724,7 +31836,8 @@
               "filledBits": "3ff0000000000000",
               "remainingBits": "4008000000000000",
               "nativeRemainingBits": null,
-              "clockBits": "4040800000000000"
+              "clockBits": "4040800000000000",
+              "nativeInfo": true
             }
           ]
         }
@@ -31753,7 +31866,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -31982,8 +32095,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Reviewed this separate order mapper body: alias priority, protocol status/type/side projection, numeric fields, clock timing and inverse remaining conversion plus retained native remaining. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners.",
-    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }let rows=$type(Some($value),\"USDT-FUTURES\",|_|Some(true),||33.0).unwrap();serde_json::json!({\"rows\":rows.into_iter().map(|r|serde_json::json!({\"id\":r.id,\"symbol\":r.symbol,\"open\":r.status==safe_cex_types::OrderStatus::Open,\"limit\":r.r#type==safe_cex_types::OrderType::Limit,\"buy\":r.side==safe_cex_types::OrderSide::Buy,\"priceBits\":format!(\"{:016x}\",r.price.to_bits()),\"amountBits\":format!(\"{:016x}\",r.amount.to_bits()),\"filledBits\":format!(\"{:016x}\",r.filled.to_bits()),\"remainingBits\":format!(\"{:016x}\",r.remaining.to_bits()),\"nativeRemainingBits\":r.extra.and_then(|e|e.remaining_native).map(|n|format!(\"{:016x}\",n.to_bits())),\"clockBits\":format!(\"{:016x}\",r.last_update.to_bits())})).collect::<Vec<_>>()})}",
+    "evidence": "Reviewed this separate order mapper body: alias priority, protocol status/type/side projection, numeric fields, clock timing and inverse remaining conversion plus retained native remaining. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners. Actual constructor regression compiled RED on prior whole-row JSON projection and GREEN for Classic/USDC/inverse. Every existing numeric field observation remains, plus native info UTF16, NaN, negative zero and own Undefined before projection.",
+    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }use safe_cex_types::retained_json::RetainedJsonInput as I;let mut retained=I::from($value.clone());retained.as_object_mut().unwrap().extend([(\"opaque\".encode_utf16().collect(),I::Text(vec![0xd800,65,0xdc00])),(\"nan\".encode_utf16().collect(),I::Float(f64::NAN)),(\"zero\".encode_utf16().collect(),I::Float(-0.0)),(\"undefined\".encode_utf16().collect(),I::Undefined)]);let rows=$type(Some(&retained),\"USDT-FUTURES\",|_|Some(true),||33.0).unwrap();serde_json::json!({\"rows\":rows.into_iter().map(|r|{let info=r.info.as_ref().unwrap();assert_eq!(info.get(\"opaque\").unwrap().as_text().unwrap(),&[0xd800,65,0xdc00]);assert!(info.get(\"nan\").unwrap().as_f64().unwrap().is_nan());assert_eq!(info.get(\"zero\").unwrap().as_f64().unwrap().to_bits(),(-0.0_f64).to_bits());assert!(matches!(info.get(\"undefined\"),Some(I::Undefined)));serde_json::json!({\"id\":r.id,\"symbol\":r.symbol,\"open\":r.status==safe_cex_types::OrderStatus::Open,\"limit\":r.r#type==safe_cex_types::OrderType::Limit,\"buy\":r.side==safe_cex_types::OrderSide::Buy,\"priceBits\":format!(\"{:016x}\",r.price.to_number().to_bits()),\"amountBits\":format!(\"{:016x}\",r.amount.to_bits()),\"filledBits\":format!(\"{:016x}\",r.filled.to_bits()),\"remainingBits\":format!(\"{:016x}\",r.remaining.to_bits()),\"nativeRemainingBits\":r.extra.and_then(|e|e.remaining_native).map(|n|format!(\"{:016x}\",n.to_bits())),\"clockBits\":format!(\"{:016x}\",r.last_update.to_bits()),\"nativeInfo\":true})}).collect::<Vec<_>>()})}",
     "cases": [
       {
         "input": {
@@ -32009,7 +32122,8 @@
               "filledBits": "3fe0000000000000",
               "remainingBits": "3f8eb851eb851eb8",
               "nativeRemainingBits": "3ff8000000000000",
-              "clockBits": "4040800000000000"
+              "clockBits": "4040800000000000",
+              "nativeInfo": true
             }
           ]
         }
@@ -32038,7 +32152,8 @@
               "filledBits": "3ff0000000000000",
               "remainingBits": "3fc3333333333333",
               "nativeRemainingBits": "4008000000000000",
-              "clockBits": "4040800000000000"
+              "clockBits": "4040800000000000",
+              "nativeInfo": true
             }
           ]
         }
@@ -32069,7 +32184,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -32113,7 +32228,7 @@
       }
     },
     "evidence": "Reviewed the private evaluation-state projection, string-ID refusal, typed TableHit admission and optional native remaining metadata. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners.",
-    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }use safe_cex_num::TableHit;let pending=super::PendingOrder{id:Some($value.clone()),status:TableHit::Mapped(safe_cex_types::OrderStatus::Open),symbol:\"NATIVE\".into(),kind:TableHit::Mapped(safe_cex_types::OrderType::Limit),side:TableHit::Mapped(safe_cex_types::OrderSide::Buy),price:17.5,amount:2.0,filled:0.5,remaining:1.5,last_update:33.0,reduce_only:false,time_in_force:TableHit::Mapped(safe_cex_types::OrderTimeInForce::GoodTillCancel),tp:None,sl:None,remaining_native:Some(150.0)};match $type(pending,&serde_json::json!({\"marker\":\"native-info\"})){Ok(order)=>serde_json::json!({\"ok\":true,\"id\":order.id,\"symbol\":order.symbol,\"priceBits\":format!(\"{:016x}\",order.price.to_bits()),\"nativeRemainingBits\":order.extra.unwrap().remaining_native.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }use safe_cex_num::TableHit;let pending=super::PendingOrder{id:Some(safe_cex_types::retained_json::RetainedJsonInput::from($value.clone())),status:TableHit::Mapped(safe_cex_types::OrderStatus::Open),symbol:\"NATIVE\".into(),kind:TableHit::Mapped(safe_cex_types::OrderType::Limit),side:TableHit::Mapped(safe_cex_types::OrderSide::Buy),unmapped_raw_side:false,price:17.5,amount:2.0,filled:0.5,remaining:1.5,last_update:33.0,reduce_only:false,time_in_force:TableHit::Mapped(safe_cex_types::OrderTimeInForce::GoodTillCancel),tp:None,sl:None,remaining_native:Some(150.0)};match $type(pending,&safe_cex_types::retained_json::RetainedJsonInput::from(serde_json::json!({\"marker\":\"native-info\"}))){Ok(order)=>serde_json::json!({\"ok\":true,\"id\":order.id,\"symbol\":order.symbol,\"priceBits\":format!(\"{:016x}\",order.price.to_number().to_bits()),\"nativeRemainingBits\":order.extra.unwrap().remaining_native.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
     "cases": [
       {
         "input": "native-a",
@@ -32311,7 +32426,7 @@
       }
     },
     "evidence": "Reviewed fresh snapshot filtering, per-ID freshness, native payload timestamp precedence and ordered unused-current append. Observe the actual chosen native record markers. Native expectations are authored independently and inspect actual selected native fields/effects without serializing result owners.",
-    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }let mut rest=fx::position(\"same\",1.0);rest.info=Some(serde_json::json!({\"uTime\":200}));let mut current=fx::position(\"same\",9.0);current.info=Some(serde_json::json!({\"uTime\":300}));let extra=fx::position(\"extra\",5.0);let rest=[rest];let current=[current,extra];let time=if $value==true{180.0}else{1.0};let times=std::collections::HashMap::from([(\"same\".to_owned(),time),(\"extra\".to_owned(),time)]);let selected=$type(&rest,&current,200.0,0.0,&Default::default(),&times,50.0);serde_json::json!({\"selected\":selected.into_iter().map(|p|serde_json::json!({\"id\":p.id,\"markerBits\":format!(\"{:016x}\",p.entry_price.to_bits())})).collect::<Vec<_>>()})}",
+    "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-binding-fixture.rs\")); }let mut rest=fx::position(\"same\",1.0);rest.info=safe_cex_types::retained_json::RetainedJsonInput::from(serde_json::json!({\"uTime\":200})).into();let mut current=fx::position(\"same\",9.0);current.info=safe_cex_types::retained_json::RetainedJsonInput::from(serde_json::json!({\"uTime\":300})).into();let extra=fx::position(\"extra\",5.0);let rest=[rest];let current=[current,extra];let time=if $value==true{180.0}else{1.0};let times=std::collections::HashMap::from([(\"same\".to_owned(),time),(\"extra\".to_owned(),time)]);let selected=$type(&rest,&current,200.0,0.0,&Default::default(),&times,50.0);serde_json::json!({\"selected\":selected.into_iter().map(|p|serde_json::json!({\"id\":p.id,\"markerBits\":format!(\"{:016x}\",p.entry_price.to_bits())})).collect::<Vec<_>>()})}",
     "cases": [
       {
         "input": true,
@@ -36362,6 +36477,174 @@
             }
           }
         ]
+      }
+    ]
+  },
+  "safe_cex_venue_bitget::orders::truthy": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "truthy",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Retained scalar source truthiness selects aliases before parseFloat. Native numbers remain native and absent, undefined and null remain false. The actual helper is invoked directly; mapper source/binding evidence remains independent.",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value.clone());serde_json::json!($type(Some(&retained)))}",
+    "cases": [
+      {
+        "input": 0,
+        "output": false
+      },
+      {
+        "input": "0",
+        "output": true
+      },
+      {
+        "input": null,
+        "output": false
+      },
+      {
+        "input": [],
+        "output": true
+      }
+    ]
+  },
+  "safe_cex_venue_bitget::orders::raw_side_fallback": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "raw_side_fallback",
+      "signature": {
+        "inputs": [
+          [
+            "raw",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "tuple": [
+            {
+              "resolved_path": {
+                "path": "safe_cex_num::table_lookup::TableHit",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::OrderSide",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            {
+              "primitive": "bool"
+            }
+          ]
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "The raw-side fallback distinguishes an admitted mapped enum, own undefined and unsupported native scalar. It is delayed until final Order projection; inherited table hits retain their earlier suppression behavior.",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value.clone());let (side,unmapped)=$type(Some(&retained));serde_json::json!({\"buy\":side==safe_cex_num::TableHit::Mapped(safe_cex_types::OrderSide::Buy),\"sell\":side==safe_cex_num::TableHit::Mapped(safe_cex_types::OrderSide::Sell),\"unmapped\":unmapped})}",
+    "cases": [
+      {
+        "input": "buy",
+        "output": {
+          "buy": true,
+          "sell": false,
+          "unmapped": false
+        }
+      },
+      {
+        "input": "sell",
+        "output": {
+          "buy": false,
+          "sell": true,
+          "unmapped": false
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "buy": false,
+          "sell": false,
+          "unmapped": true
+        }
       }
     ]
   }

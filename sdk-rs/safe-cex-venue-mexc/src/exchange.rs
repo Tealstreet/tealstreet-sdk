@@ -1319,24 +1319,30 @@ impl MexcExchange {
                     .execute(request.clone())
                     .await
                     .map_err(|error| failure_report_value(&error))?;
-                let payload: Value =
-                    parse_response_json(&response.body).map_err(|error| error.to_string())?;
-                let rows = extract_rows(Some(&payload), &[]);
-
-                // The source completes filter() over every row before beginning
-                // map(). Preserve that stage ordering so a later predicate error
-                // wins over an earlier normalization error.
+                use safe_cex_types::retained_json::RetainedJsonInput as Input;
+                let payload = match response.body {
+                    RestResponseBody::Encoded(bytes) => serde_json::from_slice::<Input>(&bytes)
+                        .map_err(|cause| cause.to_string())?,
+                    RestResponseBody::Untransformed(input)
+                    | RestResponseBody::Transformed(input) => input,
+                };
+                let data = payload
+                    .get("data")
+                    .filter(|value| !value.is_nullish())
+                    .unwrap_or(&payload);
+                let rows = data.as_array().unwrap_or(&[]);
+                // Source filter completes before any market normalization begins.
                 let mut tradable = Vec::new();
                 for row in rows {
-                    let object = row
-                        .as_object()
-                        .ok_or_else(|| "MEXC market row is not an object".to_owned())?;
-                    if is_tradable_mexc_market(object).map_err(|error| error.message.to_string())? {
-                        tradable.push(object.clone());
+                    if !row.is_object() {
+                        return Err("MEXC market row is not an object".into());
+                    }
+                    if is_tradable_mexc_market(row).map_err(|error| error.message.to_string())? {
+                        tradable.push(row);
                     }
                 }
                 let mut markets = Vec::with_capacity(tradable.len());
-                for row in &tradable {
+                for row in tradable {
                     markets.push(normalize_market(row).map_err(|error| error.message.to_string())?);
                 }
                 Ok::<_, Value>(markets)

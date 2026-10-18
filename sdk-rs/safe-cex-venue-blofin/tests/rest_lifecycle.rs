@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use safe_cex_num::numeric_ingress::{js_from_value, js_value_as_f64};
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{
@@ -140,7 +142,7 @@ fn market(a: &Market, e: &Value) {
     num(a.limits.leverage.min, &e["limits"]["leverage"]["min"]);
     num(a.limits.leverage.max, &e["limits"]["leverage"]["max"]);
     num(a.contract_size.unwrap(), &e["contractSize"]);
-    plain(a.info.as_ref().unwrap(), &e["info"]);
+    retained_assert::assert_value(a.info.as_ref().unwrap(), &e["info"]);
     assert!(
         a.pretty_symbol.is_none()
             && a.is_expiring.is_none()
@@ -181,7 +183,7 @@ fn position(a: &Position, e: &Value) {
     if e.get("info").is_none() || e["info"].get("undefined") == Some(&Value::Bool(true)) {
         assert!(a.info.is_none())
     } else {
-        plain(a.info.as_ref().unwrap(), &e["info"]);
+        retained_assert::assert_value(a.info.as_ref().unwrap(), &e["info"]);
     }
     if let Some(v) = e.get("marginSize") {
         num(a.margin_size.unwrap(), v)
@@ -408,10 +410,17 @@ fn read_cases(method: &str, expected_count: usize) {
                         market(a, e)
                     }
                     if c["fallbackAlias"] == true {
-                        actual[0].info.as_mut().unwrap()["stored"] = json!(false);
-                        assert_eq!(
-                            s.markets()[0].info.as_ref().unwrap()["stored"],
-                            true,
+                        *actual[0].info.as_mut().unwrap().get_mut("stored").unwrap() =
+                            json!(false).into();
+                        assert!(
+                            s.markets()[0]
+                                .info
+                                .as_ref()
+                                .unwrap()
+                                .get("stored")
+                                .unwrap()
+                                .as_bool()
+                                .unwrap(),
                             "native fallback snapshots independent"
                         )
                     }
@@ -574,12 +583,12 @@ impl LifecycleHost for Life<'_> {
     }
     fn fetch_tickers_raw(
         &self,
-    ) -> LifecycleFuture<'_, Option<safe_cex_venue_blofin::utility::UtilityInput>, String> {
+    ) -> LifecycleFuture<'_, Option<safe_cex_venue_blofin::tickers::TickerInput>, String> {
         self.fetched("raw", Some(js_from_value(json!(["raw"])).unwrap()))
     }
     fn format_tickers(
         &self,
-        _: Option<safe_cex_venue_blofin::utility::UtilityInput>,
+        _: Option<safe_cex_venue_blofin::tickers::TickerInput>,
     ) -> Result<Vec<Ticker>, ServiceError<String>> {
         self.trace.borrow_mut().push(json!(["format"]));
         Ok(js_from_value(json!([corpus()["models"]["ticker"]])).unwrap())
@@ -1238,7 +1247,37 @@ fn native_rest_boundaries() {
             let actual = ready(fetch_markets(&s, &adapter, &h, || "cache-id".into())).unwrap();
             assert_eq!(actual.len(), 1);
             assert_eq!(actual[0].id, models["market"]["id"]);
-            assert_eq!(actual[0].info.as_ref().unwrap()["stored"], true);
+            if index == 0 {
+                // The source parseFloat("bad") result is a usable native NaN.
+                assert!(actual[0].contract_size.unwrap().is_nan());
+                let info = actual[0].info.as_ref().unwrap();
+                assert!(
+                    info.get("contractValue")
+                        .unwrap()
+                        .as_f64()
+                        .unwrap()
+                        .is_nan()
+                );
+                assert!(
+                    info.get("stored").is_none(),
+                    "fresh row, no cached fallback"
+                );
+                assert!(
+                    logs.borrow().is_empty(),
+                    "no error for retained native info"
+                );
+            } else {
+                assert!(
+                    actual[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("stored")
+                        .unwrap()
+                        .as_bool()
+                        .unwrap()
+                );
+            }
         } else {
             let opts: OHLCVOptions =
                 serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m","to":9e15}))
@@ -1250,8 +1289,8 @@ fn native_rest_boundaries() {
     }
     assert_eq!(
         logs.borrow().len(),
-        3,
-        "each boundary is explicit, not silently normalized"
+        2,
+        "strict base field and invalid time report; native NaN info remains usable"
     );
     let sort_input = json!({"body":{"data":[["3000","1","2","0","1","x","y","3"],["2000","1","2","0","1","x","y","3"],["bad","1","2","0","1","x","y","3"],["1000","1","2","0","1","x","y","3"]]}});
     let adapter = ReadAdapter {
@@ -1382,3 +1421,6 @@ fn audit_validation_interleaves_sum_coercion() {
         "BLOFIN-AUDIT validation native report"
     );
 }
+
+#[path = "support/retained_market_info.rs"]
+mod retained_market_info;

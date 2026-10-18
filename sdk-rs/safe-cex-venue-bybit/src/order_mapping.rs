@@ -193,7 +193,7 @@ pub(crate) fn map_order(
         remaining,
         reduce_only: reduce_only.into(),
         close: (inverse.then_some(close)).into(),
-        info: (Some(row.clone())).into(),
+        info: (Some(row.clone().into())).into(),
         time_in_force: (tif).into(),
         last_update,
         trigger_type: if kind == OrderType::Conditional {

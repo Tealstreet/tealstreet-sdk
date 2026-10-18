@@ -1,5 +1,8 @@
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
+#[cfg(feature = "native")]
+#[path = "support/lifecycle_aliases.rs"]
+mod lifecycle_aliases;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -32,6 +35,7 @@ impl ExchangeTask for Task {
 #[derive(Default)]
 struct Runtime {
     now: Cell<f64>,
+    monotonic_clock: Cell<Option<f64>>,
     sleep_clock: Rc<Cell<f64>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
@@ -57,7 +61,7 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn monotonic_now_ms(&self) -> f64 {
-        22000.0
+        self.monotonic_clock.get().unwrap_or(22000.0)
     }
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         self.sleeps.borrow_mut().push(delay);
@@ -88,11 +92,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reported.borrow_mut().push(error.name.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -3050,6 +3058,33 @@ const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
     ("Spot", "fetch_public_trades", r#"err:Not implemented"#, &[]),
 ];
 
+fn assert_method_outcome_json(actual: &Value, expected: &Value, path: &str) {
+    match (actual, expected) {
+        (Value::Number(actual), Value::Number(expected)) => assert_eq!(
+            actual.as_f64().unwrap().to_bits(),
+            expected.as_f64().unwrap().to_bits(),
+            "{path} numeric bits"
+        ),
+        (Value::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{path} array length");
+            for (index, expected) in expected.iter().enumerate() {
+                assert_method_outcome_json(&actual[index], expected, &format!("{path}[{index}]"));
+            }
+        }
+        (Value::Object(actual), Value::Object(expected)) => {
+            assert_eq!(
+                actual.keys().collect::<Vec<_>>(),
+                expected.keys().collect::<Vec<_>>(),
+                "{path} object keys"
+            );
+            for (key, expected) in expected {
+                assert_method_outcome_json(&actual[key], expected, &format!("{path}.{key}"));
+            }
+        }
+        _ => assert_eq!(actual, expected, "{path}"),
+    }
+}
+
 #[test]
 fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() {
     use safe_cex_exchange::exchange::Exchange;
@@ -3153,7 +3188,17 @@ fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() 
             observed.iter().zip(expected)
         {
             assert_eq!(label, want_label, "method order: {venue:?}");
-            assert_eq!(outcome, want_outcome, "{venue:?} {label} outcome");
+            match (
+                outcome.strip_prefix("ok:"),
+                want_outcome.strip_prefix("ok:"),
+            ) {
+                (Some(actual), Some(expected)) => assert_method_outcome_json(
+                    &serde_json::from_str(actual).unwrap(),
+                    &serde_json::from_str(expected).unwrap(),
+                    &format!("{venue:?} {label} outcome"),
+                ),
+                _ => assert_eq!(outcome, *want_outcome, "{venue:?} {label} outcome"),
+            }
             assert_eq!(
                 requests, want_requests,
                 "{venue:?} {label} transport requests"
@@ -3656,14 +3701,18 @@ fn production_native_pm_position_info_is_the_current_position_without_info() {
         for (field, value) in expected {
             if let Some(number) = value.as_f64() {
                 assert_eq!(
-                    info.get(field).and_then(Value::as_f64).map(f64::to_bits),
+                    info.get(field)
+                        .and_then(|value| value.as_f64())
+                        .map(f64::to_bits),
                     Some(number.to_bits()),
                     "frame {index}: info numeric field {field} uses the current position"
                 );
             } else {
                 assert_eq!(
                     info.get(field),
-                    Some(value),
+                    Some(&safe_cex_types::retained_json::RetainedJsonInput::from(
+                        value.clone()
+                    )),
                     "frame {index}: info field {field}"
                 );
             }
@@ -4913,6 +4962,91 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
 
 #[test]
 #[cfg(feature = "native")]
+fn production_native_class_future_completes_store_after_held_http() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    struct Held {
+        released: Arc<AtomicBool>,
+        completed: Arc<AtomicUsize>,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+    impl RestAdapter for Held {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request.url);
+            let released = self.released.clone();
+            let completed = self.completed.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                if released.load(Ordering::SeqCst) {
+                    completed.fetch_add(1, Ordering::SeqCst);
+                    Poll::Ready(Ok(RestResponse {
+                        status: 200,
+                        reason: None,
+                        headers: Default::default(),
+                        body: RestResponseBody::Encoded(b"[]".to_vec()),
+                    }))
+                } else {
+                    Poll::Pending
+                }
+            }))
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let released = Arc::new(AtomicBool::new(false));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::<Mutex<Vec<String>>>::default();
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        Arc::new(Held {
+            released: released.clone(),
+            completed: completed.clone(),
+            requests: requests.clone(),
+        }),
+        Rc::new(|_, _| panic!("no external provider is configured")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        dependencies,
+    )
+    .unwrap();
+    owner.private.position.last_fetch_time.set(-10_000.0);
+    owner.private.position.pending_events.set(true);
+    let before = owner.base.store.update_ids().positions;
+    owner.private.throttled_positions().unwrap();
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(owner.base.store.update_ids().positions, before);
+    assert!(owner.private.position.in_flight.get());
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(completed.load(Ordering::SeqCst), 0);
+    released.store(true, Ordering::SeqCst);
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(
+        owner.base.store.update_ids().positions,
+        before + 1.0,
+        "the detached native class future publishes its completed position snapshot"
+    );
+    assert_eq!(completed.load(Ordering::SeqCst), 2);
+    assert!(!owner.private.position.in_flight.get());
+    assert!(!owner.private.position.pending_events.get());
+    assert!(runtime.reported.borrow().is_empty());
+    owner.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native")]
 fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations() {
     use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_venue_binance::ticker_capture::{Capture, Dictionary, TickerReference};
@@ -5004,6 +5138,291 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
         );
         owner.base.dispose().unwrap();
     }
+}
+
+#[cfg(feature = "native")]
+#[path = "support/snapshot_aliases.rs"]
+mod snapshot_aliases;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_public_rest_future_waits_and_preserves_candles_and_rejection() {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Held {
+        release: Arc<AtomicBool>,
+        requests: Arc<Mutex<Vec<RestRequest>>>,
+        status: u16,
+    }
+    impl RestAdapter for Held {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request.clone());
+            let mut response = Some(RestResponse {
+                status: self.status,
+                reason: None,
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(if self.status == 200 {
+                    br#"[[60000,"-0","101.25","-2.5","9.75","3.125"],[120000,"7.5","8.25","6.125","7.75","0"]]"#.to_vec()
+                } else {
+                    br#"{"code":-1121,"msg":"Invalid symbol."}"#.to_vec()
+                }),
+            });
+            Box::pin(std::future::poll_fn(move |_| {
+                if self.release.load(Ordering::SeqCst) {
+                    let response = response.take().expect("one HTTP settlement");
+                    Poll::Ready(if response.status == 200 {
+                        Ok(response)
+                    } else {
+                        Err(safe_cex_transport::RestFailure {
+                            code: Some("ERR_BAD_REQUEST".into()),
+                            message: "Request failed with status code 400".into(),
+                            transport_error: None,
+                            response: Some(Box::new(response)),
+                            request: Box::new(request.clone()),
+                            context: None,
+                        })
+                    })
+                } else {
+                    Poll::Pending
+                }
+            }))
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        for status in [200, 400] {
+            let runtime = Rc::new(Runtime::default());
+            let release = Arc::new(AtomicBool::new(false));
+            let requests = Arc::<Mutex<Vec<RestRequest>>>::default();
+            let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+                runtime.clone(),
+                Arc::new(Held {
+                    release: release.clone(),
+                    requests: requests.clone(),
+                    status,
+                }),
+                Rc::new(|_, _| panic!("no external candle provider configured")),
+                None,
+                safe_cex_exchange::native::NativeHttpEvents::default(),
+            );
+            let name = match venue {
+                Venue::Futures => "binance",
+                Venue::PM => "binancepm",
+                Venue::Spot => "binancespot",
+            };
+            let owner = ExchangeOwner::new(
+                venue,
+                serde_json::from_value(json!(name)).unwrap(),
+                serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
+                    .unwrap(),
+                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                dependencies,
+            )
+            .unwrap();
+            let options = EventValue::from_json(
+                json!({"symbol":"BTCUSDT","interval":"1m","from":123,"to":180000,"limit":2}),
+            );
+            let mut future = Box::pin(owner.fetch_ohlcv(options));
+            for _ in 0..3 {
+                assert!(
+                    future
+                        .as_mut()
+                        .poll(&mut Context::from_waker(Waker::noop()))
+                        .is_pending(),
+                    "real public REST future must stay pending before HTTP release {venue:?} {status}"
+                );
+                runtime.pump();
+            }
+            {
+                let requests = requests.lock().unwrap();
+                assert_eq!(requests.len(), 1, "one real native GET {venue:?} {status}");
+                assert_eq!(requests[0].method, "get");
+                let (path, query) = requests[0].url.split_once('?').unwrap();
+                assert_eq!(
+                    path,
+                    if venue == Venue::Spot {
+                        "/api/v3/klines"
+                    } else {
+                        "/fapi/v1/klines"
+                    }
+                );
+                for pair in [
+                    "symbol=BTCUSDT",
+                    "interval=1m",
+                    "startTime=60000",
+                    "endTime=180000",
+                    "limit=2",
+                ] {
+                    assert!(
+                        query.split('&').any(|part| part == pair),
+                        "missing source query {pair}: {query}"
+                    );
+                }
+            }
+            release.store(true, Ordering::SeqCst);
+            let result = run(&runtime, future);
+            if status == 200 {
+                let rows = result.unwrap();
+                assert_eq!(rows.read("length").unwrap().number().unwrap(), 2.0);
+                for (index, expected) in [
+                    [60.0, -0.0, 101.25, -2.5, 9.75, 3.125],
+                    [120.0, 7.5, 8.25, 6.125, 7.75, 0.0],
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let row = rows.read(&index.to_string()).unwrap();
+                    for (key, number) in ["timestamp", "open", "high", "low", "close", "volume"]
+                        .into_iter()
+                        .zip(expected)
+                    {
+                        let EventValue::Number(actual) = row.read(key).unwrap() else {
+                            panic!("native numeric candle field {key}");
+                        };
+                        assert_eq!(
+                            actual.to_bits(),
+                            f64::to_bits(number),
+                            "{venue:?} candle {index} {key}"
+                        );
+                    }
+                    assert!(matches!(
+                        row.read("lastSide").unwrap(),
+                        EventValue::Undefined
+                    ));
+                }
+            } else {
+                let error = result.unwrap_err();
+                let response = error
+                    .response
+                    .as_ref()
+                    .expect("HTTP rejection retains response");
+                assert_eq!(response["status"], 400);
+                assert_eq!(response["data"]["code"], -1121);
+                assert_eq!(response["data"]["msg"], "Invalid symbol.");
+            }
+            assert_eq!(
+                requests.lock().unwrap().len(),
+                1,
+                "settlement must not resend"
+            );
+            owner.dispose().unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+#[path = "support/order_throttle_binding.rs"]
+mod order_throttle_binding;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_clones_share_settlement_and_captured_receiver() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct ListenKey {
+        released: Arc<AtomicBool>,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+    impl RestAdapter for ListenKey {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request.url);
+            let released = self.released.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                if !released.load(Ordering::SeqCst) {
+                    return Poll::Pending;
+                }
+                Poll::Ready(Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Encoded(
+                        br#"{"listenKey":"native-clone-key"}"#.to_vec(),
+                    ),
+                }))
+            }))
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let released = Arc::new(AtomicBool::new(false));
+    let requests = Arc::<Mutex<Vec<String>>>::default();
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        Arc::new(ListenKey {
+            released: released.clone(),
+            requests: requests.clone(),
+        }),
+        Rc::new(|_, _| panic!("no external provider")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        dependencies,
+    )
+    .unwrap();
+    let original = owner.private.connect_and_subscribe();
+    let mut first = Box::pin(original.clone());
+    let second = original.clone();
+    drop(original);
+    runtime.pump();
+    assert!(
+        first
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "settlement clones share one real listen-key request"
+    );
+    released.store(true, Ordering::SeqCst);
+    run(&runtime, first).unwrap();
+    run(&runtime, second).unwrap();
+    assert!(!owner.private.connect.connecting.get());
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "both settlement clones observe the same completion"
+    );
+    let action = owner.private.capture_connect();
+    let retained = action.clone();
+    assert!(
+        action.same(&retained),
+        "CapturedAction Clone retains the actual bound arrow"
+    );
+    drop(action);
+    retained.call().unwrap();
+    for _ in 0..16 {
+        runtime.pump();
+    }
+    let requests = requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "cloned current arrow reconnects through the real native parent"
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|path| path.starts_with("/fapi/v1/listenKey"))
+    );
+    drop(requests);
+    owner.dispose().unwrap();
+    assert!(runtime.reported.borrow().is_empty());
 }
 
 #[test]

@@ -1039,7 +1039,14 @@ fn malformed_balance_upnl_refuses_only_its_account_row() {
             (200., 150., 50., 7.)
         );
         assert_eq!(
-            balance.info.as_ref().unwrap()["data"]["account"]
+            balance
+                .info
+                .as_ref()
+                .unwrap()
+                .get("data")
+                .unwrap()
+                .get("account")
+                .unwrap()
                 .as_array()
                 .unwrap()
                 .len(),
@@ -1164,7 +1171,11 @@ fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
                 .find(|entry| entry[0] == "message")
                 .unwrap();
             assert_eq!(error.message, expected[1].as_str().unwrap());
-            assert_eq!(context["source"], "unhandledRejection");
+            assert!(
+                context
+                    .get("source")
+                    .is_some_and(|source| source.text_equals("unhandledRejection"))
+            );
             if index == 0 {
                 assert_eq!(
                     error.message,

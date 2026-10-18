@@ -14,11 +14,8 @@ use crate::{
 use safe_cex_exchange::{
     exchange::BaseExchange,
     js_runtime::{
-        base_exchange::ExternalPublicDataFactory,
-        client::JsHttpHost,
-        promise::await_js,
-        scope::ScopeShared,
-        value::{Js, to_json},
+        base_exchange::ExternalPublicDataFactory, client::JsHttpHost, promise::await_js,
+        scope::ScopeShared, value::Js,
     },
     runtime::{ExchangeError, ExchangeRuntime},
     websocket::WsRuntime,
@@ -153,12 +150,12 @@ impl Host {
         &self,
         method: &'static str,
         endpoint: &'static str,
-        payload: Option<Value>,
-    ) -> Promise<Result<Value, PortfolioFailure>> {
+        payload: Option<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Promise<Result<safe_cex_types::retained_json::RetainedJsonInput, PortfolioFailure>> {
         let invoked = self.xhr(false).and_then(|client| {
             let mut args = vec![Js::str(endpoint)];
             if let Some(payload) = payload {
-                let value = safe_cex_exchange::js_runtime::value::from_json(&payload);
+                let value = safe_cex_exchange::js_runtime::value::from_retained_input(payload);
                 args.push(if method == "get" {
                     Js::object(vec![("params", value)])
                 } else {
@@ -170,7 +167,7 @@ impl Host {
         self.promise(async move {
             let response = await_js(invoked?).await.map_err(from_thrown)?;
             let data = response.get("data").map_err(from_thrown)?;
-            to_json(&data).map_err(from_thrown)
+            safe_cex_exchange::js_runtime::value::to_retained_input(&data).map_err(from_thrown)
         })
     }
     pub(super) fn emit(&self, message: Option<Value>) -> Result<(), PortfolioFailure> {

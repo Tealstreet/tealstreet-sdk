@@ -50,6 +50,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub report_contexts: RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>,
     pub logs: RefCell<Vec<String>>,
     /// Optional deterministic entropy stream for session/identity race witnesses.
     pub random_sequence: Cell<Option<u64>>,
@@ -137,10 +138,20 @@ impl ExchangeRuntime for Runtime {
             0.5
         }
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+        self.report_contexts.borrow_mut().push(context.clone());
         self.reports.borrow_mut().push(error.message.clone());
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+        self.report_contexts.borrow_mut().push(context.clone());
         self.reports
             .borrow_mut()
             .push(safe_cex_exchange::runtime::exception_text(error));
@@ -240,6 +251,8 @@ pub struct Wire {
     pub network_failures: RefCell<Vec<String>>,
     pub reject_http_errors: Cell<bool>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(u16, Value)>)>>,
+    pub encoded_routes: RefCell<Vec<(String, Vec<u8>)>>,
+    pub retained_routes: RefCell<Vec<(String, safe_cex_types::retained_json::RetainedJsonInput)>>,
     /// (METHOD, path, query key, query value) routes, checked before the plain ones.
     pub param_routes: RefCell<Vec<(String, String, String, String, (u16, Value))>>,
     pub requests: RefCell<Vec<Request>>,
@@ -358,6 +371,18 @@ impl RestAdapter for Wire {
             .find(|(gated_path, _)| *gated_path == path)
             .map(|(_, gate)| gate.clone());
         let reject_http_errors = self.reject_http_errors.get();
+        let encoded = self
+            .encoded_routes
+            .borrow()
+            .iter()
+            .find(|(route, _)| route == &path)
+            .map(|(_, body)| body.clone());
+        let retained = self
+            .retained_routes
+            .borrow()
+            .iter()
+            .find(|(route, _)| route == &path)
+            .map(|(_, body)| body.clone());
         Box::pin(async move {
             if let Some(gate) = gate {
                 gate.wait().await;
@@ -382,7 +407,14 @@ impl RestAdapter for Wire {
                     status,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Encoded(body.to_string().into_bytes()),
+                    body: retained.map_or_else(
+                        || {
+                            RestResponseBody::Encoded(
+                                encoded.unwrap_or_else(|| body.to_string().into_bytes()),
+                            )
+                        },
+                        RestResponseBody::Untransformed,
+                    ),
                 }),
                 None => Err(safe_cex_transport::RestFailure::pre_transmit(
                     format!("unscripted request {method} {path}"),

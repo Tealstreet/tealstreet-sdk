@@ -10,7 +10,7 @@ pub(crate) fn to_data(value: &Js) -> DataValue {
         Js::Null => DataValue::Null,
         Js::Bool(b) => DataValue::Bool(*b),
         Js::Number(n) => DataValue::Number(*n),
-        Js::String(s) => DataValue::String(String::from_utf16_lossy(s)),
+        Js::String(s) => DataValue::String(s.to_vec()),
         Js::Array(_) => DataValue::Array(Rc::new(RefCell::new(
             value
                 .array_items()
@@ -24,7 +24,7 @@ pub(crate) fn to_data(value: &Js) -> DataValue {
                 .own_entries()
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(k, v)| (String::from_utf16_lossy(&k), to_data(&v)))
+                .map(|(k, v)| (k.to_vec(), to_data(&v)))
                 .collect::<BTreeMap<_, _>>(),
         ))),
     }
@@ -36,14 +36,16 @@ pub(crate) fn from_data(value: &DataValue) -> Js {
         DataValue::Null => Js::Null,
         DataValue::Bool(b) => Js::Bool(*b),
         DataValue::Number(n) => Js::Number(*n),
-        DataValue::String(s) => Js::str(s),
+        DataValue::String(s) => Js::utf16(s),
         DataValue::Array(items) => Js::array(items.borrow().iter().map(from_data).collect()),
-        DataValue::Object(fields) => Js::object(
-            fields
-                .borrow()
-                .iter()
-                .map(|(k, v)| (k.as_str(), from_data(v)))
-                .collect(),
-        ),
+        DataValue::Object(fields) => {
+            let object = Js::object(vec![]);
+            for (key, value) in fields.borrow().iter() {
+                object
+                    .define_key(key, from_data(value))
+                    .expect("fresh data object");
+            }
+            object
+        }
     }
 }

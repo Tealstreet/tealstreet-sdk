@@ -1,5 +1,7 @@
 //! Concrete AsterDEX bindings on the shared runtime and scripted wire.
 #![cfg(not(target_arch = "wasm32"))]
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 #[path = "support/exchange_runtime.rs"]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
@@ -281,11 +283,9 @@ fn sparse_position_risk_rows_use_source_coercion_in_v1_and_v3() {
         );
         assert_eq!(long.leverage, 20.0);
         assert_eq!(long.liquidation_price, 0.0);
-        assert_eq!(
-            long.info.as_ref(),
-            Some(&sparse),
-            "raw fields stay untouched"
-        );
+        // Native Float and captured JSON lexemes represent the same JS Number.
+        // Check the retained fields and numeric bits before any JSON projection.
+        retained_assert::assert_value(long.info.as_ref().unwrap(), &sparse);
         let short = positions
             .iter()
             .find(|p| p.side == PositionSide::Short)
@@ -1474,10 +1474,16 @@ fn algo_capacity_counts_raw_stop_info_when_normalized_type_is_undefined() {
     script(&wire);
     drive(&rt, venue.start()).unwrap();
     let mut markets = store.markets().to_vec();
-    markets[0].info.as_mut().unwrap()["filters"]
-        .as_array_mut()
+    let safe_cex_types::retained_json::RetainedJsonInput::Array(filters) = markets[0]
+        .info
+        .as_mut()
         .unwrap()
-        .push(json!({"filterType":"MAX_NUM_ALGO_ORDERS","limit":1}));
+        .get_mut("filters")
+        .unwrap()
+    else {
+        panic!("native filters array")
+    };
+    filters.push(json!({"filterType":"MAX_NUM_ALGO_ORDERS","limit":1}).into());
     Store::update(
         store.as_ref(),
         StoreUpdate {

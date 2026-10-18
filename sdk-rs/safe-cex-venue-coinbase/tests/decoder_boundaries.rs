@@ -343,12 +343,10 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
                     .iter()
                     .any(|p| p.segments.last().unwrap().ident == "Deserialize")
                 });
-            // The runtime portfolio projection reads uuid/type and retains unused
-            // metadata; the independent declaration DTO keeps its strict decoder.
-            let expected = (matches!(file, "types" | "cutover")
+            // PortfolioState uses the separately classified retained object decoder.
+            let expected = matches!(file, "types" | "cutover")
                 && (types[&name] || name == "CoinbaseStarbaseFalse")
-                && !retained_numeric_struct(file, &name))
-                || (file == "portfolios_balances" && name == "PortfolioState");
+                && !retained_numeric_struct(file, &name);
             assert_eq!(
                 derived, expected,
                 "{file}::{name}: derived/strict/serialize-only classification"
@@ -452,7 +450,7 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
                     (file, owner.as_str(), trait_name.as_str()),
                     ("classes", "Rc", "CoinbaseApiHost")
                         | ("portfolios_balances", "Rc", "PortfolioHost")
-                        | ("order_sync", "Value", "PrivateOrderScalar")
+                        | ("order_sync", "Input", "PrivateOrderScalar")
                         | (
                             "order_sync",
                             "crate::starbase_public_frames::CoinbaseStarbaseFrameValue",
@@ -495,6 +493,22 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
                 match trait_name.as_str() {
                     "Deserialize" => {
                         assert!(manual.insert(owner.clone()), "duplicate decoder");
+                        if (file, owner.as_str()) == ("portfolios_balances", "PortfolioState") {
+                            let mut calls = RetainedCalls::default();
+                            calls.visit_item_impl(imp);
+                            assert!(
+                                calls.functions.contains("Input::deserialize"),
+                                "portfolio retained capture"
+                            );
+                            assert!(
+                                calls.methods.contains("shift_remove"),
+                                "portfolio consumed fields are selected separately"
+                            );
+                            assert!(
+                                !calls.methods.contains("into_value"),
+                                "portfolio metadata has no JSON projection"
+                            );
+                        }
                         if retained_numeric_struct(file, &owner) {
                             let mut calls = RetainedCalls::default();
                             calls.visit_item_impl(imp);
@@ -581,12 +595,14 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
                         owner.as_str(),
                         "CoinbaseStarbasePromise" | "MicrotaskJob"
                     )),
-                    "Serialize" => assert!(matches!(
-                        owner.as_str(),
-                        "CoinbaseStarbasePublicChannel"
-                            | "CoinbaseStarbaseJsonRpcParams"
-                            | "CoinbaseStarbaseRequestHandle"
-                    )),
+                    "Serialize" => assert!(
+                        matches!(
+                            owner.as_str(),
+                            "CoinbaseStarbasePublicChannel"
+                                | "CoinbaseStarbaseJsonRpcParams"
+                                | "CoinbaseStarbaseRequestHandle"
+                        ) || (file, owner.as_str()) == ("portfolios_balances", "PortfolioState")
+                    ),
                     // The RPC sum only lifts an already-constructed protocol error.
                     "From" => {
                         let input = path_name(argument(trait_path));
@@ -671,7 +687,7 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
                                     // Object-record/native-candle view access, with no wire decoding.
                                     | ("PublicData", "get" | "fields")
                                     // Plain retained JSON map carrier, without typed wire field decoding.
-                                    | ("CoinbaseOrderResponse", "from_json" | "get" | "shallow_copy")
+                                    | ("CoinbaseOrderResponse", "from_json" | "from_retained" | "get" | "shallow_copy")
                                     // UTF-16 grammar scanner, not a Serde/record ingress path.
                                     | ("JsonDuplicateKeyScanner", "new" | "scan" | "scan_value" | "scan_object" | "scan_array" | "scan_string" | "scan_number" | "consume_literal" | "skip_whitespace")
                                     // Native parsed JSON operations; no Serde decoder or unguarded raw parser.
@@ -844,6 +860,9 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
             })
             .map(|(name, _)| name.clone())
             .collect();
+        if file == "portfolios_balances" {
+            expected.insert("PortfolioState".to_owned());
+        }
         let expected_outputs = if file == "types" {
             expected.extend(RETAINED_NUMERIC_STRUCTS.map(str::to_owned));
             RETAINED_NUMERIC_STRUCTS

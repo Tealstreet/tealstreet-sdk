@@ -193,3 +193,10 @@ The intrinsic/source fixture reuses the queued binding runtime and awaits each
 settled Promise through its real checkpoint, including handled rejections. The
 native registry HTTP witness separately checks order aggregation and the source
 catch returning stored orders with one error event.
+
+The websocket-account fixture supplies Map, Set and WsDirectFallback as explicit
+`Js::constructor` capabilities, matching the production construct intrinsic. Its
+56 maintained-source scenarios retain original thrown identity and effect checks.
+A separate constructed-family witness verifies all four OKX variants install
+distinct public/private/business socket owners sharing the original Store,
+without issuing HTTP during construction.

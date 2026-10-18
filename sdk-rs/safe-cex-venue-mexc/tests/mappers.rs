@@ -43,9 +43,10 @@ fn mexc_mappers_live_typescript_every_value() {
     for (index, case) in cases.iter().enumerate() {
         let raw = decoded(&case["raw"]);
         let raw = raw.as_object().unwrap();
-        let market = case
-            .get("marketRaw")
-            .map(|v| normalize_market(v.as_object().unwrap()).unwrap());
+        let market = case.get("marketRaw").map(|v| {
+            normalize_market(&serde_json::Value::Object((v.as_object().unwrap()).clone()).into())
+                .unwrap()
+        });
         let mode = if case["mode"] == "oneway" {
             PositionMode::OneWay
         } else {

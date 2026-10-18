@@ -121,13 +121,13 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, expanded(child, seen, bindings)]));
   }
   // PatchSource admits the raw serde_json Map, so its dyn entrypoints are raw input.
-  const rawInput = value => /"primitive":"str"|"primitive":"u8"|serde_json::(?:value::)?(?:Value|Map)|alloc::string::String|safe_cex_store::model_patch::PatchSource/.test(JSON.stringify(normalize(expanded(value))));
+  const rawInput = value => /"primitive":"str"|"primitive":"u8"|serde_json::(?:value::)?(?:Value|Map)|alloc::string::String|safe_cex_types::retained_json::RetainedJsonInput|safe_cex_store::model_patch::PatchSource/.test(JSON.stringify(normalize(expanded(value))));
   const apiSources = new Map();
   const decoderBounds = fn => /serde(?:_core)?::de::(?:DeserializeOwned|Deserializer|Deserialize)/.test(JSON.stringify(normalize(fn.generics)));
   const decodedOutput = value => {
     value = expanded(value);
     if (!value || typeof value !== 'object') return false;
-    if (value.resolved_path && (deserializerIds.has(String(value.resolved_path.id)) || /serde_json::(?:value::)?Value/.test(JSON.stringify(normalize(value.resolved_path))))) return true;
+    if (value.resolved_path && (deserializerIds.has(String(value.resolved_path.id)) || /(?:serde_json::(?:value::)?Value|safe_cex_types::retained_json::RetainedJsonInput)/.test(JSON.stringify(normalize(value.resolved_path))))) return true;
     return Object.values(value).some(decodedOutput);
   };
   for (const item of Object.values(index)) {

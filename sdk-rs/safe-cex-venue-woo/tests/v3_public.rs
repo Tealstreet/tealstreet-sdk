@@ -201,9 +201,21 @@ fn market_info_snapshot_differs_from_live_source_alias() {
     assert_eq!(row.symbol, witness["sourceAfter"]);
     assert_eq!(markets.len(), 1, "WOO-CARDINALITY alias native markets");
     let info = markets[0].info.as_ref().unwrap();
-    assert_eq!(info["symbol"], witness["snapshotAfter"]);
+    assert_eq!(
+        info.get("symbol").unwrap().as_text().unwrap(),
+        witness["snapshotAfter"]
+            .as_str()
+            .unwrap()
+            .encode_utf16()
+            .collect::<Vec<_>>()
+    );
     assert_ne!(
-        info["symbol"], witness["sourceAfter"],
+        info.get("symbol").unwrap().as_text().unwrap(),
+        witness["sourceAfter"]
+            .as_str()
+            .unwrap()
+            .encode_utf16()
+            .collect::<Vec<_>>(),
         "owned info does not observe the later source mutation"
     );
 }

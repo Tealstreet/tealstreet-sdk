@@ -99,11 +99,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, c: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        c: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.host.report_exception(e, c)
     }
     fn execute_worker_request(&self, r: Value) -> ExchangeFuture<'static, Value> {
@@ -170,7 +174,7 @@ impl WsParent for Parent {
         &self,
         _: &str,
         _: Option<&str>,
-        _: Option<&Value>,
+        _: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         Ok(())
     }

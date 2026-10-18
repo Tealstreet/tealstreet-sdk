@@ -279,15 +279,23 @@ impl ExchangeRuntime for NativeRuntime {
     fn random(&self) -> f64 {
         random_unit()
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         eprintln!(
-            "[safe-cex uncaught] {}: {} {context}",
+            "[safe-cex uncaught] {}: {} {context:?}",
             error.name, error.message
         );
     }
-    fn report_raw_exception(&self, error: &crate::js_runtime::value::Js, context: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &crate::js_runtime::value::Js,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         let description = crate::runtime::console_text(std::slice::from_ref(error));
-        eprintln!("[safe-cex uncaught] {description} {context}");
+        eprintln!("[safe-cex uncaught] {description} {context:?}");
     }
     fn execute_worker_request(&self, _request: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async {

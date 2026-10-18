@@ -16,3 +16,10 @@ safe-cex-transport.workspace = true
 serde_json.workspace = true
 
 serde.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+safe-cex-exchange = { workspace = true, features = ["native"] }
+safe-cex-transport = { workspace = true, features = ["native"] }
+tokio = { workspace = true, features = ["rt", "time", "net"] }
+tokio-tungstenite.workspace = true
+futures-util.workspace = true

@@ -7,16 +7,16 @@ use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_num::numeric_ingress::{JsNumberOutput, js_deserialize_passthrough, js_value_as_f64};
 use safe_cex_num::{
     adjust, js_number_string, js_string, js_truthy, math_max, math_min, math_round,
 };
 use safe_cex_transport::{RestBody, RestRequest};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode,
     PositionSide, PreparedOrderOpts, retained_json::RetainedJsonInput,
 };
-use serde::Serialize;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{rc::Rc, task::Poll};
 
@@ -35,16 +35,6 @@ pub struct BingxPlacement {
     pub reads: Rc<BingxDataReads>,
     pub unlimited: Rc<dyn ReadTransport>,
     pub host: Rc<dyn PlacementHost>,
-}
-#[derive(Serialize)]
-#[serde(transparent)]
-struct Response {
-    value: Value,
-}
-impl JsNumberOutput for Response {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self,struct{} passthrough{value});
-    }
 }
 fn numeric(n: f64) -> Result<Value, ExchangeError> {
     RetainedJsonInput::Float(n)
@@ -120,7 +110,7 @@ impl BingxPlacement {
             .base
             .emit_and_log_error(ExchangeErrorInput::Message(message), label, None)
     }
-    async fn post(&self, url: &str, payload: Value) -> Result<Value, ExchangeError> {
+    async fn post(&self, url: &str, payload: Value) -> Result<Input, ExchangeError> {
         let response = self
             .unlimited
             .send(RestRequest {
@@ -145,17 +135,15 @@ impl BingxPlacement {
         })
         .await;
         response?
-            .decode_with(|decoder| {
-                js_deserialize_passthrough(decoder).map(|value| Response { value })
-            })
+            .decode_with(Input::deserialize)
             .map_err(|e| ExchangeError::new(e.to_string()))
             .and_then(|r| {
-                if r.value.is_null() {
+                if r.is_null() {
                     Err(ExchangeError::new(
                         "Cannot read properties of null (reading 'code')",
                     ))
                 } else {
-                    Ok(r.value)
+                    Ok(r)
                 }
             })
     }
@@ -467,14 +455,14 @@ impl BingxPlacement {
     pub async fn place_order(
         &self,
         opts: &PreparedOrderOpts,
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         let payloads = self.format_create_order(opts).await?;
         self.place_order_batch(&payloads).await
     }
     pub async fn place_orders(
         self: &Rc<Self>,
         orders: &[PreparedOrderOpts],
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         self.reads.base.assert_caller_client_order_ids(orders)?;
         self.reads.get_or_fetch_position_mode(false).await?;
         let mut futures = orders
@@ -525,8 +513,10 @@ impl BingxPlacement {
                 let reporter = runtime.clone();
                 runtime.spawn_local(Box::pin(async move {
                     if let Err(e) = future.as_mut().await {
-                        reporter
-                            .report_exception(&e, &json!({"operation":"BingX formatting sibling"}));
+                        reporter.report_exception(
+                            &e,
+                            &json!({"operation":"BingX formatting sibling"}).into(),
+                        );
                     }
                 }));
             }
@@ -538,7 +528,7 @@ impl BingxPlacement {
     pub async fn place_order_batch(
         &self,
         payloads: &[Value],
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         let mut ids = Vec::new();
         let mut message = String::new();
         for payload in payloads {
@@ -552,13 +542,13 @@ impl BingxPlacement {
                 let data = self
                     .post(crate::constants::ENDPOINTS[11].1, payload.clone())
                     .await?;
-                if data.get("code").and_then(js_value_as_f64) != Some(0.0) {
+                if data.get("code").and_then(Input::as_f64) != Some(0.0) {
                     message = crate::errors::normalize_order_placement_error(
                         &symbol,
-                        &js_string(
+                        &safe_cex_num::js_retained_string(
                             data.get("msg")
-                                .filter(|v| js_truthy(Some(v)))
-                                .or(Some(&json!(""))),
+                                .filter(|v| v.is_truthy())
+                                .or(Some(&Input::from(json!("")))),
                         )
                         .map_err(|e| ExchangeError::new(e.message))?,
                     );
@@ -567,9 +557,9 @@ impl BingxPlacement {
                     let raw = data
                         .get("data")
                         .and_then(|d| d.get("order"))
-                        .filter(|v| js_truthy(Some(v)))
+                        .filter(|v| v.is_truthy())
                         .cloned()
-                        .unwrap_or(json!({}));
+                        .unwrap_or_else(|| Input::Object(vec![]));
                     let order = map_order(
                         &raw,
                         &self.reads.base.store.orders(),
@@ -587,7 +577,7 @@ impl BingxPlacement {
                     }
                     ids.push(
                         raw.get("orderID")
-                            .filter(|v| js_truthy(Some(v)))
+                            .filter(|v| v.is_truthy())
                             .or_else(|| raw.get("orderId"))
                             .cloned(),
                     );
@@ -610,7 +600,7 @@ impl BingxPlacement {
     pub async fn place_order_batch_old(
         &self,
         payloads: &[Value],
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         let mut ids = Vec::new();
         let mut message = String::new();
         for lot in payloads.chunks(5) {
@@ -620,8 +610,8 @@ impl BingxPlacement {
                     .await;
                 match result {
                     Ok(data) => {
-                        if data.get("code").and_then(js_value_as_f64) != Some(0.0) {
-                            message = js_string(data.get("msg"))
+                        if data.get("code").and_then(Input::as_f64) != Some(0.0) {
+                            message = safe_cex_num::js_retained_string(data.get("msg"))
                                 .map_err(|e| ExchangeError::new(e.message))?;
                             self.report(message.clone(), None)?;
                             ids.push(None);
@@ -629,7 +619,7 @@ impl BingxPlacement {
                             let raw = data.get("data").and_then(|d| d.get("order"));
                             ids.push(
                                 raw.and_then(|o| o.get("orderID"))
-                                    .filter(|v| js_truthy(Some(v)))
+                                    .filter(|v| v.is_truthy())
                                     .or_else(|| raw.and_then(|o| o.get("orderId")))
                                     .cloned(),
                             );
@@ -654,10 +644,13 @@ impl BingxPlacement {
                     .await;
                 match result {
                     Ok(data) => {
-                        if data.get("code").and_then(js_value_as_f64) != Some(0.0) {
-                            if let Some(msg) = data.get("msg").and_then(Value::as_str) {
+                        if data.get("code").and_then(Input::as_f64) != Some(0.0) {
+                            if let Some(msg) = data.get("msg").and_then(|v| match v {
+                                Input::Text(units) => String::from_utf16(units).ok(),
+                                _ => None,
+                            }) {
                                 if !msg.contains("Msg: lock fail") {
-                                    message = msg.into();
+                                    message = msg;
                                     self.report(message.clone(), None)?;
                                 }
                             } else {
@@ -665,7 +658,7 @@ impl BingxPlacement {
                                     None => {
                                         "Cannot read properties of undefined (reading 'includes')"
                                     }
-                                    Some(Value::Null) => {
+                                    Some(Input::Null) => {
                                         "Cannot read properties of null (reading 'includes')"
                                     }
                                     Some(_) => "data.msg.includes is not a function",

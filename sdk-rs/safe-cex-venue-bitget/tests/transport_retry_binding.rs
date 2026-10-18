@@ -56,13 +56,17 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         self.inner.random()
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.inner.report_exception(error, context);
     }
     fn report_raw_exception(
         &self,
         error: &safe_cex_exchange::js_runtime::value::Js,
-        context: &Value,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         self.inner.report_raw_exception(error, context);
     }

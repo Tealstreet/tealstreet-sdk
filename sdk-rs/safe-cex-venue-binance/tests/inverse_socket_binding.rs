@@ -365,8 +365,9 @@ fn account_frame_converts_inverse_contracts_and_preserves_existing_fields() {
     assert_eq!(p.side.value(), Some(&safe_cex_types::PositionSide::Short));
     assert_eq!(p.leverage, 17.);
     assert_eq!(p.liquidation_price, 20000.);
-    assert_eq!(p.info.value().unwrap()["contractsNative"], 2.);
-    assert_eq!(p.info.value().unwrap()["old"], true);
+    let info = p.info.value().unwrap();
+    assert_eq!(info.get("contractsNative").unwrap().as_f64(), Some(2.));
+    assert_eq!(info.get("old").unwrap().as_bool(), Some(true));
     assert_eq!(
         h.http.requests.borrow().len(),
         1,
@@ -573,4 +574,83 @@ fn private_warning_prefix_preserves_native_surrogate_error_and_rejection() {
             );
         }
     }
+}
+
+#[test]
+fn disconnected_candle_listener_clone_retries_and_shares_cleanup_state() {
+    let h = support::fixture(true, false);
+    seed(&h);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let sink = calls.clone();
+    let cleanup = invoke(
+        &h,
+        "listenOHLCV",
+        vec![
+            from_json(&json!({"symbol":SYMBOL,"interval":"1m"})),
+            Js::function("capture", move |_, args| {
+                sink.borrow_mut().push(args[0].clone());
+                Ok(Js::Undefined)
+            }),
+        ],
+    );
+    h.runtime.pump();
+    assert!(
+        messages(&h).is_empty(),
+        "disconnected listener waits for its clone retry"
+    );
+    let socket = connect(&h, SocketSlot::Public);
+    advance(&h, 100.0);
+    assert_eq!(messages(&h).iter().filter(|m|
+        m["method"] == "SUBSCRIBE" && m["params"] == json!(["btcusd_perp@kline_1m"])
+    ).count(), 1, "cloned retry registers exactly the original candle parser");
+    let candle = json!({"e":"kline","s":SYMBOL,"k":{"s":SYMBOL,"i":"1m","t":1000,"o":"1","h":"2","l":"0.5","c":"1.5","v":"7"}});
+    frame(&socket, candle.clone());
+    assert_eq!(
+        calls.borrow().len(),
+        1,
+        "cloned listener retains the original parser callback"
+    );
+    assert_eq!(
+        calls.borrow()[0].get("close").unwrap().to_number().unwrap(),
+        1.5
+    );
+    cleanup.call(Js::Undefined, vec![]).unwrap();
+    frame(&socket, candle);
+    assert_eq!(
+        calls.borrow().len(),
+        1,
+        "cleanup removes the parser installed by the clone"
+    );
+    assert_eq!(
+        messages(&h)
+            .iter()
+            .filter(|m| m["method"] == "UNSUBSCRIBE")
+            .count(),
+        1
+    );
+
+    h.exchange.base().dispose().unwrap();
+    let h = support::fixture(true, false);
+    let cancelled = invoke(
+        &h,
+        "listenOHLCV",
+        vec![
+            from_json(&json!({"symbol":SYMBOL,"interval":"5m"})),
+            Js::function("cancelled", |_, _| {
+                panic!("cancelled retry must never register")
+            }),
+        ],
+    );
+    h.runtime.pump();
+    cancelled.call(Js::Undefined, vec![]).unwrap();
+    connect(&h, SocketSlot::Public);
+    advance(&h, 100.0);
+    assert!(
+        !messages(&h)
+            .iter()
+            .any(|m| m["method"] == "SUBSCRIBE" && m["params"] == json!(["btcusd_perp@kline_5m"])),
+        "cleanup before connection cancels the cloned listener retry"
+    );
+    h.exchange.base().dispose().unwrap();
+    assert!(h.runtime.reports.borrow().is_empty());
 }

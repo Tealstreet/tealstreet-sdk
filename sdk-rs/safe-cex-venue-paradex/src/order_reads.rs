@@ -1,7 +1,7 @@
 //! REST order-read orchestration; mapOrder and transport remain separate rows.
 use crate::constants::ENDPOINTS;
-use safe_cex_num::{JsCoercionError, JsJsonValue, js_json_stringify, js_string, js_truthy};
-use serde_json::Value;
+use safe_cex_num::{JsCoercionError, js_retained_json_stringify, js_retained_string};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use std::future::Future;
 
 // ts: ParadexExchange.fetchOrders
@@ -17,7 +17,7 @@ pub async fn fetch_orders<E, T, I, F>(
     sdk_init: Option<I>,
     has_jwt_manager: impl FnOnce() -> bool,
     get: impl FnOnce(&'static str) -> Result<F, E>,
-    mut map_order: impl FnMut(&Value) -> Result<T, E>,
+    mut map_order: impl FnMut(&Input) -> Result<T, E>,
     effects: &mut OrderReadEffects<
         impl FnMut(String, &'static str) -> Result<(), E>,
         impl FnMut(&E) -> Result<String, E>,
@@ -27,7 +27,7 @@ pub async fn fetch_orders<E, T, I, F>(
 ) -> Result<Vec<T>, E>
 where
     I: Future<Output = Result<(), E>>,
-    F: Future<Output = Result<Option<Value>, E>>,
+    F: Future<Output = Result<Option<Input>, E>>,
 {
     let result = async {
         if let Some(init) = sdk_init {
@@ -44,12 +44,9 @@ where
         let endpoint = ENDPOINTS.iter().find(|(k, _)| *k == "ORDERS").unwrap().1;
         let data = get(endpoint)?.await?;
         let rows = data.as_ref().and_then(|v| v.get("results"));
-        if !js_truthy(data.as_ref()) || !js_truthy(rows) {
+        if !data.as_ref().is_some_and(Input::is_truthy) || !rows.is_some_and(Input::is_truthy) {
             (effects.log)("Orders API returned invalid data structure".into(), "error")?;
-            let prepared = data
-                .map(JsJsonValue::from)
-                .unwrap_or(JsJsonValue::Undefined);
-            let text = js_json_stringify(&prepared)
+            let text = js_retained_json_stringify(data.as_ref().unwrap_or(&Input::Undefined))
                 .map_err(&mut effects.coercion_error)?
                 .unwrap_or_else(|| "undefined".into());
             (effects.log)(format!("Data received: {text}"), "debug")?;
@@ -57,9 +54,9 @@ where
         }
         let rows = rows.unwrap();
         let length = match rows {
-            Value::Array(v) => v.len().to_string(),
-            Value::String(v) => v.encode_utf16().count().to_string(),
-            _ => js_string(rows.get("length")).map_err(&mut effects.coercion_error)?,
+            Input::Array(v) => v.len().to_string(),
+            Input::Text(v) => v.len().to_string(),
+            _ => js_retained_string(rows.get("length")).map_err(&mut effects.coercion_error)?,
         };
         (effects.log)(
             format!("Orders API response: {length} total orders"),
@@ -73,16 +70,21 @@ where
         })?;
         let mut open_orders = Vec::new();
         for row in rows {
-            if row.is_null() {
+            if row.is_nullish() {
                 return Err((effects.coercion_error)(JsCoercionError {
                     name: "TypeError",
-                    message: "Cannot read properties of null (reading 'status')",
+                    message: if row.is_null() {
+                        "Cannot read properties of null (reading 'status')"
+                    } else {
+                        "Cannot read properties of undefined (reading 'status')"
+                    },
                 }));
             }
-            if matches!(
-                row.get("status").and_then(Value::as_str),
-                Some("NEW" | "OPEN" | "PENDING" | "UNTRIGGERED")
-            ) {
+            if row.get("status").is_some_and(|value| {
+                ["NEW", "OPEN", "PENDING", "UNTRIGGERED"]
+                    .iter()
+                    .any(|status| value.text_equals(status))
+            }) {
                 open_orders.push(row);
             }
         }

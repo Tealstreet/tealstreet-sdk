@@ -411,3 +411,8 @@ impl ExchangeWsAuthHost for Host {
         Ok(self.promise(async move { result.await.map(|token| Some(super::value::text(&token))) }))
     }
 }
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/retained_merge_native.rs"]
+mod retained_merge_native;

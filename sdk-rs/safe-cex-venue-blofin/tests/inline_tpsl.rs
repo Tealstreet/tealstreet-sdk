@@ -1,8 +1,6 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
-use safe_cex_num::numeric_ingress::{
-    js_from_str, js_from_value, js_from_value_ref, js_value_as_f64,
-};
+use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_types::{
     Order, OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
     OrderType,
@@ -13,14 +11,24 @@ use std::process::Command;
 fn bits(value: f64) -> Value {
     json!({"number":if value.is_nan(){"nan".into()}else{format!("{:016x}",value.to_bits())}})
 }
-fn info(value: Value) -> Value {
+fn info(value: safe_cex_types::retained_json::RetainedJsonInput) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match value {
-        Value::Number(_) => bits(js_value_as_f64(&value).unwrap()),
-        Value::Array(v) => Value::Array(v.into_iter().map(info).collect()),
-        Value::Object(v) => Value::Object(v.into_iter().map(|(k, v)| (k, info(v))).collect()),
-        other => other,
+        Input::Float(v) => bits(v),
+        Input::Lexeme(v) => bits(v.parse().unwrap()),
+        Input::Array(v) => Value::Array(v.into_iter().map(info).collect()),
+        Input::Object(v) => Value::Object(
+            v.into_iter()
+                .map(|(k, v)| (String::from_utf16(&k).unwrap(), info(v)))
+                .collect(),
+        ),
+        Input::Text(v) => Value::String(String::from_utf16(&v).unwrap()),
+        Input::Bool(v) => Value::Bool(v),
+        Input::Null => Value::Null,
+        Input::Undefined => panic!("source corpus has no native undefined in JSON info"),
     }
 }
+
 fn trigger(t: OrderStopTriggerType) -> &'static str {
     match t {
         OrderStopTriggerType::LastPrice => "last_price",

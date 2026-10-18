@@ -1,7 +1,7 @@
 //! Primary/inverse position-control bodies; host calls retain source sequencing.
 //! JSON records exclude executable prototypes/getters. Futures begin at first poll.
 use safe_cex_num::{js_number, js_number_string, js_string, js_truthy, math_max, math_min};
-use safe_cex_types::MarginType;
+use safe_cex_types::{MarginType, retained_json::RetainedJsonInput as Input};
 use serde_json::{Map, Value, json};
 use std::{future::Future, rc::Rc};
 
@@ -296,7 +296,7 @@ async fn fetch_position_mode_impl<Get>(
     get: impl FnOnce(&str, Map<String, Value>) -> Result<Get, Error>,
     mut map_position: impl FnMut(&Value, usize) -> Result<Value, Error>,
     upsert: impl FnOnce(Option<Positions>) -> Result<(), Error>,
-    emit: impl FnOnce(Option<Value>, Option<&str>, Option<Map<String, Value>>) -> Result<(), Error>,
+    emit: impl FnOnce(Option<Input>, Option<&str>, Option<Input>) -> Result<(), Error>,
     primary: bool,
 ) -> Result<Option<Value>, Error>
 where
@@ -321,40 +321,46 @@ where
     .await?;
     let list = data.get("result").and_then(|r| r.get("list"));
     if primary {
-        let meta = crate::response::get_bybit_response_meta(&data);
+        let meta = crate::response::get_bybit_response_meta(&data.as_ref().clone().into());
         if !meta.is_success && list.and_then(Value::as_array).is_none_or(Vec::is_empty) {
-            let fallback = meta
-                .ret_msg
-                .as_deref()
-                .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    meta.ret_code
-                        .map(|code| {
-                            format!(
-                                "Bybit positions request failed with code {}",
-                                js_number_string(code)
-                            )
-                        })
-                        .unwrap_or_else(|| {
-                            "Bybit positions request returned malformed status payload".into()
-                        })
-                });
-            let mut extra = json!({"endpoint":endpoint("POSITIONS"),"symbol":symbol,"hasExplicitStatus":meta.has_explicit_status}).as_object().unwrap().clone();
+            let fallback = meta.ret_msg.clone().unwrap_or_else(|| {
+                meta.ret_code
+                    .map(|code| {
+                        format!(
+                            "Bybit positions request failed with code {}",
+                            js_number_string(code)
+                        )
+                        .encode_utf16()
+                        .collect()
+                    })
+                    .unwrap_or_else(|| {
+                        "Bybit positions request returned malformed status payload"
+                            .encode_utf16()
+                            .collect()
+                    })
+            });
+            let mut extra: Input = json!({"endpoint":endpoint("POSITIONS"),"symbol":symbol,"hasExplicitStatus":meta.has_explicit_status}).into();
             if let Some(code) = meta.ret_code {
-                extra.insert("retCode".into(), Value::from(code));
+                extra
+                    .as_object_mut()
+                    .unwrap()
+                    .push(("retCode".encode_utf16().collect(), Input::Float(code)));
             }
             if let Some(message) = meta.ret_msg {
-                extra.insert("retMsg".into(), Value::String(message));
+                extra
+                    .as_object_mut()
+                    .unwrap()
+                    .push(("retMsg".encode_utf16().collect(), Input::Text(message)));
             }
             emit(
-                Some(Value::String(fallback)),
+                Some(Input::Text(fallback)),
                 Some("Bybit fetchPositionMode failed"),
                 Some(extra),
             )?;
             return Ok(Some(Value::String("oneway".into())));
         }
     } else if field(&data, "retMsg")?.and_then(Value::as_str) != Some("OK") {
-        emit(field(&data, "retMsg")?.cloned(), None, None)?;
+        emit(field(&data, "retMsg")?.cloned().map(Into::into), None, None)?;
         return Ok(Some(Value::String("oneway".into())));
     }
     let formatted = if let Some(rows) = list.and_then(Value::as_array) {
@@ -388,7 +394,7 @@ pub async fn fetch_position_mode<Get>(
     get: impl FnOnce(&str, Map<String, Value>) -> Result<Get, Error>,
     map_position: impl FnMut(&Value, usize) -> Result<Value, Error>,
     upsert: impl FnOnce(Option<Positions>) -> Result<(), Error>,
-    emit: impl FnOnce(Option<Value>, Option<&str>, Option<Map<String, Value>>) -> Result<(), Error>,
+    emit: impl FnOnce(Option<Input>, Option<&str>, Option<Input>) -> Result<(), Error>,
 ) -> Result<Option<Value>, Error>
 where
     Get: Future<Output = Result<Rc<Value>, Error>>,
@@ -413,7 +419,7 @@ pub async fn fetch_inverse_position_mode<Get>(
     get: impl FnOnce(&str, Map<String, Value>) -> Result<Get, Error>,
     map_position: impl FnMut(&Value, usize) -> Result<Value, Error>,
     upsert: impl FnOnce(Option<Positions>) -> Result<(), Error>,
-    emit: impl FnOnce(Option<Value>, Option<&str>, Option<Map<String, Value>>) -> Result<(), Error>,
+    emit: impl FnOnce(Option<Input>, Option<&str>, Option<Input>) -> Result<(), Error>,
 ) -> Result<Option<Value>, Error>
 where
     Get: Future<Output = Result<Rc<Value>, Error>>,

@@ -17,7 +17,6 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeTask},
     websocket::BaseWebSocket,
 };
-use safe_cex_num::JsJsonValue as J;
 use safe_cex_store::Store;
 use safe_cex_types::{Candle, ExchangeOptions, OHLCVOptions, OrderBook};
 use std::{
@@ -45,20 +44,7 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
     native.request = field("request");
     native
 }
-// Conversion between the existing prepared-data carrier and shared JS heap.
-// This retains undefined/BigInt/nonfinite values until their actual wire boundary.
-pub(super) fn js(value: &J) -> Js {
-    match value {
-        J::Undefined => Js::Undefined,
-        J::Null => Js::Null,
-        J::Bool(v) => Js::Bool(*v),
-        J::Number(v) => Js::Number(*v),
-        J::String(v) => Js::str(v),
-        J::BigInt(v) => Js::BigInt(Rc::new(v.clone())),
-        J::Array(v) => Js::array(v.iter().map(js).collect()),
-        J::Object(v) => Js::object(v.iter().map(|(k, v)| (k.as_str(), js(v))).collect()),
-    }
-}
+pub(super) use crate::data::js;
 pub(super) struct Host {
     pub scope: Rc<Shared>,
     pub public: Js,
@@ -157,7 +143,7 @@ impl Host {
             if let Err(error) = result {
                 runtime.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"ApexOmni callback"}),
+                    &serde_json::json!({"operation":"ApexOmni callback"}).into(),
                 );
             }
         }));
@@ -240,7 +226,10 @@ impl ApexHost for HostLink {
         }
         Ok(())
     }
-    fn request(&self, request: ApexRequest) -> ExchangeFuture<'_, J> {
+    fn request(
+        &self,
+        request: ApexRequest,
+    ) -> ExchangeFuture<'_, safe_cex_types::retained_json::RetainedJsonInput> {
         let owner = self.owner();
         Box::pin(async move {
             let owner = owner?;
@@ -257,11 +246,18 @@ impl ApexHost for HostLink {
             .and_then(|v| v.to_number())
             .map_err(error)
     }
-    fn console(&self, level: &str, message: &str, detail: Option<&J>) -> Result<(), ExchangeError> {
+    fn console(
+        &self,
+        level: &str,
+        message: &str,
+        detail: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Result<(), ExchangeError> {
         let owner = self.owner()?;
         let mut args = vec![Js::str(message)];
         if let Some(detail) = detail {
-            args.push(js(detail));
+            args.push(safe_cex_exchange::js_runtime::value::from_retained_input(
+                detail.clone(),
+            ));
         }
         owner
             .scope

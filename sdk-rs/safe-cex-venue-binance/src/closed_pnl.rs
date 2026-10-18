@@ -18,7 +18,11 @@ pub fn derive_binance_closed_positions(
     account_name: &str,
 ) -> Result<Vec<safe_cex_types::ClosedPnlEntry>, JsCoercionError> {
     use safe_cex_num::js_number;
-    use safe_cex_types::*;
+    use safe_cex_types::{
+        ClosedPnlEntry, ClosedPnlEntryContracts, ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice,
+        ClosedPnlEntryFees, ClosedPnlEntryLeverage, ClosedPnlEntryNotional,
+        ClosedPnlEntryUnrealizedPnl, DataProvenance,
+    };
     let mut entries = Vec::new();
     for row in rows {
         let realized_pnl = to_number(row.get("realizedPnl"))?;

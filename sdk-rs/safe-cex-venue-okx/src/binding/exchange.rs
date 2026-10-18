@@ -170,7 +170,7 @@ impl OkxExchange {
                 Ok(typed) => callback(typed),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source": "okx listener payload"}),
+                    &serde_json::json!({"source": "okx listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)
