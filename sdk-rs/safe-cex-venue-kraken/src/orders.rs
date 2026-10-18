@@ -2,7 +2,8 @@
 use crate::{helpers, types};
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
-    js_date_parse, js_retained_string, js_time_clip, numeric_ingress::JsNumberInput, parse_float,
+    js_date_parse, js_retained_parse_float, js_retained_string, js_time_clip,
+    numeric_ingress::JsNumberInput,
 };
 use safe_cex_store::Store;
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
@@ -31,7 +32,7 @@ fn truthy<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
 
 fn number(value: Option<&Input>) -> Result<f64, ExchangeError> {
     value.map_or(Ok(0.0), |value| {
-        string(Some(value)).map(|text| parse_float(&text))
+        js_retained_parse_float(Some(value)).map_err(|cause| type_error(cause.message))
     })
 }
 

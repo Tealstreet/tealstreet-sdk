@@ -432,3 +432,10 @@ requires named native failures, restores exact bytes and requires passing tests.
 Futures ticker and order reads capture native response data before coercion. Their
 raw info retains own Undefined, unpaired UTF-16 and nonfinite number bits; the
 constructed REST regression observes all of these before any JSON output.
+
+Configured REST ticker and order numeric fields use canonical retained parseFloat
+before any UTF-8 String admission. The actual-source and HTTP binding regression
+`retained_numeric_prefixes_match_source_before_utf8_string_admission` preserves
+a numeric prefix followed by a lone surrogate; independent compiled ticker and
+order controls fail before their respective cutovers. Symbol and ID Strings keep
+their explicit final shared output admission.
