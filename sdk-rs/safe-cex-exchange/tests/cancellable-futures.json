@@ -2858,7 +2858,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2903,7 +2903,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -3007,7 +3007,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -3051,7 +3051,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         }
       ],
       "guards": [

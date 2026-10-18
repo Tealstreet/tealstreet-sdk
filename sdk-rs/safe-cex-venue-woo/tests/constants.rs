@@ -21,7 +21,7 @@ fn legacy_tables_match_live_typescript_values_and_iteration_order() {
 }
 
 #[test]
-fn typed_tables_exclude_the_pinned_typescript_prototype_bug() {
+fn own_entry_templates_exclude_inherited_runtime_keys() {
     let expected: Value = serde_json::from_str(include_str!("fixtures/constants.json")).unwrap();
     for key in [
         "constructor",

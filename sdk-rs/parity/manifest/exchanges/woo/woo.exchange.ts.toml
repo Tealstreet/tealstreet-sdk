@@ -511,8 +511,8 @@ ts = "WOOXExchange.mapLimitOrder"
 kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-woo/src/binding/hosts/order_mapping.rs::map_limit_order"
-status = "divergent"
-note = "MIXED: renamed mapLimitOrder to safe-cex-venue-woo/src/binding/hosts/order_mapping.rs::map_limit_order. The real class executes the runtime-value mapper; the dead typed facade is deleted. Preserves truthy field fallbacks, own undefined table results and prices, native inherited prototype referents, source numeric bits, per-order clock and original info alias. Actual private socket terminal IOC/FOK/MARKET reports emit fills and close prior orders. The 103 actual-source mapper records and 36 native numeric-bit cases now execute production class members instead of asserting facade refusals. Shared Store and public typed-return fields retain separate closed-model constraints; no shared type change or nonnumeric-field insertion claim. Symbol normalization retains its separately reviewed string/coercion boundary."
+status = "ported"
+note = "ACCEPT after current constructed-binding review: renamed mapLimitOrder to safe-cex-venue-woo/src/binding/hosts/order_mapping.rs::map_limit_order. The real class executes the runtime-value mapper; the dead typed facade is deleted. Preserves truthy field fallbacks, own undefined table results and prices, native inherited prototype referents, source numeric bits, per-order clock and original info alias. Actual private socket terminal IOC/FOK/MARKET reports emit fills and close prior orders. The 103 actual-source mapper records and 36 native numeric-bit cases execute production class members; the focused constructed-table witness also checks original inherited referent identity and post-map info mutation. See LIVE_ORDER_REVIEW.md. Shared Store and public typed-return fields retain separate closed-model constraints; no shared type change or nonnumeric-field insertion claim. Symbol normalization retains its separately reviewed string/coercion boundary."
 
 [[symbol]]
 ts = "WOOXExchange.fetchAlgoOrders"

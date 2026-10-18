@@ -8,7 +8,16 @@ import { hyperliquidProjectionCompilerIdentity } from './accepted-hyperliquid-pr
 import { reviewedGenericAliasProbe } from './accepted-reviewed-aliases.mjs';
 import { aliasContract } from './accepted-aliases.mjs';
 
-const specs = Object.fromEntries(Object.entries(loadPolicy('generic-aliases')).filter(([name]) => name.startsWith('safe_cex_venue_hyperliquid::')));
+const projectionNames = [
+  'safe_cex_venue_hyperliquid::private_class::PrivateValue',
+  'safe_cex_venue_hyperliquid::private_class::PrivateError',
+  'safe_cex_venue_hyperliquid::public_class::PublicValue',
+  'safe_cex_venue_hyperliquid::public_class::PublicError',
+  'safe_cex_venue_hyperliquid::core_exchange_class::ExchangeValue',
+  'safe_cex_venue_hyperliquid::core_exchange_class::ExchangeError',
+];
+const specs = Object.fromEntries(Object.entries(loadPolicy('generic-aliases')).filter(([name]) => projectionNames.includes(name)));
+assert.deepEqual(Object.keys(specs).sort(), [...projectionNames].sort(), 'all six reviewed associated projections remain selected');
 const workspace = fileURLToPath(new URL('../../', import.meta.url));
 
 // Controlled compiler-role fixture. Actual rustdoc/artifact/native execution is

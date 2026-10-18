@@ -619,12 +619,6 @@ impl crate::private_session::ConstructorBindings for Constructor {
                     safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
                     child.base(),
                 );
-                if let Some(market) = child.market_websocket.get() {
-                    self.0.base.set_borrowed_socket(
-                        safe_cex_exchange::socket_lifecycle::SocketSlot::PublicSecondary,
-                        market.base(),
-                    );
-                }
                 self.0
                     .public
                     .set(Rc::downgrade(&child))
