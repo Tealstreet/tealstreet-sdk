@@ -45,7 +45,9 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("TxFlow phase 0 must not spawn")
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.console
             .borrow_mut()
             .push((severity.into(), message.into()));
@@ -59,7 +61,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
         panic!("unexpected raw exception report")
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}

@@ -190,24 +190,23 @@ impl From<safe_cex_num::JsCoercionError> for ExchangeError {
 }
 impl From<safe_cex_transport::RestFailure> for ExchangeError {
     fn from(error: safe_cex_transport::RestFailure) -> Self {
-        if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+        let mut projected = if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
             error.transport_error.as_deref()
             && let Some(cause) = origin
                 .error()
                 .downcast_ref::<crate::js_runtime::value::owned::OwnedCallbackError>()
         {
-            let mut projected =
-                crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error();
-            projected.origin = Some(ExchangeErrorOrigin::new(error));
-            return projected;
-        }
-        let mut projected = Self::new(error.message.clone());
-        if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =
-            error.transport_error.as_deref()
-        {
-            projected.name = cause.name.into();
-        }
-        projected.code = error.code.as_ref().map(|code| Js::str(code));
+            crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error()
+        } else {
+            let mut projected = Self::new(error.message.clone());
+            if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =
+                error.transport_error.as_deref()
+            {
+                projected.name = cause.name.into();
+            }
+            projected.code = error.code.as_ref().map(|code| Js::str(code));
+            projected
+        };
         projected.context = error.context.as_deref().cloned();
         projected.response = error.response.as_ref().map(|response| {
             // Existing JSON consumers receive a view. The retained RestFailure
@@ -288,7 +287,13 @@ pub trait ExchangeRuntime {
     /// Schedule on the monotonic clock; even zero delay yields a scheduler turn.
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()>;
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask>;
-    fn console(&self, severity: &str, message: &str);
+    /// Original console arguments, including native Error references. Hosts must
+    /// observe these values before choosing a terminal or telemetry representation.
+    fn console_values(&self, severity: &str, values: &[Js]);
+    /// Convenience for the existing typed Rust callers; there is one host path.
+    fn console(&self, severity: &str, message: &str) {
+        self.console_values(severity, &[Js::str(message)]);
+    }
     fn unique_id(&self) -> String;
     fn is_worker(&self) -> bool;
     fn random(&self) -> f64;
@@ -296,9 +301,9 @@ pub trait ExchangeRuntime {
     /// Production hosts must not swallow this callback: owned asynchronous work
     /// uses it for unawaited failures independently of transport diagnostics.
     fn report_exception(&self, error: &ExchangeError, context: &serde_json::Value);
-    /// Preserve a non-string JSON error value at the host reporting boundary.
-    /// Wrapping it in ExchangeError changes the source report's value and type.
-    fn report_raw_exception(&self, error: &serde_json::Value, context: &serde_json::Value);
+    /// Original exception, retaining native Error name/message and reference identity.
+    /// A JSON projection here loses non-enumerable Error properties and identity.
+    fn report_raw_exception(&self, error: &Js, context: &serde_json::Value);
     fn execute_worker_request(
         &self,
         request: serde_json::Value,
@@ -313,4 +318,71 @@ pub trait RemoteSigner: safe_cex_transport::signing::RemoteSigner {
 pub struct ExchangeSigners {
     pub remote_signer: Option<Rc<dyn RemoteSigner>>,
     pub payload_signer: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
+}
+
+/// Read diagnostic data without invoking user getters or conversion hooks.
+fn diagnostic_string(value: &Js, key: &str) -> Option<String> {
+    use crate::js_runtime::value::{Prop, utf16};
+    let key = utf16(key);
+    let mut current = value.clone();
+    let mut seen = Vec::new();
+    while let Js::Object(object) = current {
+        if seen.iter().any(|seen| Rc::ptr_eq(seen, &object)) {
+            return None;
+        }
+        seen.push(object.clone());
+        if let Some(property) = object.props.borrow().get(&key) {
+            return match property {
+                Prop::Data(Js::String(text))
+                | Prop::DataDescriptor {
+                    value: Js::String(text),
+                    ..
+                } => Some(String::from_utf16_lossy(text)),
+                _ => None,
+            };
+        }
+        let prototype = object.proto.borrow().clone();
+        current = prototype?;
+    }
+    None
+}
+
+/// Terminal presentation after the original values reach the console capability.
+/// Object inspection never executes user code; native Error data remains visible.
+pub fn console_text(values: &[Js]) -> String {
+    values
+        .iter()
+        .map(|value| {
+            if let Js::Object(object) = value {
+                if object.class == "Error" {
+                    let name = diagnostic_string(value, "name").unwrap_or_else(|| "Error".into());
+                    let message = diagnostic_string(value, "message").unwrap_or_default();
+                    return match (name.is_empty(), message.is_empty()) {
+                        (true, _) => message,
+                        (_, true) => name,
+                        _ => format!("{name}: {message}"),
+                    };
+                }
+            }
+            if value.is_object() {
+                format!("[{}]", value.type_of())
+            } else {
+                value.to_display()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Text-only fixture observation after receiving the retained exception. Native
+/// production reporting uses console_text; rich sinks should retain Js directly.
+pub fn exception_text(error: &Js) -> String {
+    if let Js::Object(object) = error
+        && object.class == "Error"
+    {
+        return diagnostic_string(error, "message").unwrap_or_default();
+    }
+    crate::js_runtime::value::to_json(error)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| console_text(std::slice::from_ref(error)))
 }

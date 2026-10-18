@@ -113,7 +113,7 @@ impl ExchangeRuntime for Runtime {
             observer: self.cancel_observer.clone(),
         })
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[crate::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "owned-test".into()
     }
@@ -123,7 +123,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(&self, _: &crate::js_runtime::value::Js, _: &serde_json::Value) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
