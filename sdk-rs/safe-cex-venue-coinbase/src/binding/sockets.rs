@@ -209,7 +209,7 @@ impl SocketHost {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
                 fields.info =
-                    (Some(to_json(&to_js(&order.info)).expect("parsed private frame"))).into();
+                    (Some(safe_cex_exchange::js_runtime::value::to_retained_input(&to_js(&order.info))?)).into();
                 fields
             })
             .collect()
