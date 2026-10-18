@@ -623,6 +623,13 @@ paths independently; both must compile and fail the named native test, then pass
 after exact source restoration. Other owners and generic instantiations remain
 outside this finite evidence.
 
+The twenty history/API/lifecycle capabilities have individual source-role records
+and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
+Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls
+are described in `LIFECYCLE_ALIAS_REVIEW.md`. Income paging uses the canonical
+native typed bridge on both sides of the shared pager, preserving native number
+bits while retaining the existing numeric transaction/trade ID String policy.
+
 ### Retired duplicate order throttle
 
 The former `orders_throttle` generic module had no production caller; its only
