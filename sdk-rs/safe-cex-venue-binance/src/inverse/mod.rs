@@ -6,8 +6,7 @@ mod lifecycle;
 mod ops;
 mod orders;
 mod reads;
-#[path = "../generated/binanceinverse.rs"]
-pub mod types;
+pub use crate::binanceinverse_types as types;
 mod ws_private;
 mod ws_public;
 

@@ -1,6 +1,10 @@
 //! Bind source-generated COIN-M constants to the shared native JavaScript graph.
-use super::types::*;
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_typed};
+use super::types::{
+    BASE_URL, BASE_WS_URL, ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC,
+    ORDER_SIDE, ORDER_TRIGGER_TYPE, ORDER_TYPE, POSITION_SIDE, PUBLIC_ENDPOINTS, RECV_WINDOW,
+    TIME_IN_FORCE,
+};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_typed};
 
 fn table<T: serde::Serialize>(rows: &[(&str, T)]) -> Result<Js, Thrown> {
     let value = Js::object(vec![]);
@@ -11,6 +15,12 @@ fn table<T: serde::Serialize>(rows: &[(&str, T)]) -> Result<Js, Thrown> {
 }
 
 pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
+    globals.define(
+        "groupBy",
+        Js::function("groupBy", |_, args| {
+            safe_cex_exchange::js_runtime::library::group_by(&arg(&args, 0), &arg(&args, 1))
+        }),
+    )?;
     globals.define(
         "OrderRejectReason",
         Js::object(vec![(

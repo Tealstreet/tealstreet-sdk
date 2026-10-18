@@ -254,3 +254,105 @@ fn malformed_position_envelope_reports_and_retains_existing_snapshot() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].strict_equals(&Js::str("Exchange Error: Binance COIN-M /dapi/v1/positionRisk response malformed: expected array, received object(code,message) (code=0 wrong-shape)")), "actual event: {}", errors[0].to_display());
 }
+
+#[test]
+#[ignore = "executes the complete maintained TypeScript venue with installed oracle dependencies"]
+fn maintained_rest_class_matches_native_market_position_and_order_results() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/inverse-rest-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let h = harness(options(), |wire| {
+        wire.ok("GET", "/dapi/v1/exchangeInfo", json!({"symbols":[raw_market(), {"contractType":"CURRENT_QUARTER","contractStatus":"TRADING"}]}));
+        wire.ok(
+            "GET",
+            "/dapi/v2/leverageBracket",
+            json!([{"symbol":"BTCUSD_PERP","brackets":[{"initialLeverage":75}]}]),
+        );
+        wire.ok("GET", "/dapi/v1/positionRisk", json!([{
+            "symbol":"BTCUSD_PERP","positionAmt":"100","positionSide":"BOTH","entryPrice":"4000","markPrice":"5000","unRealizedProfit":"0.25","liquidationPrice":"2500","leverage":"10","isolatedMargin":"0","marginType":"cross"
+        }]));
+        wire.ok(
+            "POST",
+            "/dapi/v1/order",
+            json!({"orderId":9007199254740993_u64}),
+        );
+    });
+    seed(&h);
+    let markets = call(&h, "fetchMarkets", vec![]);
+    h.exchange
+        .receiver()
+        .get("store")
+        .unwrap()
+        .call_method(
+            "update",
+            vec![Js::object(vec![("markets", markets.clone())])],
+        )
+        .unwrap();
+    let positions = call(&h, "fetchPositions", vec![]);
+    // Observe native numeric outputs before the secondary JSON comparison.
+    assert_eq!(
+        positions
+            .get("0")
+            .unwrap()
+            .get("contracts")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        2.0_f64.to_bits()
+    );
+    let ids = call(
+        &h,
+        "placeOrder",
+        vec![from_json(
+            &json!({"symbol":"BTCUSD_PERP","side":"buy","type":"limit","amount":2,"price":5000.16}),
+        )],
+    );
+    let requests = h.http.calls("/dapi/v1/order");
+    assert_eq!(requests.len(), 1);
+    let query: std::collections::BTreeMap<_, _> = requests[0]
+        .url
+        .split_once('?')
+        .unwrap()
+        .1
+        .split('&')
+        .map(|pair| pair.split_once('=').unwrap())
+        .collect();
+    let native = Js::object(vec![
+        ("markets", markets),
+        ("positions", positions),
+        ("ids", ids),
+        (
+            "order",
+            Js::object(vec![
+                ("quantity", Js::str(query["quantity"])),
+                ("positionSide", Js::str(query["positionSide"])),
+                ("price", Js::str(query["price"])),
+            ]),
+        ),
+    ]);
+    fn finite_numbers(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Number(number) => json!(number.as_f64().unwrap()),
+            serde_json::Value::Array(rows) => rows.into_iter().map(finite_numbers).collect(),
+            serde_json::Value::Object(fields) => fields
+                .into_iter()
+                .map(|(key, value)| (key, finite_numbers(value)))
+                .collect(),
+            other => other,
+        }
+    }
+    let source = serde_json::from_slice(&source.stdout).unwrap();
+    let native = safe_cex_exchange::js_runtime::value::to_json(&native).unwrap();
+    assert_eq!(finite_numbers(native), finite_numbers(source));
+    h.exchange.base().dispose().unwrap();
+}

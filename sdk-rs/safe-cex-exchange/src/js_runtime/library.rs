@@ -55,6 +55,37 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
     Ok(out)
 }
 
+/// Imported lodash groupBy for native data collections and the existing
+/// function/property iteratee profile. Values remain the original referents.
+pub fn group_by(collection: &Js, by: &Js) -> Result<Js, Thrown> {
+    let result = Js::object(vec![]);
+    if collection.is_nullish() {
+        return Ok(result);
+    }
+    let length = if collection.is_callable() {
+        Js::Undefined
+    } else {
+        collection.get("length")?
+    };
+    let keys: Box<dyn Iterator<Item = Vec<u16>>> = match length {
+        Js::Number(n) if n >= 0.0 && n.fract() == 0.0 && n <= 9_007_199_254_740_991.0 => {
+            Box::new((0..n as usize).map(|index| index.to_string().encode_utf16().collect()))
+        }
+        _ => Box::new(collection.own_keys().into_iter().map(|key| key.to_vec())),
+    };
+    for key in keys {
+        let value = collection.get_key(&key)?;
+        let key = iteratee(by, value.clone())?.to_js_string()?;
+        if result.own_keys().iter().any(|own| **own == *key) {
+            result.get_key(&key)?.call_method("push", vec![value])?;
+        } else {
+            // lodash baseAssignValue defines an own __proto__ data property.
+            result.define_key(&key, Js::array(vec![value]))?;
+        }
+    }
+    Ok(result)
+}
+
 pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
     if !obj.is_object() {
         let rhs = if matches!(obj, Js::SymbolIterator) {
