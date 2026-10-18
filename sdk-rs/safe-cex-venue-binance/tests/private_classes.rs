@@ -1446,7 +1446,9 @@ impl ExchangeImports for Imports {
         if let Some(response) = self.rejected_response.borrow().clone() {
             return response;
         }
-        Ok(error.response.clone().map(EventValue::from_json))
+        Ok(error
+            .retained_response_input()
+            .map(safe_cex_exchange::js_runtime::value::from_retained_input))
     }
     fn external_provider(
         &self,
@@ -1680,7 +1682,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
                 "native fulfilled response keeps original identity"
             );
             let mut original = ExchangeError::new("original guard rejection");
-            original.response = Some(json!({}));
+            original = original.with_retained_response(json!({}).into());
             let original = Rc::new(original);
             let rejected = imports.rejected_guards.borrow()[0](original.clone())
                 .expect("native missing rejection status returns original rejection future");
@@ -4876,8 +4878,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         } else {
             let error = result.unwrap_err();
             let response = error
-                .response
-                .as_ref()
+                .response_json_view()
                 .expect("the original HTTP response is retained");
             assert_eq!(response["status"], 429);
             assert_eq!(response["data"]["code"], -1003);
@@ -5375,8 +5376,7 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
             } else {
                 let error = result.unwrap_err();
                 let response = error
-                    .response
-                    .as_ref()
+                    .response_json_view()
                     .expect("HTTP rejection retains response");
                 assert_eq!(response["status"], 400);
                 assert_eq!(response["data"]["code"], -1121);

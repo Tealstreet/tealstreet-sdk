@@ -30,7 +30,8 @@ fn pm_margin_mode_rejection_matches_source() {
         sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
             "fixture-code"
         )));
-        sentinel.response = Some(json!({"status":503,"data":{"msg":"detail"}}));
+        sentinel =
+            sentinel.with_retained_response((json!({"status":503,"data":{"msg":"detail"}})).into());
         let error = {
             let mut future = std::pin::pin!(change_binance_pm_margin_type(|message| {
                 trace.push(message.to_owned());
@@ -54,7 +55,7 @@ fn pm_margin_mode_rejection_matches_source() {
             "PM margin emits once before rejection case{index}"
         );
         assert_eq!(
-            json!({"name":error.name,"message":error.message,"same":error==sentinel,"code":observed_error_code(&error.code),"response":error.response}),
+            json!({"name":error.name,"message":error.message,"same":error==sentinel,"code":observed_error_code(&error.code),"response":error.response_json_view()}),
             case["error"],
             "PM margin error precedence and metadata case{index}"
         );

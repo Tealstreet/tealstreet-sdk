@@ -7,7 +7,7 @@ use crate::{
 use safe_cex_exchange::{
     OwnedOperation,
     exchange::Exchange,
-    runtime::{ExchangeError, ExchangeFuture, ListenerCleanup, LogSeverity},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ListenerCleanup, LogSeverity},
     websocket::{BaseWebSocket, ReopenResync, WsParent, WsProtocol, WsRuntime},
 };
 use safe_cex_num::{
@@ -1541,7 +1541,8 @@ impl PrivateOpenHost for PrivateOpen {
 impl Socket {
     fn send_login(&self) -> ExchangeFuture<'static, ()> {
         let socket = self.me();
-        Box::pin(async move {
+        let runtime: Rc<dyn ExchangeRuntime> = self.runtime();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
             let venue = socket.venue()?;
             let options = venue.base.options();
             let runtime = venue.runtime.clone();

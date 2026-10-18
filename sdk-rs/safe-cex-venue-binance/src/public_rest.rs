@@ -182,7 +182,7 @@ fn catch(
     venue: RestVenue,
     error: Failure,
 ) -> Result<(), Failure> {
-    let properties = json!({"message":error.message,"response":error.response});
+    let properties = json!({"message":error.message,"response":error.response_json_view()});
     if venue == RestVenue::Futures {
         emit_binance_exchange_error(
             &ExceptionValue::Error {

@@ -570,7 +570,10 @@ fn native_api_aliases_sign_and_preserve_success_and_rejection() {
     );
     let error = run(&runtime, send()).unwrap_err();
     assert_eq!(error.message, "alias refusal");
-    assert_eq!(error.response.as_ref().unwrap()["data"]["code"], -2015);
+    assert_eq!(
+        error.response_json_view().as_ref().unwrap()["data"]["code"],
+        -2015
+    );
     assert_eq!(
         errors.borrow().as_slice(),
         &[vec![

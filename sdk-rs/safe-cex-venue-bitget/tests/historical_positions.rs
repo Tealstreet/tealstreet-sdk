@@ -270,7 +270,7 @@ fn historical_positions_preserves_failure_and_cancellation() {
     };
     let mut folder = folder(vec![], &venue);
     let mut failure = ExchangeError::new("original folder failure");
-    failure.response = Some(json!({"code":17}));
+    failure = failure.with_retained_response(json!({"code":17}).into());
     failure.store_subscriber_ids = vec![3, 1];
     let ptr = std::ptr::from_ref(failure.metadata.as_ref());
     let expected = failure.clone();
