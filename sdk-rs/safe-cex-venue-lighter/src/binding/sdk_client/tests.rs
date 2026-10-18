@@ -189,7 +189,10 @@ impl World {
         self.http.sent.borrow().clone()
     }
     fn settle(&self, value: Js) -> Result<Js, Thrown> {
-        let mut future = Box::pin(await_js(value));
+        let mut future = Box::pin(await_js(
+            &(self.runtime.clone() as Rc<dyn ExchangeRuntime>),
+            value,
+        ));
         for _ in 0..64 {
             if let Poll::Ready(v) = future
                 .as_mut()

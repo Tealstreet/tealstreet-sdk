@@ -45,8 +45,8 @@ pub(super) fn call_member(rt: &Rt, name: &str, args: Vec<Js>) -> Result<Js, Thro
     f.call(rt.this.clone(), args)
 }
 
-pub(super) fn awaited(value: Js) -> Task<Js, Thrown> {
-    Box::pin(await_js(value))
+pub(super) fn awaited(rt: &Rt, value: Js) -> Task<Js, Thrown> {
+    Box::pin(await_js(&rt.exchange_runtime(), value))
 }
 
 /// An async member's body: a synchronous throw becomes a rejected promise.
@@ -102,7 +102,10 @@ impl Host for Frame {
         }
     }
     fn invoke(&mut self, call: Js) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(awaited(invoke(&call, self.rt.this.clone(), vec![])?))
+        Ok(awaited(
+            &self.rt,
+            invoke(&call, self.rt.this.clone(), vec![])?,
+        ))
     }
     fn invoke_parse(&mut self, call: Js, rows: Js) -> Result<Js, Thrown> {
         invoke(&call, self.rt.this.clone(), vec![rows])
@@ -114,7 +117,10 @@ impl Host for Frame {
             Transport::Secondary => "_secondaryXhr",
         })?;
         let get = client.get("get")?;
-        Ok(awaited(invoke(&get, client, vec![Js::str(endpoint)])?))
+        Ok(awaited(
+            &self.rt,
+            invoke(&get, client, vec![Js::str(endpoint)])?,
+        ))
     }
     fn field(&mut self, value: &Js, key: &str) -> Result<Js, Thrown> {
         value.get(key)

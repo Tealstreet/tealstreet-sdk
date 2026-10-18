@@ -153,7 +153,12 @@ impl RuntimeHost for Host {
         }
     }
     fn await_value(&self, item: Js) -> Task<Js> {
-        Box::pin(async move { await_js(item).await.map_err(|error| error.value) })
+        let rt = self.rt();
+        Box::pin(async move {
+            await_js(&rt?.exchange_runtime(), item)
+                .await
+                .map_err(|error| error.value)
+        })
     }
 }
 impl AssemblyHost for Host {

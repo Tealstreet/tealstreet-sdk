@@ -414,7 +414,7 @@ impl SnapshotHost for Rt {
         Js::Promise(Promise::spawn(&self.exchange_runtime(), body))
     }
     fn wait(&self, value: Js) -> Operation<Js, Thrown> {
-        Box::pin(await_js(value))
+        Box::pin(await_js(&self.exchange_runtime(), value))
     }
     fn error(&self, message: Js) -> Result<Thrown, Thrown> {
         let message = if message.is_undefined() {

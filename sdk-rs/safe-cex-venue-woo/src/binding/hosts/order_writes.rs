@@ -252,7 +252,7 @@ impl Host for Frame {
         c.call(&self.rt, a)
     }
     fn call(&mut self, c: Callee, a: Vec<Js>) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(settle(c.call(&self.rt, a)?))
+        Ok(settle(&self.rt, c.call(&self.rt, a)?))
     }
     /// `this.isPublicDataOnly` / `this.isDisposed`; every other root is `this.store.<k>`.
     fn root(&mut self, k: &str) -> Result<Js, Thrown> {
@@ -416,7 +416,7 @@ impl Host for Frame {
         Ok(())
     }
     fn await_element(&mut self, v: Js) -> Task<Js, Thrown> {
-        settle(v)
+        settle(&self.rt, v)
     }
     /// `orders.sort((a, b) => b.createdTime - a.createdTime)`, in place.
     fn sort_history(&mut self, rows: Js) -> Result<Js, Thrown> {
