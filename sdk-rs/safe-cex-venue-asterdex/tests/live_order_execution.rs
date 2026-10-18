@@ -97,6 +97,23 @@ impl RestAdapter for Adapter {
             .expect("unexpected native request");
         Box::pin(async move {
             if let Some(e) = next["error"].as_str() {
+                if next["errorType"] == "axios" {
+                    use safe_cex_exchange::js_runtime::value::owned::{
+                        OwnedCallbackError, OwnedJsValue,
+                    };
+                    return Err(RestFailure::from_transport(
+                        safe_cex_transport::TransportError::Rejected(
+                            safe_cex_transport::provider::TransportErrorOrigin::new(
+                                OwnedCallbackError::new(OwnedJsValue::object(vec![
+                                    ("name", OwnedJsValue::string("AxiosError")),
+                                    ("message", OwnedJsValue::string(e)),
+                                    ("isAxiosError", OwnedJsValue::Bool(true)),
+                                ])),
+                            ),
+                        ),
+                        r,
+                    ));
+                }
                 return Err(RestFailure::pre_transmit(e.into(), r));
             }
             Ok(RestResponse {
@@ -355,7 +372,7 @@ fn order_execution_matches_live_typescript() {
                         c["error"]["name"], "AxiosError",
                         "source AxiosError name witness"
                     );
-                    assert_eq!(e.name, "Error", "native REST error-name boundary");
+                    assert_eq!(e.name, c["error"]["name"], "retained Axios error name");
                     assert!(e.is_axios_error);
                 } else {
                     assert_eq!(e.name, c["error"]["name"], "{name} native error name");

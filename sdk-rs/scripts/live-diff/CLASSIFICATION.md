@@ -49,3 +49,27 @@ Reports and hashes are retained in
 [`evidence/confirmations-2026-10-18.json`](evidence/confirmations-2026-10-18.json).
 Results were sent to `codex-0w5ohi`, `codex-dwfl8p`, and `codex-wdtab1`; no new
 root cause is asserted for the ApexOmni/Lighter stalls.
+
+## Bybit concrete-helper dispatch
+
+The `Unknown method` findings for `fetchOptionMarkets`, `fetchTickersRaw` and
+`fetchTickersWithoutParse` are harness-only, not missing public native methods.
+Reviewed SDK master `b10cec94d31da76b8d5e86b1a590cb69300a2f29` declares them
+on the concrete Bybit class but not in `exchanges/base.ts`'s public `Exchange`
+interface or `CallableMethodsInWorker` union. The actual
+`webworker/handlers/CallMethodHandler.ts` rejects each without invoking its
+receiver property. A valid `fetchOrders` call is the positive dispatch control.
+
+The planned exchange-server (#8030, reviewed checkout `7695533a25f4`) imports
+`store.webworker`, forwards account messages through `ctx.dispatchMessage`, and
+uses the same `ExchangeWorker` / `CallMethodHandler`; it adds no helper dispatch.
+The maintainer also confirmed no application callers on monorepo master.
+The earlier direct TS helper result versus native rejection remains historical
+probe evidence, rather than a public API parity defect.
+
+The shared REST plan/allowlist now excludes these names for both implementations,
+including raw ticker helpers on other venues. Public market and ticker reads
+remain, and Bybit's option-chain/expiry profile still uses public methods after
+option-enabled market loading. Actual TS and Rust probe children reject direct
+helper messages with the same visible error before either runtime is accessed.
+This does not qualify any differing result through those public paths as parity.

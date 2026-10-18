@@ -50,6 +50,9 @@ struct State {
     load_ready: Rc<Cell<bool>>,
     start_ready: Rc<Cell<bool>>,
     clock_error: Cell<bool>,
+    clock_waker: RefCell<Option<Waker>>,
+    load_waker: RefCell<Option<Waker>>,
+    start_waker: RefCell<Option<Waker>>,
     load_missing: Cell<bool>,
     completed_starts: Rc<Cell<u32>>,
     replay: Cell<bool>,
@@ -101,6 +104,7 @@ impl Host {
     }
     fn drain(&self) {
         for _iteration in 0..32 {
+            self.state.runtime.advance(self.state.runtime.now.get());
             let tasks = std::mem::take(&mut *self.state.tasks.borrow_mut());
             for mut f in tasks {
                 match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
@@ -322,11 +326,15 @@ impl ExchangeWorkerHost for Host {
     }
 }
 impl WorkerBootstrapHost for Host {
+    fn runtime(&self) -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
+        self.state.runtime.clone()
+    }
     fn construct_clock_start(&self) -> ExchangeFuture<'static, ()> {
         self.event("clock");
         let ready = self.state.clock_ready.clone();
         let failed = self.state.clock_error.get();
-        Box::pin(std::future::poll_fn(move |_| {
+        let state = self.state.clone();
+        Box::pin(std::future::poll_fn(move |cx| {
             if ready.get() {
                 Poll::Ready(if failed {
                     Err(ExchangeError::new("clock failed"))
@@ -334,6 +342,7 @@ impl WorkerBootstrapHost for Host {
                     Ok(())
                 })
             } else {
+                *state.clock_waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -350,10 +359,12 @@ impl WorkerBootstrapHost for Host {
         let factory: Rc<dyn WorkerExchangeConstructor> = Rc::new(Factory {
             host: self.self_ref.clone(),
         });
-        Some(Box::pin(std::future::poll_fn(move |_| {
+        let state = self.state.clone();
+        Some(Box::pin(std::future::poll_fn(move |cx| {
             if ready.get() {
                 Poll::Ready(Ok(factory.clone()))
             } else {
+                *state.load_waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         })))
@@ -435,11 +446,13 @@ impl WorkerBootstrapHost for Host {
         self.event("start");
         let ready = self.state.start_ready.clone();
         let count = self.state.completed_starts.clone();
-        Box::pin(std::future::poll_fn(move |_| {
+        let state = self.state.clone();
+        Box::pin(std::future::poll_fn(move |cx| {
             if ready.get() {
                 count.set(count.get() + 1);
                 Poll::Ready(Ok(()))
             } else {
+                *state.start_waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -622,6 +635,7 @@ fn startup_success_timeout_cancellation_and_retained_loser() {
         "BOOT native clock prefix"
     );
     assert!(poll(&mut f).is_pending());
+    h.drain();
     let events = h.state.events.borrow().clone();
     let start = events.iter().position(|e| e == "start").unwrap();
     assert_eq!(
@@ -651,9 +665,11 @@ fn startup_success_timeout_cancellation_and_retained_loser() {
     h.state.start_ready.set(false);
     let mut f = w.start();
     assert!(poll(&mut f).is_pending());
-    w.dispose().unwrap();
-    assert_eq!(poll(&mut f), Poll::Ready(Ok(false)));
     h.drain();
+    w.dispose().unwrap();
+    assert!(poll(&mut f).is_pending());
+    h.drain();
+    assert_eq!(poll(&mut f), Poll::Ready(Ok(false)));
     assert_eq!(
         h.state.tasks.borrow().len(),
         1,
@@ -680,7 +696,10 @@ fn startup_success_timeout_cancellation_and_retained_loser() {
     h.state.start_ready.set(false);
     let mut f = w.start();
     assert!(poll(&mut f).is_pending());
+    h.drain();
     h.fire(0, 30_000.);
+    assert!(poll(&mut f).is_pending());
+    h.drain();
     assert_eq!(poll(&mut f), Poll::Ready(Ok(false)));
     assert!(w.cancel_startup.borrow().is_none());
     let error = h
@@ -795,8 +814,10 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
             .unwrap()
             .as_ref()
             .unwrap()
-            .get("private"),
-        Some(&json!(1))
+            .get("private")
+            .and_then(Value::as_f64)
+            .map(f64::to_bits),
+        Some((1f64).to_bits())
     );
     assert_eq!(
         w.store()
@@ -804,8 +825,10 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
             .unwrap()
             .as_ref()
             .unwrap()
-            .get("public"),
-        Some(&json!(2))
+            .get("public")
+            .and_then(Value::as_f64)
+            .map(f64::to_bits),
+        Some((2f64).to_bits())
     );
     w.handle_payload(payload(StoreWorkerOp::Deactivate, None))
         .unwrap();
@@ -1065,5 +1088,122 @@ fn session_registry_seed_reuse_precedence_mismatch_and_dispose() {
     assert_eq!(
         src["replayEvents"],
         json!(["listen", "post:start-status", "replay"])
+    );
+}
+
+fn startup_timing_source() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/worker_bootstrap_oracle.mjs"
+        ))
+        .arg("--startup-timing")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "STARTUP source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+fn release_clock(h: &Host) {
+    h.state.clock_ready.set(true);
+    if let Some(waker) = h.state.clock_waker.borrow_mut().take() {
+        waker.wake();
+    }
+}
+#[test]
+fn startup_dropped_waiter_keeps_clock_loader_and_snapshot_running() {
+    let source = startup_timing_source();
+    let mut profiles = Vec::new();
+    for mode in ["success", "failure", "dispose", "loader", "venue"] {
+        let (h, w) = fixture(false);
+        h.state.clock_ready.set(matches!(mode, "loader" | "venue"));
+        h.state.load_ready.set(mode != "loader");
+        h.state.start_ready.set(mode != "venue");
+        h.state.clock_error.set(mode == "failure");
+        let waiter = w.start();
+        assert!(w.cancel_startup.borrow().is_some());
+        assert_eq!(h.state.events.borrow().last().unwrap(), "clock");
+        drop(waiter);
+        h.drain();
+        assert_eq!(w.exchange().is_some(), mode == "venue");
+        if mode == "dispose" {
+            w.dispose().unwrap();
+        }
+        match mode {
+            "loader" => {
+                h.state.load_ready.set(true);
+                if let Some(waker) = h.state.load_waker.borrow_mut().take() {
+                    waker.wake();
+                }
+            }
+            "venue" => {
+                h.state.start_ready.set(true);
+                if let Some(waker) = h.state.start_waker.borrow_mut().take() {
+                    waker.wake();
+                }
+            }
+            _ => release_clock(&h),
+        }
+        h.drain();
+        profiles.push(json!({"mode":mode, "completed":h.state.completed_starts.get(),
+            "stores":h.state.stores.borrow().len(), "errors":h.state.posts.borrow().iter().filter(|p|p.op==StoreWorkerOp::Error).count(),
+            "exchange":w.exchange().is_some(), "cancelPending":w.cancel_startup.borrow().is_some()}));
+    }
+    assert_eq!(
+        Value::Array(profiles),
+        source["direct"],
+        "STARTUP dropped waiter retains actual worker continuation"
+    );
+}
+#[test]
+fn startup_ready_clock_yields_before_loader_and_caller_settlement() {
+    let (h, w) = fixture(false);
+    let mut waiter = w.start();
+    assert_eq!(h.state.events.borrow().last().unwrap(), "clock");
+    assert!(poll(&mut waiter).is_pending());
+    assert!(
+        !h.state.events.borrow().iter().any(|e| e == "load"),
+        "STARTUP ready clock must yield before loader"
+    );
+    h.drain();
+    assert_eq!(finish(&h, waiter), Ok(true));
+    assert_eq!(h.state.completed_starts.get(), 1);
+}
+#[test]
+fn session_dropped_init_waiter_keeps_start_and_failure_cleanup_running() {
+    let source = startup_timing_source();
+    let mut profiles = Vec::new();
+    for missing in [false, true] {
+        let h = Host::new();
+        h.state.load_missing.set(missing);
+        h.state.expected_seed.set(Some(7.));
+        let module = WorkerModule::new(h.clone());
+        let session = module.start(h.clone(), false);
+        let init = payload(
+            StoreWorkerOp::Init,
+            Some(
+                json!({"accountName":"a", "exchangeName":"bybit", "options":{"key":"","secret":""},
+            "settings":{"placeOrder":{"tpTriggerType":"mark_price","slTriggerType":"last_price"}},
+            "metadata":{"supportedTPSLTriggerTypes":[],"privateProxyIps":[]},"sessionKey":"s","store":{"latency":7}}),
+            ),
+        );
+        let waiter = h.send(init);
+        let worker = session.get_worker().unwrap();
+        assert_eq!(
+            worker.store().serialize().unwrap().latency.to_bits(),
+            7f64.to_bits()
+        );
+        drop(waiter);
+        h.drain();
+        profiles.push(json!({"missing":missing,"completed":h.state.completed_starts.get(),"stores":h.state.stores.borrow().len(),
+            "present":session.get_worker().is_some(),"cancelPending":worker.cancel_startup.borrow().is_some()}));
+    }
+    assert_eq!(
+        Value::Array(profiles),
+        source["session"],
+        "STARTUP abandoned listener retains init continuation and failed-worker cleanup"
     );
 }
