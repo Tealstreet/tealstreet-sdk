@@ -771,3 +771,68 @@ fn rest_ticker_funding_time_uses_the_host_local_date_converter() {
         venue.dispose().unwrap();
     }
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("mexc");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 160);
+    let (venue, runtime, store, _) = support::fixture();
+    let seed = ticker_coercion::seed("mexc");
+    let markets = seed
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            serde_json::from_value(json!({
+                "id":t.id,"symbol":t.symbol,"base":"fixture","quote":"USDT","active":true,
+                "contractSize":(i+1) as f64 * 0.25,"precision":{"amount":0.01,"price":0.25},
+                "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+            }))
+            .unwrap()
+        })
+        .collect();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    assert!(socket.is_connected(), "production MEXC ticker socket opens");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}

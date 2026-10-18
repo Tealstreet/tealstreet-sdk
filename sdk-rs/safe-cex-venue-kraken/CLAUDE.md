@@ -420,3 +420,11 @@ fallback. String sides are iterable: Futures/Spot snapshots skip their NaN quant
 and emit an empty side, while Spot deltas retain a NaN level. The constructed
 public-book regression compares those actual source cases through real subscriptions
 and raw socket frames, retaining native price/amount bits before JSON projection.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` covers 224 Futures cases / 672 frames and40 Spot three-row frames, including every numeric get-key alias and distinct fallback values. Futures uses fractional relative funding, while Spot last also updates mark/index.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.
