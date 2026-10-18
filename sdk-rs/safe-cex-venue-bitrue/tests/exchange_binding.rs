@@ -968,6 +968,21 @@ fn malformed_balance_upnl_refuses_only_its_account_row() {
 
 #[test]
 fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
+    let unhandled = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/composition-streams-oracle.cjs"
+        ))
+        .arg("--unhandled-book-pair")
+        .output()
+        .unwrap();
+    assert!(
+        unhandled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&unhandled.stderr)
+    );
+    let unhandled: Value = serde_json::from_slice(&unhandled.stdout).unwrap();
+    assert_eq!(unhandled["callbacks"], 0);
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1030,11 +1045,36 @@ fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
                 }).to_string())));
             f.runtime.pump();
         };
+        assert!(f.runtime.exceptions.borrow().is_empty());
         push(json!([pair]), json!([]));
         assert!(
             books.borrow().is_empty(),
             "source refuses noniterable book row {index}"
         );
+        {
+            let reports = f.runtime.exceptions.borrow();
+            assert_eq!(
+                reports.len(),
+                1,
+                "shared unhandled async rejection must be surfaced exactly once"
+            );
+            let (error, context) = &reports[0];
+            assert_eq!(error.name, unhandled["rejection"]["name"].as_str().unwrap());
+            let expected = source[index]["error"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry[0] == "message")
+                .unwrap();
+            assert_eq!(error.message, expected[1].as_str().unwrap());
+            assert_eq!(context["source"], "unhandledRejection");
+            if index == 0 {
+                assert_eq!(
+                    error.message,
+                    unhandled["rejection"]["message"].as_str().unwrap()
+                );
+            }
+        }
         push(json!([[2, 3]]), json!([[4, 5]]));
         let books = books.borrow();
         assert_eq!(books.len(), 1, "next valid snapshot recovers after refusal");
@@ -1056,6 +1096,12 @@ fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
         );
         drop(books);
         cleanup().unwrap();
+        f.runtime.pump();
+        assert_eq!(
+            f.runtime.exceptions.borrow().len(),
+            1,
+            "valid recovery and cleanup must not duplicate the rejection report"
+        );
     }
 }
 
