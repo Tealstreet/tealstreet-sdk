@@ -50732,5 +50732,106 @@
     },
     "reason": "Typed Spot entrypoint selecting Venue::Spot and forwarding the host, symbol and native callback to the depth lifecycle. It does not expose an alternate raw decoder.",
     "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::class_jobs::Settlement": {
+    "shape": "typed",
+    "evidence": "The private-state Settlement<T> is a shared owned Future handle, not a wire constructor or Deserialize owner. The exact Future::poll API receives a pinned handle and native task Context and returns an already-owned Result. The existing production_native_private_clones_share_settlement_and_captured_receiver native test constructs the actual parent and holds its real listen-key request, observes Pending and shared completion through cloned handles, and checks only one request. The eager_prefix_shared_native_settlement_and_all_waiters direct production-job witness separately observes owned success fields, original object identity and both waiter wakeups. The distinct dropped_join_does_not_stop_driver_and_prefix_rejection_is_settlement witness observes original Rc error identity. Canonical named missing-contract RED1 is captured with197 dependency decoder owners retained; the independent continuation control already compiled RED/exact-restored GREEN, with final replay and positive receipt pending; no decoder execution or universal generic data-domain claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::future::future::Future",
+          "name": "poll",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "resolved_path": {
+                    "path": "core::pin::Pin",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": true,
+                                "type": {
+                                  "generic": "Self"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "cx",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::task::wake::Context",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'_"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::task::poll::Poll",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Output",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Polls native runtime state and task Context; it neither parses nor admits a wire representation. T is already produced by the scheduled callee."
+      }
+    ]
   }
 }
