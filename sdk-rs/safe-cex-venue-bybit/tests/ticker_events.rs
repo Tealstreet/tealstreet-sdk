@@ -60,7 +60,7 @@ fn ticker_notification_retains_subscriber_identity_after_committed_patch() {
         )
         .unwrap_err();
         let TickerEventError::Store(StoreMutationError::Notification(notification)) = error else {
-            panic!("ticker notification must retain typed subscriber identity");
+            panic!("ticker notification must retain typed subscriber identity: {error:?}");
         };
         assert_eq!(
             notification.cause(),
