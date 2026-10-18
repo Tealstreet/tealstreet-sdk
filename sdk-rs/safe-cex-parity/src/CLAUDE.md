@@ -87,7 +87,15 @@ These classifications are not independent runtime proof. Unknown local custom tr
 to module scope for concrete API classification; local unions/generics and
 unknown procedural expansion fail closed. Function-local `macro_rules!`
 definitions and their invocations are ignored by public-surface discovery
-because lexical block scope makes them unnameable outside that body. A
+because lexical block scope makes them unnameable outside that body. Their
+invoked effects are checked separately: exactly one empty matcher or one
+`($name:literal, $value:expr)` matcher is supported, with no extra arms,
+repetitions, forwarding fragments or unknown captures. The census substitutes
+parenthesized fragments into the body and visits both that body and every
+argument, including unused arguments. Hidden impls, modules/imports, opaque
+attributes and unresolved nested macros remain refused; no macro-name allowance
+is involved. The actual Bitrue enum registration recipe and compiled global-impl
+controls exercise this bounded form. A
 module-scope `macro_rules!` is accepted only when every same-name definition in
 the target is unconditional and every arm transcribes without a declaration
 keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still

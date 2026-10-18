@@ -306,14 +306,49 @@ impl<'ast> Visit<'ast> for LocalMacroEffects {
 }
 
 // A deliberately bounded invocation grammar, not a macro_rules expander.
+// Accept a single empty matcher or exactly ($name:literal, $value:expr).
 // Other matchers/arms/forwarding require explicit effect support before use.
-fn local_macro_body(tokens: proc_macro2::TokenStream) -> Option<syn::Block> {
-    use proc_macro2::{Delimiter, TokenStream, TokenTree};
+fn local_macro_body(
+    tokens: proc_macro2::TokenStream,
+    arguments: proc_macro2::TokenStream,
+) -> Option<(syn::Block, Vec<syn::Expr>)> {
+    use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
+    use syn::parse::Parser;
+
+    fn substitute(
+        tokens: TokenStream,
+        captures: &HashMap<String, TokenStream>,
+    ) -> Option<TokenStream> {
+        let mut output = TokenStream::new();
+        let mut tokens = tokens.into_iter();
+        while let Some(token) = tokens.next() {
+            output.extend([match token {
+                TokenTree::Punct(dollar) if dollar.as_char() == '$' => {
+                    let TokenTree::Ident(name) = tokens.next()? else {
+                        return None;
+                    };
+                    let name = name.to_string();
+                    let value = captures.get(name.trim_start_matches("r#"))?;
+                    // Preserve the opaque expression fragment's precedence.
+                    TokenTree::Group(Group::new(Delimiter::Parenthesis, value.clone()))
+                }
+                TokenTree::Group(group) => {
+                    let mut substituted =
+                        Group::new(group.delimiter(), substitute(group.stream(), captures)?);
+                    substituted.set_span(group.span());
+                    TokenTree::Group(substituted)
+                }
+                token => token,
+            }]);
+        }
+        Some(output)
+    }
+
     let mut tokens = tokens.into_iter();
     let TokenTree::Group(matcher) = tokens.next()? else {
         return None;
     };
-    if matcher.delimiter() != Delimiter::Parenthesis || !matcher.stream().is_empty() {
+    if matcher.delimiter() != Delimiter::Parenthesis {
         return None;
     }
     let (TokenTree::Punct(equal), TokenTree::Punct(arrow), TokenTree::Group(body)) =
@@ -331,7 +366,63 @@ fn local_macro_body(tokens: proc_macro2::TokenStream) -> Option<syn::Block> {
             return None;
         }
     }
-    syn::parse2::<syn::Block>(TokenStream::from(TokenTree::Group(body))).ok()
+    if matcher.stream().is_empty() {
+        return arguments.is_empty().then(|| {
+            syn::parse2::<syn::Block>(TokenStream::from(TokenTree::Group(body)))
+                .ok()
+                .map(|body| (body, Vec::new()))
+        })?;
+    }
+    let names = (|input: syn::parse::ParseStream<'_>| {
+        let mut names = Vec::new();
+        for (index, expected) in ["literal", "expr"].into_iter().enumerate() {
+            if index != 0 {
+                input.parse::<syn::Token![,]>()?;
+            }
+            input.parse::<syn::Token![$]>()?;
+            let name = input.parse::<syn::Ident>()?.to_string();
+            input.parse::<syn::Token![:]>()?;
+            let fragment = input.parse::<syn::Ident>()?;
+            if fragment != expected {
+                return Err(input.error("unsupported local macro fragment"));
+            }
+            names.push(name.trim_start_matches("r#").to_owned());
+        }
+        Ok(names)
+    })
+    .parse2(matcher.stream())
+    .ok()?;
+    if names[0] == names[1] {
+        return None;
+    }
+    let (literal, expression) = (|input: syn::parse::ParseStream<'_>| {
+        let literal = input.parse::<syn::Lit>()?;
+        input.parse::<syn::Token![,]>()?;
+        let expression = input.parse::<syn::Expr>()?;
+        Ok((literal, expression))
+    })
+    .parse2(arguments.clone())
+    .ok()?;
+    // Keep the original token streams without requiring a token-printing codec.
+    // The first comma separates a single literal token from the expression.
+    let mut argument_tokens = arguments.into_iter();
+    let literal_tokens = TokenStream::from(argument_tokens.next()?);
+    if !matches!(argument_tokens.next()?, TokenTree::Punct(p) if p.as_char() == ',') {
+        return None;
+    }
+    let captures = HashMap::from([
+        (names[0].clone(), literal_tokens),
+        (names[1].clone(), argument_tokens.collect()),
+    ]);
+    let mut substituted = Group::new(Delimiter::Brace, substitute(body.stream(), &captures)?);
+    substituted.set_span(body.span());
+    let body = syn::parse2::<syn::Block>(TokenStream::from(TokenTree::Group(substituted))).ok()?;
+    // Inspect even unused arguments: an opaque recipe cannot conceal effects.
+    let literal = syn::Expr::Lit(syn::ExprLit {
+        attrs: Vec::new(),
+        lit: literal,
+    });
+    Some((body, vec![literal, expression]))
 }
 
 /// Module-scope `macro_rules!` recipes proven to expand to expressions only,
@@ -582,17 +673,16 @@ impl LocalTypes {
                     .cloned()
             });
         if let Some(recipe) = local_macro {
-            let body = recipe.and_then(local_macro_body);
+            let body = recipe.and_then(|recipe| local_macro_body(recipe, item.tokens.clone()));
             let mut effects = LocalMacroEffects::default();
-            if let Some(body) = &body {
-                // No cfg filtering: hidden impls must be rejected too.
+            if let Some((body, arguments)) = &body {
+                // No cfg filtering: hidden impls and unused arguments stay visible.
+                for argument in arguments {
+                    effects.visit_expr(argument);
+                }
                 effects.visit_block(body);
             }
-            if self.inside_local_recipe
-                || !item.tokens.is_empty()
-                || body.is_none()
-                || effects.unsupported
-            {
+            if self.inside_local_recipe || body.is_none() || effects.unsupported {
                 let end = item.span().end();
                 self.names.push((
                     format!(
@@ -2121,6 +2211,60 @@ mod tests {
             "{:?}",
             visitor.names
         );
+    }
+
+    #[test]
+    fn actual_bitrue_local_enum_recipe_has_visible_bounded_effects() {
+        let source = include_str!("../../safe-cex-venue-bitrue/src/binding/classes.rs");
+        assert_eq!(source.matches("enums!(").count(), 3);
+        let mut visitor = verified_test_visitor();
+        visitor.visit_file(&syn::parse_file(source).unwrap());
+        let opaque: Vec<_> = visitor
+            .names
+            .iter()
+            .filter(|row| row.0.starts_with("UNSUPPORTED_LOCAL_MACRO_EFFECTS:"))
+            .collect();
+        assert!(opaque.is_empty(), "actual Bitrue enum recipe: {opaque:?}");
+    }
+
+    #[test]
+    fn literal_expression_local_macro_effects_are_checked_after_substitution() {
+        for source in [
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("impl is inert text", crate::TABLE); }"#,
+            r#"fn owner() { macro_rules! renamed { ($key:literal, $value:expr) => { let _ = $value; let _ = $key; }; } renamed!("side", (1 + 2)); }"#,
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor.names.is_empty(),
+                "bounded effects: {source}: {:?}",
+                visitor.names
+            );
+        }
+        for source in [
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", { impl FromStr for Side {} 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $unused:expr) => { let _ = $label; }; } entries!("x", { impl FromStr for Side {} 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $unused:expr) => { let _ = $label; }; } entries!("x", include!("hidden.rs")); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", { #[vendor::decorate] struct Hidden; 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { impl FromStr for Side {} let _ = ($label, $rows); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows, $other); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:expr, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!(label, 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($same:literal, $same:expr) => { let _ = $same; }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; () => { 1 }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($($item:expr),*) => { 1 }; } entries!("x", 1); }"#,
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor
+                    .names
+                    .iter()
+                    .any(|row| row.0.starts_with("UNSUPPORTED_")),
+                "opaque effect must stay refused: {source}: {:?}",
+                visitor.names
+            );
+        }
     }
 
     #[test]
