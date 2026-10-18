@@ -282,3 +282,8 @@ uses it to expose a CONNECTING plain socket before the upgrade settles; its owne
 task registry cancels pending I/O. Keep one physical handshake/reader/writer
 algorithm, and preserve admission Host errors versus network Error/Close delivery.
 See exchange-core WS_CONTRACT.md and registry's native_connecting_socket witness.
+
+Native reqwest builder failures for protocols Axios rejects retain
+`ERR_BAD_REQUEST` and `Unsupported protocol <scheme>:`. They are request setup
+failures, not retryable connection resets. The constructed Aster validation
+regression compares the real native adapter with maintained Axios.

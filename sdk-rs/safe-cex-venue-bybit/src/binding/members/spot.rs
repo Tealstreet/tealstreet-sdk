@@ -3,7 +3,7 @@ use crate::binding::{
     host::text,
     promise::await_js,
     rt::Rt,
-    value::{Js, Thrown, arg, from_typed, to_json, to_typed},
+    value::{Js, Thrown, arg, from_typed, to_retained_input, to_typed},
 };
 use crate::{
     spot_exchange_reads as reads, spot_order_writes as writes, variant_account_refresh as refresh,
@@ -79,64 +79,66 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let category = text(&arg(&a, 0))?;
         Ok(rt.clone().spawn(Box::pin(async move {
             let client = rt.this.get("xhr")?;
-            let data = crate::rest_markets::fetch_markets_helper(
-                &category,
-                false,
-                rt.this.get("isPublicDataOnly")?.truthy(),
-                |endpoint, params| {
-                    let request = client.call_method(
-                        "get",
-                        vec![
-                            Js::str(endpoint),
-                            Js::object(vec![("params", crate::binding::value::from_json(&params))]),
-                        ],
-                    );
-                    {
-                        let await_runtime = rt.exchange_runtime();
-                        async move {
-                            let response =
-                                await_js(&await_runtime, request.map_err(|e| e.message())?)
-                                    .await
-                                    .map_err(|e| e.message())?;
-                            to_json(&response.get("data").map_err(|e| e.message())?)
-                                .map_err(|e| e.message())
-                        }
+            let response = client.call_method(
+                "get",
+                vec![
+                    Js::str("/v5/market/instruments-info"),
+                    Js::object(vec![(
+                        "params",
+                        Js::object(vec![
+                            ("category", Js::str(&category)),
+                            ("limit", Js::Number(1000.)),
+                        ]),
+                    )]),
+                ],
+            )?;
+            let data = await_js(&rt.exchange_runtime(), response)
+                .await?
+                .get("data")?;
+            let message = crate::binding::host::get_key(&data, "retMsg")?;
+            if !message.strict_equals(&Js::str("OK")) {
+                rt.this.call_method("emitAndLogError", vec![message])?;
+                return Ok(Js::array(vec![Js::Null]));
+            }
+            let list = data.get("result")?.get("list")?;
+            let rows = list.array_values()?.ok_or_else(|| {
+                if list.is_nullish() {
+                    Thrown::type_error(if matches!(list, Js::Null) {
+                        "Cannot read properties of null (reading 'map')"
+                    } else {
+                        "Cannot read properties of undefined (reading 'map')"
+                    })
+                } else {
+                    Thrown::type_error("data.result.list.map is not a function")
+                }
+            })?;
+            let mut mapped = Vec::with_capacity(rows.len());
+            for row in rows {
+                mapped.push(
+                    crate::market_mapping::map_market(
+                        &to_retained_input(&row)?,
+                        &[],
+                        &category,
+                        crate::market_mapping::Family::Spot,
+                    )
+                    .map_err(|message| Thrown::type_error(&message))?,
+                );
+            }
+            let mut markets = Vec::with_capacity(mapped.len());
+            for market in mapped {
+                match market {
+                    Ok(market) => markets.push(from_typed(&market)?),
+                    Err(message) => {
+                        rt.this
+                            .call_method("emitAndLogError", vec![Js::str(&message)])?;
                     }
-                },
-                |message| {
-                    rt.this
-                        .call_method(
-                            "emitAndLogError",
-                            vec![message.map_or(Js::Undefined, crate::binding::value::from_json)],
-                        )
-                        .map(|_| ())
-                        .map_err(|e| e.message())
-                },
-            )
-            .await
-            .map_err(error)?;
-            from_typed(&data)
+                }
+            }
+            Ok(Js::array(markets))
         })))
     })?;
     method(rt, "parseTickers", |rt, a| {
-        let store = rt.this.get("store")?;
-        let raw = arg(&a, 0);
-        let raw = if raw.truthy() {
-            Some(
-                to_json(&raw)?
-                    .as_array()
-                    .cloned()
-                    .ok_or_else(|| error("rawTickers is not iterable"))?,
-            )
-        } else {
-            None
-        };
-        let markets: Vec<safe_cex_types::Market> = to_typed(&store.get("markets")?)?;
-        let cached: Vec<safe_cex_types::Ticker> = to_typed(&store.get("tickers")?)?;
-        from_typed(
-            &crate::exchange_state::parse_spot_tickers(raw.as_deref(), &markets, &cached)
-                .map_err(error)?,
-        )
+        super::markets::parse_tickers(&rt, arg(&a, 0))
     })?;
     method(rt, "fetchTickersRaw", |rt, _| {
         Ok(rt.clone().spawn(Box::pin({
@@ -282,47 +284,107 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 
 // ts: BybitSpotExchange.start — preserve the source's sequential awaited array operands.
 pub(crate) fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
-    Ok(rt.clone().spawn(Box::pin({ let await_runtime = rt.exchange_runtime(); async move {
-        let this = &rt.this;
-        await_js(&await_runtime, rt.shared.globals.get("virtualClock")?.call_method("start", vec![])?).await?;
-        let public_only = this.get("isPublicDataOnly")?.truthy();
-        let external = await_js(&await_runtime, this.call_method("initExternalPublicData", vec![])?).await?;
-        let probe = if public_only { Js::Null } else {
-            this.call_method("fetchMarginAccountInfos", vec![])?.call_method("then", vec![
-                Js::function("privateProbeSuccess", |_, _| Ok(Js::Undefined)),
-                Js::function("privateProbeFailure", |_, args| {
-                    let failure = arg(&args, 0);
-                    let message = if failure.is_nullish() { Js::Undefined } else { failure.get("message")? };
-                    let message = text(&if message.truthy() { message } else { failure })?;
-                    Ok(Js::str(if message.is_empty() { "request failed" } else { &message }))
-                }),
-            ])?
-        };
-        if !external.truthy() {
-            let markets = await_js(&await_runtime, this.call_method("fetchMarkets", vec![])?).await?;
-            if !this.get("isDisposed")?.truthy() {
-                this.call_method("log", vec![Js::str(&format!("Loaded {} Bybit markets", text(&markets.get("length")?)?))])?;
-                publish_loaded(this, vec![("markets", markets)], &["markets"])?;
-                this.get("publicWebsocket")?.call_method("connectAndSubscribe", vec![])?;
+    Ok(rt.clone().spawn(Box::pin({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let this = &rt.this;
+            await_js(
+                &await_runtime,
+                rt.shared
+                    .globals
+                    .get("virtualClock")?
+                    .call_method("start", vec![])?,
+            )
+            .await?;
+            let public_only = this.get("isPublicDataOnly")?.truthy();
+            let external = await_js(
+                &await_runtime,
+                this.call_method("initExternalPublicData", vec![])?,
+            )
+            .await?;
+            let probe = if public_only {
+                Js::Null
+            } else {
+                this.call_method("fetchMarginAccountInfos", vec![])?
+                    .call_method(
+                        "then",
+                        vec![
+                            Js::function("privateProbeSuccess", |_, _| Ok(Js::Undefined)),
+                            Js::function("privateProbeFailure", |_, args| {
+                                let failure = arg(&args, 0);
+                                let message = if failure.is_nullish() {
+                                    Js::Undefined
+                                } else {
+                                    failure.get("message")?
+                                };
+                                let message = if message.truthy() { message } else { failure }
+                                    .to_js_string()?;
+                                Ok(if message.is_empty() {
+                                    Js::str("request failed")
+                                } else {
+                                    Js::utf16(&message)
+                                })
+                            }),
+                        ],
+                    )?
+            };
+            if !external.truthy() {
+                let markets =
+                    await_js(&await_runtime, this.call_method("fetchMarkets", vec![])?).await?;
+                if !this.get("isDisposed")?.truthy() {
+                    this.call_method(
+                        "log",
+                        vec![Js::str(&format!(
+                            "Loaded {} Bybit markets",
+                            text(&markets.get("length")?)?
+                        ))],
+                    )?;
+                    publish_loaded(this, vec![("markets", markets)], &["markets"])?;
+                    this.get("publicWebsocket")?
+                        .call_method("connectAndSubscribe", vec![])?;
+                }
+                let raw = await_js(
+                    &await_runtime,
+                    this.call_method("fetchTickersWithoutParse", vec![])?,
+                )
+                .await?;
+                let tickers = this.call_method("parseTickers", vec![raw])?;
+                if this.get("isDisposed")?.truthy() {
+                    return Ok(Js::Undefined);
+                }
+                publish_loaded(this, vec![("tickers", tickers)], &["tickers"])?;
             }
-            let raw = await_js(&await_runtime, this.call_method("fetchTickersWithoutParse", vec![])?).await?;
-            let tickers = this.call_method("parseTickers", vec![raw])?;
-            if this.get("isDisposed")?.truthy() { return Ok(Js::Undefined); }
-            publish_loaded(this, vec![("tickers", tickers)], &["tickers"])?;
+            let failure = if probe.truthy() {
+                await_js(&await_runtime, probe).await?
+            } else {
+                Js::Undefined
+            };
+            if failure.truthy() {
+                let mut message: Vec<u16> =
+                    "Bybit market data is ready, but the private API was rejected ("
+                        .encode_utf16()
+                        .collect();
+                message.extend(failure.to_js_string()?.iter().copied());
+                message.extend(") — trading is unavailable".encode_utf16());
+                this.call_method("log", vec![Js::utf16(&message), Js::str("warning")])?;
+            } else {
+                this.call_method("log", vec![Js::str("Ready to trade on Bybit")])?;
+            }
+            if public_only {
+                publish_loaded(this, vec![], &["balance", "positions", "orders"])?;
+                return Ok(Js::Undefined);
+            }
+            this.get("privateWebsocket")?
+                .call_method("connectAndSubscribe", vec![])?;
+            await_js(
+                &await_runtime,
+                this.call_method("fetchOrdersPositionsAndBalance", vec![])?,
+            )
+            .await?;
+            this.call_method("tick", vec![])?;
+            Ok(Js::Undefined)
         }
-        let failure = if probe.truthy() { await_js(&await_runtime, probe).await? } else { Js::Undefined };
-        if failure.truthy() {
-            this.call_method("log", vec![Js::str(&format!("Bybit market data is ready, but the private API was rejected ({}) — trading is unavailable", text(&failure)?)), Js::str("warning")])?;
-        } else { this.call_method("log", vec![Js::str("Ready to trade on Bybit")])?; }
-        if public_only {
-            publish_loaded(this, vec![], &["balance", "positions", "orders"])?;
-            return Ok(Js::Undefined);
-        }
-        this.get("privateWebsocket")?.call_method("connectAndSubscribe", vec![])?;
-        await_js(&await_runtime, this.call_method("fetchOrdersPositionsAndBalance", vec![])?).await?;
-        this.call_method("tick", vec![])?;
-        Ok(Js::Undefined)
-    } })))
+    })))
 }
 fn publish_loaded(
     this: &Js,

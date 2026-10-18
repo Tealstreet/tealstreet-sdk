@@ -100,7 +100,7 @@ async fn observe(name: ExchangeName) {
             .socket_health()
             .unwrap()
             .as_ref()
-            .and_then(serde_json::Value::as_object)
+            .and_then(safe_cex_types::retained_json::RetainedJsonInput::as_object)
             .is_some_and(|health| !health.is_empty()),
         "health commits before notification throws"
     );

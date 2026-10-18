@@ -245,7 +245,7 @@ impl WsParent for Parent {
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.health_writes.set(self.health_writes.get() + 1);
         self.store
-            .update_socket_health(json!({"publicHealthy": true}).as_object().unwrap())?;
+            .update_socket_health(&json!({"publicHealthy": true}).into())?;
         self.check("health")
     }
     fn update_latency(&self, value: f64) -> Result<(), ExchangeError> {

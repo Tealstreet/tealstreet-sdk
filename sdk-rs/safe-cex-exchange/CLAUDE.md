@@ -2060,6 +2060,7 @@ callback scheduling with the maintained TypeScript function in Node.
 
 
 
+BaseExchange socket-health publication constructs own undefined timestamp/close-code properties and passes them to the canonical Store partial merge. It never removes keys through a JSON read/replacement. Typed Store notifications and prepared payloads retain the same health field.
 
 Native replay receipts include raw ExchangeRuntime tasks as well as canonical
 Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
@@ -2074,6 +2075,12 @@ The public probe requires the versioned raw receipt and refuses older addons.
 Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
 the private wake-race witness checks the pre-repoll fence.
 
+Js::ordinary_has_instance implements the shared OrdinaryHasInstance operation
+using the bound target, constructor prototype and internal prototype links.
+Bound call-only functions retain that target independently of constructibility.
+The js_construction Node comparison covers bound constructors, primitive left
+operands, null prototypes and invalid prototypes; native getter checks preserve
+original thrown identity. Hyro validation consumes this operation directly.
 
 `js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
 natural-run detection, minrun, binary insertion, stack collapse, directional merges

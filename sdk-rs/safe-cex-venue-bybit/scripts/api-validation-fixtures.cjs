@@ -31,6 +31,8 @@ function observe(value){
 const error=phase=>({name:`${phase}Error`,message:`${phase} failed`,code:17});
 const outcome=(e,errors)=>({error:e.name??null,message:e.message??null,origin:Object.keys(errors).find(k=>errors[k]===e)||null});
 async function main(){
+ const hyroReceiverAudit = await require("./hyro-account-fixtures.cjs")();
+ const retainedReceiverAudit = await require("./retained-audit-fixtures.cjs")();
  const validations=[],hyro=[],fetches=[],caches=[],vips=[];
  const rich={name:'RequestError',message:'fallback message',response:{data:{message:'LOG-37',msg:'RESULT-91'}}};
  const inputs=[
@@ -101,6 +103,6 @@ async function main(){
   let result;try{api.updateBatchLimitBasedOnVipLevel();result={ok:true};}catch(e){result=outcome(e,errors);}
   vips.push({family,input,trace,result,reads,sets,level:observe(level),batch:observe(batch)});
  }assert.equal(vips.length,70,'API independent VIP floor');
- process.stdout.write(JSON.stringify({validations,hyro,fetches,caches,vips}));
+ process.stdout.write(JSON.stringify({hyroReceiverAudit,retainedReceiverAudit,validations,hyro,fetches,caches,vips}));
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

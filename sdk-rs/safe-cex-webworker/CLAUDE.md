@@ -732,3 +732,9 @@ an empty live list. The composition witness binds the singleton to the actual
 ChaserEngine and compares registration, cleanup and completion with maintained
 source; terminal host capabilities remain required. This accepts composition,
 not the separately tracked state, carrier, startup or method timing findings.
+
+Worker startup and session listeners own their continuations through canonical
+start_eager. Clock, import, venue-start and startup-race typed results yield at
+their source await boundaries. Discarding a caller waiter cannot cancel startup
+or failed-worker table cleanup; token/disposal suppression and retained startup
+losers remain unchanged. Raw session/config admission is a separate audit row.
