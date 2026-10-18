@@ -32,7 +32,7 @@ fn failure() -> Failure {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "api-code"
     )));
-    e.response = Some(json!({"status":503}));
+    e = e.with_retained_response((json!({"status":503})).into());
     Rc::new(e)
 }
 fn wire(v: &EventValue) -> Value {
@@ -86,10 +86,14 @@ fn original(got: &Failure, want: &Failure, label: &str) {
         Some(json!("api-code")),
         "{label}"
     );
-    assert_eq!(got.response, Some(json!({"status":503})), "{label}")
+    assert_eq!(
+        got.response_json_view(),
+        Some(json!({"status":503})),
+        "{label}"
+    )
 }
 fn error_wire(e: &Failure, want: &Failure) -> Value {
-    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))})
 }
 #[derive(Default)]
 struct Trace(Vec<Value>);
@@ -1050,7 +1054,7 @@ fn auth() {
                     "{label}: native generated message"
                 );
                 assert!(
-                    got.code.is_none() && got.response.is_none(),
+                    got.code.is_none() && got.response_json_view().is_none(),
                     "{label}: native generated absent code/response"
                 );
             }

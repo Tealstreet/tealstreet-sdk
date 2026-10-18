@@ -284,7 +284,7 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "private-code"
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"private detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"private detail"}})).into());
     Bindings(Rc::new(State {
         f,
         events,
@@ -568,7 +568,7 @@ fn projected(s: &State, error: Option<&Failure>) -> Value {
         })
         .collect::<Vec<_>>();
     let effects=s.effects.borrow().iter().map(|e|json!({"op":op_name(e.op),"args":e.args.iter().map(wire).collect::<Vec<_>>(),"identity":identity(s,e),"pending":e.pending})).collect::<Vec<_>>();
-    json!({"name":s.name(),"trace":trace,"effects":effects,"pending":s.flags.get(),"clocks":s.clocks.get(),"priceCalls":s.prices.get(),"eventLength":s.events.len(),"failure":error.map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))})
+    json!({"name":s.name(),"trace":trace,"effects":effects,"pending":s.flags.get(),"clocks":s.clocks.get(),"priceCalls":s.prices.get(),"eventLength":s.events.len(),"failure":error.map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))}))})
 }
 fn native_num(value: EventValue, expected: f64, label: &str) {
     let EventValue::Number(actual) = value else {
@@ -638,7 +638,7 @@ fn native_error(
                 "{label}: native error code"
             );
             assert_eq!(
-                e.response,
+                e.response_json_view(),
                 Some(json!({"status":503,"data":{"msg":"private detail"}})),
                 "{label}: native error response"
             );
@@ -655,7 +655,11 @@ fn native_error(
                 None,
                 "{label}: native generated code"
             );
-            assert_eq!(e.response, None, "{label}: native generated response");
+            assert_eq!(
+                e.response_json_view(),
+                None,
+                "{label}: native generated response"
+            );
         }
         _ => panic!("{label}: native result/error path mismatch"),
     }

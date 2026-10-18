@@ -517,7 +517,16 @@ impl ApiWire for Wire {
                 let has_config = error.value.get("config").is_ok_and(|v| !v.is_nullish());
                 let mut native = error.to_exchange_error();
                 if !response.is_undefined() {
-                    native.response = to_json(&response).ok();
+                    match safe_cex_exchange::js_runtime::value::to_retained_input(&response) {
+                        Ok(response) => native = native.with_retained_response(response),
+                        Err(cause) => {
+                            return ApiFailure {
+                                error: cause.into(),
+                                status,
+                                config: has_config.then_some(config),
+                            };
+                        }
+                    }
                 }
                 if let Ok(code) = error.value.get("code")
                     && (error.value.has_own("code") || !code.is_undefined())

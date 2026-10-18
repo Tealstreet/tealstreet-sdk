@@ -122,7 +122,10 @@ fn private_pin_key_retains_native_value_and_request_rejection_after_suspension()
                     "source rejected interceptor rethrows the original HTTP error"
                 );
                 assert_eq!(
-                    error.response.as_ref().expect("original HTTP response")["data"]["msg"],
+                    error
+                        .response_json_view()
+                        .as_ref()
+                        .expect("original HTTP response")["data"]["msg"],
                     "native listen-key refusal"
                 );
                 assert!(!error.name.is_empty());

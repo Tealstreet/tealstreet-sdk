@@ -156,9 +156,9 @@ impl BreakoutRuntime {
         }
     }
     fn report(&self, error: &ExchangeError, response_message: bool) -> Result<(), ExchangeError> {
+        let response_view = error.response_json_view();
         let msg = if response_message {
-            error
-                .response
+            response_view
                 .as_ref()
                 .and_then(|r| r.get("data"))
                 .and_then(|r| r.get("msg"))

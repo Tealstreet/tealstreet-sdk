@@ -27,7 +27,9 @@ where
     let pending = session();
     async move {
         if let Err(error) = pending.await {
-            let data = error.response.as_ref().and_then(|r| r.get("data"));
+            let response_view = error.response_json_view();
+            let response = response_view;
+            let data = response.as_ref().and_then(|r| r.get("data"));
             let message = data.and_then(|d| d.get("message"));
             logger(if js_truthy(message) {
                 message.cloned().unwrap()
@@ -127,8 +129,8 @@ where
         }
         .await;
         if let Err(error) = &result {
-            let msg = error
-                .response
+            let response_view = error.response_json_view();
+            let msg = response_view
                 .as_ref()
                 .and_then(|r| r.get("data"))
                 .and_then(|d| d.get("msg"));

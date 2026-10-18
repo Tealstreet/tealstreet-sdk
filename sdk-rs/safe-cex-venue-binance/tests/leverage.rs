@@ -131,7 +131,9 @@ fn leverage_matches_live_source_and_native_store() {
                 ]));
                 if listener_reject {
                     let mut error = ExchangeError::new("listener failed");
-                    error.response = Some(json!({"data":{"msg":"subscriber detail"}}));
+                    error = error.with_retained_response(
+                        (json!({"data":{"msg":"subscriber detail"}})).into(),
+                    );
                     Err(error.into())
                 } else {
                     Ok(())
@@ -159,7 +161,7 @@ fn leverage_matches_live_source_and_native_store() {
             ]));
             posts.borrow_mut().push((url.into(), body));
             let mut error = ExchangeError::new("request failed");
-            error.response = Some(json!({"data":{"msg":c["msg"]}}));
+            error = error.with_retained_response((json!({"data":{"msg":c["msg"]}})).into());
             std::future::ready(if reject { Err(error) } else { Ok(()) })
         };
         let emit = |message: Value| {

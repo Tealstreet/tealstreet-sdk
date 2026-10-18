@@ -183,15 +183,15 @@ fn setup(f: Value, venue: &'static str, family: &'static str) -> Bind {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "snapshot-code"
     )));
-    e.response = Some(
-        json!({"status":503,"data":{"msg":"venue detail","code":if f["name"]=="not-found-code"{json!(-2013)}else if f["name"]=="string-not-found-code"{json!("-2013")}else{json!(-1000)}}}),
-    );
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"venue detail","code":if f["name"]=="not-found-code"{json!(-2013)}else if f["name"]=="string-not-found-code"{json!("-2013")}else{json!(-1000)}}})).into());
     let mut e2 = e.clone();
     e2.message = "algo first".into();
     e2.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "algo-code"
     )));
-    e2.response = Some(json!({"status":503,"data":{"msg":"algo detail","code":-1001}}));
+    e2 = e2.with_retained_response(
+        (json!({"status":503,"data":{"msg":"algo detail","code":-1001}})).into(),
+    );
     let orders = value(
         json!([{"id":"cached","symbol":"BTCUSDT","status":"open","type":"limit","side":"buy","price":8,"amount":2,"filled":1,"remaining":1,"reduceOnly":false,"lastUpdate":9,"info":{"clientOrderId":"client-A"}}]),
     );
@@ -442,7 +442,7 @@ fn method(m: SnapshotMethod) -> &'static str {
     }
 }
 fn error_wire(e: &Failure) -> Value {
-    json!({"$error":true,"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"$error":true,"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))})
 }
 fn project(s: &State, result: &Result<EventValue, Failure>) -> Value {
     let v = result
@@ -482,7 +482,7 @@ fn project(s: &State, result: &Result<EventValue, Failure>) -> Value {
         Value::Null
     };
     let notices=s.notices.borrow().iter().map(|(m,args)|json!({"method":method(*m),"args":args.iter().map(|a|match a{SnapshotArgument::Value(v)=>wire(v),SnapshotArgument::Error(e)=>error_wire(e)}).collect::<Vec<_>>()})).collect::<Vec<_>>();
-    json!({"name":s.name(),"trace":*s.trace.borrow(),"notices":notices,"clocks":s.clocks.get(),"stale":s.stale.get(),"refs":{"fallbackOrders":v.same(&s.orders),"balance":bal.same(&s.balance),"positions":maybe("positions").same(&s.positions),"order":ord.same(&items(&s.orders)[0]),"info":info,"regularInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&rows.iter().any(|r|prop(o,"info").same(r))).count(),"algoInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&algos.iter().any(|a|!prop(o,"info").same(a)&&prop(&prop(o,"info"),"nested").same(&prop(a,"nested")))).count()},"value":wire(&v),"failure":result.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))})
+    json!({"name":s.name(),"trace":*s.trace.borrow(),"notices":notices,"clocks":s.clocks.get(),"stale":s.stale.get(),"refs":{"fallbackOrders":v.same(&s.orders),"balance":bal.same(&s.balance),"positions":maybe("positions").same(&s.positions),"order":ord.same(&items(&s.orders)[0]),"info":info,"regularInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&rows.iter().any(|r|prop(o,"info").same(r))).count(),"algoInfo":list.iter().filter(|o|!o.nullish()&&own(o,"info")&&algos.iter().any(|a|!prop(o,"info").same(a)&&prop(&prop(o,"info"),"nested").same(&prop(a,"nested")))).count()},"value":wire(&v),"failure":result.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))}))})
 }
 fn fixtures(family: &str, n: usize) -> Vec<Value> {
     let all: Vec<Value> = serde_json::from_str(include_str!("fixtures/private-rest.json")).unwrap();
@@ -553,7 +553,7 @@ fn original_error(e: &Failure, s: &State, label: &str) {
         "{label}: native error code"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(
             json!({"status":503,"data":{"msg":"venue detail","code":if s.name()=="not-found-code"{json!(-2013)}else if s.name()=="string-not-found-code"{json!("-2013")}else{json!(-1000)}}})
         ),
@@ -628,7 +628,8 @@ fn generated_error(e: &Failure, s: &State, name: &str, message: &str, label: &st
         "{label}: native generated error code absent"
     );
     assert_eq!(
-        e.response, None,
+        e.response_json_view(),
+        None,
         "{label}: native generated error response absent"
     );
 }
@@ -1034,7 +1035,7 @@ fn order_tests(venue: &'static str, family: &'static str) {
                     "{label}: native earlier rejection code"
                 );
                 assert_eq!(
-                    e.response,
+                    e.response_json_view(),
                     Some(json!({"status":503,"data":{"msg":"algo detail","code":-1001}})),
                     "{label}: native earlier rejection response"
                 )

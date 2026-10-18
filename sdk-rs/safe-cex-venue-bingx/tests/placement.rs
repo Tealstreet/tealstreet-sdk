@@ -169,7 +169,7 @@ impl ReadTransport for Transport {
                 .unwrap_or_else(|| json!({"code":0,"data":{}}));
             if let Some(reject) = response.get("reject") {
                 let mut e = ExchangeError::new(reject["message"].as_str().unwrap());
-                e.response = Some(json!({"data":{"msg":reject["msg"]}}));
+                e = e.with_retained_response((json!({"data":{"msg":reject["msg"]}})).into());
                 Err(e)
             } else {
                 Ok(response)

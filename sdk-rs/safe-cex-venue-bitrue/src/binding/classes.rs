@@ -24,10 +24,13 @@ fn coercion(e: safe_cex_num::JsCoercionError) -> Thrown {
     Thrown::error(e.name, e.message)
 }
 fn exchange_error(e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
-    let response = e.metadata.response.clone();
+    let response = e.retained_response_input();
     let thrown = Thrown::from(e);
     if let Some(response) = response {
-        let _ = thrown.value.define("response", from_json(&response));
+        let _ = thrown.value.define(
+            "response",
+            safe_cex_exchange::js_runtime::value::from_retained_input(response),
+        );
     }
     thrown
 }

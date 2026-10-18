@@ -213,7 +213,7 @@ fn setup(f: Value, venue: &'static str, family: &'static str) -> Bind {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "lifecycle-code"
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"lifecycle detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"lifecycle detail"}})).into());
     let count = f
         .get("count")
         .cloned()
@@ -516,13 +516,13 @@ fn original(e: &Failure, st: &State, label: &str) {
         "{label}: native code"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(json!({"status":503,"data":{"msg":"lifecycle detail"}})),
         "{label}: native response"
     );
 }
 fn failure(e: Option<&Failure>, st: &State) -> Value {
-    e.map(|e|json!({"original":Rc::ptr_eq(e,&st.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})).unwrap_or(Value::Null)
+    e.map(|e|json!({"original":Rc::ptr_eq(e,&st.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))})).unwrap_or(Value::Null)
 }
 fn project(st: &State, result: &Result<(), Failure>, timer_error: Option<&Failure>) -> Value {
     let effects=st.effects.borrow().iter().map(|e|{let refs=if e.k==LifecycleSync::Update{let row=&e.args[0];json!({"markets":p(row,"markets").same(&st.markets),"tickers":p(row,"tickers").same(&st.tickers),"orders":p(row,"orders").same(&st.orders),"risk":p(row,"positions").same(&st.risk),"positions":p(row,"positions").same(&st.positions),"balance":p(row,"balance").same(&st.balance),"loadedFresh":if own(row,"loaded"){json!(!p(row,"loaded").same(&e.loaded_before))}else{Value::Null},"loadedNested":own(row,"loaded")&&p(&p(row,"loaded"),"nested").same(&p(&st.initial_loaded,"nested"))})}else{Value::Null};json!({"name":syn(e.k),"args":e.args.iter().map(wire).collect::<Vec<_>>(),"receiver":e.receiver,"refs":refs})}).collect::<Vec<_>>();
@@ -667,7 +667,11 @@ fn start_native(st: &State, result: &Result<(), Failure>, label: &str) {
                 None,
                 "{label}: native generated code"
             );
-            assert_eq!(e.response, None, "{label}: native generated response");
+            assert_eq!(
+                e.response_json_view(),
+                None,
+                "{label}: native generated response"
+            );
         } else {
             original(e, st, label)
         }

@@ -90,12 +90,12 @@ fn spread(out: &mut Vec<EventValue>, v: EventValue) -> Result<(), Failure> {
 }
 fn message(e: &Failure) -> EventValue {
     let msg = e
-        .response
+        .retained_response_input()
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("msg"))
         .cloned()
-        .map(EventValue::from_json)
+        .map(safe_cex_exchange::js_runtime::value::from_retained_input)
         .unwrap_or(EventValue::Undefined);
     fallback(msg, string(&e.message))
 }

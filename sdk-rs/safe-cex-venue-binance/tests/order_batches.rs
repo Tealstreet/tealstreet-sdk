@@ -265,7 +265,7 @@ fn error(name: &str) -> Failure {
             -1000
         }
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"venue detail"}})).into());
     Rc::new(e)
 }
 fn state(family: &str, name: &str) -> Shared {
@@ -430,7 +430,8 @@ fn state(family: &str, name: &str) -> Shared {
     replacement.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "emit-code"
     )));
-    replacement.response = Some(json!({"status":504,"data":{"msg":"emit detail"}}));
+    replacement = replacement
+        .with_retained_response((json!({"status":504,"data":{"msg":"emit detail"}})).into());
     Rc::new(RefCell::new(State {
         family: family.into(),
         venue,
@@ -715,7 +716,7 @@ impl BatchBindings for Bindings {
                     if let Some(c) = &observed_error_code(&e.code) {
                         fields.insert("code".into(), c.clone());
                     }
-                    if let Some(r) = &e.response {
+                    if let Some(r) = &e.response_json_view() {
                         fields.insert("response".into(), r.clone());
                     }
                     Value::Object(fields)
@@ -813,7 +814,7 @@ fn generated(e: &Failure, b: &State, msg: &str, l: &str) {
     assert_eq!(e.name, "TypeError", "{l}: native generated name");
     assert_eq!(e.message, msg, "{l}: native generated message");
     assert!(
-        e.code.is_none() && e.response.is_none(),
+        e.code.is_none() && e.response_json_view().is_none(),
         "{l}: native generated metadata"
     );
 }
@@ -852,7 +853,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
         "{l}: native Error code"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(if replaced {
             json!({"status":504,"data":{"msg":"emit detail"}})
         } else {
@@ -862,7 +863,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
     );
 }
 fn error_wire(e: &Failure, b: &State) -> Value {
-    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response_json_view().clone().unwrap_or(json!({"$undefined":true}))})
 }
 impl Trace {
     fn wire(&self, b: &State) -> Value {

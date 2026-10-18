@@ -301,7 +301,8 @@ impl JsProtocol {
 }
 
 // Preserve the host binary object until a venue explicitly consumes its bytes
-// or asks for text. Node ws delivers Buffer; browser WebSocket defaults to Blob.
+// or asks for text. Both WebSocket and the maintained reconnecting wrapper
+// default to Blob, including when the wrapper uses Node ws underneath.
 fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -> Js {
     let values = Js::array(
         bytes
@@ -316,48 +317,30 @@ fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -
             ("byteLength", Js::Number(bytes.len() as f64)),
         ],
     );
-    if cfg!(target_arch = "wasm32") {
-        let size = bytes.len() as f64;
-        let text = String::from_utf8_lossy(bytes).into_owned();
-        let text_runtime = runtime.clone();
-        Js::object_with_class(
-            "Blob",
-            vec![
-                ("size", Js::Number(size)),
-                (
-                    "arrayBuffer",
-                    Js::function("arrayBuffer", move |_, _| {
-                        Ok(Js::Promise(Promise::settled(&runtime, Ok(buffer.clone()))))
-                    }),
-                ),
-                (
-                    "text",
-                    Js::function("text", move |_, _| {
-                        Ok(Js::Promise(Promise::settled(
-                            &text_runtime,
-                            Ok(Js::str(&text)),
-                        )))
-                    }),
-                ),
-            ],
-        )
-    } else {
-        let text = String::from_utf8_lossy(bytes).into_owned();
-        Js::object_with_class(
-            "Buffer",
-            vec![
-                ("bytes", values),
-                ("buffer", buffer),
-                ("byteOffset", Js::Number(0.0)),
-                ("byteLength", Js::Number(bytes.len() as f64)),
-                ("length", Js::Number(bytes.len() as f64)),
-                (
-                    "toString",
-                    Js::function("toString", move |_, _| Ok(Js::str(&text))),
-                ),
-            ],
-        )
-    }
+    let size = bytes.len() as f64;
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    let text_runtime = runtime.clone();
+    Js::object_with_class(
+        "Blob",
+        vec![
+            ("size", Js::Number(size)),
+            (
+                "arrayBuffer",
+                Js::function("arrayBuffer", move |_, _| {
+                    Ok(Js::Promise(Promise::settled(&runtime, Ok(buffer.clone()))))
+                }),
+            ),
+            (
+                "text",
+                Js::function("text", move |_, _| {
+                    Ok(Js::Promise(Promise::settled(
+                        &text_runtime,
+                        Ok(Js::str(&text)),
+                    )))
+                }),
+            ),
+        ],
+    )
 }
 
 impl WsProtocol for JsProtocol {

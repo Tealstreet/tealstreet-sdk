@@ -78,7 +78,7 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
     marker.is_axios_error = true;
     marker.request = Some(json!({"requestMarker":73}));
     marker.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(79)));
-    marker.response = Some(json!({"status":429,"data":{"code":71}}));
+    marker = marker.with_retained_response(json!({"status":429,"data":{"code":71}}).into());
     marker.context = Some(json!({"marker":"native-listener"}));
     let expected_metadata = marker.metadata.clone();
     let pointer = std::ptr::from_ref(marker.metadata.as_ref());
@@ -162,7 +162,7 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
         "concrete reporter original message"
     );
     assert_eq!(
-        failure.response,
+        failure.response_json_view(),
         Some(json!({"status":429,"data":{"code":71}})),
         "concrete reporter full response"
     );

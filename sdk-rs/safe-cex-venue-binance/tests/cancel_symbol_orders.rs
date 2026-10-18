@@ -66,8 +66,9 @@ fn sentinel(role: &str, msg: Option<&Value>) -> Rc<ExchangeError> {
     error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         format!("{role}-code")
     )));
-    error.response = Some(
-        json!({"status":503,"data":msg.map(|value|json!({"msg":value})).unwrap_or(json!({}))}),
+    error = error.with_retained_response(
+        (json!({"status":503,"data":msg.map(|value|json!({"msg":value})).unwrap_or(json!({}))}))
+            .into(),
     );
     Rc::new(error)
 }
@@ -293,7 +294,7 @@ fn compare(variant: &str, count: usize) {
                     if fail == ordinal {
                         return Err(StoreSubscriberError::with_response(
                             ls.message.clone(),
-                            ls.response.clone().unwrap(),
+                            ls.response_json_view().clone().unwrap(),
                         )
                         .with_cause(ls.clone()));
                     }
@@ -349,7 +350,9 @@ fn compare(variant: &str, count: usize) {
                 })
             }))
         };
-        let emit = |message: Value| {
+        let emit = |message: safe_cex_exchange::js_runtime::value::Js| {
+            let message = safe_cex_exchange::js_runtime::value::to_json(&message)
+                .expect("finite source message fixture");
             emissions.borrow_mut().push(message);
             if case["emitReject"] == true {
                 Err(emitter.clone())

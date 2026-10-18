@@ -109,7 +109,8 @@ fn closed_position_reader_matches_source() {
                 std::future::ready(if case["reject"].as_i64() == Some(call) {
                     let mut error = ExchangeError::new("fixture request");
                     error.name = "RangeError".into();
-                    error.response = Some(json!({"data":{"msg":case["msg"]}}));
+                    error =
+                        error.with_retained_response((json!({"data":{"msg":case["msg"]}})).into());
                     Err(error)
                 } else {
                     Ok(case.get("page").cloned())

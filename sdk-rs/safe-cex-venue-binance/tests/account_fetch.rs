@@ -23,7 +23,8 @@ fn sentinel() -> ExchangeError {
     error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "fixture-code"
     )));
-    error.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
+    error =
+        error.with_retained_response((json!({"status":503,"data":{"msg":"venue detail"}})).into());
     error
 }
 fn cases() -> Vec<Value> {
@@ -86,7 +87,7 @@ fn assert_error(actual: &ExchangeError, expected: &Value, fixture: &ExchangeErro
         "{label} native error code"
     );
     assert_eq!(
-        actual.response.as_ref(),
+        actual.response_json_view().as_ref(),
         expected.get("response").filter(|v| !v.is_null()),
         "{label} native response"
     );

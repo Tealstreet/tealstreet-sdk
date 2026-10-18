@@ -277,7 +277,7 @@ fn run_lifecycle(name: &str) {
         host.responses.borrow_mut().insert("/v3/symbols",J::from(json!({"data":{"contractConfig":{"perpetualContract":[corpus()["fixtures"]["contract"]]}}})));
         if name == "validateAccount" && variant == 1 {
             let mut error = ExchangeError::new("network cause");
-            error.response = Some(json!({"data":{"msg":"bad key"}}));
+            error = error.with_retained_response((json!({"data":{"msg":"bad key"}})).into());
             host.request_errors.borrow_mut().insert("/v3/user", error);
         }
         let services = Rc::new(Services {

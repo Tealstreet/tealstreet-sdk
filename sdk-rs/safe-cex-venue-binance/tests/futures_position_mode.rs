@@ -12,7 +12,7 @@ use std::{
 
 fn failure(data: &Value, phase: &str) -> ExchangeError {
     let mut error = ExchangeError::new(format!("{phase} failed"));
-    error.response = Some(json!({"data":data}));
+    error = error.with_retained_response((json!({"data":data})).into());
     error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         phase
     )));

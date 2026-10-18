@@ -1006,7 +1006,7 @@ impl RuntimeHost for Host {
             }
             "isBinanceStyleSignatureRejection" => {
                 safe_cex_transport::signature_rejection::is_binance_style_signature_rejection(
-                    &a[0].wire(),
+                    &a[0].wire().into(),
                 )
                 .map(|v| self.boolean(v))
                 .map_err(|e| error(&e.message))

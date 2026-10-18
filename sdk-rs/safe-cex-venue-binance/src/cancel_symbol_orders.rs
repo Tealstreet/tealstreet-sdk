@@ -1,7 +1,9 @@
-use safe_cex_exchange::runtime::ExchangeError;
+use safe_cex_exchange::{
+    js_runtime::value::{Js, from_retained_input},
+    runtime::ExchangeError,
+};
 use safe_cex_store::{Store, StoreMutationError};
 use safe_cex_types::{Order, OrderStatus};
-use serde_json::Value;
 use std::{cell::RefCell, future::Future, pin::pin, rc::Rc, task::Poll};
 
 /// Configured DELETE arguments. The wire adapter nests symbol under params.
@@ -51,7 +53,7 @@ pub async fn cancel_binance_symbol_orders<F>(
     symbol: &str,
     mut delete: impl FnMut(&'static str, CancelSymbolRequest) -> Result<F, Rc<ExchangeError>>,
     mut update_status: impl FnMut(&[CancelOrderHandle], OrderStatus) -> Result<(), StoreMutationError>,
-    emit_error: impl FnOnce(Value) -> Result<(), Rc<ExchangeError>>,
+    emit_error: impl FnOnce(Js) -> Result<(), Rc<ExchangeError>>,
 ) -> Result<(), CancelSymbolError>
 where
     F: Future<Output = Result<(), Rc<ExchangeError>>>,
@@ -118,7 +120,7 @@ pub async fn cancel_binance_pm_symbol_orders<F>(
     store: &dyn Store,
     symbol: &str,
     delete: impl FnOnce(&'static str, CancelSymbolRequest) -> Result<F, Rc<ExchangeError>>,
-    emit_error: impl FnOnce(Value) -> Result<(), Rc<ExchangeError>>,
+    emit_error: impl FnOnce(Js) -> Result<(), Rc<ExchangeError>>,
 ) -> Result<(), CancelSymbolError>
 where
     F: Future<Output = Result<(), Rc<ExchangeError>>>,
@@ -155,7 +157,7 @@ pub async fn cancel_binance_spot_symbol_orders<F>(
     store: &dyn Store,
     symbol: &str,
     delete: impl FnOnce(&'static str, CancelSymbolRequest) -> Result<F, Rc<ExchangeError>>,
-    emit_error: impl FnOnce(Value) -> Result<(), Rc<ExchangeError>>,
+    emit_error: impl FnOnce(Js) -> Result<(), Rc<ExchangeError>>,
 ) -> Result<(), CancelSymbolError>
 where
     F: Future<Output = Result<(), Rc<ExchangeError>>>,
@@ -216,19 +218,21 @@ where
     .await
 }
 
-fn selected_message(error: &ExchangeError) -> Value {
+fn selected_message(error: &ExchangeError) -> Js {
     error
-        .response
+        .retained_response_input()
         .as_ref()
         .and_then(|response| response.get("data"))
         .and_then(|data| data.get("msg"))
-        .filter(|value| safe_cex_num::js_truthy(Some(value)))
         .cloned()
-        .unwrap_or_else(|| Value::String(error.message.clone()))
+        .map(from_retained_input)
+        .filter(Js::truthy)
+        .unwrap_or_else(|| Js::str(&error.message))
 }
+
 fn finish(
     result: Result<(), CancelSymbolError>,
-    emit_error: impl FnOnce(Value) -> Result<(), Rc<ExchangeError>>,
+    emit_error: impl FnOnce(Js) -> Result<(), Rc<ExchangeError>>,
 ) -> Result<(), CancelSymbolError> {
     match result {
         Ok(()) => Ok(()),

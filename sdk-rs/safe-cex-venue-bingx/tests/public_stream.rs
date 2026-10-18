@@ -578,7 +578,8 @@ fn ticker_write_failure_preserves_original_cause() {
             let mut cause = ExchangeError::new("subscriber cause");
             cause.name = "ListenerError".into();
             cause.store_subscriber_ids = vec![71, 83];
-            cause.response = Some(json!({"data":{"msg":"subscriber denied"}}));
+            cause =
+                cause.with_retained_response((json!({"data":{"msg":"subscriber denied"}})).into());
             Err(StoreSubscriberError::new("subscriber cause").with_cause(Rc::new(cause)))
         }),
     );
@@ -600,7 +601,7 @@ fn ticker_write_failure_preserves_original_cause() {
         "BINGX-PUBLIC subscriber outer boundary"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(json!({"data":{"msg":"subscriber denied"}}))
     );
     assert_eq!(store.tickers().unwrap()[0].last, 13.5);

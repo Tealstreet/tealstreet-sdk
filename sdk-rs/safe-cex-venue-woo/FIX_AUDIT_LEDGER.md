@@ -25,12 +25,18 @@ inherits `BaseExchange.scheduleCancel` at `packages/safe-cex/src/exchanges/base.
 binding agrees, emits no additional report, and creates no HTTP or socket route.
 The signed legacy `cancelAllOrders` DELETE remains operational.
 
+The V3 request preparation functions and auth/prepared DTOs have no production
+TS or Rust consumer. The constructed class dependency walk never loads
+woo.v3.request.ts. Their unused Rust bodies and exact facade cases are retired;
+WooV3RequestInput stays for the remaining inert builders. The full ticker/quote
+corpus, including native bits and alias/freeze observations, stays unchanged.
+
 ## Exact assignment
 
 | ID | Source identity | Outcome | Native evidence / remaining work |
 | --- | --- | --- | --- |
-| 1 | `WooV3PreparedRequest` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
-| 2 | `prepareWooV3Request` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
+| 1 | `WooV3PreparedRequest` | ACCEPT | No production caller/registration; unused preparer, auth/prepared DTOs and exact facade tail retired. Request input and every unrelated quote/ticker case remain; native/source registration probes and all-target compiler verify the boundary. |
+| 2 | `prepareWooV3Request` | ACCEPT | No production caller/registration; unused preparer, auth/prepared DTOs and exact facade tail retired. Request input and every unrelated quote/ticker case remain; native/source registration probes and all-target compiler verify the boundary. |
 | 3 | `ORDER_TYPE` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
 | 4 | `ORDER_SIDE` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
 | 5 | `ORDER_TRIGGER_TYPE` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
@@ -100,6 +106,6 @@ The signed legacy `cancelAllOrders` DELETE remains operational.
 - All-target compiler checking covers the remaining WOO consumers; the full parity
   index checks that no removed Rust target or obsolete exemption is left behind.
 
-The recovery and cancel-all-after batches accept 3 of 60 assigned rows; the
-remaining 57 stay OPEN. Of those, 44 are other inactive V3 rows whose Rust caller
-closures still need retirement.
+The recovery, cancel-all-after and request-preparer batches accept 5 of 60
+assigned rows; the remaining 55 stay OPEN. Of those, 42 are other inactive V3
+rows whose Rust caller closures still need retirement.

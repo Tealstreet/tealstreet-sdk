@@ -60,7 +60,7 @@ fn ticker_notification_retains_subscriber_identity_after_committed_patch() {
         )
         .unwrap_err();
         let TickerEventError::Store(StoreMutationError::Notification(notification)) = error else {
-            panic!("ticker notification must retain typed subscriber identity");
+            panic!("ticker notification must retain typed subscriber identity: {error:?}");
         };
         assert_eq!(
             notification.cause(),
@@ -122,7 +122,7 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
     );
     let mut comparisons = 0;
     let mut retained_nonfinite = 0;
-    let mut inherited_key_differences = 0;
+    let mut inherited_key_comparisons = 0;
     for (i, case) in fixtures["cases"].as_array().unwrap().iter().enumerate() {
         let initial: Ticker = serde_json::from_value(case["initial"].clone()).unwrap();
         let store = DefaultStore::new();
@@ -152,18 +152,14 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
         );
         let symbol = case["frame"]["data"]["symbol"].as_str();
         if matches!(symbol, Some("constructor" | "__proto__" | "toString")) {
-            // Source lookup reaches Object.prototype, then tries to parse the
-            // malformed price. Typed owned-key lookup skips that nonexistent ticker.
             assert_eq!(case["error"], "Cannot convert object to primitive value");
-            assert!(result.is_ok());
-            inherited_key_differences += 1;
-        } else {
-            assert_eq!(
-                result.err().map(|error| error.to_string()).as_deref(),
-                case.get("error").and_then(Value::as_str),
-                "case {i}: {case}"
-            );
+            inherited_key_comparisons += 1;
         }
+        assert_eq!(
+            result.err().map(|error| error.to_string()).as_deref(),
+            case.get("error").and_then(Value::as_str),
+            "case {i}: {case}"
+        );
         assert_eq!(
             notifications.get(),
             case["notifications"].as_u64().unwrap(),
@@ -224,6 +220,6 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
         retained_nonfinite > 0,
         "source nonfinite overwrite witness disappeared"
     );
-    assert_eq!(inherited_key_differences, 12);
+    assert_eq!(inherited_key_comparisons, 12);
     assert_eq!(comparisons, 21384, "TICKER-CARDINALITY native comparisons");
 }

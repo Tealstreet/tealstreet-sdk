@@ -57,7 +57,7 @@ fn error_constructor_preserves_literal_message_distinct_snapshots_and_presence()
     assert_eq!(error.name, "Error");
     assert_eq!(error.message, "literal {broken json}");
     assert_eq!(error.to_string(), "literal {broken json}");
-    let native_response = error.metadata.response.as_ref().unwrap();
+    let native_response = error.response_json_view().unwrap();
     let native_cause = error.metadata.original_error.as_ref().unwrap();
     assert_eq!(js_value_as_f64(&native_response["status"]).unwrap(), 403.0);
     assert_eq!(
@@ -80,11 +80,14 @@ fn error_constructor_preserves_literal_message_distinct_snapshots_and_presence()
     assert_eq!(js_value_as_f64(&native_response["status"]).unwrap(), 403.0);
     assert_eq!(native_cause["message"], "cause");
     let absent = helpers::create_kraken_api_error("", None, None);
-    assert!(absent.metadata.response.is_none());
+    assert!(absent.response_json_view().is_none());
     assert!(absent.metadata.original_error.is_none());
     let explicit_null =
         helpers::create_kraken_api_error("", Some(&Value::Null), Some(&Value::Null));
-    assert!(matches!(explicit_null.metadata.response, Some(Value::Null)));
+    assert!(matches!(
+        explicit_null.response_json_view(),
+        Some(Value::Null)
+    ));
     assert!(matches!(
         explicit_null.metadata.original_error,
         Some(Value::Null)

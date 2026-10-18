@@ -49,14 +49,21 @@ fn mutation_thrown(error: StoreMutationError) -> Thrown {
 }
 
 fn mutation_error(error: Thrown) -> StoreMutationError {
-    if let Some(native) = &error.native
-        && let Some(origin) = &native.origin
-    {
-        if let Some(error) = origin.error().downcast_ref::<StoreMutationError>() {
-            return error.clone();
+    if let Some(native) = &error.native {
+        if let (Some(id), Some(cause)) = (
+            native.store_subscriber_ids.last(),
+            native.store_subscriber_cause.as_ref(),
+        ) {
+            return safe_cex_store::StoreNotificationError::from_subscriber(*id, cause.clone())
+                .into();
         }
-        if let Some(error) = origin.error().downcast_ref::<StoreReadError>() {
-            return error.clone().into();
+        if let Some(origin) = &native.origin {
+            if let Some(error) = origin.error().downcast_ref::<StoreMutationError>() {
+                return error.clone();
+            }
+            if let Some(error) = origin.error().downcast_ref::<StoreReadError>() {
+                return error.clone().into();
+            }
         }
     }
     property(error).into()

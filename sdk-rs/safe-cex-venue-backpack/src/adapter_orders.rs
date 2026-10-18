@@ -297,11 +297,10 @@ impl BackpackExchange {
 
 fn validation_failure(e: ExchangeError) -> crate::account_reads::ValidationFailure {
     std::rc::Rc::new(std::cell::RefCell::new(JsJsonValue::Object(vec![
-        ("message".into(), JsJsonValue::String(e.message)),
+        ("message".into(), JsJsonValue::String(e.message.clone())),
         (
             "response".into(),
-            e.metadata
-                .response
+            e.response_json_view()
                 .map(Into::into)
                 .unwrap_or(JsJsonValue::Undefined),
         ),

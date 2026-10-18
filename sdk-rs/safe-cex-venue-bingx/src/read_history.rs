@@ -297,8 +297,8 @@ impl BingxReadHistory {
         match result {
             Ok(v) => Ok(v),
             Err(e) => {
-                let msg = e
-                    .response
+                let response_view = e.response_json_view();
+                let msg = response_view
                     .as_ref()
                     .and_then(|v| v.get("data"))
                     .and_then(|v| v.get("msg"));
@@ -479,8 +479,8 @@ impl BingxReadHistory {
         }
         .await;
         if let Err(e) = result {
-            let msg = e
-                .response
+            let response_view = e.response_json_view();
+            let msg = response_view
                 .as_ref()
                 .and_then(|v| v.get("data"))
                 .and_then(|v| v.get("msg"));

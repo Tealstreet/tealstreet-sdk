@@ -1438,7 +1438,7 @@ fn final_portfolio_and_notification_cutovers() {
     original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         "SUB"
     )));
-    original.response = Some(json!({"data":{"msg":"source message"}}));
+    original = original.with_retained_response((json!({"data":{"msg":"source message"}})).into());
     original.context = Some(json!({"trace":42}));
     let expected = original.clone();
     let _unsub = fail_ex
@@ -1453,7 +1453,7 @@ fn final_portfolio_and_notification_cutovers() {
         observed_error_code(&error.code),
         observed_error_code(&expected.code)
     );
-    assert_eq!(error.response, expected.response);
+    assert_eq!(error.response_json_view(), expected.response_json_view());
     assert_eq!(error.context, expected.context);
     assert_eq!(
         error.store_subscriber_ids.len(),
