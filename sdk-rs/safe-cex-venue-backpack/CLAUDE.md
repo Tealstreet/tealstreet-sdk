@@ -404,3 +404,31 @@ The two native receiver tests in `adapter_classes.rs` cover strict UTF-16
 comparison and own-field forwarding, including native cell identity, presence,
 number bits and nullish refusal. These entries classify existing receiver roles;
 they do not widen the adapter's prepared-data profile.
+
+The Backpack alias census finds 16 live structural containers: nine have native
+Serde decoders, and seven hold already typed state, callbacks or prepared values.
+The seven generic containers register one fixed instantiation with exact compiler
+source and expanded targets. `scripts/container-alias-contracts.mjs` authenticates
+the full compiler inventory before running this finite cohort; the separate 18
+callable/future and two nominal aliases are outside this cohort.
+
+Native decoder observations inspect UTF-16 keys, duplicate-key order, holes,
+number bits, shared ownership and mutation visibility without JSON projection.
+The four container tests in `adapter_classes.rs` also construct the actual typed
+aliases, including `SigningRecord<Js>`, preserving native nonfinite values, own
+undefined and original cell identity. These observations cover the declared
+instantiations and prepared profiles, not every possible generic value type.
+
+The remaining alias cohort has 13 callable capabilities, five pinned Result
+futures and two nominal option aliases. The existing Rc/Fn family authenticates
+its generic callbacks; exact fixed registrations handle the Result futures and
+one-shot boxed callbacks. These native capabilities are non-decoders. The
+concrete ExchangeOptions alias instead retains its shared strict decoder, while
+the prepared order-option specialization has no raw decoder.
+
+`callable-alias-contracts.mjs` authenticates the full compiler inventory before
+selecting all 20 owners. Native tests in `adapter_classes.rs` invoke the actual
+aliases, preserve arguments/results and shared effects, poll each pending future,
+and execute production native HTTP factory/install and Date.parse callbacks.
+The finite instantiations do not claim every generic argument or JavaScript
+scheduler behavior.

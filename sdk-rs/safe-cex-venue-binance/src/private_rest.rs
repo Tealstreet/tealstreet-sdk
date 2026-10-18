@@ -560,11 +560,11 @@ pub async fn fetch_pm_orders(
         Err(e) => {
             if state.get() {
                 let call = b.capture(SnapshotMethod::Log)?;
+                let mut message = "fetchOrders error: ".encode_utf16().collect::<Vec<_>>();
+                message
+                    .extend_from_slice(&error_message(&e).to_js_string().map_err(Failure::from)?);
                 call(vec![
-                    arg(string(format!(
-                        "fetchOrders error: {}",
-                        error_message(&e).text()?
-                    ))),
+                    arg(EventValue::utf16(&message)),
                     arg(string("warning")),
                 ])?
             } else {

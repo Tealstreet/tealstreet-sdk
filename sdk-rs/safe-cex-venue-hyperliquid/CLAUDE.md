@@ -428,3 +428,10 @@ and sixteen compressed fast-context frames; Spot covers eight mids frames.
 Malformed input sits between distinct good rows, with finite Store resets.
 The shared control runner misroutes midPrice independently in both live socket
 bodies and requires compiled native failures followed by exact-restored passes.
+
+The public Cloid, FundingHistory, UserOpenOrders and perpetual/Spot
+CancelOrderRequests aliases execute their actual native decoder traits through
+`scripts/wire-alias-contracts.mjs`. Authenticated compiler claims and root types
+remain guarded. Observations read every member and list position directly,
+including signed-zero bits; all five String conversion routes retain direct
+unit/byte witnesses. This is wire-alias evidence, not a Realm/HTTP behavior claim.

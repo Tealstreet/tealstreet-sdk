@@ -298,3 +298,112 @@ fn production_subscription_step_failures_do_not_close_the_iterator() {
         assert_eq!(closes.get(), 0, "{mode}: no IteratorClose before a body");
     }
 }
+
+#[test]
+fn production_prepared_pair_captures_method_once_and_keeps_receiver_and_native_payload() {
+    use crate::native_bindings::{BoundHost, Prepared};
+    let h = support::harness(support::options(), |_| {});
+    let host = BoundHost {
+        ops: ops::binding_ops(Rc::downgrade(&h.exchange.rt.shared)),
+        receiver: h.exchange.rt.this.clone(),
+    };
+    let receiver = Js::object(vec![("marker", Js::Number(1.0))]);
+    let payload = Js::object(vec![
+        ("undefined", Js::Undefined),
+        ("text", Js::utf16(&[0xdc00])),
+    ]);
+    let bits = 0x7ff8_0000_0000_0042;
+    payload
+        .define_key(&[0xd800], Js::Number(f64::from_bits(bits)))
+        .unwrap();
+    let weak = match &receiver {
+        Js::Object(data) => Rc::downgrade(data),
+        _ => unreachable!(),
+    };
+    let calls = Rc::new(Cell::new(0));
+    let invoked = calls.clone();
+    let returned = payload.clone();
+    let function = Js::function("original", move |this, args| {
+        invoked.set(invoked.get() + 1);
+        let expected = Js::Object(weak.upgrade().unwrap());
+        assert!(this.same_reference(&expected));
+        assert_eq!(
+            this.get("marker")?.as_f64().unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert!(args[0].same_reference(&returned));
+        Ok(returned.clone())
+    });
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    let captured = function.clone();
+    receiver
+        .define_accessor(
+            "method",
+            Some(Rc::new(move |_| {
+                count.set(count.get() + 1);
+                Ok(captured.clone())
+            })),
+            None,
+        )
+        .unwrap();
+    let prepared: Prepared<Js> = host.prepare(receiver.clone(), "method").unwrap();
+    assert!(prepared.0.same_reference(&function));
+    assert!(prepared.1.same_reference(&receiver));
+    receiver
+        .define(
+            "method",
+            Js::function("replacement", |_, _| panic!("prepared function was reread")),
+        )
+        .unwrap();
+    receiver.set("marker", Js::Number(-0.0)).unwrap();
+    let value = host.call(prepared, vec![payload.clone()]).unwrap();
+    assert!(value.same_reference(&payload));
+    assert_eq!(
+        value
+            .get_key(&[0xd800])
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        bits
+    );
+    assert_eq!(
+        value.get("text").unwrap().as_str().unwrap().as_ref(),
+        &[0xdc00]
+    );
+    assert!(value.has_own("undefined"));
+    assert!(value.get("undefined").unwrap().is_undefined());
+    assert_eq!(reads.get(), 1);
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn production_prepared_pair_keeps_original_getter_throw_before_call() {
+    use crate::native_bindings::BoundHost;
+    let h = support::harness(support::options(), |_| {});
+    let host = BoundHost {
+        ops: ops::binding_ops(Rc::downgrade(&h.exchange.rt.shared)),
+        receiver: h.exchange.rt.this.clone(),
+    };
+    let cause = Js::object(vec![("code", Js::utf16(&[0xd800]))]);
+    let returned = cause.clone();
+    let receiver = Js::object(vec![]);
+    receiver
+        .define_accessor(
+            "method",
+            Some(Rc::new(move |_| Err(Thrown::new(returned.clone())))),
+            None,
+        )
+        .unwrap();
+    let continued = Cell::new(false);
+    let error = host
+        .prepare(receiver, "method")
+        .and_then(|prepared| {
+            continued.set(true);
+            host.call(prepared, vec![])
+        })
+        .unwrap_err();
+    assert!(error.value.same_reference(&cause));
+    assert!(!continued.get());
+}
