@@ -1008,3 +1008,15 @@ Restored integration gates: binding54, exchange72 (maintained source corpora),
 native_clock2 passed. Strict-field reports use canonical text at the actual warning
 boundary, retaining the source value and native kind; the final continuation and
 unmapped checks exercise that diagnostic without weakening refusal assertions.
+
+
+Final retry cleanup removes the default-callable restoration loop needed only
+by the previous lossy response ABI. Native config now retains the original
+adapter/serializer itself. With that loop absent, the entire actual binding54
+(including shared custom adapter on both legacy attempts and signed retry cases),
+factory/request/response source comparisons3, native all-target strict Clippy
+and Wasm library strict Clippy pass. Final malformed-enum6 and continuation1
+checks pass; the earlier exchange72 and native_clock2 are retained.
+The core owner separately reports integrated all-features cancellation6 and
+override_contract7 passing for shared PR901; no duplicate inventory rebuild
+was run in this worktree. The extractor reports0updated/0added/0orphaned.

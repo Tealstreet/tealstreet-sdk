@@ -262,20 +262,7 @@ impl ApexApiHost for ApiHost {
     }
     fn request_retry(&self, config: Js) -> ExchangeFuture<'_, Js> {
         Box::pin(async move {
-            // The typed response ABI omits functions. Per-request capabilities
-            // are not exposed by ApexRequest; restore this client's original
-            // adapter/serializer defaults when preparing a legacy resend.
-            for (name, value) in self
-                .client()
-                .get("defaults")
-                .map_err(error)?
-                .own_entries()
-                .map_err(error)?
-            {
-                if value.is_callable() && config.get_key(&name).map_err(error)?.is_undefined() {
-                    config.define_key(&name, value).map_err(error)?;
-                }
-            }
+            // Native response/config retains the original adapter and serializer.
             let response = await_js(
                 self.client()
                     .call_method("request", vec![config])
