@@ -367,18 +367,22 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
         "join" => method(name, move |a| {
             let sep = arg(&a, 0);
             let sep = if sep.is_undefined() {
-                ",".to_owned()
+                vec![b',' as u16].into()
             } else {
-                text(&sep)?
+                sep.to_js_string()?
             };
-            let mut parts = vec![];
-            for v in items(&this) {
-                parts.push(match v {
-                    Some(v) if !v.is_nullish() => text(&v)?,
-                    _ => String::new(),
-                });
+            let mut units = vec![];
+            for (index, value) in items(&this).into_iter().enumerate() {
+                if index > 0 {
+                    units.extend_from_slice(&sep);
+                }
+                if let Some(value) = value
+                    && !value.is_nullish()
+                {
+                    units.extend_from_slice(&value.to_js_string()?);
+                }
             }
-            Ok(Js::str(&parts.join(&sep)))
+            Ok(Js::utf16(&units))
         }),
         "slice" => method(name, move |a| {
             let all = items(&this);
