@@ -876,3 +876,10 @@ POST-forwarding roles from executed dense-array, iterable-guard and ID outputs.
 `ORDER_BATCH_CONTRACT_REVIEW.md` documents their finite native profiles, actual
 signed bulk-placement witness, compiled controls and canonical scoped measure.
 Keep the three existing callable alias records and their separate evidence.
+
+The seven `public_ticker_events` function contracts execute the real raw-data
+readers; they are not typed/non-decoder exemptions. Native bit and ordered-effect
+observations are compared with the maintained TS constructors. The ordinary
+private_classes source-case guard keeps all 164 cases live in CI. Preserve the
+208 constructed native Store cases and seven independent compiled body controls
+when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
