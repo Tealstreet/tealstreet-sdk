@@ -286,9 +286,7 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
             for method in ["positions", "validate", "account"] {
                 let store = Rc::new(history_store::ObservedStore::new());
                 let market = normalize_market(
-                    json!({"symbol":"BTC_USDT","contractSize":0.1})
-                        .as_object()
-                        .unwrap(),
+                    &json!({"symbol":"BTC_USDT","contractSize":0.1}).into(),
                 )
                 .unwrap();
                 let mut position = fake_positions_for_market(&market, None, None, None).remove(0);

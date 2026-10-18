@@ -1,3 +1,5 @@
+#[path = "support/retained_input.rs"]
+mod retained_input;
 use safe_cex_num::numeric_ingress::{JsNumberOutput, js_from_str, js_from_value};
 use safe_cex_types::{MarginType, Market, PositionMode, PositionSide};
 use safe_cex_venue_weex::utils as utility;
@@ -230,7 +232,11 @@ fn utility_input_refusals_lose_normal_results() {
                 }
                 _ => unread.to_owned(),
             };
-            refuse::<WeexUtilityInput>(&raw, &format!("WEEX input cost {name}:{kind}"));
+            if kind == "unit" {
+                retained_input::admit_utf16(&raw);
+            } else {
+                refuse::<WeexUtilityInput>(&raw, &format!("WEEX input cost {name}:{kind}"));
+            }
             compared += 1;
         }
     }
@@ -426,7 +432,11 @@ fn integer_string_is_native_before_whole_argument_refusal() {
         }
     }
     assert_eq!(compared, 8, "WEEX integer string route floor");
-    refuse::<WeexUtilityInput>(r#""\ud800""#, "WEEX integer string returned unit");
+    let native = retained_input::admit_utf16(r#""\ud800""#);
+    assert!(
+        to_integer_string(Some(&native)).is_err(),
+        "UTF-8 return boundary remains explicit"
+    );
     for observation in source_profile::observe(
         SOURCE,
         "weex-integer-unit",
@@ -457,9 +467,11 @@ fn income_id_is_native_before_whole_record_refusal() {
         }
     }
     assert_eq!(compared, 8, "WEEX income id route floor");
-    refuse::<WeexUtilityInput>(
-        r#"{"billId":"\ud800","income":3,"time":1700000000123}"#,
-        "WEEX income returned transaction unit",
+    let native =
+        retained_input::admit_utf16(r#"{"billId":"\ud800","income":3,"time":1700000000123}"#);
+    assert!(
+        normalize_income(&native, |value| value).is_err(),
+        "WEEX income returned transaction unit: explicit UTF-8 return boundary"
     );
     for observation in source_profile::observe(
         FULL_SOURCE,
@@ -484,9 +496,11 @@ fn public_trade_id_is_native_before_whole_record_refusal() {
         }
     }
     assert_eq!(compared, 8, "WEEX public trade route floor");
-    refuse::<WeexUtilityInput>(
-        r#"{"id":"\ud800","price":3,"qty":5,"time":1700000000123}"#,
-        "WEEX public trade returned unit",
+    let native =
+        retained_input::admit_utf16(r#"{"id":"\ud800","price":3,"qty":5,"time":1700000000123}"#);
+    assert!(
+        normalize_public_trade(&native, "B/Q", |value| value).is_err(),
+        "WEEX public trade returned unit: explicit UTF-8 return boundary"
     );
     for observation in source_profile::observe(
         FULL_SOURCE,
@@ -584,9 +598,20 @@ fn market_strings_and_info_are_native_before_whole_record_refusal() {
         }
     }
     assert_eq!(compared, 8, "WEEX market string route floor");
-    refuse::<WeexUtilityInput>(
+    let native = retained_input::admit_utf16(
         r#"{"symbol":"B/Q","baseAsset":"B","quoteAsset":"Q","extra":"\ud800"}"#,
-        "WEEX market returned info unit",
+    );
+    let market = normalize_market(&native).unwrap();
+    assert_eq!(
+        market
+            .info
+            .as_ref()
+            .unwrap()
+            .get("extra")
+            .unwrap()
+            .as_text()
+            .unwrap(),
+        &[0xd800]
     );
     for observation in source_profile::observe(
         "tests/record-boundary-oracle.cjs",

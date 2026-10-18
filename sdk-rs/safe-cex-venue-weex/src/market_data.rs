@@ -1,15 +1,15 @@
 //! WEEX market and ticker projections; no Store mutation or notification.
 use crate::utils::{WeexUtilityError, WeexUtilityInput, normalize_percentage, to_number};
-use safe_cex_num::{js_number_string, js_string, parse_int, parse_precision};
+use safe_cex_num::{js_number_string, js_retained_string as js_string, parse_int, parse_precision};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision, Ticker,
 };
-use serde_json::{Map, Value};
 
 #[derive(Debug)]
 pub(crate) struct MarketProjectionRefusal {
     pub error: WeexUtilityError,
-    pub value: Option<Value>,
+    pub value: Option<Input>,
 }
 
 pub fn normalize_market(raw: &WeexUtilityInput) -> Result<Market, WeexUtilityError> {
@@ -75,8 +75,8 @@ pub(crate) fn normalize_market_row(
     let text = |key: &str| -> Result<String, MarketProjectionRefusal> {
         value
             .get(key)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
+            .and_then(Input::as_text)
+            .and_then(|units| String::from_utf16(units).ok())
             .ok_or_else(|| MarketProjectionRefusal {
                 error: WeexUtilityError {
                     name: "TypeError",
@@ -107,7 +107,7 @@ pub(crate) fn normalize_market_row(
         symbol,
         base,
         quote,
-        active: value.get("forwardContractFlag") != Some(&Value::Bool(false)),
+        active: value.get("forwardContractFlag") != Some(&Input::Bool(false)),
         precision: MarketPrecision {
             amount: amount_step,
             price: price_step,
@@ -126,7 +126,7 @@ pub(crate) fn normalize_market_row(
         contract_size: Some(contract_val),
         maker_fee: Some(maker_fee),
         taker_fee: Some(taker_fee),
-        info: Some(value.clone().into()),
+        info: Some(value.clone()),
         pretty_symbol: None,
         is_expiring: None,
         is_inverse: None,
@@ -153,13 +153,16 @@ pub fn normalize_ticker(
     let ask = raw_book
         .and_then(|raw| raw.pick_retained(&["askPrice"]))
         .or_else(|| pick(&["askPrice", "a"]));
-    let mut info = Map::new();
-    if let Some(raw) = raw_ticker {
-        info.insert("ticker".to_owned(), raw.as_value().clone());
-    }
-    if let Some(raw) = raw_book {
-        info.insert("bookTicker".to_owned(), raw.as_value().clone());
-    }
+    let info = Input::Object(vec![
+        (
+            "ticker".encode_utf16().collect(),
+            raw_ticker.map_or(Input::Undefined, |raw| raw.as_value().clone()),
+        ),
+        (
+            "bookTicker".encode_utf16().collect(),
+            raw_book.map_or(Input::Undefined, |raw| raw.as_value().clone()),
+        ),
+    ]);
     Ok(Ticker {
         id: market.id.clone(),
         symbol: market.symbol.clone(),
@@ -176,6 +179,6 @@ pub fn normalize_ticker(
         volume: to_number(pick(&["volume", "v"]).as_ref(), None)?,
         quote_volume: to_number(pick(&["quoteVolume", "q"]).as_ref(), None)?,
         timestamp: None,
-        info: Some(Value::Object(info).into()),
+        info: Some(info),
     })
 }

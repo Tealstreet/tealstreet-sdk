@@ -1,3 +1,5 @@
+#[path = "support/retained_input.rs"]
+mod retained_input;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_types::{BothPositionSide, ExecutionPositionSide, Market, OrderSide, PositionSide};
 use safe_cex_venue_weex::{
@@ -319,8 +321,9 @@ fn fills_match_actual_typescript() {
         );
     }
     assert_eq!(corpus["callable"]["bits"], "401d000000000000");
+    let native = retained_input::admit_utf16(r#"{"symbol":"\ud800"}"#);
     assert!(
-        js_from_str::<WeexUtilityInput>(r#"{"symbol":"\ud800"}"#).is_err(),
-        "fills::utf16_refusal"
+        normalize_execution(&native, Some(&market), |value| value).is_err(),
+        "fills UTF-8 model symbol refusal remains visible"
     );
 }

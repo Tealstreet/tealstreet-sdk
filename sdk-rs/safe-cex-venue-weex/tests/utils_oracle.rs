@@ -38,7 +38,7 @@ fn utility_enums_match_actual_typescript() {
                 2 => js_from_value(serde_json::from_str(raw).unwrap()).unwrap(),
                 _ => js_from_value_ref(&serde_json::from_str(raw).unwrap()).unwrap(),
             };
-            let native = safe_cex_num::numeric_ingress::js_value_as_f64(input.as_value()).unwrap();
+            let native = input.as_value().as_f64().unwrap();
             assert_eq!(
                 format!("{:016x}", native.to_bits()),
                 case["native"]["bits"].as_str().unwrap(),

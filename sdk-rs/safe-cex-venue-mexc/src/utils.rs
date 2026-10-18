@@ -1,9 +1,9 @@
 //! Pure MEXC wire normalization; JS coercion delegates to the shared primitives.
 use safe_cex_num::{
-    JsCoercionError, js_number, js_number_string, js_string, js_truthy, math_max, parse_float,
-    parse_precision,
+    JsCoercionError, js_number, js_number_string, js_string, js_truthy, math_max, parse_precision,
 };
 use safe_cex_store::orderbook::{calc_order_book_total, sort_order_book};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     MarginType, Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,
     OrderBook, OrderBookOrders, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide,
@@ -16,12 +16,21 @@ fn pick<'a>(raw: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
 }
 
 pub fn to_number(value: Option<&Value>, fallback: Option<f64>) -> Result<f64, JsCoercionError> {
+    retained_number(value.cloned().map(Input::from).as_ref(), fallback)
+}
+
+fn retained_number(value: Option<&Input>, fallback: Option<f64>) -> Result<f64, JsCoercionError> {
     let fallback = fallback.unwrap_or(0.0);
-    if value.is_none_or(|v| v.is_null() || v.as_str() == Some("")) {
+    if value.is_none_or(|value| value.is_nullish() || value.text_equals("")) {
         return Ok(fallback);
     }
-    let parsed = parse_float(&js_string(value)?);
+    let parsed = safe_cex_num::js_retained_parse_float(value)?;
     Ok(if parsed.is_finite() { parsed } else { fallback })
+}
+
+fn retained_pick<'a>(raw: &'a Input, keys: &[&str]) -> Option<&'a Input> {
+    keys.iter()
+        .find_map(|key| raw.get(key).filter(|value| !value.is_nullish()))
 }
 
 pub fn to_integer_string(value: Option<&Value>) -> Result<String, JsCoercionError> {
@@ -43,8 +52,8 @@ pub fn from_mexc_symbol(symbol: Option<&Value>) -> Result<String, JsCoercionErro
     Ok(to_integer_string(symbol)?.replace('_', ""))
 }
 
-pub fn step_from_scale(scale: Option<&Value>, fallback: f64) -> Result<f64, JsCoercionError> {
-    let numeric = js_number(scale)?;
+pub fn step_from_scale(scale: Option<&Input>, fallback: f64) -> Result<f64, JsCoercionError> {
+    let numeric = safe_cex_num::js_retained_number(scale)?;
     if numeric.is_finite() && numeric.fract() == 0.0 && numeric >= 0.0 {
         let precision = parse_precision(Some(&js_number_string(numeric))).map_err(|message| {
             JsCoercionError {
@@ -81,20 +90,20 @@ pub fn amount_to_native_volume(amount: f64, market: Option<&Market>) -> f64 {
     amount / get_contract_size(market)
 }
 
-pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionError> {
-    let id = js_string(raw.get("symbol"))?;
-    let base = pick(raw, &["baseCoin"])
-        .map(|v| js_string(Some(v)))
+pub fn normalize_market(raw: &Input) -> Result<Market, JsCoercionError> {
+    let id = safe_cex_num::js_retained_string(raw.get("symbol"))?;
+    let base = retained_pick(raw, &["baseCoin"])
+        .map(|v| safe_cex_num::js_retained_string(Some(v)))
         .transpose()?
         .unwrap_or_else(|| id.split('_').next().unwrap_or("").into());
-    let quote = pick(raw, &["quoteCoin", "settleCoin"])
-        .map(|v| js_string(Some(v)))
+    let quote = retained_pick(raw, &["quoteCoin", "settleCoin"])
+        .map(|v| safe_cex_num::js_retained_string(Some(v)))
         .transpose()?
         .unwrap_or_else(|| id.split('_').nth(1).unwrap_or("USDT").into());
-    let contract_size = to_number(raw.get("contractSize"), Some(1.0))?;
-    let vol_unit = to_number(raw.get("volUnit"), Some(1.0))?;
+    let contract_size = retained_number(raw.get("contractSize"), Some(1.0))?;
+    let vol_unit = retained_number(raw.get("volUnit"), Some(1.0))?;
     let amount_step = math_max(contract_size * vol_unit, contract_size);
-    let price_step = to_number(
+    let price_step = retained_number(
         raw.get("priceUnit"),
         Some(step_from_scale(raw.get("priceScale"), 0.00000001)?),
     )?;
@@ -104,11 +113,11 @@ pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionEr
         1.0
     };
     let min = math_max(
-        to_number(raw.get("minVol"), None)? * valid_contract_size,
+        retained_number(raw.get("minVol"), None)? * valid_contract_size,
         amount_step,
     );
-    let max = match pick(raw, &["maxVol", "limitMaxVol"]) {
-        Some(value) => to_number(Some(value), None)?,
+    let max = match retained_pick(raw, &["maxVol", "limitMaxVol"]) {
+        Some(value) => retained_number(Some(value), None)?,
         None => 9_007_199_254_740_991.0,
     } * valid_contract_size;
     Ok(Market {
@@ -117,7 +126,10 @@ pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionEr
         id,
         base,
         quote,
-        active: !raw.contains_key("state") || to_number(raw.get("state"), None)? == 0.0,
+        active: raw
+            .get("state")
+            .is_none_or(|value| matches!(value, Input::Undefined))
+            || retained_number(raw.get("state"), None)? == 0.0,
         precision: MarketPrecision {
             amount: amount_step,
             price: price_step,
@@ -125,15 +137,18 @@ pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionEr
         limits: MarketLimits {
             amount: MarketLimitsAmount { min, max },
             leverage: MarketLimitsLeverage {
-                min: to_number(raw.get("minLeverage"), Some(1.0))?,
-                max: to_number(pick(raw, &["maxLeverage", "regularMaxLeverage"]), Some(1.0))?,
+                min: retained_number(raw.get("minLeverage"), Some(1.0))?,
+                max: retained_number(
+                    retained_pick(raw, &["maxLeverage", "regularMaxLeverage"]),
+                    Some(1.0),
+                )?,
             },
             price: None,
         },
         contract_size: Some(contract_size),
-        maker_fee: Some(to_number(raw.get("makerFeeRate"), None)?),
-        taker_fee: Some(to_number(raw.get("takerFeeRate"), None)?),
-        info: Some(Value::Object(raw.clone()).into()),
+        maker_fee: Some(retained_number(raw.get("makerFeeRate"), None)?),
+        taker_fee: Some(retained_number(raw.get("takerFeeRate"), None)?),
+        info: Some(raw.clone()),
         is_expiring: None,
         is_inverse: None,
         is_spot: None,
@@ -143,12 +158,18 @@ pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionEr
     })
 }
 
-pub fn is_tradable_mexc_market(raw: &Map<String, Value>) -> Result<bool, JsCoercionError> {
-    let coin = to_integer_string(pick(raw, &["settleCoin", "quoteCoin"]))?.to_uppercase();
+pub fn is_tradable_mexc_market(raw: &Input) -> Result<bool, JsCoercionError> {
+    let coin = safe_cex_num::js_retained_string(
+        retained_pick(raw, &["settleCoin", "quoteCoin"]).or(Some(&Input::Text(Vec::new()))),
+    )?
+    .to_uppercase();
     Ok(matches!(coin.as_str(), "USDT" | "USDC")
-        && raw.get("apiAllowed") != Some(&Value::Bool(false))
-        && raw.get("isHidden") != Some(&Value::Bool(true))
-        && (!raw.contains_key("state") || to_number(raw.get("state"), None)? == 0.0))
+        && raw.get("apiAllowed") != Some(&Input::Bool(false))
+        && raw.get("isHidden") != Some(&Input::Bool(true))
+        && (raw
+            .get("state")
+            .is_none_or(|value| matches!(value, Input::Undefined))
+            || retained_number(raw.get("state"), None)? == 0.0))
 }
 
 pub fn normalize_percentage(value: Option<&Value>) -> Result<f64, JsCoercionError> {

@@ -208,10 +208,18 @@ impl WsRuntime for Runtime {
 #[derive(Default)]
 pub struct Http {
     pub sent: Mutex<Vec<RestRequest>>,
-    routes: Mutex<Vec<(String, String, VecDeque<(u16, Value)>)>>,
+    routes: Mutex<Vec<(String, String, VecDeque<(u16, RestResponseBody)>)>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: u16, value: Value) {
+        self.route_body(
+            method,
+            path,
+            status,
+            RestResponseBody::Encoded(serde_json::to_vec(&value).unwrap()),
+        );
+    }
+    pub fn route_body(&self, method: &str, path: &str, status: u16, value: RestResponseBody) {
         let mut routes = self.routes.lock().unwrap();
         if let Some((_, _, queue)) = routes.iter_mut().find(|(m, p, _)| m == method && p == path) {
             queue.push_back((status, value));
@@ -232,6 +240,10 @@ impl Http {
             .unwrap()
             .retain(|(m, p, _)| m != method || p != path);
         self.ok(method, path, data);
+    }
+    pub fn replace_body(&self, path: &str, body: RestResponseBody) {
+        self.routes.lock().unwrap().retain(|(_, p, _)| p != path);
+        self.route_body("GET", path, 200, body);
     }
     pub fn calls(&self, path: &str) -> Vec<RestRequest> {
         self.sent
@@ -262,7 +274,7 @@ impl RestAdapter for Http {
                     status,
                     reason: None,
                     headers: [("content-type".into(), "application/json".into())].into(),
-                    body: RestResponseBody::Encoded(serde_json::to_vec(&value).unwrap()),
+                    body: value,
                 })
             }
             None => panic!("unscripted {} {}", request.method, request.url),

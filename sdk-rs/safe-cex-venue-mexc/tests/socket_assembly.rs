@@ -213,9 +213,13 @@ fn venue_with_adapter(
 ) -> Rc<MexcExchange> {
     let store = Rc::new(DefaultStore::new());
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     Store::update(

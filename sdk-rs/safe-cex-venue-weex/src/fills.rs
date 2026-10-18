@@ -4,14 +4,14 @@ use crate::utils::{
     WeexUtilityError, WeexUtilityInput, normalize_order_side, normalize_timestamp_to_ms,
     normalize_timestamp_to_seconds, to_integer_string, to_number,
 };
-use safe_cex_num::{js_string, js_truthy};
+use safe_cex_num::js_retained_string as js_string;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{BothPositionSide, Execution, ExecutionPositionSide, HistoricalTrade, Market};
-use serde_json::Value;
 
 #[derive(Debug)]
 pub(crate) struct ExecutionProjectionRefusal {
     pub error: WeexUtilityError,
-    pub value: Value,
+    pub value: Input,
 }
 
 #[derive(Debug)]
@@ -20,7 +20,7 @@ pub(crate) enum ExecutionRowError {
     Projection(ExecutionProjectionRefusal),
 }
 
-fn optional_bool(value: Option<&Value>, field: &str) -> Result<Option<bool>, WeexUtilityError> {
+fn optional_bool(value: Option<&Input>, field: &str) -> Result<Option<bool>, WeexUtilityError> {
     value
         .map(|value| {
             value.as_bool().ok_or_else(|| WeexUtilityError {
@@ -86,12 +86,15 @@ fn normalize_execution_fields(
         return Ok(None);
     }
     let fill_id = raw.pick_retained(&["tradeId", "fillId", "id"]);
-    let id = if js_truthy(fill_id.as_ref().map(WeexUtilityInput::as_value)) {
+    let id = if fill_id
+        .as_ref()
+        .is_some_and(|value| value.as_value().is_truthy())
+    {
         Some(to_integer_string(fill_id.as_ref())?)
     } else {
         None
     };
-    let order_id = if js_truthy(value.get("orderId")) {
+    let order_id = if value.get("orderId").is_some_and(Input::is_truthy) {
         Some(to_integer_string(raw.pick_retained(&["orderId"]).as_ref())?)
     } else {
         None
@@ -100,7 +103,7 @@ fn normalize_execution_fields(
         raw.pick_retained(&["realizedPnl", "realizePnl"]).as_ref(),
         None,
     )?;
-    let position_key = if js_truthy(value.get("positionSide")) {
+    let position_key = if value.get("positionSide").is_some_and(Input::is_truthy) {
         js_string(value.get("positionSide"))?.to_uppercase()
     } else {
         String::new()
@@ -158,7 +161,8 @@ fn project_execution(
         Some(asset) => Some(
             asset
                 .as_value()
-                .as_str()
+                .as_text()
+                .and_then(|units| String::from_utf16(units).ok())
                 .ok_or_else(|| ExecutionProjectionRefusal {
                     error: WeexUtilityError {
                         name: "TypeError",

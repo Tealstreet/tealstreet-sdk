@@ -404,3 +404,7 @@ The MEXC unit target retains the six throwing-listener observations and primitiv
 reporting helpers. `venue-oracle:mexc` runs both targets; worker dependencies never
 belong in this venue. Browser Error/structuredClone proof remains in the tooling
 example and Node runner documented above.
+
+Market fetches retain configured response data through tradability filtering and
+normalization; raw info never takes a JSON projection. The constructed fetch/Store
+regression observes opaque UTF-16, nonfinite bits, signed zero and own Undefined.

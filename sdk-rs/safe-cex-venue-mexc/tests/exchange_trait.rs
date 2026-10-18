@@ -32,9 +32,10 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
     panic!("scripted call must settle");
 }
 fn script(wire: &support::Wire, path: &str, data: Value) {
-    wire.bodies
-        .borrow_mut()
-        .insert(path.into(), json!({"success":true,"code":0,"data":data}));
+    wire.bodies.borrow_mut().insert(
+        path.into(),
+        json!({"success":true,"code":0,"data":data}).into(),
+    );
 }
 fn calls(wire: &support::Wire) -> Vec<(String, String, Value)> {
     wire.requests.borrow_mut().drain(..).collect()
@@ -1034,4 +1035,70 @@ fn retained_raw_amount_alias_drives_real_cancel_and_replace() {
         assert!(info.has_own("ownUndefined"));
         venue.dispose().unwrap();
     }
+}
+
+#[test]
+fn fetch_markets_retains_opaque_native_info_before_normalization() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let (venue, rt, store, wire) = support::fixture();
+    let mut row = Input::from(
+        json!({"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","contractSize":1,"state":0}),
+    );
+    row.as_object_mut().unwrap().extend([
+        (
+            "opaque".encode_utf16().collect(),
+            Input::Text(vec![0xd800, 65, 0xdc00]),
+        ),
+        ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
+        (
+            "infinity".encode_utf16().collect(),
+            Input::Float(f64::INFINITY),
+        ),
+        ("zero".encode_utf16().collect(), Input::Float(-0.0)),
+        ("undefined".encode_utf16().collect(), Input::Undefined),
+    ]);
+    wire.bodies.borrow_mut().insert(
+        DETAIL.into(),
+        Input::Object(vec![(
+            "data".encode_utf16().collect(),
+            Input::Array(vec![row.clone()]),
+        )]),
+    );
+    let markets = drive(&rt, venue.fetch_markets()).unwrap();
+    assert_eq!(
+        markets.len(),
+        1,
+        "actual configured market fetch admits opaque metadata"
+    );
+    safe_cex_store::Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let markets = store.markets();
+    let info = markets[0].info.as_ref().unwrap();
+    assert_eq!(
+        info.get("opaque").unwrap().as_text().unwrap(),
+        &[0xd800, 65, 0xdc00]
+    );
+    assert!(info.get("nan").unwrap().as_f64().unwrap().is_nan());
+    assert_eq!(
+        info.get("infinity").unwrap().as_f64().unwrap().to_bits(),
+        f64::INFINITY.to_bits()
+    );
+    assert_eq!(
+        info.get("zero").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0f64).to_bits()
+    );
+    assert!(matches!(info.get("undefined"), Some(Input::Undefined)));
+    assert_eq!(
+        info.as_object().unwrap().len(),
+        row.as_object().unwrap().len()
+    );
+    assert_eq!(markets[0].symbol, "BTCUSDT");
+    assert!(sent(&calls(&wire), "GET", DETAIL));
 }
