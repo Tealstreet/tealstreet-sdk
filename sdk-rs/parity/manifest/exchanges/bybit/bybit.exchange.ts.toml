@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange::reinit_on_throw"
 status = "divergent"
-note = "CHOSEN Concrete exchange operation preserves the original success/rejection identity, sets needsReinit only on rejection and never clears an existing flag on success. Actual constructor plus source field initializer witnesses cover both initial states and outcomes; a success-clears-flag mutant compiles and fails the named settled-state assertion. CHOSEN owned cancellation: an unawaited TypeScript request rejection still sets the flag, while dropping an unpolled or pending Rust wrapper releases its request and performs no late mutation. Mirroring that detached tail would retain the exchange/request beyond caller cancellation and evade structured request ownership. Source unawaited-settlement and Rust request-drop witnesses pin both directions. No venue task or registry is introduced; full constructor and client response lifecycle remain separate."
+note = "The production receiver installed in binding/receiver.rs starts the canonical source Promise immediately and retains the rejection continuation after its waiter is dropped. Native constructed primary/inverse/spot owners cover both initial flag states and both outcomes without premature mutation; the original success/error value is forwarded. ACCEPT for the historical poll/drop claim: the generic Rust helper does not describe the installed receiver. See DIVERGENCE_FIX_AUDIT.md and binding/receiver_tests.rs::divergence_audit_reinit_continuations_survive_dropped_waits. Renamed Rust target: safe-cex-venue-bybit/src/exchange.rs::BybitExchange::reinit_on_throw."
 
 [[symbol]]
 ts = "BybitExchange#debouncedPrivateSnapshotRefresh"
@@ -584,7 +584,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::fetch_balance"
 status = "divergent"
-note = "CHOSEN: native generic future and lazy disposal/store/formatter callbacks replace JavaScript receiver access and Promise scheduling; Rust begins execution when polled. Reads occur after the raw request resolves, formatter is skipped when disposed, and raw/stored/formatted values plus rejection identity are forwarded unchanged. Native assertions compare retained Rc values before callback observations. Lifecycle composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::fetch_balance."
+note = "The installed binding/members/account.rs member invokes fetchRawBalance immediately, retains native raw/formatted identity, reads disposal only after the response and returns the current stored balance when disposed. The common typed binding/exchange.rs invocation helper now captures the actual member result before boxing its waiter, then awaits the existing source Promise without another spawn. Constructed native receiver and SDK-helper probes cover pending responses, dropped waits, UTF-16, signed zero and disposal; maintained source profiles agree. The generic helper retains explicit dependencies. See DIVERGENCE_FIX_AUDIT.md. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::fetch_balance."
 
 [[symbol]]
 ts = "BybitExchange.syncBalanceUpnlFromPositions"
@@ -1088,7 +1088,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_primary_position_mode"
 status = "divergent"
-note = "Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_primary_position_mode. CHOSEN: async wrapper executes at native Future first poll and cancellation follows drop. Refuses option symbols, then inverse symbols (\"Bybit position mode can only be changed on linear markets here\"), then delegates to the shared change_position_mode body (linear, USDT)."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_primary_position_mode. The public SDK invokes the installed member before returning its waiter and retains its existing source Promise after caller wait abandonment. A compiled prefix regression observes the actual linear/USDT helper and held settlement. Refuses option symbols, then inverse symbols, then delegates to the shared change_position_mode body. See DIVERGENCE_FIX_AUDIT.md."
 
 [[symbol]]
 ts = "BybitExchange.changePositionModeHelper"
