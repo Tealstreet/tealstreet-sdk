@@ -214,7 +214,7 @@ impl PrivateTopicsHost for Rt {
             .to_number()
     }
     fn set_of(&self, values: Js) -> Result<Js, Thrown> {
-        self.global("Set")?.call(Js::Undefined, vec![values])
+        self.global("Set")?.construct(vec![values], None)
     }
     fn map_set(&self, map: Js, key: Js, value: f64) -> Result<(), Thrown> {
         map.call_method("set", vec![key, Js::Number(value)])

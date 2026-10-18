@@ -144,23 +144,3 @@ impl<T> NativeSlots<T> {
             .map(|(_, native)| native.clone())
     }
 }
-
-/// An object whose prototype is `prototype`, as `new` allocates it.
-fn instance_of(prototype: &Js) -> Js {
-    let instance = Js::object(vec![]);
-    if let Js::Object(object) = &instance {
-        *object.proto.borrow_mut() = Some(prototype.clone());
-    }
-    instance
-}
-
-fn has_prototype(value: &Js, prototype: &Js) -> bool {
-    match value {
-        Js::Object(object) => object
-            .proto
-            .borrow()
-            .as_ref()
-            .is_some_and(|proto| proto.same_reference(prototype)),
-        _ => false,
-    }
-}

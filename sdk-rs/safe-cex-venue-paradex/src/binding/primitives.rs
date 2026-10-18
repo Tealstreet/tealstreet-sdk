@@ -100,9 +100,9 @@ pub(super) fn call(rt: &Rt, n: &str, a: Vec<Js>) -> Result<Js, Thrown> {
             );
             Js::array(out)
         }
-        "new Map" => rt.global("Map")?.call(Js::Undefined, vec![])?,
+        "new Map" => rt.global("Map")?.construct(vec![], None)?,
         "new Set" => Js::new_set(),
-        "Set.from" => rt.global("Set")?.call(Js::Undefined, vec![x])?,
+        "Set.from" => rt.global("Set")?.construct(vec![x], None)?,
         "Array.from.values" => {
             let values = x.call_method("values", vec![])?;
             Js::array(iterate(&values)?)

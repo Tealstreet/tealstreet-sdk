@@ -408,14 +408,14 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     let w = weak.clone();
     def(
         "BaseExchange",
-        Js::constructor("BaseExchange", move |_, a| {
+        Js::constructor("BaseExchange", None, move |_, a| {
             base_exchange(&scope(&w)?, arg(&a, 0), arg(&a, 1), arg(&a, 2))
         }),
     );
     let w = weak.clone();
     def(
         "BaseWebSocket",
-        Js::constructor("BaseWebSocket", move |_, a| {
+        Js::constructor("BaseWebSocket", None, move |_, a| {
             Ok(sockets::base_websocket(
                 &scope(&w)?.shared.sockets,
                 arg(&a, 0),
@@ -733,7 +733,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     );
     def(
         "WeakSet",
-        Js::constructor("WeakSet", |_, _| Ok(Js::new_set())),
+        Js::constructor("WeakSet", None, |_, _| Ok(Js::new_set())),
     );
 
     install_enums(&g);

@@ -398,7 +398,7 @@ fn world_with_token(token: impl FnOnce(&Rc<dyn ExchangeRuntime>) -> Js) -> World
     let calls: Calls = Rc::default();
     let parent = parent(&runtime, &store, &calls, token(&exchange_runtime));
     let class = realm.global("LighterPrivateWebsocket").unwrap();
-    let socket = class.call(Js::Undefined, vec![parent]).unwrap();
+    let socket = class.construct(vec![parent], None).unwrap();
     World {
         runtime,
         store,

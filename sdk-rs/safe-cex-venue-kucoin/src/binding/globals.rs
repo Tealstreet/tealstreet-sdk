@@ -278,8 +278,7 @@ pub(crate) fn install(
                     Ok(Js::array(out))
                 },
                 |parent, role, index, shards| {
-                    class.call(
-                        Js::Undefined,
+                    class.construct(
                         vec![
                             parent.clone(),
                             Js::object(vec![
@@ -288,6 +287,7 @@ pub(crate) fn install(
                                 ("shardCount", Js::Number(shards)),
                             ]),
                         ],
+                        None,
                     )
                 },
             )
@@ -296,7 +296,7 @@ pub(crate) fn install(
 
     // Construction-time collaborators.
     let w = weak.clone();
-    let base = Js::constructor("BaseExchange", move |_, a| base_exchange(&w, a));
+    let base = Js::constructor("BaseExchange", None, move |_, a| base_exchange(&w, a));
     base.define("prototype", Js::object(vec![]))?;
     def("BaseExchange", base)?;
     for name in ["createAPI", "createKucoinSpotAPI"] {

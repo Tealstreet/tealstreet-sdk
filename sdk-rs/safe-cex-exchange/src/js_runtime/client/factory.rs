@@ -114,6 +114,52 @@ fn install_outcome_interceptor(
         let response = arg(&args, 0);
         if let Some(owner) = fulfilled_owner.upgrade() {
             record_outcome(&owner, &response, Some(&response));
+            let observe = || -> Result<(), Thrown> {
+                let config = optional(&response, "config")?;
+                if optional(&config, "__tealstreetSigningCapture")?.truthy() {
+                    return Ok(());
+                }
+                let url = optional(&config, "url")?;
+                let url = match url {
+                    Js::String(text) => Some(String::from_utf16(&text).map_err(|_| {
+                        Thrown::type_error("lone UTF-16 surrogate at a typed boundary")
+                    })?),
+                    _ => None,
+                };
+                if response.type_of() != "object" || response.is_nullish() || response.is_array() {
+                    owner.note_http_failure(None);
+                    return Ok(());
+                }
+                let Js::Number(status) = response.get("status")? else {
+                    owner.note_http_failure(None);
+                    return Ok(());
+                };
+                if status < 400.0 {
+                    owner.note_http_failure(None);
+                    return Ok(());
+                }
+                let candidates = [response.get("statusText")?, response.get("status_text")?];
+                let status_text = candidates
+                    .into_iter()
+                    .find_map(|candidate| match candidate {
+                        Js::String(text) if !text.is_empty() => Some(text),
+                        _ => None,
+                    });
+                let status_text = status_text.map_or(Ok(String::new()), |text| {
+                    String::from_utf16(&text).map_err(|_| {
+                        Thrown::type_error("lone UTF-16 surrogate at a typed boundary")
+                    })
+                })?;
+                owner.note_http_failure(Some(crate::error_reporting::HttpFailureRecord {
+                    status,
+                    status_text,
+                    url,
+                    at: owner.runtime.now_ms(),
+                }));
+                Ok(())
+            };
+            // TS suppresses telemetry failures so they cannot reject the request.
+            drop(observe());
         }
         Ok(response)
     });

@@ -1,7 +1,7 @@
 //! lighter-sdk TransactionClient: a JS class over the native
 //! `transaction_client::TransactionClient`, whose HTTP and crypto
 //! dependencies are the JS objects handed to its constructor.
-use super::{Host, NativeSlots, codec, has_prototype, instance_of};
+use super::{Host, NativeSlots, codec};
 use crate::{
     binding::{
         ops::{has_property, spread, to_string},
@@ -350,15 +350,9 @@ pub(super) fn install(host: &Host) -> Result<(), Thrown> {
         });
         prototype.define(name, method)?;
     }
-    let (ctor_host, ctor_prototype) = (host.clone(), prototype.clone());
-    // Realm construction calls constructors without a receiver, so the class
-    // allocates its own instance.
-    let class = Js::constructor("TransactionClient", move |this, a| {
-        let instance = if has_prototype(&this, &ctor_prototype) {
-            this
-        } else {
-            instance_of(&ctor_prototype)
-        };
+    let ctor_host = host.clone();
+    let class = Js::constructor("TransactionClient", None, move |target, a| {
+        let instance = target.allocate_instance()?;
         let client = construct(&ctor_host, &arg(&a, 0))?;
         slots.bind(&instance, client)?;
         Ok(instance)

@@ -972,8 +972,17 @@ compares these operations with Node, including cross-realm identities. Intrinsic
 parent metadata is independent of the shadowable `__proto__` string property.
 Unknown surrogate keys miss inherited UTF8 intrinsic fields without replacement;
 intrinsic writes retain their existing explicit native-primitive boundary.
-Construction/new.target, accessor flags and function own-key reflection remain
-separate consolidation capabilities.
+Function construction is a separate operation on the same referent. The factory
+requires an explicit optional call body and a construct callback receiving the
+original new.target and native argument vector. Native class bodies allocate
+through allocate_instance and return their actual constructed object; callable
+builtins provide their source call behavior explicitly. Bound construction keeps
+prefix arguments and substitutes its target only for the default bound new.target.
+GetSuperConstructor reads the active function parent from metadata, independently
+of own __proto__ data. Constructor validation occurs at invocation after argument
+evaluation. tests/js_construction.rs compares native operations with Node,
+including cross-realm allocation fallback and Error prototype/message order.
+Accessor flags and complete function own-key reflection remain separate steps.
 
 The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
 retaining the target receiver and prepending bound arguments even when the result
@@ -1648,6 +1657,41 @@ listener arguments, including Unicode, NUL, empty strings and formatting tokens.
 `scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
 missing classifications or changed default bodies; the receiver classification
 applies only to this typed forwarding method.
+
+Ordinary object/function descriptor operations retain accessor functions as native
+Js referents, including enumeration/configuration flags and inherited receivers.
+Object.defineProperty validates getter callability before reading the setter and
+keeps original thrown values. Object.freeze preserves accessor setters while
+locking configuration and data writes; preventExtensions blocks new own fields.
+Descriptor reflection reads stored functions without invoking them. Integrity
+operations on array/collection storage await the separate storage cutover.
+The native define_accessor helper remains a host bootstrap installer with its
+existing ABI; it bypasses source descriptor validation and must not implement
+user descriptor operations. Its fallible callsite migration is separately held
+until the approved model-info cutover. Source definitions use define_property.
+tests/js_property_descriptors.rs executes both maintained Hyperliquid frozen
+configuration initializers and compares accessors with Node, including getter
+identity, strict writes, setter receivers, validation order and JS stringify.
+scripts/js-property-descriptor-controls.py compiles an accessor-configurability
+fault, requires the named failure, restores exact bytes and reruns the witnesses.
+
+Synchronous IteratorRecord owns the original iterator, cached next method and
+terminal flag over shared Js referents. IteratorStep omits value reads for array
+elisions; IteratorStepValue terminates on abrupt next/done/value access. Normal
+IteratorClose propagates cleanup errors and rejects primitive return results.
+Throwing completion preserves the original error after cleanup effects. Existing
+Array.from, Map/Set construction and iterable collection reuse these operations.
+The installed-global witness compares Node next/done/value/body failures, while
+normal-close cases cover skipped getters, replaced next members, original bound
+references and return methods/getters/classes. These are core prerequisites;
+Hyperliquid still uses Realm until its atomic family cutover. The independent
+js-iterator-record-controls.py fault must compile, fail normal-close validation,
+restore exact bytes and pass the native/source cases.
+
+Source `new` operations use `Js::construct`, including top-level native venue
+factories and host-selected collection constructors. Ordinary host calls remain
+separate. Lighter SDK's captured URLSearchParams uses `ClientHost::construct` for
+both transaction submission paths; JSON stringify remains an ordinary call.
 
 The shared JS Axios factory records each dispatched request in the existing
 HTTP_STATS singleton after proxy authorization, including rejected HTTP statuses.

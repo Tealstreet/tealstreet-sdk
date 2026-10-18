@@ -60,8 +60,9 @@ fn strict_put(target: &Js, key: &[u16], value: Js) -> Result<(), Thrown> {
             target.set_key(key, value)
         }
         Js::Object(_) | Js::Function(_) => {
-            let getter_only = own_props(target)
-                .is_some_and(|p| matches!(p.borrow().get(key), Some(Prop::Accessor(_, None))));
+            let getter_only = own_props(target).is_some_and(|p| {
+                matches!(p.borrow().get(key), Some(Prop::Accessor { set: None, .. }))
+            });
             if getter_only {
                 return Err(Thrown::type_error(&format!(
                     "Cannot set property {} of #<Object> which has only a getter",
