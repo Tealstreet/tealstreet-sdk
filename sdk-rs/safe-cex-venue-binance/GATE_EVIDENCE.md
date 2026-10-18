@@ -3170,11 +3170,17 @@ full coercion/UTF16, mutable/non-Error failures, nested error-response identity,
 host scheduling and discarded async/drop/unwind ownership are unclaimed.
 No shared SDK type/trait change.
 
-**FINDING, UNREMEASURED**: `private_rest::pm_rows → json_data → response_message`
-still projects nonfinite malformed OBJECT code/message metadata to JSON null.
-Finite JSON malformed-object metadata is the declared new PM boundary. Root
-native Infinity kind was corrected and proved. No source execution, survivor
-control or correction is claimed for nested nonfinite metadata.
+**Historical finding, now remeasured**: the former
+`private_rest::pm_rows → json_data → response_message` projection replaced nested
+nonfinite code/message metadata with null. The native guard cutover removes
+`json_data`. `private_rest_native::native_pm_order_diagnostics_keep_nested_nonfinite_metadata`
+executes the real native owner/signed HTTP path against the maintained TS guard:
+master compiles and fails (`code=null` versus `code=Infinity -Infinity`), and the
+restored cutover passes both authored HTTP cases. The separate three surrogate
+projection regressions are also master-red/restored-green. Native NaN/Infinity,
+own undefined and UTF16 key/message observations are in the canonical guard
+contract. See `PRIVATE_REST_CONTRACT_REVIEW.md` for the bounded cohort; this does
+not reclassify unrelated historical evidence as current execution.
 
 Not run: full Binance suite (only two scoped targets ran), workspace build,
 host clippy, wasm clippy, CI, exhaustive cases/mutations or whole-venue audit.

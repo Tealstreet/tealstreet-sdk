@@ -7,6 +7,9 @@ mod lifecycle_aliases;
 #[path = "support/private_order_aliases.rs"]
 mod private_order_aliases;
 #[cfg(feature = "native")]
+#[path = "support/private_rest_native.rs"]
+mod private_rest_native;
+#[cfg(feature = "native")]
 #[path = "support/public_frame_guard.rs"]
 mod public_frame_guard;
 #[cfg(feature = "native")]
