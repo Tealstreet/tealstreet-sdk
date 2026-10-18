@@ -57,7 +57,16 @@ fn legacy_native_error_keeps_original_origin_without_reading_the_cause() {
         .downcast_ref::<OriginalCause>()
         .unwrap();
     assert!(cause.value.same_reference(&value));
-    assert_eq!(cause.value.get_key(&[0xd800]).unwrap().as_f64().unwrap().to_bits(), (-0.0f64).to_bits());
+    assert_eq!(
+        cause
+            .value
+            .get_key(&[0xd800])
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        (-0.0f64).to_bits()
+    );
     assert_eq!(reads.get(), 0);
     assert_eq!(displays.get(), 0);
 }

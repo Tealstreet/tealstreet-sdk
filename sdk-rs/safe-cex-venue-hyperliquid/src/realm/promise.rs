@@ -128,6 +128,12 @@ impl Realm {
         &mut self,
         thrown: &Value,
     ) -> safe_cex_exchange::runtime::ExchangeError {
+        let native_error = thrown
+            .object()
+            .and_then(|o| o.borrow().native_error.clone());
+        if let Some(error) = native_error {
+            return (*error).clone();
+        }
         let message = if thrown
             .object()
             .is_some_and(|o| matches!(o.borrow().kind, Kind::Error))

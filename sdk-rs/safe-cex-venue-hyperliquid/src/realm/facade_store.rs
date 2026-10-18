@@ -26,25 +26,47 @@ struct TableView {
 }
 
 impl Exotic for TableView {
-    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value> {
-        let key = String::from_utf16_lossy(key.units()?);
+    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Result<Option<Value>, Thrown> {
+        let Some(units) = key.units() else {
+            return Ok(None);
+        };
+        let key = String::from_utf16_lossy(units);
         match self.table {
-            Table::MarketsBySymbol => realm.from_typed(self.store.markets_by_symbol().get(&key)?),
-            Table::MarketsById => realm.from_typed(self.store.markets_by_id().get(&key)?),
-            Table::TickersBySymbol => realm.from_typed(self.store.tickers_by_symbol().get(&key)?),
-            Table::TickersById => realm.from_typed(self.store.tickers_by_id().get(&key)?),
+            Table::MarketsBySymbol => self
+                .store
+                .markets_by_symbol()
+                .get(&key)
+                .map(|value| realm.from_typed(value))
+                .transpose(),
+            Table::MarketsById => self
+                .store
+                .markets_by_id()
+                .get(&key)
+                .map(|value| realm.from_typed(value))
+                .transpose(),
+            Table::TickersBySymbol => self
+                .store
+                .tickers_by_symbol()
+                .get(&key)
+                .map(|value| realm.from_typed(value))
+                .transpose(),
+            Table::TickersById => self
+                .store
+                .tickers_by_id()
+                .get(&key)
+                .map(|value| realm.from_typed(value))
+                .transpose(),
         }
-        .ok()
     }
 
-    fn keys(&self) -> Vec<PropKey> {
+    fn keys(&self, _realm: &mut Realm) -> Result<Vec<PropKey>, Thrown> {
         let keys: Vec<String> = match self.table {
             Table::MarketsBySymbol => self.store.markets_by_symbol().keys().cloned().collect(),
             Table::MarketsById => self.store.markets_by_id().keys().cloned().collect(),
             Table::TickersBySymbol => self.store.tickers_by_symbol().keys().cloned().collect(),
             Table::TickersById => self.store.tickers_by_id().keys().cloned().collect(),
         };
-        keys.iter().map(|k| PropKey::str(k)).collect()
+        Ok(keys.iter().map(|k| PropKey::str(k)).collect())
     }
 }
 

@@ -101,6 +101,29 @@ impl Realm {
     pub(crate) fn error(&self, message: &str) -> Thrown {
         self.error_of("Error", message)
     }
+    pub(crate) fn from_exchange_error(
+        &mut self,
+        error: safe_cex_exchange::runtime::ExchangeError,
+    ) -> Thrown {
+        let native_error = error.origin.as_ref().map(|_| Rc::new(error.clone()));
+        let thrown = self.error(&error.message);
+        if error.name != "Error" {
+            self.define_hidden(&thrown, PropKey::str("name"), Value::str(&error.name));
+        }
+        if let Some(code) = &error.code {
+            let code = match self.restore_typed_value(code) {
+                Ok(code) => code,
+                Err(cause) => return cause,
+            };
+            self.define_hidden(&thrown, PropKey::str("code"), code);
+        }
+        if let Some(response) = &error.response {
+            let response = self.from_serde(response);
+            self.define_hidden(&thrown, PropKey::str("response"), response);
+        }
+        thrown.object().unwrap().borrow_mut().native_error = native_error;
+        thrown
+    }
 
     // ---- properties ----
     fn nullish_read(&self, v: &Value, key: &PropKey) -> Thrown {
@@ -184,9 +207,10 @@ impl Realm {
                 Kind::Exotic(view) => Some(view.clone()),
                 _ => None,
             };
+            let missing_own = o.borrow().own(key).is_none();
             if let Some(view) = exotic
-                && o.borrow().own(key).is_none()
-                && let Some(v) = view.lookup(self, key)
+                && missing_own
+                && let Some(v) = view.lookup(self, key)?
             {
                 return Ok(v);
             }
@@ -463,7 +487,7 @@ impl Realm {
                 _ => None,
             };
             if let Some(view) = exotic
-                && view.keys().iter().any(|k| k.same(key))
+                && view.keys(self)?.iter().any(|k| k.same(key))
             {
                 return Ok(true);
             }
@@ -474,20 +498,42 @@ impl Realm {
         }
         Ok(false)
     }
-    pub(crate) fn has_own(&self, target: &Value, key: &PropKey) -> bool {
-        target.object().is_some_and(|o| {
-            Self::own_slot(o, key).is_some()
-                || matches!(&o.borrow().kind, Kind::Exotic(view) if view.keys().iter().any(|k| k.same(key)))
+    pub(crate) fn has_own(&mut self, target: &Value, key: &PropKey) -> Result<bool, Thrown> {
+        let Some(o) = target.object() else {
+            return Ok(false);
+        };
+        if Self::own_slot(o, key).is_some() {
+            return Ok(true);
+        }
+        let view = match &o.borrow().kind {
+            Kind::Exotic(view) => Some(view.clone()),
+            _ => None,
+        };
+        Ok(match view {
+            Some(view) => view.keys(self)?.iter().any(|k| k.same(key)),
+            None => false,
         })
     }
     /// OrdinaryOwnPropertyKeys order: integer keys ascending, then strings by
     /// insertion. `enumerable_only` filters for Object.keys / for-in / spread.
-    pub(crate) fn own_keys(&self, target: &Value, enumerable_only: bool) -> Vec<PropKey> {
+    pub(crate) fn own_keys(
+        &mut self,
+        target: &Value,
+        enumerable_only: bool,
+    ) -> Result<Vec<PropKey>, Thrown> {
         let Some(o) = target.object() else {
             if let Value::String(u) = target {
-                return (0..u.len()).map(index_key).collect();
+                return Ok((0..u.len()).map(index_key).collect());
             }
-            return vec![];
+            return Ok(vec![]);
+        };
+        let view = match &o.borrow().kind {
+            Kind::Exotic(view) => Some(view.clone()),
+            _ => None,
+        };
+        let view_keys = match view {
+            Some(view) => view.keys(self)?,
+            None => vec![],
         };
         let data = o.borrow();
         let mut ints: Vec<(usize, PropKey)> = vec![];
@@ -495,12 +541,10 @@ impl Realm {
         if let Kind::Array(items) = &data.kind {
             ints.extend((0..items.len()).map(|i| (i, index_key(i))));
         }
-        if let Kind::Exotic(view) = &data.kind {
-            for key in view.keys() {
-                match key.array_index() {
-                    Some(i) => ints.push((i, key)),
-                    None => strings.push(key),
-                }
+        for key in view_keys {
+            match key.array_index() {
+                Some(i) => ints.push((i, key)),
+                None => strings.push(key),
             }
         }
         for p in &data.props {
@@ -516,11 +560,11 @@ impl Realm {
             }
         }
         ints.sort_by_key(|(i, _)| *i);
-        ints.into_iter().map(|(_, k)| k).chain(strings).collect()
+        Ok(ints.into_iter().map(|(_, k)| k).chain(strings).collect())
     }
     /// Own enumerable string-keyed values in key order (for spreads/Object.entries).
     pub(crate) fn own_entries(&mut self, target: &Value) -> Result<Vec<(PropKey, Value)>, Thrown> {
-        let keys = self.own_keys(target, true);
+        let keys = self.own_keys(target, true)?;
         let mut out = Vec::with_capacity(keys.len());
         for k in keys {
             let v = self.get(target, &k)?;
