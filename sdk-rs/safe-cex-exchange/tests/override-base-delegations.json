@@ -5,7 +5,8 @@
     "chosen-base": "A manifest row declares the base call as a CHOSEN divergence from the source body. Evidence names that manifest text.",
     "no-venue-override": "The body reimplements a BaseExchange getter and reads a member that no listed source class overrides, so base dispatch equals dynamic dispatch. The audit re-checks venue-overrides.json, so a new source override makes this entry fail.",
     "socket-receiver": "The receiver is the venue socket's BaseWebSocket, not BaseExchange; the syntactic audit only sees a field or method named base. Evidence names the receiver type declaration.",
-    "base-implementation": "The shared bridge implements the actual source BaseExchange.dispose body; its source citation names that base method, not an unrelated venue super call."
+    "base-implementation": "The shared bridge implements the actual source BaseExchange.dispose body; its source citation names that base method, not an unrelated venue super call.",
+    "native-final-drop": "One canonical native handle destruction entrypoint closes shared resources after venue cleanup, even if source dispose has no super call. This native-only lifetime policy is never a TypeScript dispose/super claim."
   },
   "delegations": [
     {
@@ -916,6 +917,25 @@
         {
           "file": "packages/safe-cex/src/exchanges/base.ts",
           "contains": "public signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {"
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-exchange/src/native_teardown.rs",
+      "finding": "native_final_drop bypasses dynamic hook dispose through base",
+      "kind": "native-final-drop",
+      "evidence": [
+        {
+          "file": "sdk-rs/safe-cex-exchange/src/native_teardown.rs",
+          "contains": "pub fn native_final_drop("
+        },
+        {
+          "file": "sdk-rs/parity/PUBLIC_ASYNC_WRAPPER_CENSUS.md",
+          "contains": "native_final_drop"
+        },
+        {
+          "file": "sdk-rs/safe-cex-exchange/tests/native_final_drop.rs",
+          "contains": "fn native_final_drop_completes_after_both_venue_and_store_errors()"
         }
       ]
     }

@@ -5,10 +5,10 @@ rust_files = [ "safe-cex-venue-woo/src/v3_private.rs", "safe-cex-venue-woo/src/v
 [[symbol]]
 ts = "WooV3AccountMode"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_private.rs::WooV3AccountMode"
-status = "ported"
-note = "Exact MARGIN/SPOT string union, asserted as both decoded native variants. Native target: safe-cex-venue-woo/src/v3_private.rs::WooV3AccountMode."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 account-read scaffold has no production TS caller or native runtime registration. Its unused Rust account decoder/balance mapper, DTOs, private enum/helper and exact facade tail are removed. Constructed native/source registration probes plus the actual signed legacy validateAccount/fetchBalance path verify the boundary; all-target compiler checking verifies no Rust caller is lost. The remaining V3 asset/futures/metadata cases stay intact. See FIX_AUDIT_LEDGER.md rows 8 and 52; no V3 read route is enabled."
 
 [[symbol]]
 ts = "WooV3AccountPositionMode"
@@ -93,10 +93,10 @@ note = "CHOSEN: owned public f64 metadata retains number bits and required camel
 [[symbol]]
 ts = "WooV3AccountInfo"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_private.rs::WooV3AccountInfo"
-status = "divergent"
-note = "CHOSEN: complete owned account record keeps all 21 declaration fields and Main/Sub decode literals; public account_type String construction is wider than the source literal union, and Readonly becomes native ownership. Native target: safe-cex-venue-woo/src/v3_private.rs::WooV3AccountInfo."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 account-read scaffold has no production TS caller or native runtime registration. Its unused Rust account decoder/balance mapper, DTOs, private enum/helper and exact facade tail are removed. Constructed native/source registration probes plus the actual signed legacy validateAccount/fetchBalance path verify the boundary; all-target compiler checking verifies no Rust caller is lost. The remaining V3 asset/futures/metadata cases stay intact. See FIX_AUDIT_LEDGER.md rows 8 and 52; no V3 read route is enabled."
 
 [[symbol]]
 ts = "WooV3AssetBalance"
@@ -389,18 +389,18 @@ note = "CHOSEN: maker then nullable-PnL validation retain source precedence befo
 [[symbol]]
 ts = "decodeWooV3AccountInfo"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_private.rs::decode_woo_v3_account_info"
-status = "divergent"
-note = "CHOSEN: complete ordered account decoder returns an owned 21-field snapshot after envelope checks; source frozen object/exception identity is replaced by native ownership/Result. Native target: safe-cex-venue-woo/src/v3_private.rs::decode_woo_v3_account_info."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 account-read scaffold has no production TS caller or native runtime registration. Its unused Rust account decoder/balance mapper, DTOs, private enum/helper and exact facade tail are removed. Constructed native/source registration probes plus the actual signed legacy validateAccount/fetchBalance path verify the boundary; all-target compiler checking verifies no Rust caller is lost. The remaining V3 asset/futures/metadata cases stay intact. See FIX_AUDIT_LEDGER.md rows 8 and 52; no V3 read route is enabled."
 
 [[symbol]]
 ts = "mapWooV3AccountBalance"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_private.rs::map_woo_v3_account_balance", "safe-cex-venue-woo/src/v3_private.rs::WooV3AccountBalance" ]
-status = "divergent"
-note = "CHOSEN: account-mode/uPnL/decimal/free-collateral checks and IEEE subtraction retain native free/used/total/uPnL; typed owned info replaces the source Balance.info alias, in an operation-only balance output. Native target: safe-cex-venue-woo/src/v3_private.rs::map_woo_v3_account_balance. Supporting native target: safe-cex-venue-woo/src/v3_private.rs::WooV3AccountBalance."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 account-read scaffold has no production TS caller or native runtime registration. Its unused Rust account decoder/balance mapper, DTOs, private enum/helper and exact facade tail are removed. Constructed native/source registration probes plus the actual signed legacy validateAccount/fetchBalance path verify the boundary; all-target compiler checking verifies no Rust caller is lost. The remaining V3 asset/futures/metadata cases stay intact. See FIX_AUDIT_LEDGER.md rows 8 and 52; no V3 read route is enabled."
 
 [[symbol]]
 ts = "decodeWooV3AssetBalances"

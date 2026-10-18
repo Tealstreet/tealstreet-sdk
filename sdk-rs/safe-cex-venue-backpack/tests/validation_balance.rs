@@ -248,7 +248,10 @@ fn actual_typescript_fetch_balance() {
         );
         assert_eq!(trace.borrow().as_slice(), case["trace"].as_array().unwrap());
     }
-    assert!(js_from_str::<String>(c["balanceBoundary"]["raw"].as_str().unwrap()).is_err());
+    let raw = c["balanceBoundary"]["raw"].as_str().unwrap();
+    let native = js_from_str::<String>(raw).unwrap();
+    assert_eq!(native, "2\u{fffd}");
+    typed_utf16::assert_projection(raw, &native);
     assert_eq!(c["balanceBoundary"]["total"], bits(2.0));
 }
 fn validation_inputs() -> Vec<J> {
@@ -768,3 +771,6 @@ fn actual_typescript_serial_cancellation_waits() {
         assert_eq!(trace.borrow().as_slice(), case["after"].as_array().unwrap());
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

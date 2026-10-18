@@ -129,8 +129,8 @@ pub trait WsProtocol {
     ) -> Result<(), ExchangeError> {
         Err(ExchangeError::new("Not implemented"))
     }
-    /// The socket's `error` event, after the base error handling; TS fires venue
-    /// error listeners whether or not the parent is disposed.
+    /// Later error listeners run only when grouped dispatch ignores the base
+    /// listener's stopImmediatePropagation, including after disposal.
     fn on_error(&self, _socket: &BaseWebSocket, _message: &str) -> Result<(), ExchangeError> {
         Ok(())
     }
@@ -1679,7 +1679,12 @@ impl BaseWebSocket {
             self.parent
                 .log(&format!("WebSocket error: {logged}"), LogSeverity::Error)?;
         }
-        self.protocol.on_error(self, message)
+        // createWebsocket registers the stopping base listener before venue listeners.
+        if self.grouped_listener_dispatch() {
+            self.protocol.on_error(self, message)
+        } else {
+            Ok(())
+        }
     }
     pub fn send(self: &Rc<Self>, message: &str) -> Result<(), ExchangeError> {
         if self.is_disposed() {
@@ -3964,6 +3969,32 @@ mod tests {
         match future.as_mut().poll(&mut cx) {
             Poll::Ready(result) => result,
             Poll::Pending => panic!("future unexpectedly pending"),
+        }
+    }
+
+    #[test]
+    fn error_prefix_respects_dispatch_mode_even_after_disposal() {
+        struct ErrorListener(Cell<usize>);
+        impl WsProtocol for ErrorListener {
+            fn on_error(&self, _: &BaseWebSocket, _: &str) -> Result<(), ExchangeError> {
+                self.0.set(self.0.get() + 1);
+                Ok(())
+            }
+        }
+        for grouped in [false, true] {
+            for disposed in [false, true] {
+                let (_, parent, runtime, _) = fixture();
+                let listener = Rc::new(ErrorListener(Cell::new(0)));
+                let socket = BaseWebSocket::new(1, parent.clone(), runtime, listener.clone());
+                socket.grouped_listener_dispatch.set(grouped);
+                parent.disposed.set(disposed);
+                if disposed {
+                    socket.dispose();
+                }
+                socket.handle_web_socket_error("transport failed").unwrap();
+                assert_eq!(listener.0.get(), usize::from(grouped));
+                assert_eq!(parent.logs.borrow().len(), usize::from(!disposed));
+            }
         }
     }
 

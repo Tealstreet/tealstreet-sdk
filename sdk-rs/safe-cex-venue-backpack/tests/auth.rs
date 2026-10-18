@@ -234,12 +234,12 @@ fn actual_typescript_request_signing_and_headers() {
         "actual TypeScript clock stays single after await"
     );
     for key in ["instructionRaw", "keyRaw"] {
-        assert!(
-            safe_cex_num::numeric_ingress::js_from_str::<String>(
-                corpus["boundary"][key].as_str().unwrap()
-            )
-            .is_err(),
-            "shared UTF8 auth refusal {key}"
+        typed_utf16::assert_projection(
+            corpus["boundary"][key].as_str().unwrap(),
+            &(safe_cex_num::numeric_ingress::js_from_str::<String>(
+                corpus["boundary"][key].as_str().unwrap(),
+            ))
+            .expect("typed surrogate record is retained"),
         );
     }
     assert_eq!(
@@ -269,3 +269,6 @@ fn actual_typescript_request_signing_and_headers() {
         corpus["headers"].as_array().unwrap().len()
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

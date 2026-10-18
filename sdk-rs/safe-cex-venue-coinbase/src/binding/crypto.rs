@@ -44,7 +44,27 @@ impl CdpSigningHost for CryptoHost {
     fn prepare_pkcs8(&self, secret: &str) -> Result<Vec<u8>, PortfolioFailure> {
         crate::utils::pem_to_pkcs8_der_with(secret, |encoded| {
             safe_cex_transport::codec::decode_base64(encoded).map_err(|original| {
-                let mut error = ExchangeError::new(original.to_string());
+                // Match the maintained atob diagnostics without losing the
+                // native codec cause. A valid alphabet with one leftover byte
+                // has a different failure from invalid alphabet or padding.
+                let unpadded = if encoded.len().is_multiple_of(4) {
+                    encoded
+                        .strip_suffix("==")
+                        .or_else(|| encoded.strip_suffix('='))
+                        .unwrap_or(encoded)
+                } else {
+                    encoded
+                };
+                let message = if unpadded.len() % 4 == 1
+                    && unpadded
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
+                {
+                    "The string to be decoded is not correctly encoded."
+                } else {
+                    "Invalid character"
+                };
+                let mut error = ExchangeError::new(message);
                 error.name = "InvalidCharacterError".into();
                 error.origin = Some(ExchangeErrorOrigin::new(original));
                 failure(error)
@@ -325,6 +345,7 @@ mod tests {
         let failure = host.prepare_pkcs8("!").unwrap_err();
         let native = super::super::error::exchange_error(&failure);
         assert_eq!(native.name, "InvalidCharacterError");
+        assert_eq!(native.message, "Invalid character");
         assert!(
             native.origin.is_some(),
             "original codec failure remains the error origin"

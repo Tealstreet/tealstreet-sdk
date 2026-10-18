@@ -165,16 +165,10 @@ fn error_guards_and_account_validators_native_before_source() {
         retained_input_observations::text_at(r#""\ud800""#, &[]),
         vec![0xd800]
     );
-    let lone = lone.decode::<String>().unwrap_err();
-    assert!(
-        lone.to_string()
-            .contains("invalid utf-16: lone surrogate found"),
-        "WOO-GUARD native typed String projection refusal"
-    );
-    assert!(
-        js_from_str::<String>(r#""\ud800""#).is_err(),
-        "WOO-GUARD native returned string cannot materialize"
-    );
+    assert_eq!(lone.decode::<String>().unwrap(), "\u{fffd}");
+    let typed = js_from_str::<String>(r#""\ud800""#).unwrap();
+    assert_eq!(typed, "\u{fffd}");
+    typed_utf16::assert_projection(r#""\ud800""#, &typed);
     let lone_key = js_from_str::<JsNumberInput>(r#"{"\ud800":1}"#).unwrap();
     let safe_cex_types::retained_json::RetainedJsonInput::Object(fields) =
         retained_input_observations::capture(r#"{"\ud800":1}"#)
@@ -183,17 +177,13 @@ fn error_guards_and_account_validators_native_before_source() {
     };
     assert_eq!(fields.len(), 1);
     assert_eq!(fields[0].0, vec![0xd800]);
-    let lone_key = lone_key.decode::<JsObjectMap<JsNumberInput>>().unwrap_err();
-    assert!(
-        lone_key
-            .to_string()
-            .contains("invalid utf-16: lone surrogate found"),
-        "WOO-GUARD native typed key projection refusal"
-    );
-    assert!(
-        js_from_str::<JsObjectMap<JsNumberInput>>(r#"{"\ud800":1}"#).is_err(),
-        "WOO-GUARD native exact-keys input cannot materialize"
-    );
+    let typed = lone_key.decode::<JsObjectMap<JsNumberInput>>().unwrap();
+    assert_eq!(typed.len(), 1);
+    assert!(typed.get("\u{fffd}").is_some());
+    let typed = js_from_str::<JsObjectMap<JsNumberInput>>(r#"{"\ud800":1}"#).unwrap();
+    assert_eq!(typed.len(), 1);
+    assert!(typed.get("\u{fffd}").is_some());
+    typed_utf16::assert_projection(r#"{"\ud800":1}"#, &typed);
     let ascii = js_from_str::<JsNumberInput>(r#""\\ud800""#).unwrap();
     assert_eq!(require_string(Some(&ascii), "guard").unwrap(), r"\ud800");
     assert_eq!(
@@ -1096,3 +1086,6 @@ fn native_mutation_acceptance_and_response_order() {
         );
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

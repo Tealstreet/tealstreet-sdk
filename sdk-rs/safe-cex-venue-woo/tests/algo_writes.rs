@@ -195,18 +195,24 @@ fn native_algo_declarations_before_source() {
     );
     for value in [&stop, &trailing, &positional] {
         let raw = value.to_string().replace("decl-19", r"\ud800");
-        assert!(
-            js_from_str::<WooV3AlgoPlaceInput>(&raw).is_err(),
-            "WOO-ALGO-DECL native whole input union refusal"
-        );
+        typed_utf16::assert_projection(&raw, &js_from_str::<WooV3AlgoPlaceInput>(&raw).unwrap());
         if value["family"] == "STOP_MARKET" {
-            assert!(js_from_str::<WooV3StopMarketPlaceInput>(&raw).is_err());
+            typed_utf16::assert_projection(
+                &raw,
+                &js_from_str::<WooV3StopMarketPlaceInput>(&raw).unwrap(),
+            );
         }
         if value["family"] == "TRAILING_STOP" {
-            assert!(js_from_str::<WooV3TrailingPlaceInput>(&raw).is_err());
+            typed_utf16::assert_projection(
+                &raw,
+                &js_from_str::<WooV3TrailingPlaceInput>(&raw).unwrap(),
+            );
         }
         if value["family"] == "POSITIONAL_TP_SL" {
-            assert!(js_from_str::<WooV3PositionalPlaceInput>(&raw).is_err());
+            typed_utf16::assert_projection(
+                &raw,
+                &js_from_str::<WooV3PositionalPlaceInput>(&raw).unwrap(),
+            );
         }
         let retained: JsObjectMap<JsNumberInput> = js_from_str(&raw).unwrap();
         let tag = retained["algoOrderTag"]
@@ -219,18 +225,13 @@ fn native_algo_declarations_before_source() {
             "WOO-ALGO-DECL native retained tag"
         );
     }
-    assert!(
-        js_from_str::<WooV3PositionalTriggerInput>(
-            r#"{"triggerPrice":"\ud800","triggerPriceType":"MARKET_PRICE"}"#
-        )
-        .is_err()
+    let raw = r#"{"triggerPrice":"\ud800","triggerPriceType":"MARKET_PRICE"}"#;
+    typed_utf16::assert_projection(
+        raw,
+        &js_from_str::<WooV3PositionalTriggerInput>(raw).unwrap(),
     );
-    assert!(
-        js_from_str::<WooV3AlgoPlaceResponseRow>(
-            r#"{"algoOrderId":71,"clientAlgoOrderId":83,"algoType":"STOP","quantity":"\ud800"}"#
-        )
-        .is_err()
-    );
+    let raw = r#"{"algoOrderId":71,"clientAlgoOrderId":83,"algoType":"STOP","quantity":"\ud800"}"#;
+    typed_utf16::assert_projection(raw, &js_from_str::<WooV3AlgoPlaceResponseRow>(raw).unwrap());
     for expected in ["\u{10000}", r"\ud800"] {
         let mut value = trigger.clone();
         value["triggerPrice"] = json!(expected);
@@ -2446,3 +2447,6 @@ fn native_declarations() {
     assert_eq!(p.symbol_pending_cancel, e["symbolPendingCancel"]);
     assert_eq!(p.cancel_response_identity, e["cancelResponseIdentity"]);
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
