@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
@@ -63,10 +65,10 @@ async function opening(t, options = {}, sign) {
   started.catch(() => {});
   await within(connected, 2000, 'real native gateway connection did not open');
   await delay(30);
-  return { id, call, started, events, stores, release() {
+  return { id, call, started, events, stores, release(channels = ['market', 'tickers']) {
     for (const socket of sockets) {
       for (const [channel, data] of [['market', market], ['tickers', ticker]]) {
-        socket.write(textFrame({ type: 'data', exchangeId: 'binance', channel, data: [data] }));
+        if (channels.includes(channel)) socket.write(textFrame({ type: 'data', exchangeId: 'binance', channel, data: [data] }));
       }
     }
   } };
@@ -109,6 +111,8 @@ test('startup errors resolve false and post the worker startup error context', {
 
 test('the actual 30-second startup deadline logs visibly and resolves false', { timeout: 35000 }, async t => {
   const h = await opening(t);
+  h.release(['market']);
+  await delay(350);
   assert.equal(await within(h.started, 32000, 'startup deadline did not settle'), false);
   await delay(30);
   const event = h.events.find(event => event.event === 'error' && event.data?.[0] === 'Error starting exchange: binance: Exchange start timed out after 30s');
@@ -117,4 +121,14 @@ test('the actual 30-second startup deadline logs visibly and resolves false', { 
   assert.equal(event.data[1].sentryData.tags.worker_error_phase, 'startup');
   assert.equal(event.data[1].sendToSentry, true);
   assert.equal(event.data[1].suppressConsoleLog, false);
+  const fullPosts = () => h.stores.filter(store => Object.hasOwn(store, 'orders') && Object.hasOwn(store, 'positions')).length;
+  const count = fullPosts();
+  h.release();
+  await delay(350);
+  assert.equal(fullPosts(), count, 'timed-out startup must not force a late full Store snapshot');
+});
+
+test('cancelled native startup writes the suppression warning', { timeout: 10000 }, async () => {
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, ['--test', '--test-name-pattern=^(dispose|close) settles', new URL(import.meta.url).pathname]);
+  assert.match(stdout + stderr, /Error starting exchange \(disposed, suppressing\): binance/);
 });

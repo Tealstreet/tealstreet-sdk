@@ -83,7 +83,7 @@ impl NativeStartup {
         }
         Ok(())
     }
-    fn report_error(&self, error: &Value) -> Result<(), ExchangeError> {
+    fn report_error(&self, account: &NativeAccount, error: &Value) -> Result<(), ExchangeError> {
         let detail = error.get("message").and_then(Value::as_str).unwrap_or("");
         let suffix = if detail.is_empty() {
             String::new()
@@ -94,8 +94,7 @@ impl NativeStartup {
         worker_logging::forward_error(
             &self.cooldowns,
             (
-                serde_json::from_value(json!(self.name))
-                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+                account.exchange_name(),
                 self.account.as_deref().unwrap_or(""),
             ),
             &message,
@@ -132,8 +131,7 @@ impl NativeStartup {
                 return Ok(JsData(NativeValue::Bool(false)));
             }
             worker_logging::forward_log(
-                serde_json::from_value(json!(self.name))
-                    .map_err(|error| json!({"name":"Error","message":error.to_string()}))?,
+                account.exchange_name(),
                 self.account.as_deref().unwrap_or(""),
                 WorkerLogLevel::Info,
                 &format!("Starting exchange in webworker: {}", self.name),
@@ -141,11 +139,27 @@ impl NativeStartup {
                 |payload| self.post(payload),
             )
             .map_err(|error| json!({"name":error.name,"message":error.message}))?;
-            let mut timeout = pin!(tokio::time::sleep(Duration::from_secs(30)));
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
             let (finished, result) = oneshot::channel();
+            let finished = Rc::new(RefCell::new(Some(finished)));
+            let completed = finished.clone();
+            let starting_account = account.clone();
             // Promise.race leaves the started venue operation running after a lost race.
             tokio::task::spawn_local(async move {
-                let _ = finished.send(native_account_call(account, "start".into(), vec![]).await);
+                let result = native_account_call(starting_account, "start".into(), vec![]).await;
+                if let Some(finished) = completed.borrow_mut().take() {
+                    let _ = finished.send(result);
+                }
+            });
+            let timed_out_account = account.clone();
+            let timeout = tokio::task::spawn_local(async move {
+                tokio::time::sleep_until(deadline).await;
+                if let Some(finished) = finished.borrow_mut().take() {
+                    timed_out_account.cancel_startup();
+                    let _ = finished.send(Err(
+                        json!({"name":"Error","message":"Exchange start timed out after 30s"}),
+                    ));
+                }
             });
             let mut result = pin!(result);
             let outcome = {
@@ -153,11 +167,6 @@ impl NativeStartup {
                 poll_fn(|context| {
                     if changed.as_mut().poll(context).is_ready() {
                         return Poll::Ready(Ok(NativeValue::Bool(false)));
-                    }
-                    if timeout.as_mut().poll(context).is_ready() {
-                        return Poll::Ready(Err(
-                            json!({"name":"Error","message":"Exchange start timed out after 30s"}),
-                        ));
                     }
                     match result.as_mut().poll(context) {
                         Poll::Ready(Ok(result)) => Poll::Ready(result),
@@ -169,19 +178,22 @@ impl NativeStartup {
                 })
                 .await
             };
+            timeout.abort();
             if token != *generation.borrow() {
-                if let Err(error) = &outcome {
-                    eprintln!(
-                        "Error starting exchange (disposed, suppressing): {} {error}",
-                        self.name
-                    );
-                }
+                eprintln!(
+                    "Error starting exchange (disposed, suppressing): {}{}",
+                    self.name,
+                    outcome
+                        .as_ref()
+                        .err()
+                        .map_or(String::new(), |error| format!(" {error}"))
+                );
                 return Ok(JsData(NativeValue::Bool(false)));
             }
             match outcome {
                 Ok(result) => Ok(JsData(result)),
                 Err(error) => {
-                    self.report_error(&error)
+                    self.report_error(&account, &error)
                         .map_err(|error| json!({"name":error.name,"message":error.message}))?;
                     Ok(JsData(NativeValue::Bool(false)))
                 }

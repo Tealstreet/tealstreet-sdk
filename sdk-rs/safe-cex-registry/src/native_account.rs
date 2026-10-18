@@ -75,6 +75,9 @@ struct NativeStream {
     cleanup: Option<ListenerCleanup>,
 }
 impl NativeAccount {
+    pub fn exchange_name(&self) -> ExchangeName {
+        self.exchange.base().name.clone()
+    }
     /// Invalidate startup delivery before an asynchronous host disposal is polled.
     pub fn cancel_startup(&self) {
         self.startup_token
