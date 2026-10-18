@@ -241,8 +241,14 @@ pub fn send(case: &str, f: impl Fn(&Rt, &str, Js) -> Result<(), Thrown>) -> Valu
 pub fn timer(case: &str, f: impl Fn(&Rt, &'static str, f64, bool) -> Result<Js, Thrown>) -> Value {
     let (h, rt) = make(true);
     let receiver = Js::object(vec![
-        ("isDisposed", Js::Bool(case == "disposed")),
-        ("isForceClosed", Js::Bool(case == "closed")),
+        (
+            "isDisposed",
+            Js::Bool(case == "disposed" || case == "unguarded"),
+        ),
+        (
+            "isForceClosed",
+            Js::Bool(case == "closed" || case == "unguarded"),
+        ),
     ]);
     let rt = rt.with_this(receiver.clone());
     let calls = Rc::new(Cell::new(0));
