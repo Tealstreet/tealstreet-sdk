@@ -5,14 +5,23 @@ assignment index. They do not classify the rest of this venue.
 
 | Owner | Ruling | Production observation |
 | --- | --- | --- |
-| `pemToPkcs8Der` | FIX at signing assembly; ACCEPT the unused unit-error facade | The actual CryptoHost calls the shared PEM algorithm with a decoder retaining its native cause, but exposed the codec's diagnostic instead of the maintained `atob` diagnostic. Both constructed Advanced and Spot WS authentication and REST placement expose that message. Keep the native cause and `InvalidCharacterError` name; preserve the two source message branches. The metadata-free standalone facade is not used by production signing. |
+| `pemToPkcs8Der` | FIX at signing assembly; ACCEPT the unused unit-error facade | The actual CryptoHost calls the shared PEM algorithm with a decoder retaining its native cause, but exposed the codec's diagnostic instead of the maintained `atob` diagnostic. Both constructed Advanced and Spot WS authentication expose that raw message; REST placement passes it through the shared factory enhancer. Keep the native cause and `InvalidCharacterError` name; preserve the two source message branches. The metadata-free standalone facade is not used by production signing. |
 | `buildCoinbaseStarbasePlaceOrder` | ACCEPT, inactive typed builder | Current source and native production placement use legacy REST. The fixed production selector disables activation and selects legacy writes. The separate inert TS builder preserves arbitrary caller own fields/order; the Rust blocked gate borrows the exact typed caller, including numeric bits, but its typed serialization cannot include caller-only fields. There is no live HTTP, socket or Store consumer of this builder. This ruling does not authorize those losses on a future activated Starbase path. |
 
 `tests/exchange_binding.rs` adds independent named production witnesses without
 changing any existing source corpus or identity assertion. The separate
 `scripts/divergence-binding.cjs` executes the actual maintained credential and
 signing functions, including real `atob` and the ES256 selection, for eleven
-explicit malformed PEM payloads. It also executes the actual inert Starbase
+explicit malformed PEM payloads. For each payload and both venue names, the same
+oracle also executes maintained `createAPI`, `safeCexAxiosCreate` and
+`enhanceAxiosError` with installed Axios request/response interceptors. Signing
+rejects before the terminal adapter, initially retains `InvalidCharacterError`, and adds
+`[coinbase]` or `[coinbasespot] Request setup error:` to the REST message. Direct
+WS signing bypasses that factory and keeps the original unprefixed message.
+The oracle executes the maintained `placeOrder` catch too: it emits the enhanced
+message and throws a new `Error` with that message, matching the native facade.
+This is a fixture correction for the factory behavior, not a production exception.
+It also executes the actual inert Starbase
 builder, asserts source caller identity/key order, and checks the real source
 placement member still posts to the legacy endpoint.
 

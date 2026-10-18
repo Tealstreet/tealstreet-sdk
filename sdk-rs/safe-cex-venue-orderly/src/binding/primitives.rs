@@ -5,7 +5,7 @@ use super::{
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_typed};
 use safe_cex_transport::query::{QueryArrayFormat, QueryKeyOrder, QueryProfile, render_query};
 use safe_cex_types::{QueryValue, object_map::JsObjectMap};
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 pub(super) fn table<T: serde::Serialize>(entries: &[(&str, T)], key: &Js, inverse: bool) -> R<V> {
     let result = Js::object(vec![]);
     for (name, value) in entries {
@@ -25,12 +25,15 @@ pub(super) fn deep_clone(value: &Js) -> R<Js> {
         }
         match value {
             Js::Array(items) => {
-                let target = Js::Array(Rc::new(RefCell::new(vec![])));
+                let target = Js::array(vec![]);
+                target.set("length", Js::Number(items.len() as f64))?;
                 seen.push((value.clone(), target.clone()));
-                if let Js::Array(out) = &target {
-                    for item in items.borrow().iter() {
-                        out.borrow_mut()
-                            .push(item.as_ref().map(|item| copy(item, seen)).transpose()?);
+                for index in 0..items.len() {
+                    if value.has_index(index) {
+                        target.define(
+                            &index.to_string(),
+                            copy(&value.get(&index.to_string())?, seen)?,
+                        )?;
                     }
                 }
                 Ok(target)
@@ -60,7 +63,7 @@ fn query_value(value: &Js) -> R<QueryValue> {
         Js::String(_) => QueryValue::String(text(value)?),
         Js::Array(_) => QueryValue::Array(
             value
-                .array_values()
+                .array_values()?
                 .unwrap()
                 .iter()
                 .map(query_value)

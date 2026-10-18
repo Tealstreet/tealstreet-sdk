@@ -1031,7 +1031,12 @@ mod js_sockets {
             panic!("Blob.arrayBuffer returns a Promise")
         };
         let buffer = buffer.result().unwrap().unwrap();
-        let bytes = buffer.get("bytes").unwrap().array_values().unwrap();
+        let bytes = buffer
+            .get("bytes")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(
             bytes
                 .iter()
@@ -1043,6 +1048,7 @@ mod js_sockets {
         let Js::Promise(text) = received[0].call_method("text", vec![]).unwrap() else {
             panic!("Blob.text returns a Promise")
         };
+        assert_eq!(bytes.len(), 4);
         assert_eq!(
             text.result().unwrap().unwrap().to_display(),
             "\0��A",
@@ -1528,8 +1534,9 @@ fn native_failed_upgrade_delivers_error_then_close_without_open() {
         });
         let runtime = native_runtime();
         let socket = runtime.dial(url, vec![], Default::default(), false).await.unwrap();
-        assert_eq!(socket.ready_state(), 3);
+        assert_eq!(socket.ready_state(), 0);
         assert!(matches!(socket.next_event().await.unwrap(), WsEvent::Error(message) if message.contains("400")));
+        assert_eq!(socket.ready_state(), 3);
         assert!(matches!(socket.next_event().await.unwrap(), WsEvent::Close { code: Some(1006), reason } if reason.is_empty()));
         assert!(socket.next_event().as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
         let error = match runtime.dial("invalid".into(), vec![], Default::default(), false).await {

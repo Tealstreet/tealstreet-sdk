@@ -548,6 +548,18 @@
     ]
   },
   {
+    "file": "safe-cex-exchange/src/js_runtime/client/factory.rs",
+    "function": "install_outcome_interceptor",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "name",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-exchange/src/js_runtime/promise.rs",
     "function": "spawn",
     "edges": [

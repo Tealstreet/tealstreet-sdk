@@ -673,6 +673,13 @@ and retained-error assertions. `scripts/factory-retry-condition-control.py`
 inverts the production instruments-info exclusion, requires a compiled attempt
 count failure and restores exact source bytes before requiring a passing run.
 
+The original-method retry guard is an approved safety residual. A rewritten
+network-error config must not replay create/cancel/amend POST bodies; the source
+retries those endpoints as signed GETs with the old body retained. The nine
+native factory profiles and six maintained Axios rewrite/control profiles in
+`api_factory` pin this distinction. The mutation script also removes this guard
+and requires the named replay-count refusal before exact restoration.
+
 The Exchange candle-read override reaches the concrete receiver for all four bound
 families. `binding/members/ohlcv.rs` preserves primary validation/errors and the
 dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
@@ -962,3 +969,8 @@ Protective-side inference preserves the get-key primitive TypeError without
 embedding the class name in its message. The 242-case maintained-source test
 checks both the constructed native receiver and the typed helper; primitive
 diagnostics are compared directly rather than normalized to a custom string.
+
+The SDK invoke/invoke_unit and get_account wrappers call their installed member
+before returning a waiter and await the same canonical Promise. Preserve this
+boundary when changing the typed facade; do not add a second Promise driver.
+DIVERGENCE_FIX_AUDIT.md records the seven audited rows and the remaining 30.

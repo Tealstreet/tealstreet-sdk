@@ -52,7 +52,7 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
         },
         sort: |_, array, mut compare| {
             let mut values = array
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("value.sort is not a function"))?;
             // Timestamp normalizers return finite numbers; stable ties retain source order.
             for index in 1..values.len() {
@@ -62,8 +62,8 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
                     i -= 1;
                 }
             }
-            if let Js::Array(items) = &array {
-                *items.borrow_mut() = values.into_iter().map(Some).collect();
+            for (index, value) in values.into_iter().enumerate() {
+                array.set(&index.to_string(), value)?;
             }
             Ok(array)
         },
@@ -204,7 +204,7 @@ pub(super) fn account_runtime() -> a::WeexAccountReadRuntime<Host, Js, Thrown> {
             push.call(
                 Js::Undefined,
                 values
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?,
             )?;
             Ok(())

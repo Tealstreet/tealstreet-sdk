@@ -917,11 +917,14 @@ actual-source scheduling and returned-array witnesses.
 
 ## Shared income range paging
 
-`income_paging::paginate_income_range` owns no executor or transport. Its awaited
-fetch callback returns the shared typed ledger; its awaited delay operation
-receives the original f64, leaving host timer conversion explicit. Only fetch
-failures are caught: the branch becomes incomplete, while delay failures escape.
-Caller drop cancels its owned pending callback future.
+`income_paging::paginate_income_range` requires its owning runtime and owned
+fetch/delay callbacks. Canonical start_eager starts the first fetch at invocation
+and retains the walk after waiter drop; each fetch and delay uses the same
+Promise await boundary. The delay receives the original f64, leaving host timer
+conversion explicit. Fetch failures mark the branch incomplete; delay failures
+escape with their original metadata. tests/income_paging compares the maintained
+source with NativeRuntime after dropping an unpolled waiter, and retains the
+existing request, deduplication, output-bit and delay-error corpus.
 
 The pending-window stack is LIFO. Direction reads use the original global range,
 not the current subwindow; page length includes unusable rows. Identity retains
@@ -929,8 +932,10 @@ both PnL and commission from the same bill, keeps the first duplicate, and stabl
 newest-first sorting preserves insertion order on timestamp ties. No termination
 guard repairs source floating-point nonprogress for non-advancing chunks.
 
-Typed `IncomeRecord` excludes nullish/coercible/open source records and UTF-16
-lone surrogates. Returned records and options are owned rather than live aliases.
+Typed `IncomeRecord` excludes nullish/coercible/open source records. The canonical
+native String decoder replaces isolated UTF-16 units at the approved typed
+boundary; direct Serde JSON input remains a separate decoder. Returned records
+and options are owned rather than live aliases.
 These are declared choices, not source-equivalence claims for arbitrary objects.
 The six existing income-paging manifest rows own the shared implementation;
 binance, bitget, kraken and weex each have one separate wrapper call to adopt.
@@ -1115,8 +1120,9 @@ in ECMA-262. New fields default to undefined/false; omitted fields on an existin
 property retain their value. Read-only writes reject, non-enumerable fields stay
 out of keys/spread/JSON, and non-configurable fields survive deletion and reject
 incompatible redefinition (SameValue preserves NaN and the sign of zero).
-Arrays and accessor descriptors explicitly refuse until a source caller requires
-that representation. Existing host define_accessor remains the host accessor seam.
+Array and accessor descriptors share this checked property machinery; arrays now
+retain sparse indexed/named slots and a virtual length in one ArrayData owner.
+Existing host define_accessor remains the fallible host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
 redefinition matrix; the native error test covers Polymarket's enhanced message.
 
@@ -1366,6 +1372,13 @@ units, puts undefined before holes and rejects a present non-callable comparator
 The native-host `js_sort` target checks the compiled master panic and error count,
 plus Node ordering across merge boundaries. Ordering under an inconsistent
 comparator remains implementation-dependent under ECMAScript.
+
+Journal interval reconstruction reuses that sorter for both fills and reconstructed
+intervals. Equal timestamps with missing IDs and NaN close times need not define
+a total order. The journal target compares all position fields with maintained
+TS across 128 finite mixed-ID and 128 nonfinite-close profiles, alongside its
+192 existing interval/funding profiles. The old fill sort panics on the finite
+profiles; a separate reversed-result-order control checks the final sort.
 
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
@@ -1857,7 +1870,8 @@ Native functions store name/length as ordinary nonenumerable configurable,
 readonly descriptors; redefining/deleting them uses the common property code.
 Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
 this does not widen the public intrinsic descriptor-reflection surface.
-Array descriptor/prototype migration remains the separate single-storage step.
+Array descriptors, virtual length and prototype links now use the same canonical
+ArrayData owner; hidden own indices suppress inherited names without reading values.
 
 ## ccxt compatibility imports
 
@@ -1921,9 +1935,16 @@ eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
 `js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
-and the Vec<Market> info boundary. Its optional recorded-payload probe measures
-parse and typed decode separately; `tests/large_payload_source.mjs` captures
+and the Vec<Market> info boundary. `tests/large_payload_source.mjs` captures
 maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Use `cargo run --release -p safe-cex-exchange --features native --example
+large_payload_decode` with LARGE_PAYLOAD_MANIFEST and LARGE_PAYLOAD_OUTPUT to
+measure the same recorded probe with the production allocator. The test binary
+has a counting allocator and must not supply production CPU ratios. Report CPU
+medians and spread from at least three interleaved control/candidate runs;
+input restoration and complete output observations stay outside timed phases.
+The bootstrap parse/decode budget is 250 ms process CPU per recorded venue;
+TS ratios remain diagnostic. Per-frame WebSocket timing is a separate budget.
 Native observation files encode UTF-16, own undefined and f64 bits explicitly so
 before/after byte comparisons do not hide lossy JSON projections.
 

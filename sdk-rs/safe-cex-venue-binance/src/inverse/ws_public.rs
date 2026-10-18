@@ -209,7 +209,7 @@ fn on_message(rt: &Rt, data: Js) -> Result<(), Thrown> {
     rt.call_path("trackLastReceived", vec![])?;
     let handlers = Handlers::default();
     for (key, value) in rt.this.get("messageHandlers")?.own_entries()? {
-        let handler = if let Some(callbacks) = value.array_values() {
+        let handler = if let Some(callbacks) = value.array_values()? {
             let callbacks = callbacks
                 .into_iter()
                 .map(|callback| {

@@ -5,7 +5,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_types::IncomeRecord;
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, rc::Rc};
 type F<'a, V, E> = Pin<Box<dyn Future<Output = Result<V, E>> + 'a>>;
 type Mapper<'a, V, E> = Box<dyn FnMut(V) -> Result<V, E> + 'a>;
 pub struct WeexIncomeRuntime<H, V, E> {
@@ -123,24 +123,37 @@ pub fn fetch_income_history<'a, H, V: Clone + 'a, E: 'a>(
         (r.map)(h, &rows, Box::new(move |row| (r.normalize)(h, row)))
     }))
 }
-pub fn fetch_income_history_range<'a, H, V: Clone + 'a>(
-    h: &'a H,
-    r: &'a WeexIncomeRangeRuntime<H, V>,
+pub fn fetch_income_history_range<H: 'static, V: Clone + 'static>(
+    h: Rc<H>,
+    r: &WeexIncomeRangeRuntime<H, V>,
+    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
     start: f64,
     end: f64,
     income_type: V,
-) -> ExchangeFuture<'a, Vec<IncomeRecord>> {
-    eager(Box::pin(async move {
-        let mut page = move |params: IncomePageParams| -> ExchangeFuture<'a, Vec<IncomeRecord>> {
+) -> ExchangeFuture<'static, Vec<IncomeRecord>> {
+    let WeexIncomeRangeRuntime {
+        fetch_page,
+        sleep,
+        warning_sink,
+        warning,
+        iso_date,
+    } = *r;
+    safe_cex_exchange::eager::start_eager(&runtime.clone(), async move {
+        let page_host = h.clone();
+        let page = move |params: IncomePageParams| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
             let income_type = income_type.clone();
+            let h = page_host.clone();
             eager(Box::pin(async move {
-                let records = js_await((r.fetch_page)(h, params, income_type)?).await?;
-                js_await((r.sleep)(h, 100.0)?).await?;
+                let records = js_await(fetch_page(&h, params, income_type)?).await?;
+                js_await(sleep(&h, 100.0)?).await?;
                 Ok(records)
             }))
         };
-        let mut delay =
-            |ms| (r.sleep)(h, ms).unwrap_or_else(|e| Box::pin(std::future::ready(Err(e))));
+        let delay_host = h.clone();
+        let delay = move |ms| {
+            let h = delay_host.clone();
+            Box::pin(async move { sleep(&h, ms)?.await }) as ExchangeFuture<'static, ()>
+        };
         let options = IncomeRangeOptions {
             start_time: start,
             end_time: end,
@@ -149,21 +162,19 @@ pub fn fetch_income_history_range<'a, H, V: Clone + 'a>(
             chunk_delay_ms: None,
             max_pages_per_chunk: None,
         };
-        let pager = eager(Box::pin(paginate_income_range(
-            &mut page, options, &mut delay,
-        )));
+        let pager = paginate_income_range(runtime, Box::new(page), options, Box::new(delay));
         let result = js_await(pager).await?;
         if result.truncated {
-            let sink = (r.warning_sink)(h)?;
+            let sink = warning_sink(&h)?;
             let mut message: Vec<u16> = "Income history for ".encode_utf16().collect();
-            message.extend((r.iso_date)(h, start)?);
+            message.extend(iso_date(&h, start)?);
             message.extend("..".encode_utf16());
-            message.extend((r.iso_date)(h, end)?);
+            message.extend(iso_date(&h, end)?);
             message.extend(" is INCOMPLETE — the page budget ran out on ".encode_utf16());
             message.extend(safe_cex_num::js_number_string(result.exhausted_chunks).encode_utf16());
             message.extend(" chunk(s). Any total derived from it is a lower bound.".encode_utf16());
-            (r.warning)(h, sink, message)?;
+            warning(&h, sink, message)?;
         }
         Ok(result.records)
-    }))
+    })
 }

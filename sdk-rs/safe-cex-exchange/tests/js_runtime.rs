@@ -768,7 +768,12 @@ fn operators_follow_ecmascript_and_refuse_bigint_mixing() {
 fn set_refuses_writes_it_cannot_store_instead_of_dropping_them() {
     let array = Js::array(vec![]);
     array.set("0", Js::Number(1.0)).unwrap();
-    assert!(array.set("extra", Js::Number(1.0)).is_err());
+    array.set("extra", Js::Number(-0.0)).unwrap();
+    assert_eq!(array.get("length").unwrap().as_f64(), Some(1.0));
+    assert_eq!(
+        array.get("extra").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
     assert_eq!(
         Js::str("abc")
             .set("x", Js::Number(1.0))
@@ -2247,10 +2252,16 @@ fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
         .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
         .unwrap();
     assert!(store.options().unwrap().is_hedged);
+    facade
+        .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
+        .unwrap();
     assert!(
         facade
-            .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
-            .is_err()
+            .get("options")
+            .unwrap()
+            .get("other")
+            .unwrap()
+            .strict_equals(&Js::Bool(true))
     );
 
     store.add_order(order("one", "BTC")).unwrap();
@@ -4077,7 +4088,10 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
         );
         pending.settle(Ok(marker.clone()));
         let result = settle(&runtime, returned).unwrap();
-        let values = result.array_values().unwrap();
+        let values = result
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(values.len(), 3);
         let value = |i: usize| {
             if method == "allSettled" {

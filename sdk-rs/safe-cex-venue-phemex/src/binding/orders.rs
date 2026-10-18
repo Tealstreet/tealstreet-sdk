@@ -12,7 +12,7 @@ impl CancellationHost for Host {
         Ok(rows(v)?.len())
     }
     fn input_at(&mut self, v: &Js, i: usize) -> Result<Option<Js>, Thrown> {
-        Ok(v.array_items()
+        Ok(v.array_items()?
             .ok_or_else(|| Thrown::type_error("orders.map is not a function"))?
             .get(i)
             .cloned()

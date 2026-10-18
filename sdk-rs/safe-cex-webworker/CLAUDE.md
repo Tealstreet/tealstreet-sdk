@@ -36,8 +36,10 @@ never manufactures success from a resolved void future. Missing/rejected executo
 emit exec-log, with exec-result only for a supplied reqId (including an empty one).
 
 Full account position refreshes use the full Store mutator even for empty
-results; scoped refreshes remain partial. Cancelling an in-flight Rust refresh
-releases its own pending markers and reports cancellation to the waiting bridge.
+results; scoped refreshes remain partial. Position refresh uses the canonical eager Promise driver: fetch/locks start
+during helper or dispatch entry, and even ready fetches yield before Store/reply
+work. Dropping a caller waiter does not cancel the request; runtime abandonment
+releases its pending markers and reports cancellation to the bridge.
 
 Market-load buffering uses separate 500ms self-rescheduling checks and a 30s
 deadline. Timeout reports are cooled down for five minutes and contain only
@@ -701,3 +703,9 @@ The ticker baseline corpus includes four nullable-index actions in addition to
 its original 354 comparisons. Actual maintained worker execution observes an
 updated null baseline without a packed null value; null-to-number emits the
 numeric index delta. This preserves the source typeof-number filter.
+
+TWAP resume/terminate keep their synchronous state/timer prefix and return the
+canonical eager Promise waiter, so even ready/no-op/error results yield before
+an awaiting caller continues. Posting failures preserve earlier state commits
+and stop later cleanup/removal; tests compare actual source instances before
+polling as well as after settlement.

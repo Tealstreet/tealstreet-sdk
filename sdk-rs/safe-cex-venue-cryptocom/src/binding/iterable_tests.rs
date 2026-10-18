@@ -39,6 +39,7 @@ fn production_listener_spread_preserves_astral_and_lone_utf16_units() {
         .get("book.BTCUSD-PERP")
         .unwrap()
         .array_values()
+        .expect("fixture array property reads")
         .unwrap();
     assert_eq!(
         values.len(),
@@ -83,6 +84,7 @@ fn production_listener_spread_accepts_collection_iterator_objects() {
             .get("book.BTCUSD-PERP")
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap();
         assert_eq!(values.len(), 2, "{shape}: retained listener plus parser");
         assert!(values[0].same_reference(&first));

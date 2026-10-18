@@ -378,7 +378,7 @@ fn reject_reason(rt: &Rt, data: &Js) -> Result<Js, Thrown> {
 }
 fn orders(rt: &Rt, events: Js) -> Result<(), Thrown> {
     for event in events
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("events.forEach is not a function"))?
     {
         let data = event.get("o")?;
@@ -485,7 +485,7 @@ fn orders(rt: &Rt, events: Js) -> Result<(), Thrown> {
                 let mut existing = Js::Undefined;
                 for candidate in rt
                     .path("store.orders")?
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("orders.find is not a function"))?
                 {
                     if candidate.get("id")?.strict_equals(&id) {
@@ -519,7 +519,7 @@ fn orders(rt: &Rt, events: Js) -> Result<(), Thrown> {
 }
 fn accounts(rt: &Rt, events: Js) -> Result<(), Thrown> {
     for event in events
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("events.forEach is not a function"))?
     {
         let positions = optional(&event.get("a")?, "P")?;
@@ -532,7 +532,7 @@ fn accounts(rt: &Rt, events: Js) -> Result<(), Thrown> {
             continue;
         }
         for p in positions
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("P.forEach is not a function"))?
         {
             let symbol = p.get("s")?;
@@ -558,7 +558,7 @@ fn accounts(rt: &Rt, events: Js) -> Result<(), Thrown> {
             let mut existing = Js::Undefined;
             for candidate in rt
                 .path("parent.store.positions")?
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("positions.find is not a function"))?
             {
                 if candidate.get("id")?.strict_equals(&id) {

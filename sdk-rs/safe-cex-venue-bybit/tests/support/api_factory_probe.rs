@@ -1,7 +1,11 @@
 use super::api_factory_runtime::*;
 use safe_cex_transport::RestAdapter;
 use serde_json::{Value, json};
-use std::{rc::Rc, sync::atomic::Ordering, task::Context};
+use std::{
+    rc::Rc,
+    sync::{Arc, atomic::Ordering},
+    task::{Context, Waker},
+};
 const DIAGNOSTIC: &str = "Bybit API key environment mismatch: this key is valid for Bybit Demo Trading, but this account is configured for live Bybit. Create a live Bybit API key or switch the account to Bybit Demo Trading. [invalid key]";
 fn run(kind: ProbeKind, drop_first: bool) -> Value {
     let gate = Rc::new(Gate::default());
@@ -14,7 +18,9 @@ fn run(kind: ProbeKind, drop_first: bool) -> Value {
     );
     let mut first = Some(f.api.execute_with_receipt(request()));
     let mut second = f.api.execute_with_receipt(request());
-    let mut cx = Context::from_waker(&f.runtime.waker);
+    let observer_wakes = Arc::new(WakeCount::default());
+    let observer_waker = Waker::from(observer_wakes.clone());
+    let mut cx = Context::from_waker(&observer_waker);
     assert!(
         first.as_mut().unwrap().as_mut().poll(&mut cx).is_pending(),
         "factory_probe_native_initiator_pending"
@@ -53,12 +59,17 @@ fn run(kind: ProbeKind, drop_first: bool) -> Value {
             "factory_probe_native_observer_drop_keeps_task"
         );
     }
-    let wakes = f.wakes.0.load(Ordering::SeqCst);
+    let wakes = observer_wakes.0.load(Ordering::SeqCst);
+    let task_wakes = f.wakes.0.load(Ordering::SeqCst);
     gate.release();
+    assert!(
+        f.wakes.0.load(Ordering::SeqCst) > task_wakes,
+        "factory_probe_native_transport_wakes_runtime"
+    );
     f.runtime.pump();
     assert_eq!(
-        f.wakes.0.load(Ordering::SeqCst) - wakes,
-        if drop_first { 2 } else { 3 },
+        observer_wakes.0.load(Ordering::SeqCst) - wakes,
+        if drop_first { 1 } else { 2 },
         "factory_probe_native_same_waker_observers"
     );
     assert_eq!(
@@ -147,7 +158,9 @@ fn cancelled_owner(drop_owner: bool) {
     );
     let mut first = f.api.execute_with_receipt(request());
     let mut second = f.api.execute_with_receipt(request());
-    let mut cx = Context::from_waker(&f.runtime.waker);
+    let observer_wakes = Arc::new(WakeCount::default());
+    let observer_waker = Waker::from(observer_wakes.clone());
+    let mut cx = Context::from_waker(&observer_waker);
     assert!(first.as_mut().poll(&mut cx).is_pending());
     assert!(second.as_mut().poll(&mut cx).is_pending());
     f.runtime.pump();
@@ -158,7 +171,7 @@ fn cancelled_owner(drop_owner: bool) {
     );
     assert_eq!(gate.active.get(), 1);
     let weak = Rc::downgrade(&f.owner);
-    let wakes = f.wakes.0.load(Ordering::SeqCst);
+    let wakes = observer_wakes.0.load(Ordering::SeqCst);
     if drop_owner {
         drop(f.owner);
         assert!(
@@ -179,7 +192,7 @@ fn cancelled_owner(drop_owner: bool) {
         "factory_probe_native_dispose_releases_transport"
     );
     assert_eq!(
-        f.wakes.0.load(Ordering::SeqCst) - wakes,
+        observer_wakes.0.load(Ordering::SeqCst) - wakes,
         2,
         "factory_probe_native_dispose_wakes_both_observers"
     );
@@ -193,13 +206,19 @@ fn cancelled_owner(drop_owner: bool) {
         );
         assert!(!error.is_retryable_network());
     }
-    let settled_wakes = f.wakes.0.load(Ordering::SeqCst);
+    let settled_wakes = observer_wakes.0.load(Ordering::SeqCst);
+    let settled_task_wakes = f.wakes.0.load(Ordering::SeqCst);
     gate.release();
     f.runtime.pump();
     assert_eq!(
-        f.wakes.0.load(Ordering::SeqCst),
+        observer_wakes.0.load(Ordering::SeqCst),
         settled_wakes,
         "factory_probe_native_cancelled_transport_not_woken"
+    );
+    assert_eq!(
+        f.wakes.0.load(Ordering::SeqCst),
+        settled_task_wakes,
+        "factory_probe_native_cancelled_task_not_woken"
     );
     assert_eq!(
         f.wire.requests.borrow().len(),

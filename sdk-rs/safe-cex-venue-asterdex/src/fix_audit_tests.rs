@@ -143,12 +143,6 @@ impl Fixture {
         turns().await;
     }
 }
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        self.venue.dispose().unwrap();
-        safe_cex_store::virtual_clock::set_thread_host_time(None);
-    }
-}
 async fn turns() {
     for _ in 0..32 {
         tokio::task::yield_now().await;
@@ -551,4 +545,18 @@ fn browser_approval_export_has_no_constructed_native_entrypoint() {
             "missing browser ApprovalHost remains an explicit exported-host residual"
         );
     });
+}
+
+// Keep fixture teardown under an explicit test-only module for raw-file audits.
+#[cfg(test)]
+mod fixture_cleanup {
+    use super::Fixture;
+    use safe_cex_exchange::exchange::Exchange;
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.venue.dispose().unwrap();
+            safe_cex_store::virtual_clock::set_thread_host_time(None);
+        }
+    }
 }

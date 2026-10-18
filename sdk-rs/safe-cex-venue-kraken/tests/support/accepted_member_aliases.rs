@@ -58,7 +58,10 @@ fn complete(hosts: &[&Harness], mut future: BodyFuture<Rt>) -> Handle<Rt> {
     panic!("native member continuation did not settle");
 }
 fn assert_close(value: &Js, close: f64) {
-    let rows = value.array_values().expect("native candles");
+    let rows = value
+        .array_values()
+        .expect("native candles")
+        .expect("native array");
     assert_eq!(rows.len(), 1);
     for (field, expected) in [
         ("timestamp", 3.25f64),

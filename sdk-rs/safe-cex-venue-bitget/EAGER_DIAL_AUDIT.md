@@ -1,8 +1,9 @@
 # Eager socket dial audit
 
-The assigned `BitgetSecondaryPublicWebsocket.connectAndSubscribe` row remains
-**OPEN** for CONNECTING-wrapper presence during a held native handshake. This
-first shared repair closes the independently observable call-versus-poll gap.
+The assigned `BitgetSecondaryPublicWebsocket.connectAndSubscribe` row is **FIX**
+through two shared repairs: eager preparation/dial startup and the native
+CONNECTING handle described below. The initial eager-only repair left wrapper
+presence during a held HTTP upgrade open.
 
 The maintained whole-class oracle `scripts/secondary-public-capture.mjs` checks
 18 unchanged family/network/index scenes and synchronous wrapper presence.
@@ -36,12 +37,29 @@ leaks the cancelled I/O body, and suppresses the cancellation wake. Every mutant
 must compile and fail its named production witness, then exact byte restoration
 must pass the same test. The lazy mutant is checked through both venues.
 
-## Remaining CONNECTING representation
+## CONNECTING representation follow-up
 
-NativeRuntime currently awaits the HTTP upgrade before returning WsSocket.
+The original NativeRuntime awaited the HTTP upgrade before returning WsSocket.
 A separate compiled test changing the held-handshake presence expectation to
 true fails at `SECONDARY pending handshake has the source CONNECTING wrapper`.
-Starting the future eagerly cannot repair that state by itself. The follow-up
-must expose CONNECTING presence and source send/close/dispose semantics while
-preserving #1094's Error then Close(1006), URL admission errors, generation and
-ended guards. No ACCEPT ruling or completed-row claim is made here.
+Starting the future eagerly cannot repair that state by itself. The shared follow-up now exposes one stable CONNECTING handle, drives the one
+transport handshake through canonical eager OwnedTasks, and keeps #1094's
+network Error then Close(1006), admission origins, generation and ended guards.
+
+`safe-cex-registry/tests/native_connecting_socket.rs` constructs the actual Bitget
+parent and secondary owner, uses a real held local HTTP upgrade, and invokes
+onMarketsChanged before upgrade completion. The original code compiled RED at
+`CONNECTING Bitget market callback retains the source-selected topic before
+upgrade`: native topics were empty instead of `["NEW"]`. The repair observes the
+same topic, CONNECTING warning, reconnect, Error and Close(1006) effects as the
+maintained whole classes over an actual Node WebSocket in
+`connecting_socket_source.cjs`. Direct send preserves InvalidStateError and the
+source message. Close preserves Error-before-Close, no Open and the measured Node
+CLOSING-after-close quirk. Other real handshakes prove same-handle upgrade/frame
+delivery, pending I/O release and suppression after termination/final drop.
+
+Core's native connecting tests independently prove immediate socket-owner
+cancellation and event-waiter waker release without cancelling a held socket.
+`scripts/native-connecting-controls.py` in exchange-core disconnects production
+state, send error kind, close I/O cancellation, close wake, final drop and waiter
+registration cleanup, requiring compiled named RED and exact restore GREEN.
