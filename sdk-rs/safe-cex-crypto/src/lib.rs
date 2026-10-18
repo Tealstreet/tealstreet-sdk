@@ -47,6 +47,7 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
 #[derive(Debug, PartialEq, Eq)]
 pub enum PayloadScheme {
     HmacSha256 { encoding: Encoding },
+    Stark,
 }
 
 #[derive(Debug)]

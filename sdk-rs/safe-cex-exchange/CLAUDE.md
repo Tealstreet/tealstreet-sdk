@@ -1856,6 +1856,15 @@ then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
 Serialization errors stay visible; `native_console_default` checks both paths
 against Node and verifies that reporting leaves the retained input unchanged.
 
+The production REST host can carry the native PayloadSigner alongside its hosted
+RemoteSigner. `rest_http_host_with_signers` retains executable callbacks outside
+serialized options; shared BaseExchange assembly binds the same payload provider
+to its core and JS options before venue initialization. One PayloadScheme union
+covers HMAC hex/base64 and Stark felt-pair requests, using the existing runtime-owned
+Promise machinery for completion and errors. The Paradex native binding witness
+uses real NativeRuntime/reqwest and a loopback config/auth origin; maintained Node
+SDK code independently builds and signs Order, ModifyOrder and JWT preimages.
+
 Array.join retains UTF16 units through both separator and element coercion;
 UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 `native_array_join_preserves_utf16_elements_separators_and_coercions` compares
@@ -1876,3 +1885,13 @@ demand; it never replaces the retained response or becomes a second authority.
 The real Binance cancel-symbol witness compares both signed DELETE calls, original
 failure propagation and emitted UTF-16/argument lists with the maintained class.
 error_response_origins separately pins nearest-origin selection across a chain.
+
+`eager::start_eager` is the typed async SDK call boundary. It starts the body
+through the existing canonical Promise driver at call time, retains native `T`
+without Clone/Serde/JSON, and returns a waiter. Dropping that waiter leaves the
+runtime-owned continuation alive. Native errors retain their original metadata
+and origin. `tests/eager_start.rs` executes the real native scheduler and checks
+prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
+boundary for an already-ready result. It does not insert suspension points into
+arbitrary ready Rust leaf futures. Venue probes must still check their actual
+ready and pending I/O phases.

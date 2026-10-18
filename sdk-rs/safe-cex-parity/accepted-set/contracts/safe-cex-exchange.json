@@ -31326,5 +31326,181 @@
         "output": []
       }
     ]
+  },
+  "safe_cex_exchange::js_runtime::client::rest_http_host_with_signers": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "rest_http_host_with_signers",
+      "signature": {
+        "inputs": [
+          [
+            "runtime",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "adapter",
+            {
+              "resolved_path": {
+                "path": "alloc::sync::Arc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::provider::RestAdapter",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "remote",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::base_exchange::HostedSigner",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "dyn_trait": {
+                                        "traits": [
+                                          {
+                                            "trait": {
+                                              "path": "safe_cex_crypto::PayloadSigner",
+                                              "args": null
+                                            },
+                                            "generic_params": []
+                                          }
+                                        ],
+                                        "lifetime": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::rc::Rc",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_exchange::js_runtime::client::JsHttpHost",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production JsHttpHost capability construction; the Paradex native_payload_provider_signs_real_paradex_order_modify_and_jwt witness executes this constructor with real NativeRuntime/reqwest and compares actual SDK preimages, signatures and HTTP headers to maintained Node code. API classification itself is not a decoder receipt.",
+    "reason": "Constructs the sole REST host from existing runtime, adapter and optional executable remote/payload signing providers. It retains capabilities without deserializing account options or admitting a domain model; rest_http_host_signed delegates here with no payload capability."
   }
 }
