@@ -12,12 +12,15 @@ cases = {
     "phemex": ("websocket_data.rs", "exchange_binding", 'let last = parse_field(h, &input, "lastRp")?;', 'let last = parse_field(h, &input, "markRp")?;'),
     "kucoin": ("public_streams.rs", "exchange_trait", 'fallback(h, (h.get)(&data, "bestBidPrice")?, || {', 'fallback(h, (h.get)(&data, "bestAskPrice")?, || {'),
     "kucoinspot": ("public_streams.rs", "exchange_trait", 'vec!["bestBid", "bestBidPrice", "buy"],', 'vec!["bestAsk", "bestAskPrice", "sell"],'),
+    "hyperliquid": ("private_message_dispatch.rs", "binding", 'h.set(&buffer, "midPrice", &last)?;', 'h.set(&buffer, "mark", &last)?;'),
+    "hyperliquidspot": ("spot_ws_dispatch.rs", "spot_binding", 'h.set(&buffer, "midPrice", &last)?;', 'h.set(&buffer, "mark", &last)?;'),
+    "lighter": ("public_ingress.rs", "exchange_binding", 'let mark = parse_fields(&h, &data, &["markPrice", "mark_price", "mark"])?;', 'let mark = parse_fields(&h, &data, &["indexPrice", "index_price", "index"])?;'),
 }
 selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    crate = "kucoin" if venue == "kucoinspot" else venue
+    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid"}.get(venue, venue)
     test = {
         "kucoin": "production_ticker_coercion_futures_matches_constructed_typescript",
         "kucoinspot": "production_ticker_coercion_spot_matches_constructed_typescript",
