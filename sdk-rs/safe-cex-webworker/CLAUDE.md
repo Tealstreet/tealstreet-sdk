@@ -66,8 +66,8 @@ The existing String DTO replaces isolated UTF16 units with U+FFFD under the
 approved UTF-8 addendum; retained input units and valid pairs remain unchanged.
 Payload enums reject JSON object-form enum tags; worker ops are string literals.
 Private serde remote helpers expose the derived spelling inventory to unit tests,
-while public Deserialize requires strings. Fixture mode and version are closed
-literals too; test rejection as well as successful round trips when changing them.
+while public Deserialize requires strings. The unused perf mode/version codecs
+are retired; they no longer validate live native config or fixture arguments.
 
 Displayed-position processing consumes owned StoreData snapshots and a host wall
 clock callback, read separately for the five-minute then one-minute queue of each
@@ -306,12 +306,10 @@ tokens and three ingress paths originally pinned this FINDING. ChaserTerminate,
 ChaserCompleteEvent and ChaserOrderState now use shared public ingress; the
 remaining three task graphs are repaired by the complete adoption described below.
 
-The same ingress sweep covers worker config, fixture/frame/config and payload
-records. Their existing-Value integer -0 path also loses its sign; nested frame
-records and JSON msg/data fields cross a rebuffer even on raw outer decoding.
-Separate Node bit witnesses pin these paths rather than claiming raw ingress is
-universally safe. The fixture graph and envelope/config now repair their public decoders as
-described below; their separate bounded-depth choices remain divergent.
+The historical ingress sweep included standalone config and perf codecs. Those
+codecs are now retired after production caller proof; installed sessions forward
+native Js instead. The live StoreWorkerPayload numeric/depth/presence boundary
+remains independently tested and OPEN in the FIX-audit ledger.
 
 UI position leverage updates select buy leverage for OneWay or long positions,
 sell otherwise, and issue one native Store batch only when numeric values differ.
@@ -382,40 +380,24 @@ The risk oracle also passes in a disposable tracked-source mirror with no
 ancestor node_modules; explicit isolated compiler/lodash paths resolve there,
 and missing-package controls fail MODULE_NOT_FOUND. The mirror was deleted.
 
-Fixture/frame/config public Deserialize now captures shared JsNumberInput before
-strict map decoding, including every nested fixture buffer. Frame.msg uses the
-shared js_deserialize_passthrough adapter and an explicitly named eligibility
-exception; it keeps Value without disabling the whole-output numeric guard.
-Three old per-record loss witnesses failed unchanged after opt-in, including
-raw outer JSON frames[0].atMs. The permanent matrix compares 810 source/native
-bit observations across nine field paths, ten spellings and nine entry routes:
-bare raw str/slice, owned/borrowed Value, shared raw/owned/borrowed, and native
-negative-zero Value owned/borrowed. Shape and optional-null rejection stay strict.
-These three rows retain a separate CHOSEN shared input-depth boundary: Node
-accepts 140 nested msg arrays while the shared buffer refuses them. Ordinary
-20-level messages remain accepted. The bounded capture avoids a worker-specific
-unbounded recursive decoder; it is not a claim that TypeScript rejects depth.
-Frame/outer Value-rebuffer and omitted-msg-adapter mutations compile and fail
-FIXTURE-NUMERIC ACCEPTANCE. Restoring all legacy decoder bodies plus the legacy
-msg visitor compiles and accepts the deep owned input, failing the named depth
-refusal assertion: the depth boundary is a measured accepted-set narrowing,
-not an old refusal relabeled as new evidence.
+Unused WorkerConfig, PerfFixtureFrame, PerfFixture, PerfFixtureConfig and their
+mode/version codecs are removed with their private companions, eligibility and
+orphan-only validation tests. Actual listener/config/perf/dump capabilities carry
+canonical Js: no strict codec or JSON conversion runs on that path. The native
+carrier supplement checks fifteen config deliveries, ten fixture returns, sixty
+binary64 observations, original referents, own undefined and UTF16 units against
+maintained store.webworker. Existing callback ordering and deep-input tests remain.
 
-WorkerConfig and StoreWorkerPayload also capture JsNumberInput at public ingress.
-The optional data field uses shared js_deserialize_passthrough inside present_value,
-so explicit null remains present while absence remains None. WorkerConfig's
-eligibility uses the exhaustive shared macro for every field, including the shared
-IndexMap key/value traversal; it neither adds an orphan impl nor re-buffers JSON.
-Two committed old witnesses flipped unchanged (owned config and raw payload).
-The record oracle adds 450 comparisons over five envelope/config paths, ten
-spellings and nine routes, including nested fixtures. Shared capture's depth
-limit remains CHOSEN on both rows, including ignored deep config properties;
-Node and legacy bare decoders accept those inputs while the bounded capture
-refuses them. Ordinary nested values, absent data and explicit null remain covered.
-Config/payload rebuffer, omitted data adapter, and null-erasure controls compile
-and fail named acceptance/presence assertions. Separate compiled legacy decoders
-accept each deep input and fail the named depth-refusal assertion, pinning the
-new acceptance narrowing rather than presuming the old decoder refused it.
+StoreWorkerPayload retains its public JsNumberInput decoder and present_value
+passthrough. Its original ten spellings across nine entry routes still produce
+ninety bit comparisons; absent data, explicit null, ordinary nesting and the
+separate shared depth refusal remain covered. This does not accept that depth
+cost or close row 17. The eleven-field source optionality census remains intact;
+only its five still-live native record fields have corresponding strict codecs.
+
+Native perf service behavior is still OPEN FIX in rows 72-74: actual recording,
+structured clone, cap, timing, mode transitions and replay have not been ported.
+Required host callbacks and carrier probes do not replace that implementation.
 
 Carrier regressions compare original native numeric bits and real shared JS
 stringify with maintained source output before using finite JSON trace adapters.
