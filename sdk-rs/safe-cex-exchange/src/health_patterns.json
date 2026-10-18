@@ -77,7 +77,7 @@
           "text": "api_key_invalid"
         },
         {
-          "regex": "api[-_]?key.*invalid",
+          "regex": "api[-_ ]?key.*invalid",
           "flags": "i"
         },
         {
@@ -479,6 +479,20 @@
       }
     ],
     "hyrotrader": [
+      {
+        "category": "auth_invalid",
+        "severity": "critical",
+        "patterns": [
+          {
+            "regex": "api\\s*key\\s+is\\s+invalid",
+            "flags": "i"
+          },
+          {
+            "regex": "\\b(?:ret)?code[=:\\s]+10003\\b",
+            "flags": "i"
+          }
+        ]
+      },
       {
         "category": "order_warning",
         "severity": "warning",
