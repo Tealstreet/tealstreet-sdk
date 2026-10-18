@@ -954,7 +954,10 @@ pub fn transform_market(
         },
         limits: MarketLimits {
             cost: None,
-            amount: MarketLimitsAmount { min, max },
+            amount: MarketLimitsAmount {
+                min,
+                max: max.into(),
+            },
             leverage: MarketLimitsLeverage {
                 min: 1.0,
                 max: max_leverage,

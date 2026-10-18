@@ -484,7 +484,7 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                     cost: None,
                     amount: MarketLimitsAmount {
                         min: amount_min,
-                        max: amount_max,
+                        max: (amount_max).into(),
                     },
                     leverage: MarketLimitsLeverage {
                         min: 1.0,

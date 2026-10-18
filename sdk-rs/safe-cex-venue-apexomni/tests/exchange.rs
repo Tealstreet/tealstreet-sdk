@@ -209,7 +209,12 @@ fn market(value: &Market) -> J {
                     "amount",
                     obj(vec![
                         ("min", n(value.limits.amount.min)),
-                        ("max", n(value.limits.amount.max)),
+                        (
+                            "max",
+                            n(safe_cex_num::numeric_value_to_number(
+                                &value.limits.amount.max,
+                            )),
+                        ),
                     ]),
                 ),
                 (
