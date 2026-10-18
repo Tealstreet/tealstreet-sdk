@@ -917,11 +917,14 @@ actual-source scheduling and returned-array witnesses.
 
 ## Shared income range paging
 
-`income_paging::paginate_income_range` owns no executor or transport. Its awaited
-fetch callback returns the shared typed ledger; its awaited delay operation
-receives the original f64, leaving host timer conversion explicit. Only fetch
-failures are caught: the branch becomes incomplete, while delay failures escape.
-Caller drop cancels its owned pending callback future.
+`income_paging::paginate_income_range` requires its owning runtime and owned
+fetch/delay callbacks. Canonical start_eager starts the first fetch at invocation
+and retains the walk after waiter drop; each fetch and delay uses the same
+Promise await boundary. The delay receives the original f64, leaving host timer
+conversion explicit. Fetch failures mark the branch incomplete; delay failures
+escape with their original metadata. tests/income_paging compares the maintained
+source with NativeRuntime after dropping an unpolled waiter, and retains the
+existing request, deduplication, output-bit and delay-error corpus.
 
 The pending-window stack is LIFO. Direction reads use the original global range,
 not the current subwindow; page length includes unusable rows. Identity retains
@@ -929,8 +932,10 @@ both PnL and commission from the same bill, keeps the first duplicate, and stabl
 newest-first sorting preserves insertion order on timestamp ties. No termination
 guard repairs source floating-point nonprogress for non-advancing chunks.
 
-Typed `IncomeRecord` excludes nullish/coercible/open source records and UTF-16
-lone surrogates. Returned records and options are owned rather than live aliases.
+Typed `IncomeRecord` excludes nullish/coercible/open source records. The canonical
+native String decoder replaces isolated UTF-16 units at the approved typed
+boundary; direct Serde JSON input remains a separate decoder. Returned records
+and options are owned rather than live aliases.
 These are declared choices, not source-equivalence claims for arbitrary objects.
 The six existing income-paging manifest rows own the shared implementation;
 binance, bitget, kraken and weex each have one separate wrapper call to adopt.
@@ -1972,3 +1977,59 @@ Store payload ticker baselines retain nullable index prices. The maintained work
 advances its baseline for number-to-null transitions but omits non-number deltas;
 null-to-number emits the new number. Preserve this source behavior. The live
 store_payload oracle pins both transitions and unchanged-null packed arrays.
+
+Internal update listeners subscribe to the canonical Store's native state referent.
+They do not project StoreData or visit unrelated getters before emitter fanout.
+Typed subscribers remain explicit projection boundaries at their reached slots;
+native and typed slots share live order, unsubscription and first-error behavior.
+StoreUpdateThrottle accepts a retained argument type while its existing StoreFrame
+constructor remains available. Native account delivery retains the Js argument
+through bursts and projects only when leading/trailing delivery actually runs.
+See [the delivery review](NATIVE_STORE_DELIVERY_REVIEW.md) for compiled controls,
+receipt-qualified replay results, and the separate Bybit options decode timeout.
+
+`native_final_drop(base, venue_cleanup)` is the single native final-handle teardown
+entrypoint. It marks disposed before venue cleanup and always performs shared
+cleanup afterward, silencing Result errors at destruction. The callback must
+finish cancelling venue-owned tasks/state even if an earlier cleanup returns an
+error. Stored timer callbacks must use weak venue ownership so they cannot keep
+the final external handle alive; held venues must still service them normally.
+This accepted lifetime policy has one core override classification and no source
+super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
+`tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
+cleanup, while Backpack/BingX binding probes cover actual sockets/timers.
+
+`REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
+`JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
+materialization follows that source chain and the canonical retained response.
+Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
+signed requests before JSON. Original JS object identity remains an owned-tree residual.
+
+
+
+The mapped closed-position resolver requires a runtime and retained static fetch
+callbacks. It starts its selected fetch during invocation with `start_eager`;
+the runtime owns continuation after the waiter/source drop. Fetch and resolver
+Promise boundaries share the canonical driver. `closed_position_timing` checks
+six maintained-source profiles with NativeRuntime; the separate typed result
+surrogate/alias boundary remains in CLOSED_POSITIONS_AUDIT.md.
+
+The mapped loop utility requires its owning runtime on LoopHost and starts via
+start_eager. Its sleep Promise preserves the source await fence even for ready
+leaves, and waiter drop leaves the continuation alive. Positive infinity disables
+all loop host effects; remaining_utils compares invocation, continuation and
+callback scheduling with the maintained TypeScript function in Node.
+
+
+Native replay receipts include raw ExchangeRuntime tasks as well as canonical
+Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
+awakened tasks block drain. Reviewed timer/socket reader tasks qualify as waiting
+only at their actual pending sleep/receive leaves; pending handler HTTP/auth work
+still blocks. Waking invalidates the waiting observation before repoll. The sole
+Promise driver delegates to the separately counted canonical queue (including
+checkpoint callbacks). Completion and cancellation release records without
+retaining account/task bodies. This instrumentation runs only on explicit replay
+hosts; it does not cover arbitrary external Tokio tasks or transport internals.
+The public probe requires the versioned raw receipt and refuses older addons.
+Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
+the private wake-race witness checks the pre-repoll fence.

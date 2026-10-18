@@ -28,6 +28,7 @@ const error=(name,message)=>Object.assign(new Error(message),{name});
 const outcome=(e,remote,logging,writer)=>({error:e.name,message:e.message,sameRemote:e===remote,sameLogging:e===logging,sameWriter:e===writer});
 const raw=value=>JSON.stringify(value);
 async function main(){
+ await require('./eager-sdk-fixtures.cjs')();
  const accounts=[],margins=[],balances=[],hyro=[];
  const accountInputs=[
   {data:{retCode:0,result:{userID:'USER-37',inviterID:'AFFILIATE-91'}}},

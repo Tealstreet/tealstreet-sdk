@@ -3,7 +3,7 @@ use crate::{
     core_snapshot_readers::SnapshotHost, exchange::BybitExchange,
     hyro_private_session::SessionHost, variant_account_refresh::AccountRefreshHost,
 };
-use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_exchange::{exchange::Exchange, native_store::DefaultStore};
 use safe_cex_exchange::{
     js_runtime::{
         promise::await_js,
@@ -75,6 +75,141 @@ fn units(value: &Js) -> Vec<u16> {
         Js::String(value) => value.to_vec(),
         _ => panic!("expected native text"),
     }
+}
+
+#[test]
+fn divergence_audit_reinit_continuations_survive_dropped_waits() {
+    run(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitinverse,
+            ExchangeName::Bybitspot,
+        ] {
+            for initially in [false, true] {
+                for rejects in [false, true] {
+                    let exchange = venue(name.clone());
+                    exchange.needs_reinit.set(initially);
+                    let runtime = exchange.base.runtime.clone();
+                    let pending =
+                        safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+                    let result = exchange
+                        .js
+                        .get()
+                        .unwrap()
+                        .this
+                        .call_method("reinitOnThrow", vec![Js::Promise(pending.clone())])
+                        .unwrap();
+                    let Js::Promise(result) = result else {
+                        panic!("async receiver returns a Promise")
+                    };
+                    drop(result.wait());
+                    drop(result);
+                    assert_eq!(
+                        exchange.needs_reinit.get(),
+                        initially,
+                        "no premature rejection effect"
+                    );
+                    if rejects {
+                        pending.settle(Err(Thrown::new(Js::object(vec![(
+                            "marker",
+                            Js::Number(73.0),
+                        )]))));
+                    } else {
+                        pending.settle(Ok(Js::object(vec![("marker", Js::Number(73.0))])));
+                    }
+                    tokio::task::yield_now().await;
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    assert_eq!(
+                        exchange.needs_reinit.get(),
+                        initially || rejects,
+                        "live {name:?} receiver keeps the source continuation after the caller drops its wait"
+                    );
+                    exchange.base.dispose().unwrap();
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn divergence_audit_balance_reads_are_eager_and_keep_native_results() {
+    run(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitinverse,
+            ExchangeName::Bybitspot,
+        ] {
+            for disposed in [false, true] {
+                let exchange = venue(name.clone());
+                let runtime = exchange.base.runtime.clone();
+                let this = &exchange.js.get().unwrap().this;
+                let pending = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+                let called = Rc::new(Cell::new(false));
+                let observed = called.clone();
+                let request = pending.clone();
+                this.define(
+                    "fetchRawBalance",
+                    Js::function("fetchRawBalance", move |_, _| {
+                        observed.set(true);
+                        Ok(Js::Promise(request.clone()))
+                    }),
+                )
+                .unwrap();
+                let raw = Js::object(vec![("raw", Js::Number(-0.0))]);
+                let formatted = Js::object(vec![("total", Js::Number(91.0))]);
+                let raw_reference = raw.clone();
+                let result_reference = formatted.clone();
+                let formatted_calls = Rc::new(Cell::new(0));
+                let count = formatted_calls.clone();
+                this.define(
+                    "formatBalance",
+                    Js::function("formatBalance", move |_, args| {
+                        assert!(
+                            arg(&args, 0).strict_equals(&raw_reference),
+                            "raw receiver identity"
+                        );
+                        count.set(count.get() + 1);
+                        Ok(result_reference.clone())
+                    }),
+                )
+                .unwrap();
+                let result = this.call_method("fetchBalance", vec![]).unwrap();
+                assert!(
+                    called.get(),
+                    "raw request is invoked before returning the native Promise"
+                );
+                assert_eq!(
+                    formatted_calls.get(),
+                    0,
+                    "formatter must wait for the raw request"
+                );
+                if disposed {
+                    exchange.base.dispose().unwrap();
+                }
+                pending.settle(Ok(raw));
+                let resolved =
+                    tokio::time::timeout(Duration::from_secs(1), await_js(&runtime, result))
+                        .await
+                        .expect("live balance continuation settles after its raw request")
+                        .unwrap();
+                if disposed {
+                    assert_eq!(
+                        formatted_calls.get(),
+                        0,
+                        "disposed source branch skips formatting"
+                    );
+                    assert_eq!(resolved.get("total").unwrap().to_number().unwrap(), 0.0);
+                } else {
+                    assert_eq!(formatted_calls.get(), 1);
+                    assert!(
+                        resolved.strict_equals(&formatted),
+                        "original formatted value is forwarded"
+                    );
+                    exchange.base.dispose().unwrap();
+                }
+            }
+        }
+    });
 }
 
 #[test]
@@ -478,5 +613,162 @@ fn native_protective_side_errors_match_actual_source() {
             assert_eq!(compared, 44, "PROTECTIVE native receiver error coverage");
             venue.dispose().unwrap();
         }
+    });
+}
+
+#[test]
+fn divergence_sdk_balance_starts_before_poll_and_keeps_its_dropped_continuation() {
+    run(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitinverse,
+            ExchangeName::Bybitspot,
+        ] {
+            for dispose in [false, true] {
+                let exchange = venue(name.clone());
+                let this = &exchange.js.get().unwrap().this;
+                let runtime = exchange.base.runtime.clone();
+                let pending = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+                let started = Rc::new(Cell::new(0));
+                let count = started.clone();
+                let response = pending.clone();
+                this.set(
+                    "fetchRawBalance",
+                    Js::function("raw terminal", move |_, _| {
+                        count.set(count.get() + 1);
+                        Ok(Js::Promise(response.clone()))
+                    }),
+                )
+                .unwrap();
+                let formatted = Rc::new(Cell::new(0));
+                let count = formatted.clone();
+                let raw = Js::object(vec![
+                    ("zero", Js::Number(-0.0)),
+                    ("opaque", Js::utf16(&[0xd800])),
+                ]);
+                let expected = raw.clone();
+                this.set(
+                    "formatBalance",
+                    Js::function("format terminal", move |_, args| {
+                        assert!(
+                            arg(&args, 0).same_reference(&expected),
+                            "native raw identity survives the source await"
+                        );
+                        count.set(count.get() + 1);
+                        Ok(Js::object(vec![("total", Js::Number(-0.0))]))
+                    }),
+                )
+                .unwrap();
+                let waiter = exchange.invoke::<safe_cex_types::Balance>("fetchBalance", vec![]);
+                assert_eq!(
+                    started.get(),
+                    1,
+                    "BYBIT SDK typed call invokes the original member before waiter polling: {name:?}"
+                );
+                assert_eq!(
+                    formatted.get(),
+                    0,
+                    "held raw response does not format early"
+                );
+                drop(waiter);
+                if dispose {
+                    exchange.base.dispose().unwrap();
+                }
+                pending.settle(Ok(raw));
+                for _ in 0..32 {
+                    tokio::task::yield_now().await;
+                }
+                assert_eq!(
+                    formatted.get(),
+                    usize::from(!dispose),
+                    "dropped SDK waiter preserves source continuation and disposal branch: {name:?}"
+                );
+                if !dispose {
+                    exchange.base.dispose().unwrap();
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn divergence_sdk_mode_starts_original_helper_before_waiter_poll() {
+    run(async {
+        let exchange = venue(ExchangeName::Bybit);
+        let this = &exchange.js.get().unwrap().this;
+        let started = Rc::new(Cell::new(0));
+        let count = started.clone();
+        let pending =
+            safe_cex_exchange::js_runtime::promise::Promise::pending(&exchange.base.runtime);
+        let result = pending.clone();
+        this.set(
+            "changePositionModeHelper",
+            Js::function("mode terminal", move |_, args| {
+                assert!(arg(&args, 0).strict_equals(&Js::Bool(true)));
+                assert!(arg(&args, 1).strict_equals(&Js::str("linear")));
+                assert!(arg(&args, 2).strict_equals(&Js::str("USDT")));
+                count.set(count.get() + 1);
+                Ok(Js::Promise(result.clone()))
+            }),
+        )
+        .unwrap();
+        let waiter = Exchange::change_position_mode(exchange.as_ref(), true, None);
+        assert_eq!(
+            started.get(),
+            1,
+            "BYBIT SDK unit call starts the real mode helper before waiter polling"
+        );
+        drop(waiter);
+        pending.settle(Ok(Js::Undefined));
+        tokio::task::yield_now().await;
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn divergence_sdk_account_starts_original_client_before_waiter_poll() {
+    run(async {
+        let exchange = venue(ExchangeName::Bybit);
+        let xhr = exchange.js.get().unwrap().this.get("xhr").unwrap();
+        let started = Rc::new(Cell::new(0));
+        let count = started.clone();
+        let pending =
+            safe_cex_exchange::js_runtime::promise::Promise::pending(&exchange.base.runtime);
+        let result = pending.clone();
+        xhr.set(
+            "get",
+            Js::function("account terminal", move |_, _| {
+                count.set(count.get() + 1);
+                Ok(Js::Promise(result.clone()))
+            }),
+        )
+        .unwrap();
+        let waiter = Exchange::get_account(exchange.as_ref());
+        assert_eq!(
+            started.get(),
+            1,
+            "BYBIT SDK account call starts original client before waiter polling"
+        );
+        pending.settle(Ok(Js::object(vec![(
+            "data",
+            Js::object(vec![
+                ("retCode", Js::Number(0.0)),
+                (
+                    "result",
+                    Js::object(vec![
+                        ("userID", Js::Number(73.0)),
+                        ("inviterID", Js::Number(91.0)),
+                    ]),
+                ),
+            ]),
+        )])));
+        let result = waiter.await.unwrap();
+        assert_eq!(result.user_id, "73");
+        assert_eq!(
+            result.affiliate_id.as_ref().and_then(|v| v.as_deref()),
+            Some("91")
+        );
+        exchange.base.dispose().unwrap();
     });
 }
