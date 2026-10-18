@@ -2,6 +2,7 @@ use safe_cex_transport::signature_rejection::{
     IsSignatureRejection, SignatureRetry, resend_on_rejected_data, signature_rejected_response,
 };
 use safe_cex_transport::{RestBody, RestFailure, RestRequest, RestResponse, RestResponseBody};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 
@@ -69,7 +70,10 @@ fn reviewed_transformed_data_clone_preserves_payload_and_completed_phase() {
             b"\"left\"".to_vec(),
         ),
     ] {
-        let original = RestBody::Untransformed(input).transform(header).unwrap();
+        let expected = Input::from_value(expected).unwrap();
+        let original = RestBody::Untransformed(Input::from_value(input).unwrap())
+            .transform(header)
+            .unwrap();
         let RestBody::Transformed(data) = &original else {
             panic!("TRANSFORM CLONE requires actual completed phase")
         };
@@ -80,7 +84,7 @@ fn reviewed_transformed_data_clone_preserves_payload_and_completed_phase() {
         );
         let copied = data.clone();
         assert_eq!(copied.value(), &expected);
-        if let (Some(left), Some(right)) = (data.value().as_str(), copied.value().as_str()) {
+        if let (Input::Text(left), Input::Text(right)) = (data.value(), copied.value()) {
             if !left.is_empty() {
                 assert_ne!(
                     left.as_ptr(),

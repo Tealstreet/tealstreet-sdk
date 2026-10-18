@@ -755,7 +755,12 @@ fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"code":"0","data":{}})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"code":"0","data":{}}),
+                        )
+                        .unwrap(),
+                    ),
                 })
             })
         }

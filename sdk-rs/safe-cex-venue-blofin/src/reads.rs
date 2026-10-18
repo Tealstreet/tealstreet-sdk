@@ -26,9 +26,10 @@ fn body<E>(body: &RestResponseBody) -> Result<TickerInput, ReadError<E>> {
     // are already data: do not stringify or parse a transformed string again.
     match body {
         RestResponseBody::Encoded(bytes) => js_from_str(&String::from_utf8_lossy(bytes)),
-        RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-            js_from_value_ref(value)
-        }
+        RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => value
+            .clone()
+            .into_value()
+            .and_then(|value| js_from_value_ref(&value)),
     }
     .map_err(ReadError::Ingress)
 }
