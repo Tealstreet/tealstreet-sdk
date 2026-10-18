@@ -12,13 +12,13 @@ ENV = dict(os.environ, NEXT_PUBLIC_HYROTRADER_PROD_REST_URL="https://prod-mode.e
            NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL="", NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL="",
            NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL="", NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL="")
 ENV.setdefault("SAFE_CEX_TYPESCRIPT_PATH", str(ROOT / "node_modules/typescript"))
-COMMAND = ["cargo", "+1.99.0", "test", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-bybit",
+COMMAND = ["cargo", "+1.99.0", "test", "--manifest-path", "Cargo.toml", "-p", "safe-cex-venue-bybit",
            "--jobs", "1", "--test", "hyro_mode_binding", "hyro_mode_profile_matches_source", "--", "--exact", "--nocapture"]
 DIRECTORY = Path(tempfile.mkdtemp(prefix="hyro-mode-controls-"))
 
 
 def run(name, failure=None, command=COMMAND):
-    result = subprocess.run(command, cwd=ROOT, env=ENV, text=True, stdout=subprocess.PIPE,
+    result = subprocess.run(command, cwd=ROOT / "sdk-rs", env=ENV, text=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, timeout=600)
     (DIRECTORY / (name + ".log")).write_text(result.stdout)
     if failure:
@@ -36,7 +36,7 @@ controls = [
     ("account-mode", "sdk-rs/safe-cex/src/account.rs",
      "if account.exchange == ExchangeName::Hyrotrader {", "if account.exchange != ExchangeName::Hyrotrader {",
      "source Hyro account flag/override",
-     ["cargo", "+1.99.0", "test", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex",
+     ["cargo", "+1.99.0", "test", "--manifest-path", "Cargo.toml", "-p", "safe-cex",
       "--jobs", "1", "--test", "root_services", "hyro_account_mode_maps_before_presence_aware_overrides",
       "--", "--exact", "--nocapture"]),
 ]
