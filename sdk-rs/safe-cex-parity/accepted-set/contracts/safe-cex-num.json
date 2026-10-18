@@ -2215,7 +2215,7 @@
                 }
               ],
               [
-                "_",
+                "name",
                 {
                   "borrowed_ref": {
                     "lifetime": "'static",
@@ -4727,7 +4727,7 @@
         },
         "input": "observed",
         "reason": "The actual SerializeStruct skip hook retains own Undefined keys only for the designated ModelRecord; ordinary structs omit skipped keys.",
-        "call": "{ use serde::Serializer as _; let name=match $value[\"name\"].as_str().unwrap() { \"Record\"=>\"Record\", \"$safe_cex::ModelRecord\"=>\"$safe_cex::ModelRecord\", _=>panic!(\"outside finite struct metadata corpus\") }; let key=if $value[\"key\"]==\"one\" {\"one\"} else {\"two\"}; let mut receiver=super::Capture.serialize_struct(name,0).expect(\"native struct producer\"); <$type as serde::ser::SerializeStruct>::skip_field(&mut receiver,key).expect(\"actual skipped field hook\"); let rows:Vec<_>=receiver.values.into_iter().map(|(key,node)| match node.0 {super::Node::Undefined=>serde_json::json!([key,\"undefined\"]),_=>panic!(\"skipped model key lost Undefined node\")}).collect(); serde_json::json!({\"name\":receiver.name,\"rows\":rows}) }",
+        "call": "{ use serde::Serializer as _; let name=match $value[\"name\"].as_str().unwrap() { \"Record\"=>\"Record\", \"$safe_cex::ModelRecord\"=>\"$safe_cex::ModelRecord\", _=>panic!(\"outside finite struct metadata corpus\") }; let key=if $value[\"key\"]==\"one\" {\"one\"} else {\"two\"}; let mut receiver=super::Capture.serialize_struct(name,0).expect(\"native struct producer\"); <$type as serde::ser::SerializeStruct>::skip_field(&mut receiver,key).expect(\"actual skipped field hook\"); let rows:Vec<_>=receiver.values.into_iter().map(|(key,node)| match node {super::Node::Undefined=>serde_json::json!([String::from_utf16(&key).expect(\"native UTF8 fixture key\"),\"undefined\"]),_=>panic!(\"skipped model key lost Undefined node\")}).collect(); serde_json::json!({\"name\":receiver.name,\"rows\":rows}) }",
         "cases": [
           {
             "input": {
@@ -7120,7 +7120,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "safe_cex_num::numeric_ingress::JsNumberInput",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -7135,7 +7135,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "safe_cex_num::numeric_ingress::JsNumberInput",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -9217,7 +9217,7 @@
       }
     },
     "evidence": "Reviewed exact retained-JSON delegation. Independently authored raw JSON, stock F64Deserializer native events, and production JsNumberDeserializer bridge events inspect actual Value variants, ordered entries and numeric bits. Preserve -0/overflow, refuse NaN during JSON projection, and retain duplicate last-value/first-position behavior. Stock-f64 admission is repaired by the concrete Capture float visitor; no provider restriction or exemption. Direct Types/Num stock-F64 regressions and compiled visitor-removal/restoration controls pass; this adapter passed its actual production native/default rerun.",
-    "call": "{ fn fields(v:&serde_json::Value)->serde_json::Value { match v { serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"bool\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"text\",\"value\":s}),serde_json::Value::Number(_)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",crate::numeric_ingress::js_value_as_f64(v).expect(\"numeric node\").to_bits())}),serde_json::Value::Array(a)=>serde_json::json!({\"kind\":\"array\",\"values\":a.iter().map(fields).collect::<Vec<_>>()}),serde_json::Value::Object(o)=>serde_json::json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|serde_json::json!([String::from_utf16(k).expect(\"native UTF8 fixture key\"),fields(v)])).collect::<Vec<_>>()}) } } let result=if let Some(bits)=$value.get(\"nativeBits\").and_then(serde_json::Value::as_str) { if $value[\"provider\"] == \"bridge\" { $type(crate::numeric_ingress::JsNumberDeserializer(crate::numeric_ingress::Node::Float(f64::from_bits(u64::from_str_radix(bits,16).expect(\"native bits fixture\"))))) } else { $type(serde::de::value::F64Deserializer::<serde_json::Error>::new(f64::from_bits(u64::from_str_radix(bits,16).expect(\"native bits fixture\")))) } } else { let raw=$value[\"raw\"].as_str().expect(\"raw JSON fixture\"); $type(&mut serde_json::Deserializer::from_str(raw)) }; match result {Ok(v)=>serde_json::json!({\"ok\":true,\"value\":fields(&v)}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e.to_string()})} }",
+    "call": "{ fn fields(v:&serde_json::Value)->serde_json::Value { match v { serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"bool\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"text\",\"value\":s}),serde_json::Value::Number(_)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",crate::numeric_ingress::js_value_as_f64(v).expect(\"numeric node\").to_bits())}),serde_json::Value::Array(a)=>serde_json::json!({\"kind\":\"array\",\"values\":a.iter().map(fields).collect::<Vec<_>>()}),serde_json::Value::Object(o)=>serde_json::json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|serde_json::json!([k,fields(v)])).collect::<Vec<_>>()}) } } let result=if let Some(bits)=$value.get(\"nativeBits\").and_then(serde_json::Value::as_str) { if $value[\"provider\"] == \"bridge\" { $type(crate::numeric_ingress::JsNumberDeserializer(crate::numeric_ingress::Node::Float(f64::from_bits(u64::from_str_radix(bits,16).expect(\"native bits fixture\"))))) } else { $type(serde::de::value::F64Deserializer::<serde_json::Error>::new(f64::from_bits(u64::from_str_radix(bits,16).expect(\"native bits fixture\")))) } } else { let raw=$value[\"raw\"].as_str().expect(\"raw JSON fixture\"); $type(&mut serde_json::Deserializer::from_str(raw)) }; match result {Ok(v)=>serde_json::json!({\"ok\":true,\"value\":fields(&v)}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e.to_string()})} }",
     "cases": [
       {
         "input": {
@@ -10582,7 +10582,7 @@
         },
         "input": "observed",
         "reason": "Execute actual key seed; inspect the native pending value and remaining entries, not an echoed fixture.",
-        "call": "{ let entries=$value.as_array().expect(\"native map fixture\").iter().map(|row|(row[0].as_str().unwrap().to_owned(),crate::numeric_ingress::Node::Float(f64::from_bits(u64::from_str_radix(row[1].as_str().unwrap(),16).unwrap())))).collect::<Vec<_>>();let mut access=$type{entries:entries.into_iter(),value:None}; let key=<$type as serde::de::MapAccess>::next_key_seed(&mut access,std::marker::PhantomData::<String>).expect(\"native key seed\");let pending=access.value.as_ref().map(|v|match &v.0 {crate::numeric_ingress::Node::Float(n)=>format!(\"{:016x}\",n.to_bits()),_=>panic!(\"native pending payload changed variant\")});serde_json::json!({\"key\":key,\"pending\":pending,\"remaining\":access.entries.len()}) }",
+        "call": "{ let entries=$value.as_array().expect(\"native map fixture\").iter().map(|row|(row[0].as_str().unwrap().encode_utf16().collect::<Vec<u16>>(),crate::numeric_ingress::Node::Float(f64::from_bits(u64::from_str_radix(row[1].as_str().unwrap(),16).unwrap())))).collect::<Vec<_>>();let mut access=$type{entries:entries.into_iter(),value:None}; let key=<$type as serde::de::MapAccess>::next_key_seed(&mut access,std::marker::PhantomData::<String>).expect(\"native key seed\");let pending=access.value.as_ref().map(|v|match v {crate::numeric_ingress::Node::Float(n)=>format!(\"{:016x}\",n.to_bits()),_=>panic!(\"native pending payload changed variant\")});serde_json::json!({\"key\":key,\"pending\":pending,\"remaining\":access.entries.len()}) }",
         "cases": [
           {
             "input": [],
@@ -10725,7 +10725,7 @@
         },
         "input": "observed",
         "reason": "Execute actual value seed after the real key producer, inspect its f64 bits and emptied pending slot; separately require value-before-key refusal.",
-        "call": "{ let entries=$value.as_array().expect(\"native map fixture\").iter().map(|row|(row[0].as_str().unwrap().to_owned(),crate::numeric_ingress::Node::Float(f64::from_bits(u64::from_str_radix(row[1].as_str().unwrap(),16).unwrap())))).collect::<Vec<_>>();let mut access=$type{entries:entries.into_iter(),value:None}; if !access.entries.as_slice().is_empty(){let key=<$type as serde::de::MapAccess>::next_key_seed(&mut access,std::marker::PhantomData::<String>).expect(\"native setup key seed\");assert!(key.is_some());}let result=<$type as serde::de::MapAccess>::next_value_seed(&mut access,std::marker::PhantomData::<f64>);match result{Ok(n)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",n.to_bits()),\"pending\":access.value.is_some(),\"remaining\":access.entries.len()}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e.to_string(),\"pending\":access.value.is_some()})} }",
+        "call": "{ let entries=$value.as_array().expect(\"native map fixture\").iter().map(|row|(row[0].as_str().unwrap().encode_utf16().collect::<Vec<u16>>(),crate::numeric_ingress::Node::Float(f64::from_bits(u64::from_str_radix(row[1].as_str().unwrap(),16).unwrap())))).collect::<Vec<_>>();let mut access=$type{entries:entries.into_iter(),value:None}; if !access.entries.as_slice().is_empty(){let key=<$type as serde::de::MapAccess>::next_key_seed(&mut access,std::marker::PhantomData::<String>).expect(\"native setup key seed\");assert!(key.is_some());}let result=<$type as serde::de::MapAccess>::next_value_seed(&mut access,std::marker::PhantomData::<f64>);match result{Ok(n)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",n.to_bits()),\"pending\":access.value.is_some(),\"remaining\":access.entries.len()}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e.to_string(),\"pending\":access.value.is_some()})} }",
         "cases": [
           {
             "input": [],
@@ -11089,6 +11089,58 @@
         "nativeFields": [
           "bits",
           "calls"
+        ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Direct capture of a canonical native Input into the numeric deserializer wrapper; no Value or text projection and no fallible conversion.",
+        "call": "{ fn __native(v: &safe_cex_types::retained_json::RetainedJsonInput) -> serde_json::Value { use safe_cex_types::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let bits=u64::from_str_radix($value.as_str().unwrap(),16).unwrap();let decoded=$type::from(safe_cex_types::retained_json::RetainedJsonInput::Float(f64::from_bits(bits)));let native=__native(&decoded.0);let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native}) }",
+        "nativeFields": [
+          "kind",
+          "native"
+        ],
+        "cases": [
+          {
+            "input": "8000000000000000",
+            "output": {
+              "ok": true,
+              "kind": "float",
+              "native": {
+                "kind": "float",
+                "bits": "8000000000000000"
+              }
+            }
+          },
+          {
+            "input": "7ff8000000000042",
+            "output": {
+              "ok": true,
+              "kind": "float",
+              "native": {
+                "kind": "float",
+                "bits": "7ff8000000000042"
+              }
+            }
+          }
         ]
       }
     ],
@@ -14958,5 +15010,4035 @@
     "category": "non-decoder",
     "evidence": "Specific outbound rendering role reviewed against this production body; retained_json_writer executes actual Node JSON.stringify comparisons and scripts/retained-json-controls.py requires compiled text-replacement/array-truncation failures with exact restored passes. This classification is separate from universal semantic or admission proof.",
     "reason": "Recursively renders already captured canonical retained data into the caller-owned wire buffer, preserving omission/array-null policy until this final JSON projection. It does not parse JSON or construct a new value carrier; all capture/admission remains in the canonical types parser."
+  },
+  "safe_cex_num::coercion::js_retained_number": {
+    "api": {
+      "kind": "function",
+      "name": "js_retained_number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual maintained TS Store/native Number, parseFloat and String corpus independently specifies these native coercion outputs before JSON. Carrier construction retains UTF16 and numeric bits.",
+    "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);match $type(Some(&value)){Ok(value)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",value.to_bits()),\"nan\":value.is_nan()}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+    "cases": [
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff8000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "fff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "fff0000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "0"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "undefined"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            {
+              "kind": "text",
+              "units": [
+                57343
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                110,
+                97,
+                110
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              }
+            },
+            {
+              "key": [
+                105,
+                110,
+                102,
+                105,
+                110,
+                105,
+                116,
+                121
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff0000000000000"
+              }
+            },
+            {
+              "key": [
+                122,
+                101,
+                114,
+                111
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "8000000000000000"
+              }
+            },
+            {
+              "key": [
+                111,
+                119,
+                110,
+                85,
+                110,
+                100,
+                101,
+                102,
+                105,
+                110,
+                101,
+                100
+              ],
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "key": [
+                57343
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  55296
+                ]
+              }
+            },
+            {
+              "key": [
+                36,
+                115,
+                101,
+                114,
+                100,
+                101,
+                95,
+                106,
+                115,
+                111,
+                110,
+                58,
+                58,
+                112,
+                114,
+                105,
+                118,
+                97,
+                116,
+                101,
+                58,
+                58,
+                78,
+                117,
+                109,
+                98,
+                101,
+                114
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  49,
+                  55
+                ]
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": []
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            32,
+            45,
+            48,
+            32
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            120
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            48,
+            120,
+            49,
+            48
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "4030000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "number",
+              "bits": "4029000000000000"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "4029000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "null"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                116,
+                111,
+                83,
+                116,
+                114,
+                105,
+                110,
+                103
+              ],
+              "value": {
+                "kind": "null"
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);match $type(Some(&value)){Ok(value)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",value.to_bits()),\"nan\":value.is_nan()}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+      "cases": [
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "null"
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff8000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff0000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "fff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "fff0000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "8000000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "8000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "0"
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "bool",
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              },
+              {
+                "kind": "number",
+                "bits": "8000000000000000"
+              },
+              {
+                "kind": "text",
+                "units": [
+                  57343
+                ]
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  110,
+                  97,
+                  110
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                }
+              },
+              {
+                "key": [
+                  105,
+                  110,
+                  102,
+                  105,
+                  110,
+                  105,
+                  116,
+                  121
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff0000000000000"
+                }
+              },
+              {
+                "key": [
+                  122,
+                  101,
+                  114,
+                  111
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                }
+              },
+              {
+                "key": [
+                  111,
+                  119,
+                  110,
+                  85,
+                  110,
+                  100,
+                  101,
+                  102,
+                  105,
+                  110,
+                  101,
+                  100
+                ],
+                "value": {
+                  "kind": "undefined"
+                }
+              },
+              {
+                "key": [
+                  57343
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    55296
+                  ]
+                }
+              },
+              {
+                "key": [
+                  36,
+                  115,
+                  101,
+                  114,
+                  100,
+                  101,
+                  95,
+                  106,
+                  115,
+                  111,
+                  110,
+                  58,
+                  58,
+                  112,
+                  114,
+                  105,
+                  118,
+                  97,
+                  116,
+                  101,
+                  58,
+                  58,
+                  78,
+                  117,
+                  109,
+                  98,
+                  101,
+                  114
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    49,
+                    55
+                  ]
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": []
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              32,
+              45,
+              48,
+              32
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "8000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              120
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              48,
+              120,
+              49,
+              48
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "4030000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "number",
+                "bits": "4029000000000000"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "4029000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "null"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  116,
+                  111,
+                  83,
+                  116,
+                  114,
+                  105,
+                  110,
+                  103
+                ],
+                "value": {
+                  "kind": "null"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      ],
+      "nativeFields": [
+        "bits",
+        "nan"
+      ]
+    }
+  },
+  "safe_cex_num::coercion::js_retained_string": {
+    "api": {
+      "kind": "function",
+      "name": "js_retained_string",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual maintained TS Store/native Number, parseFloat and String corpus independently specifies these native coercion outputs before JSON. Carrier construction retains UTF16 and numeric bits.",
+    "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);match $type(Some(&value)){Ok(value)=>serde_json::json!({\"ok\":true,\"units\":value.encode_utf16().collect::<Vec<_>>()}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+    "cases": [
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            117,
+            110,
+            100,
+            101,
+            102,
+            105,
+            110,
+            101,
+            100
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            117,
+            110,
+            100,
+            101,
+            102,
+            105,
+            110,
+            101,
+            100
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            110,
+            117,
+            108,
+            108
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff8000000000000"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            78,
+            97,
+            78
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            73,
+            110,
+            102,
+            105,
+            110,
+            105,
+            116,
+            121
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "fff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            45,
+            73,
+            110,
+            102,
+            105,
+            110,
+            105,
+            116,
+            121
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            48
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "0"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            48
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot represent JavaScript UTF-16 string as UTF-8"
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "undefined"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            {
+              "kind": "text",
+              "units": [
+                57343
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot represent JavaScript UTF-16 string as UTF-8"
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                110,
+                97,
+                110
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              }
+            },
+            {
+              "key": [
+                105,
+                110,
+                102,
+                105,
+                110,
+                105,
+                116,
+                121
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff0000000000000"
+              }
+            },
+            {
+              "key": [
+                122,
+                101,
+                114,
+                111
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "8000000000000000"
+              }
+            },
+            {
+              "key": [
+                111,
+                119,
+                110,
+                85,
+                110,
+                100,
+                101,
+                102,
+                105,
+                110,
+                101,
+                100
+              ],
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "key": [
+                57343
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  55296
+                ]
+              }
+            },
+            {
+              "key": [
+                36,
+                115,
+                101,
+                114,
+                100,
+                101,
+                95,
+                106,
+                115,
+                111,
+                110,
+                58,
+                58,
+                112,
+                114,
+                105,
+                118,
+                97,
+                116,
+                101,
+                58,
+                58,
+                78,
+                117,
+                109,
+                98,
+                101,
+                114
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  49,
+                  55
+                ]
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            91,
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            32,
+            79,
+            98,
+            106,
+            101,
+            99,
+            116,
+            93
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": []
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            91,
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            32,
+            79,
+            98,
+            106,
+            101,
+            99,
+            116,
+            93
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            32,
+            45,
+            48,
+            32
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            32,
+            45,
+            48,
+            32
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            120
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            120
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot represent JavaScript UTF-16 string as UTF-8"
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            48,
+            120,
+            49,
+            48
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            48,
+            120,
+            49,
+            48
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "number",
+              "bits": "4029000000000000"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            49,
+            50,
+            46,
+            53
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "null"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": []
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                116,
+                111,
+                83,
+                116,
+                114,
+                105,
+                110,
+                103
+              ],
+              "value": {
+                "kind": "null"
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);match $type(Some(&value)){Ok(value)=>serde_json::json!({\"ok\":true,\"units\":value.encode_utf16().collect::<Vec<_>>()}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+      "cases": [
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              117,
+              110,
+              100,
+              101,
+              102,
+              105,
+              110,
+              101,
+              100
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              117,
+              110,
+              100,
+              101,
+              102,
+              105,
+              110,
+              101,
+              100
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "null"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              110,
+              117,
+              108,
+              108
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff8000000000000"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              78,
+              97,
+              78
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              73,
+              110,
+              102,
+              105,
+              110,
+              105,
+              116,
+              121
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "fff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              45,
+              73,
+              110,
+              102,
+              105,
+              110,
+              105,
+              116,
+              121
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "8000000000000000"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              48
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "0"
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              48
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "bool",
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              102,
+              97,
+              108,
+              115,
+              101
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot represent JavaScript UTF-16 string as UTF-8"
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              },
+              {
+                "kind": "number",
+                "bits": "8000000000000000"
+              },
+              {
+                "kind": "text",
+                "units": [
+                  57343
+                ]
+              }
+            ]
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot represent JavaScript UTF-16 string as UTF-8"
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  110,
+                  97,
+                  110
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                }
+              },
+              {
+                "key": [
+                  105,
+                  110,
+                  102,
+                  105,
+                  110,
+                  105,
+                  116,
+                  121
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff0000000000000"
+                }
+              },
+              {
+                "key": [
+                  122,
+                  101,
+                  114,
+                  111
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                }
+              },
+              {
+                "key": [
+                  111,
+                  119,
+                  110,
+                  85,
+                  110,
+                  100,
+                  101,
+                  102,
+                  105,
+                  110,
+                  101,
+                  100
+                ],
+                "value": {
+                  "kind": "undefined"
+                }
+              },
+              {
+                "key": [
+                  57343
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    55296
+                  ]
+                }
+              },
+              {
+                "key": [
+                  36,
+                  115,
+                  101,
+                  114,
+                  100,
+                  101,
+                  95,
+                  106,
+                  115,
+                  111,
+                  110,
+                  58,
+                  58,
+                  112,
+                  114,
+                  105,
+                  118,
+                  97,
+                  116,
+                  101,
+                  58,
+                  58,
+                  78,
+                  117,
+                  109,
+                  98,
+                  101,
+                  114
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    49,
+                    55
+                  ]
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              91,
+              111,
+              98,
+              106,
+              101,
+              99,
+              116,
+              32,
+              79,
+              98,
+              106,
+              101,
+              99,
+              116,
+              93
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": []
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              91,
+              111,
+              98,
+              106,
+              101,
+              99,
+              116,
+              32,
+              79,
+              98,
+              106,
+              101,
+              99,
+              116,
+              93
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              32,
+              45,
+              48,
+              32
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              32,
+              45,
+              48,
+              32
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              120
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              120
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              55296
+            ]
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot represent JavaScript UTF-16 string as UTF-8"
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              48,
+              120,
+              49,
+              48
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              48,
+              120,
+              49,
+              48
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "number",
+                "bits": "4029000000000000"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              49,
+              50,
+              46,
+              53
+            ]
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "null"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": []
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  116,
+                  111,
+                  83,
+                  116,
+                  114,
+                  105,
+                  110,
+                  103
+                ],
+                "value": {
+                  "kind": "null"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      ],
+      "nativeFields": [
+        "ok",
+        "units"
+      ]
+    }
+  },
+  "safe_cex_num::coercion::js_retained_parse_float": {
+    "api": {
+      "kind": "function",
+      "name": "js_retained_parse_float",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual maintained TS Store/native Number, parseFloat and String corpus independently specifies these native coercion outputs before JSON. Carrier construction retains UTF16 and numeric bits.",
+    "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);match $type(Some(&value)){Ok(value)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",value.to_bits()),\"nan\":value.is_nan()}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+    "cases": [
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff8000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "fff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "fff0000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "0"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "undefined"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            {
+              "kind": "text",
+              "units": [
+                57343
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                110,
+                97,
+                110
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              }
+            },
+            {
+              "key": [
+                105,
+                110,
+                102,
+                105,
+                110,
+                105,
+                116,
+                121
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff0000000000000"
+              }
+            },
+            {
+              "key": [
+                122,
+                101,
+                114,
+                111
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "8000000000000000"
+              }
+            },
+            {
+              "key": [
+                111,
+                119,
+                110,
+                85,
+                110,
+                100,
+                101,
+                102,
+                105,
+                110,
+                101,
+                100
+              ],
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "key": [
+                57343
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  55296
+                ]
+              }
+            },
+            {
+              "key": [
+                36,
+                115,
+                101,
+                114,
+                100,
+                101,
+                95,
+                106,
+                115,
+                111,
+                110,
+                58,
+                58,
+                112,
+                114,
+                105,
+                118,
+                97,
+                116,
+                101,
+                58,
+                58,
+                78,
+                117,
+                109,
+                98,
+                101,
+                114
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  49,
+                  55
+                ]
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": []
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            32,
+            45,
+            48,
+            32
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            120
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "4029000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "4029000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            48,
+            120,
+            49,
+            48
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "number",
+              "bits": "4029000000000000"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "4029000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "null"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                116,
+                111,
+                83,
+                116,
+                114,
+                105,
+                110,
+                103
+              ],
+              "value": {
+                "kind": "null"
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);match $type(Some(&value)){Ok(value)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",value.to_bits()),\"nan\":value.is_nan()}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+      "cases": [
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "null"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff8000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff0000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "fff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "fff0000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "8000000000000000"
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "0"
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "bool",
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              },
+              {
+                "kind": "number",
+                "bits": "8000000000000000"
+              },
+              {
+                "kind": "text",
+                "units": [
+                  57343
+                ]
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  110,
+                  97,
+                  110
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                }
+              },
+              {
+                "key": [
+                  105,
+                  110,
+                  102,
+                  105,
+                  110,
+                  105,
+                  116,
+                  121
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff0000000000000"
+                }
+              },
+              {
+                "key": [
+                  122,
+                  101,
+                  114,
+                  111
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                }
+              },
+              {
+                "key": [
+                  111,
+                  119,
+                  110,
+                  85,
+                  110,
+                  100,
+                  101,
+                  102,
+                  105,
+                  110,
+                  101,
+                  100
+                ],
+                "value": {
+                  "kind": "undefined"
+                }
+              },
+              {
+                "key": [
+                  57343
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    55296
+                  ]
+                }
+              },
+              {
+                "key": [
+                  36,
+                  115,
+                  101,
+                  114,
+                  100,
+                  101,
+                  95,
+                  106,
+                  115,
+                  111,
+                  110,
+                  58,
+                  58,
+                  112,
+                  114,
+                  105,
+                  118,
+                  97,
+                  116,
+                  101,
+                  58,
+                  58,
+                  78,
+                  117,
+                  109,
+                  98,
+                  101,
+                  114
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    49,
+                    55
+                  ]
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": []
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              32,
+              45,
+              48,
+              32
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "8000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              120
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "4029000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "4029000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              48,
+              120,
+              49,
+              48
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "number",
+                "bits": "4029000000000000"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "4029000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "null"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  116,
+                  111,
+                  83,
+                  116,
+                  114,
+                  105,
+                  110,
+                  103
+                ],
+                "value": {
+                  "kind": "null"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      ],
+      "nativeFields": [
+        "bits",
+        "nan"
+      ]
+    }
+  },
+  "safe_cex_num::json_stringify::js_retained_truthy": {
+    "api": {
+      "kind": "function",
+      "name": "js_retained_truthy",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual maintained TS Store/native Number, parseFloat and String corpus independently specifies these native coercion outputs before JSON. Carrier construction retains UTF16 and numeric bits.",
+    "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);serde_json::json!({\"ok\":true,\"truthy\":$type(&value),\"nullish\":value.is_nullish()}) }",
+    "cases": [
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "truthy": false,
+          "nullish": true
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "truthy": false,
+          "nullish": true
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": true,
+          "truthy": false,
+          "nullish": true
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff8000000000000"
+        },
+        "output": {
+          "ok": true,
+          "truthy": false,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "7ff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "fff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        },
+        "output": {
+          "ok": true,
+          "truthy": false,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "0"
+        },
+        "output": {
+          "ok": true,
+          "truthy": false,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "truthy": false,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "undefined"
+            },
+            {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            {
+              "kind": "text",
+              "units": [
+                57343
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                110,
+                97,
+                110
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              }
+            },
+            {
+              "key": [
+                105,
+                110,
+                102,
+                105,
+                110,
+                105,
+                116,
+                121
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "7ff0000000000000"
+              }
+            },
+            {
+              "key": [
+                122,
+                101,
+                114,
+                111
+              ],
+              "value": {
+                "kind": "number",
+                "bits": "8000000000000000"
+              }
+            },
+            {
+              "key": [
+                111,
+                119,
+                110,
+                85,
+                110,
+                100,
+                101,
+                102,
+                105,
+                110,
+                101,
+                100
+              ],
+              "value": {
+                "kind": "undefined"
+              }
+            },
+            {
+              "key": [
+                57343
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  55296
+                ]
+              }
+            },
+            {
+              "key": [
+                36,
+                115,
+                101,
+                114,
+                100,
+                101,
+                95,
+                106,
+                115,
+                111,
+                110,
+                58,
+                58,
+                112,
+                114,
+                105,
+                118,
+                97,
+                116,
+                101,
+                58,
+                58,
+                78,
+                117,
+                109,
+                98,
+                101,
+                114
+              ],
+              "value": {
+                "kind": "text",
+                "units": [
+                  49,
+                  55
+                ]
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": []
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            32,
+            45,
+            48,
+            32
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            120
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            49,
+            50,
+            46,
+            53,
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            48,
+            120,
+            49,
+            48
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "number",
+              "bits": "4029000000000000"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "array",
+          "values": [
+            {
+              "kind": "null"
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "entries": [
+            {
+              "key": [
+                116,
+                111,
+                83,
+                116,
+                114,
+                105,
+                110,
+                103
+              ],
+              "value": {
+                "kind": "null"
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "truthy": true,
+          "nullish": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ fn input(value:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput {use safe_cex_types::retained_json::RetainedJsonInput as R;match value[\"kind\"].as_str().unwrap(){\"undefined\"=>R::Undefined,\"null\"=>R::Null,\"bool\"=>R::Bool(value[\"value\"].as_bool().unwrap()),\"number\"=>R::Float(f64::from_bits(u64::from_str_radix(value[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>R::Text(value[\"units\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect()),\"array\"=>R::Array(value[\"values\"].as_array().unwrap().iter().map(input).collect()),\"object\"=>R::Object(value[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|v|u16::try_from(v.as_u64().unwrap()).unwrap()).collect(),input(&e[\"value\"]))).collect()),_=>panic!(\"authored native kind\")}} let value=input($value);serde_json::json!({\"ok\":true,\"truthy\":$type(&value),\"nullish\":value.is_nullish()}) }",
+      "cases": [
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "truthy": false,
+            "nullish": true
+          }
+        },
+        {
+          "input": {
+            "kind": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "truthy": false,
+            "nullish": true
+          }
+        },
+        {
+          "input": {
+            "kind": "null"
+          },
+          "output": {
+            "ok": true,
+            "truthy": false,
+            "nullish": true
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff8000000000000"
+          },
+          "output": {
+            "ok": true,
+            "truthy": false,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "7ff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "fff0000000000000"
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "8000000000000000"
+          },
+          "output": {
+            "ok": true,
+            "truthy": false,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "number",
+            "bits": "0"
+          },
+          "output": {
+            "ok": true,
+            "truthy": false,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "bool",
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "truthy": false,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              },
+              {
+                "kind": "number",
+                "bits": "8000000000000000"
+              },
+              {
+                "kind": "text",
+                "units": [
+                  57343
+                ]
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  110,
+                  97,
+                  110
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                }
+              },
+              {
+                "key": [
+                  105,
+                  110,
+                  102,
+                  105,
+                  110,
+                  105,
+                  116,
+                  121
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff0000000000000"
+                }
+              },
+              {
+                "key": [
+                  122,
+                  101,
+                  114,
+                  111
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                }
+              },
+              {
+                "key": [
+                  111,
+                  119,
+                  110,
+                  85,
+                  110,
+                  100,
+                  101,
+                  102,
+                  105,
+                  110,
+                  101,
+                  100
+                ],
+                "value": {
+                  "kind": "undefined"
+                }
+              },
+              {
+                "key": [
+                  57343
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    55296
+                  ]
+                }
+              },
+              {
+                "key": [
+                  36,
+                  115,
+                  101,
+                  114,
+                  100,
+                  101,
+                  95,
+                  106,
+                  115,
+                  111,
+                  110,
+                  58,
+                  58,
+                  112,
+                  114,
+                  105,
+                  118,
+                  97,
+                  116,
+                  101,
+                  58,
+                  58,
+                  78,
+                  117,
+                  109,
+                  98,
+                  101,
+                  114
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    49,
+                    55
+                  ]
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": []
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              32,
+              45,
+              48,
+              32
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              120
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              49,
+              50,
+              46,
+              53,
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "text",
+            "units": [
+              48,
+              120,
+              49,
+              48
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "number",
+                "bits": "4029000000000000"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "array",
+            "values": [
+              {
+                "kind": "null"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  116,
+                  111,
+                  83,
+                  116,
+                  114,
+                  105,
+                  110,
+                  103
+                ],
+                "value": {
+                  "kind": "null"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "truthy": true,
+            "nullish": false
+          }
+        }
+      ],
+      "nativeFields": [
+        "truthy",
+        "nullish"
+      ]
+    }
+  },
+  "safe_cex_num::json_stringify::js_retained_json_stringify": {
+    "api": {
+      "kind": "function",
+      "name": "js_retained_json_stringify",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Existing retained writer delegates directly to the canonical lower-layer writer, preserving its Node UTF16/number/own-key corpus.",
+    "reason": "Outbound JSON.stringify projection only, operating on an already captured native tree; it does not decode or admit data."
+  },
+  "safe_cex_num::numeric_ingress::js_capture_output": {
+    "api": {
+      "kind": "function",
+      "name": "js_capture_output",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "T"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::ser::Serialize",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  },
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::marker::Sized",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "maybe"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual maintained TS Store/native Number, parseFloat and String corpus independently specifies these native coercion outputs before JSON. Carrier construction retains UTF16 and numeric bits.",
+    "call": "{ fn __native(v: &safe_cex_types::retained_json::RetainedJsonInput) -> serde_json::Value { use safe_cex_types::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let number=f64::from_bits(u64::from_str_radix($value.as_str().unwrap(),16).unwrap());match $type(&number){Ok(decoded)=>{let native=__native(&decoded);let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "cases": [
+      {
+        "input": "0000000000000000",
+        "output": {
+          "ok": true,
+          "kind": "float",
+          "native": {
+            "kind": "float",
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": "8000000000000000",
+        "output": {
+          "ok": true,
+          "kind": "float",
+          "native": {
+            "kind": "float",
+            "bits": "8000000000000000"
+          }
+        }
+      },
+      {
+        "input": "7ff8000000000042",
+        "output": {
+          "ok": true,
+          "kind": "float",
+          "native": {
+            "kind": "float",
+            "bits": "7ff8000000000042"
+          }
+        }
+      },
+      {
+        "input": "7ff0000000000000",
+        "output": {
+          "ok": true,
+          "kind": "float",
+          "native": {
+            "kind": "float",
+            "bits": "7ff0000000000000"
+          }
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ fn __native(v: &safe_cex_types::retained_json::RetainedJsonInput) -> serde_json::Value { use safe_cex_types::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let number=f64::from_bits(u64::from_str_radix($value.as_str().unwrap(),16).unwrap());match $type(&number){Ok(decoded)=>{let native=__native(&decoded);let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": "0000000000000000",
+          "output": {
+            "ok": true,
+            "kind": "float",
+            "native": {
+              "kind": "float",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": "8000000000000000",
+          "output": {
+            "ok": true,
+            "kind": "float",
+            "native": {
+              "kind": "float",
+              "bits": "8000000000000000"
+            }
+          }
+        },
+        {
+          "input": "7ff8000000000042",
+          "output": {
+            "ok": true,
+            "kind": "float",
+            "native": {
+              "kind": "float",
+              "bits": "7ff8000000000042"
+            }
+          }
+        },
+        {
+          "input": "7ff0000000000000",
+          "output": {
+            "ok": true,
+            "kind": "float",
+            "native": {
+              "kind": "float",
+              "bits": "7ff0000000000000"
+            }
+          }
+        }
+      ],
+      "nativeFields": [
+        "kind",
+        "native"
+      ]
+    }
+  },
+  "safe_cex_num::numeric_ingress::as_number": {
+    "api": {
+      "kind": "function",
+      "name": "as_number",
+      "signature": {
+        "inputs": [
+          [
+            "node",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Closed numeric node extraction reads Float bits or parses the retained lexeme, refusing nonnumeric node variants without coercion.",
+    "call": "{ let node=if let Some(bits)=$value.get(\"bits\"){super::Node::Float(f64::from_bits(u64::from_str_radix(bits.as_str().unwrap(),16).unwrap()))}else{super::Node::from($value.clone())};let number=$type(&node);serde_json::json!({\"ok\":true,\"number\":number.is_some(),\"bits\":number.map(|v|format!(\"{:016x}\",v.to_bits()))}) }",
+    "cases": [
+      {
+        "input": {
+          "bits": "8000000000000000"
+        },
+        "output": {
+          "ok": true,
+          "number": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "bits": "7ff8000000000042"
+        },
+        "output": {
+          "ok": true,
+          "number": true,
+          "bits": "7ff8000000000042"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "ok": true,
+          "number": false,
+          "bits": null
+        }
+      },
+      {
+        "input": "12",
+        "output": {
+          "ok": true,
+          "number": false,
+          "bits": null
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let node=if let Some(bits)=$value.get(\"bits\"){super::Node::Float(f64::from_bits(u64::from_str_radix(bits.as_str().unwrap(),16).unwrap()))}else{super::Node::from($value.clone())};let number=$type(&node);serde_json::json!({\"ok\":true,\"number\":number.is_some(),\"bits\":number.map(|v|format!(\"{:016x}\",v.to_bits()))}) }",
+      "cases": [
+        {
+          "input": {
+            "bits": "8000000000000000"
+          },
+          "output": {
+            "ok": true,
+            "number": true,
+            "bits": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "bits": "7ff8000000000042"
+          },
+          "output": {
+            "ok": true,
+            "number": true,
+            "bits": "7ff8000000000042"
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": true,
+            "number": false,
+            "bits": null
+          }
+        },
+        {
+          "input": "12",
+          "output": {
+            "ok": true,
+            "number": false,
+            "bits": null
+          }
+        }
+      ],
+      "nativeFields": [
+        "number",
+        "bits"
+      ]
+    }
   }
 }

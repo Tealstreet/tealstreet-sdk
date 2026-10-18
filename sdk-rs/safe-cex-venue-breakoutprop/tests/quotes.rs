@@ -322,7 +322,7 @@ fn quotes_owned_info_boundary() {
                 .get_mut("description")
                 .unwrap() = json!("changed").into();
             let unchanged = run(fetch_markets(|| ready(Ok(saved)), &store, &report)).unwrap();
-            assert_eq!(
+            assert!(
                 unchanged[0]
                     .info
                     .as_ref()
@@ -332,7 +332,6 @@ fn quotes_owned_info_boundary() {
                     .get("description")
                     .unwrap()
                     .text_equals("instrument"),
-                true,
                 "QUOTES-OWNED market info"
             );
         } else {
@@ -364,7 +363,7 @@ fn quotes_owned_info_boundary() {
             ))
             .unwrap()
             .unwrap();
-            assert_eq!(
+            assert!(
                 unchanged[0]
                     .info
                     .as_ref()
@@ -372,7 +371,6 @@ fn quotes_owned_info_boundary() {
                     .get("symbol")
                     .unwrap()
                     .text_equals("A"),
-                true,
                 "QUOTES-OWNED ticker info"
             );
         }

@@ -471,11 +471,17 @@ fn owned_read_info_and_fallbacks() {
             _ => unreachable!(),
         };
         if method == "fetchBalance" {
-            info["portfolios"][0]["positions"][0]["symbol"] = json!("changed");
+            *info.get_mut("portfolios").unwrap().as_array_mut().unwrap()[0]
+                .get_mut("positions")
+                .unwrap()
+                .as_array_mut()
+                .unwrap()[0]
+                .get_mut("symbol")
+                .unwrap() = json!("changed").into();
         } else if method == "fetchOrders" {
-            info["instrument"] = json!("changed");
+            *info.get_mut("instrument").unwrap() = json!("changed").into();
         } else {
-            info["symbol"] = json!("changed");
+            *info.get_mut("symbol").unwrap() = json!("changed").into();
         }
         let decoded: safe_cex_venue_breakoutprop::types::PortfolioResponse =
             input.decode().unwrap();

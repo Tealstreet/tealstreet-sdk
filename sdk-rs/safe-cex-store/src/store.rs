@@ -582,7 +582,7 @@ impl StoreState {
     fn stark_config(&self) -> Option<&Value> {
         self.data.stark_config.as_ref()
     }
-    fn zk_link_config(&self) -> Option<&Value> {
+    fn zk_link_config(&self) -> Option<&safe_cex_types::retained_json::RetainedJsonInput> {
         self.data.zk_link_config.as_ref()
     }
     fn user_data(&self) -> Option<&Value> {
@@ -1152,7 +1152,10 @@ impl StoreState {
         self.data.stark_config = data;
         self.notify(false);
     }
-    fn update_zk_link_config(&mut self, data: Option<Value>) {
+    fn update_zk_link_config(
+        &mut self,
+        data: Option<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) {
         self.data.zk_link_config = data;
         self.notify(false);
     }
@@ -1649,7 +1652,9 @@ impl DefaultStore {
     pub fn stark_config(&self) -> Option<Ref<'_, Value>> {
         Ref::filter_map(self.state.borrow(), |state| state.stark_config()).ok()
     }
-    pub fn zk_link_config(&self) -> Option<Ref<'_, Value>> {
+    pub fn zk_link_config(
+        &self,
+    ) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
         Ref::filter_map(self.state.borrow(), |state| state.zk_link_config()).ok()
     }
     pub fn user_data(&self) -> Option<Ref<'_, Value>> {
@@ -1791,7 +1796,10 @@ impl DefaultStore {
         self.mutate(|state| state.update_stark_config(data))
             .map_err(StoreMutationError::from)
     }
-    pub fn update_zk_link_config(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
+    pub fn update_zk_link_config(
+        &self,
+        data: Option<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Result<(), StoreMutationError> {
         self.mutate(|state| state.update_zk_link_config(data))
             .map_err(StoreMutationError::from)
     }
@@ -1948,7 +1956,10 @@ impl Store for DefaultStore {
         self.mutate(|s| s.update_stark_config(data))
             .map_err(StoreMutationError::from)
     }
-    fn update_zk_link_config(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
+    fn update_zk_link_config(
+        &self,
+        data: Option<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Result<(), StoreMutationError> {
         self.mutate(|s| s.update_zk_link_config(data))
             .map_err(StoreMutationError::from)
     }
@@ -2038,7 +2049,7 @@ impl Store for DefaultStore {
     fn stark_config(&self) -> Option<Ref<'_, Value>> {
         Ref::filter_map(self.state.borrow(), |s| s.data.stark_config.as_ref()).ok()
     }
-    fn zk_link_config(&self) -> Option<Ref<'_, Value>> {
+    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
         Ref::filter_map(self.state.borrow(), |s| s.data.zk_link_config.as_ref()).ok()
     }
     fn user_data(&self) -> Option<Ref<'_, Value>> {
