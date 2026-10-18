@@ -2745,7 +2745,9 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
                 .store
                 .update(
                     safe_cex_store::StoreUpdate {
-                        socket_health: Some(json!({"publicHealthy":false,"privateHealthy":false})),
+                        socket_health: Some(
+                            json!({"publicHealthy":false,"privateHealthy":false}).into(),
+                        ),
                         ..Default::default()
                     },
                     false,
@@ -2762,6 +2764,8 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
                     .store
                     .socket_health()
                     .unwrap()
+                    .unwrap()
+                    .into_value()
                     .unwrap()["publicHealthy"],
                 json!(true),
                 "native watchdog performs real canonical health publication"

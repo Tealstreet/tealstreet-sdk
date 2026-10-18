@@ -157,6 +157,18 @@ test('Binance nested market socket keeps its production parent grouping', { time
     }
     assert.deepEqual(outputs[1].messageHandlerStats, outputs[0].messageHandlerStats);
   });
+  for (const key of ['privateLastMessage', 'publicCloseCode', 'privateCloseCode']) {
+    await t.test(`socket health retains own undefined ${key}`, () => {
+      assert.equal(Object.hasOwn(outputs[0].socketHealth, key), true, `TS owns ${key}`);
+      assert.equal(outputs[0].socketHealth[key], undefined);
+      assert.equal(Object.hasOwn(outputs[1].socketHealth, key), true, `native owns ${key}`);
+      assert.equal(outputs[1].socketHealth[key], undefined);
+    });
+  }
+  await t.test('whole socket health preserves source properties and order', () => {
+    assert.deepEqual(outputs[1].socketHealth, outputs[0].socketHealth);
+    assert.deepEqual(Object.keys(outputs[1].socketHealth), Object.keys(outputs[0].socketHealth));
+  });
   await t.test('public health timestamp excludes the nested market socket', () => {
     assert.ok(outputs[0].socketHealth.publicLastMessage > recording.epoch);
     assert.equal(outputs[1].socketHealth.publicLastMessage, outputs[0].socketHealth.publicLastMessage);

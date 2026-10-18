@@ -2005,3 +2005,5 @@ leaves, and waiter drop leaves the continuation alive. Positive infinity disable
 all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
+
+BaseExchange socket-health publication constructs own undefined timestamp/close-code properties and passes them to the canonical Store partial merge. It never removes keys through a JSON read/replacement. Typed Store notifications and prepared payloads retain the same health field.

@@ -13,7 +13,7 @@ use safe_cex_types::{
     RequestOutcome, RequestOutcomeCounts, StoreData, StoreDataLoaded, StoreOptions, StoreReadError,
     StoreReadPhase, StoreSubscriber, StoreUpdateIds, Ticker, retained_json,
 };
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::rc::Rc;
 
 fn property(error: Thrown) -> StoreReadError {
@@ -476,7 +476,10 @@ impl Store for DefaultStore {
             }],
         )
     }
-    fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError> {
+    fn update_socket_health(
+        &self,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), StoreMutationError> {
         self.invoke("updateSocketHealth", vec![encode(data)?])
     }
     fn latency(&self) -> Result<f64, StoreReadError> {
@@ -557,7 +560,9 @@ impl Store for DefaultStore {
     fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
         self.read("fetchedLeverage")
     }
-    fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
+    fn socket_health(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError> {
         self.read("socketHealth")
     }
     fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError> {
@@ -682,7 +687,9 @@ impl DefaultStore {
     pub fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
         Store::fetched_leverage(self)
     }
-    pub fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
+    pub fn socket_health(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError> {
         Store::socket_health(self)
     }
     pub fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError> {

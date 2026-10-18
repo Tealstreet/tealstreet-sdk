@@ -15,6 +15,13 @@ frame body is filtered or synthesized.
 compiled napi account on these inputs using the existing controlled TLS relay.
 Both sockets must open, all four frames must finish their handlers without errors,
 and the nested candle subscription must deliver. It compares the actual
-worker-delivered public handler stats and public-health timestamp. This is a
-bounded grouping regression, not a full 570-frame equality or arbitrary-task drain
-claim. The separate missing own-undefined health fields are outside its scope.
+worker-delivered public handler stats and the complete socket-health record,
+including own undefined privateLastMessage/publicCloseCode/privateCloseCode and
+property order. It is bounded to these four frames; it makes no full 570-frame
+equality or arbitrary-task drain claim.
+
+The own-undefined assertions compile RED against the prior production addon
+`b0b1c0009fddc9f3fa555c6d0894d6ef48464a31d7578b8ed3ac6ead017af4d5`
+(source ae2ddb633c). Each of the three source-owned keys is absent in that addon.
+The canonical health carrier and source partial merge preserve them through the
+production notification and worker delivery path.

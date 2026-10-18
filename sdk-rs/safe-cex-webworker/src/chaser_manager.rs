@@ -71,18 +71,21 @@ pub fn get_bybit_demo_dead_private_ws_reason(
         return Ok(None);
     }
     let health = exchange.base().store.socket_health()?;
-    let Some(health) = health
-        .as_ref()
-        .filter(|health| safe_cex_num::js_truthy(Some(health)))
-    else {
+    let Some(health) = health.as_ref().filter(|health| health.is_truthy()) else {
         return Ok(None);
     };
-    if health.get("privateReconnectPaused") == Some(&serde_json::Value::Bool(true)) {
+    if health.get("privateReconnectPaused")
+        == Some(&safe_cex_types::retained_json::RetainedJsonInput::Bool(
+            true,
+        ))
+    {
         let suffix = match health.get("privateCloseCode") {
-            None => String::new(),
+            None | Some(safe_cex_types::retained_json::RetainedJsonInput::Undefined) => {
+                String::new()
+            }
             Some(code) => format!(
                 " (last close code {})",
-                safe_cex_num::js_string(Some(code)).map_err(|error| {
+                safe_cex_num::js_retained_string(Some(code)).map_err(|error| {
                     let mut converted =
                         safe_cex_exchange::runtime::ExchangeError::new(error.message);
                     converted.name = error.name.into();
@@ -94,7 +97,11 @@ pub fn get_bybit_demo_dead_private_ws_reason(
             "reconnects are paused after repeated failures{suffix}"
         )));
     }
-    if health.get("privateInitialized") != Some(&serde_json::Value::Bool(true)) {
+    if health.get("privateInitialized")
+        != Some(&safe_cex_types::retained_json::RetainedJsonInput::Bool(
+            true,
+        ))
+    {
         return Ok(Some("it has never delivered a message".into()));
     }
     Ok(None)
@@ -115,7 +122,9 @@ pub async fn wait_for_bybit_demo_private_ws(
             .socket_health()?
             .as_ref()
             .and_then(|health| health.get("privateReconnectPaused"))
-            == Some(&serde_json::Value::Bool(true));
+            == Some(&safe_cex_types::retained_json::RetainedJsonInput::Bool(
+                true,
+            ));
         if paused {
             return Ok(reason);
         }

@@ -884,7 +884,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "1ce944d94dfd4be3b125de77f937320427a1ab56b6e9f9feb598d84c108aad3e"
+          "sha256": "99195b671abc3545063f9cb84617e3b38837ab30703dd58b19dff398324c280e"
         }
       ],
       "guards": [
@@ -2366,7 +2366,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "1ce944d94dfd4be3b125de77f937320427a1ab56b6e9f9feb598d84c108aad3e"
+          "sha256": "99195b671abc3545063f9cb84617e3b38837ab30703dd58b19dff398324c280e"
         }
       ],
       "guards": [

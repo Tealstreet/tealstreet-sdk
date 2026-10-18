@@ -219,7 +219,7 @@ fn fixture(
         StoreUpdate {
             markets: Some(vec![market]),
             tickers: Some(vec![ticker]),
-            socket_health: Some(json!({"privateInitialized":true})),
+            socket_health: Some(json!({"privateInitialized":true}).into()),
             ..Default::default()
         },
         true,
@@ -591,7 +591,7 @@ fn monitor_tracks_mutations_ticker_queue_and_two_missing_confirmations() {
         .store
         .update(
             StoreUpdate {
-                socket_health: Some(json!({"privateInitialized":false})),
+                socket_health: Some(json!({"privateInitialized":false}).into()),
                 ..Default::default()
             },
             true,
