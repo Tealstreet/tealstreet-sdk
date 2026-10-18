@@ -67,7 +67,7 @@ Declared-shape type claims cover TS-declared JSON fields, not arbitrary structur
 | F-OPTION-ACCEPTANCE | AssetCtx, SpotAssetCtx | Optional non-null strings accept/erase null; required nullable midPx is retained. Original optional-null note conflated these. |
 | F-DEFAULTS | RateLimiter.constructor | TS defaults capacity/window; Rust requires both. Clock injection does not justify omitting defaults. |
 | F-SIGNATURE-PARSER | splitSig | General ethers recovery/input normalization omitted; private generated-output splitter does not establish general equivalence. |
-| F-DIAGNOSTIC | addressToBytes, actionHash, signL1Action, addSigningInterceptor | Invalid 0x1 vault yields full ethers INVALID_ARGUMENT diagnostic in TS, concise message in Rust. Success goldens cannot discharge propagated errors. |
+| F-DIAGNOSTIC | addressToBytes, actionHash, signL1Action, addSigningInterceptor | BytesLike diagnostic loss repaired: native Realm and ApiClient retain TypeError, versioned message, code/argument/value/shortMessage through the canonical owned cause and transport projection. Five accepted and three rejected vault profiles execute maintained TS plus installed ethers. The earlier message-only assertion is corrected. |
 | F-WIRE-GUARDS | orderTypeToWire | CLOSED: oracle-first null/invalid-object cases now pin TypeError/Error names and exact messages. |
 | F-WIRE-BYTES | orderRequestToOrderWire | CLOSED: request-owned views preserve JS nil signing versus JSON omission, and missing/null order_type plus root access error names/messages. Original signing-mismatch inference was disproved by actual TS bytes (see measurement below). |
 | F-CONSTRUCTOR | HyperliquidUnreadableOrderResponseError.constructor | Mapping points to a response parser, not arbitrary-message error construction. Class-level error divergence does not validate this rs target. |
@@ -308,3 +308,15 @@ Reviewer correction at 2155719585: the initial unsubscribe test could accept Ok(
 Local post-PR public-topic slice: fixed sends bypass deduplication and preserve allMids/fastAssetCtxs/user-callback order. First/second-send and user-callback failures propagate with their specific message; callback-time state and synchronous nested subscription changes are checked. Five source cases come from a separate program so the earlier 23-case corpus is unchanged. This existing Rust operation is FINDING until concrete sender and user-topic/lifecycle composition; subscribeUserTopics itself remains pending with a finding because its Rust operation does not exist yet. PR7267 origin stays pinned at a670ccc8d1; these commits are local.
 
 User-topic dispatch now has an existing Rust operation and moves from pending to MIXED: UTF-8 snapshot boundary plus incomplete registry/concrete subscription/lifecycle composition. Thirty-two actual-source cases execute pinned lodash flatten and compare native Undefined/field presence before JSON omission. Scalar/astral and escaped lone-surrogate witnesses are separate; callback false never ends iteration, errors do, and dictionary mutation/reentry leaves the original owned key snapshot intact. The snapshot adapter claims no dictionary-write parity. No original artifact is rewritten; prior 23-case subscription and five-case public-topic programs are unchanged.
+
+
+## BytesLike signing repair
+
+The former portable message-only diagnostic choice is removed. The native helper
+accepts ethers' uppercase prefix and preserves the original BytesLike failure
+fields through action hashing, real Realm signing and native API preparation.
+`byteslike_signing` uses NativeRuntime and the production imports/transport; its
+accepted signatures and rejected native fields precede source comparison. The
+API diagnostic regression now asserts the retained protocol rather than the old
+bug. This does not extend the typed string adapter to arbitrary JS objects or
+claim unrelated wallet/nonce/MessagePack error equivalence.
