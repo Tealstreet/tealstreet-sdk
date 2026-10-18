@@ -215,17 +215,29 @@ fn json_value(v: &EventValue) -> Result<Value, Failure> {
 pub(crate) fn income_records(
     value: &EventValue,
 ) -> Result<Vec<safe_cex_types::IncomeRecord>, Failure> {
-    let mut rows = json_value(value)?;
-    if let Value::Array(items) = &mut rows {
-        for item in items.iter_mut() {
-            for key in ["tranId", "tradeId"] {
-                if let Some(id) = item.get(key).and_then(Value::as_f64) {
-                    item[key] = Value::String(safe_cex_num::js_number_string(id));
+    let rows = if let EventValue::Array(items) = value {
+        let mut rows = Vec::new();
+        for item in array_values(items) {
+            let item = if matches!(item, EventValue::Object(_)) {
+                let next = item
+                    .spread_object()
+                    .map_err(|error| Rc::new(error.to_exchange_error()))?;
+                for key in ["tranId", "tradeId"] {
+                    if let EventValue::Number(id) = next.read(key)? {
+                        next.write(key, string(safe_cex_num::js_number_string(id)));
+                    }
                 }
-            }
+                next
+            } else {
+                item
+            };
+            rows.push(item);
         }
-    }
-    typed(&EventValue::from_json(rows))
+        EventValue::array(rows)
+    } else {
+        value.clone()
+    };
+    typed(&rows)
 }
 fn typed<T: serde::de::DeserializeOwned>(v: &EventValue) -> Result<T, Failure> {
     crate::class_decode::decode(v.clone()).map_err(|e| failure(e.to_string()))
