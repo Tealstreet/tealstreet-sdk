@@ -1,5 +1,7 @@
 //! Concrete AsterDEX bindings on the shared runtime and scripted wire.
 #![cfg(not(target_arch = "wasm32"))]
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 #[path = "support/exchange_runtime.rs"]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
@@ -281,11 +283,9 @@ fn sparse_position_risk_rows_use_source_coercion_in_v1_and_v3() {
         );
         assert_eq!(long.leverage, 20.0);
         assert_eq!(long.liquidation_price, 0.0);
-        assert_eq!(
-            long.info.as_ref(),
-            Some(&sparse.clone().into()),
-            "raw fields stay untouched"
-        );
+        // Native Float and captured JSON lexemes represent the same JS Number.
+        // Check the retained fields and numeric bits before any JSON projection.
+        retained_assert::assert_value(long.info.as_ref().unwrap(), &sparse);
         let short = positions
             .iter()
             .find(|p| p.side == PositionSide::Short)
