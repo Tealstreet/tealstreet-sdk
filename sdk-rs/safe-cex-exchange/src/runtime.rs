@@ -283,7 +283,18 @@ impl From<safe_cex_transport::RestFailure> for ExchangeError {
                 .error()
                 .downcast_ref::<crate::js_runtime::value::owned::OwnedCallbackError>()
         {
-            crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error()
+            let mut projected =
+                crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error();
+            projected.is_axios_error = matches!(
+                cause.value().get("isAxiosError"),
+                Some(crate::js_runtime::value::OwnedJsValue::Bool(true))
+            );
+            if let Some(crate::js_runtime::value::OwnedJsValue::String(units)) =
+                cause.value().get("stack")
+            {
+                projected.stack = Some(String::from_utf16_lossy(units));
+            }
+            projected
         } else {
             let mut projected = Self::new(error.message.clone());
             if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =

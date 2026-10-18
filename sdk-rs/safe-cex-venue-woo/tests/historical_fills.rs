@@ -159,9 +159,17 @@ impl RestAdapter for Adapter {
                     ))
             {
                 let mut error = RestFailure::pre_transmit("outer-message".into(), request);
-                error.context = Some(Box::new(
-                    json!({"response":{"data":{"message":"response-message"}}}),
-                ));
+                error.response = Some(Box::new(RestResponse {
+                    status: 500,
+                    reason: None,
+                    headers: BTreeMap::new(),
+                    body: RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"message":"response-message"}),
+                        )
+                        .unwrap(),
+                    ),
+                }));
                 return Err(error);
             }
             let rows =
