@@ -226,7 +226,7 @@ impl PublicBodyHost for Rt {
         f.call(r, a)
     }
     fn construct(&self, f: Js, a: Vec<Js>) -> Result<Js, Thrown> {
-        f.call(Js::Undefined, a)
+        f.construct(a, None)
     }
     fn function(&self, f: crate::public_bodies::NativeCallback<Js, Thrown>) -> Js {
         Js::function("", move |_, a| f(a))

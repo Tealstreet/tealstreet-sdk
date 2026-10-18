@@ -2912,6 +2912,19 @@
     ]
   },
   {
+    "file": "safe-cex-venue-binance/src/native_host.rs",
+    "function": "request",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "start",
+        "callee": "crate :: class_jobs :: start",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-venue-binance/src/private_classes.rs",
     "function": "connect_and_subscribe",
     "edges": [

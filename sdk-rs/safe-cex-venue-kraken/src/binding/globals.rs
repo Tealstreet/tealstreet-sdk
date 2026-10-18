@@ -47,7 +47,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     let w = weak.clone();
     def(
         "BaseExchange",
-        Js::constructor("BaseExchange", move |_, a| {
+        Js::constructor("BaseExchange", None, move |_, a| {
             base(&scope(&w)?, arg(&a, 0), arg(&a, 1), arg(&a, 2))
         }),
     );
@@ -60,7 +60,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         let w = weak.clone();
         def(
             class,
-            Js::constructor(class, move |_, a| {
+            Js::constructor(class, None, move |_, a| {
                 let rt = scope(&w)?;
                 let parent = Rc::new(arg(&a, 0));
                 let socket = match kind {

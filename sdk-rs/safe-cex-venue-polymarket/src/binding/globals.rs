@@ -20,9 +20,10 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         let weak = weak.clone();
         Js::function(name, move |_, a| f(&scope_of(&weak)?, a))
     };
-    def(
-        "BaseExchange",
-        func("BaseExchange", |rt, a| {
+    def("BaseExchange", {
+        let weak = weak.clone();
+        Js::constructor("BaseExchange", None, move |_, a| {
+            let rt = scope_of(&weak)?;
             let e = &rt.shared.extra;
             let (value, base) = base_exchange::create(
                 &rt.shared.sockets,
@@ -43,8 +44,8 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 .set(base)
                 .map_err(|_| error("BaseExchange constructed twice"))?;
             Ok(value)
-        }),
-    );
+        })
+    });
     def(
         "safeCexAxiosCreate",
         func("safeCexAxiosCreate", |rt, a| {
@@ -169,7 +170,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         let weak = weak.clone();
         def(
             name,
-            Js::constructor(name, move |_, a| {
+            Js::constructor(name, None, move |_, a| {
                 let rt = scope_of(&weak)?;
                 let classes = rt
                     .shared

@@ -2,7 +2,7 @@
 use super::{Host, effective_config, rest_request, spawn};
 use crate::{
     exchange::BaseExchange,
-    http::{is_tealstreet_proxy_auth_failure_body, stringify_response_body},
+    http::{HTTP_STATS, is_tealstreet_proxy_auth_failure_body, stringify_response_body},
     js_runtime::{
         base_exchange::exchange_options,
         value::{Js, Thrown, arg, to_json},
@@ -35,7 +35,7 @@ pub fn create(
             config: &request,
         })
         .map_err(|error| Thrown::error("Error", &error.to_string()))?;
-    host.configure_exchange(exchange)?;
+    host.configure_exchange(exchange.clone())?;
     let defaults = config.spread_object()?;
     defaults.define("timeout", Js::Number(20_000.0))?;
     let headers = super::axios_headers()?;
@@ -55,6 +55,23 @@ pub fn create(
     )?;
     let client = super::create(host.clone(), defaults);
     install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied)?;
+    let stats_runtime = host.runtime();
+    let stats_exchange = serde_json::to_value(&exchange)
+        .expect("exchange name")
+        .as_str()
+        .expect("exchange name string")
+        .to_owned();
+    let record_request = Js::function("recordRequestStats", move |_, args| {
+        HTTP_STATS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record_request(&stats_exchange, stats_runtime.now_ms());
+        Ok(arg(&args, 0))
+    });
+    client
+        .get("interceptors")?
+        .get("request")?
+        .call_method("use", vec![record_request])?;
     if transport.proxied
         && let Some(authorize) = transport.authorize
     {
@@ -116,6 +133,52 @@ fn install_outcome_interceptor(
         let response = arg(&args, 0);
         if let Some(owner) = fulfilled_owner.upgrade() {
             record_outcome(&owner, &response, Some(&response));
+            let observe = || -> Result<(), Thrown> {
+                let config = optional(&response, "config")?;
+                if optional(&config, "__tealstreetSigningCapture")?.truthy() {
+                    return Ok(());
+                }
+                let url = optional(&config, "url")?;
+                let url = match url {
+                    Js::String(text) => Some(String::from_utf16(&text).map_err(|_| {
+                        Thrown::type_error("lone UTF-16 surrogate at a typed boundary")
+                    })?),
+                    _ => None,
+                };
+                if response.type_of() != "object" || response.is_nullish() || response.is_array() {
+                    owner.note_http_failure(None);
+                    return Ok(());
+                }
+                let Js::Number(status) = response.get("status")? else {
+                    owner.note_http_failure(None);
+                    return Ok(());
+                };
+                if status < 400.0 {
+                    owner.note_http_failure(None);
+                    return Ok(());
+                }
+                let candidates = [response.get("statusText")?, response.get("status_text")?];
+                let status_text = candidates
+                    .into_iter()
+                    .find_map(|candidate| match candidate {
+                        Js::String(text) if !text.is_empty() => Some(text),
+                        _ => None,
+                    });
+                let status_text = status_text.map_or(Ok(String::new()), |text| {
+                    String::from_utf16(&text).map_err(|_| {
+                        Thrown::type_error("lone UTF-16 surrogate at a typed boundary")
+                    })
+                })?;
+                owner.note_http_failure(Some(crate::error_reporting::HttpFailureRecord {
+                    status,
+                    status_text,
+                    url,
+                    at: owner.runtime.now_ms(),
+                }));
+                Ok(())
+            };
+            // TS suppresses telemetry failures so they cannot reject the request.
+            drop(observe());
         }
         Ok(response)
     });

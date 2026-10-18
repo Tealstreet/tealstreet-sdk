@@ -59,7 +59,7 @@ fn construct(scope: &Scope<()>, executor: Js) -> Js {
     scope
         .global("Promise")
         .unwrap()
-        .call(Js::Undefined, vec![executor])
+        .construct(vec![executor], None)
         .expect("production Promise constructor")
 }
 #[test]
@@ -148,7 +148,7 @@ fn constructor_runs_executor_synchronously_and_first_settlement_wins() {
                 scope
                     .global("Promise")
                     .unwrap()
-                    .call(Js::Undefined, vec![executor])
+                    .construct(vec![executor], None)
                     .unwrap_err()
                     .value
                     .get("name")

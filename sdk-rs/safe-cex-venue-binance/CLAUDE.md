@@ -570,3 +570,8 @@ The runner keeps rustdoc artifacts in `target/accepted-inventory`, separate from
 normal native builds. The companion Python control runner compiles isolated
 production faults and restores exact bytes; source fixtures are never substitutes
 for those native receipts.
+
+Native HTTP requests use the existing eager class settlement. Dropping a snapshot
+waiter after Promise.all rejection leaves its started sibling owned by the runtime,
+including response interceptors. Registry native_account_proxy_errors holds each
+orders/positions sibling response until after the first rejection to prove this.

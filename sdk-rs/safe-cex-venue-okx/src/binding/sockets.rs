@@ -1022,7 +1022,7 @@ pub(crate) fn register(g: &Js, weak: Weak<OkxShared>) {
         let w = weak.clone();
         let _ = g.define(
             name,
-            Js::constructor(name, move |_, a| {
+            Js::constructor(name, None, move |_, a| {
                 let scope = scope_of(&w)?;
                 let socket = base_websocket(&scope.shared.sockets, arg(&a, 0));
                 let s = scope.with_this(socket.clone());

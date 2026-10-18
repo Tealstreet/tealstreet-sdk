@@ -279,10 +279,10 @@ impl crate::trading_runtime::TradingHost for Host {
         false
     }
     fn new_map(&self) -> JsResult<Js> {
-        self.global_call("Map", vec![])
+        value(value(self.0.global("Map"))?.construct(vec![], None))
     }
     fn new_set(&self, values: Js) -> JsResult<Js> {
-        self.global_call("Set", vec![values])
+        value(value(self.0.global("Set"))?.construct(vec![values], None))
     }
     fn has_own(&self, object: &Js, key: &str) -> JsResult<Js, bool> {
         Ok(object.has_own(key))

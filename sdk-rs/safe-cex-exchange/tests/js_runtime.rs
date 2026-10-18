@@ -667,12 +667,12 @@ fn bigint_and_url_search_params_follow_ecmascript() {
     let params = globals
         .get("URLSearchParams")
         .unwrap()
-        .call(
-            Js::Undefined,
+        .construct(
             vec![Js::object(vec![
                 ("a b", Js::str("x y&z")),
                 ("k", Js::str("~*")),
             ])],
+            None,
         )
         .unwrap();
     assert_eq!(
@@ -1486,7 +1486,11 @@ fn to_js_json_keeps_undefined_and_bigint_and_ordered_fields() {
 #[test]
 fn ws_direct_fallback_moves_to_the_next_host_after_silent_connects() {
     let g = library();
-    let fallback = run(&g, "WsDirectFallback", vec![Js::Number(1.0)]);
+    let fallback = g
+        .get("WsDirectFallback")
+        .unwrap()
+        .construct(vec![Js::Number(1.0)], None)
+        .unwrap();
     let resolve = |f: &Js| {
         let url = f
             .call_method(
@@ -1980,7 +1984,7 @@ fn performance_now_and_math_random_read_the_runtime() {
 #[test]
 fn map_constructor_adds_entries_from_iterables() {
     let g = library();
-    let new_map = |v: Vec<Js>| g.get("Map").unwrap().call(Js::Undefined, v);
+    let new_map = |v: Vec<Js>| g.get("Map").unwrap().construct(v, None);
     let entry = |k: &str, v: f64| Js::array(vec![Js::str(k), Js::Number(v)]);
     let map = new_map(vec![Js::array(vec![
         entry("a", 1.0),
@@ -2019,7 +2023,7 @@ fn map_constructor_adds_entries_from_iterables() {
     let set = g
         .get("Set")
         .unwrap()
-        .call(Js::Undefined, vec![Js::array(vec![entry("s", 1.0)])])
+        .construct(vec![Js::array(vec![entry("s", 1.0)])], None)
         .unwrap();
     let from_set = new_map(vec![set]).unwrap();
     assert_eq!(
@@ -2082,20 +2086,26 @@ fn array_from_reads_iterables_and_array_likes() {
     let chars = from(vec![text]).unwrap();
     assert_eq!(chars.get("length").unwrap().as_f64(), Some(3.0));
     assert_eq!(json_of(&g, chars), "[\"a\",\"\u{1F600}\",\"b\"]");
-    let map = run(
-        &g,
-        "Map",
-        vec![Js::array(vec![Js::array(vec![
-            Js::str("k"),
-            Js::Number(1.0),
-        ])])],
-    );
+    let map = g
+        .get("Map")
+        .unwrap()
+        .construct(
+            vec![Js::array(vec![Js::array(vec![
+                Js::str("k"),
+                Js::Number(1.0),
+            ])])],
+            None,
+        )
+        .unwrap();
     assert_eq!(json_of(&g, from(vec![map]).unwrap()), r#"[["k",1]]"#);
-    let set = run(
-        &g,
-        "Set",
-        vec![Js::array(vec![Js::str("x"), Js::str("x"), Js::str("y")])],
-    );
+    let set = g
+        .get("Set")
+        .unwrap()
+        .construct(
+            vec![Js::array(vec![Js::str("x"), Js::str("x"), Js::str("y")])],
+            None,
+        )
+        .unwrap();
     assert_eq!(json_of(&g, from(vec![set]).unwrap()), r#"["x","y"]"#);
     let like = Js::object(vec![("length", Js::str("2.9")), ("0", Js::str("x"))]);
     let like = from(vec![like]).unwrap();
@@ -4311,4 +4321,45 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     };
     assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn native_http_factory_updates_global_request_counts() {
+    use safe_cex_exchange::{
+        http::HTTP_STATS, js_runtime::client::factory, native::native_runtime,
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(
+        tokio::task::LocalSet::new().run_until(async {
+            let runtime = native_runtime();
+            let owner = factory_owner(runtime.clone());
+            let before = HTTP_STATS.lock().unwrap().get_stats(runtime.now_ms())["total"].as_u64().unwrap();
+            for status in [200, 404] {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let origin = format!("http://{}", listener.local_addr().unwrap());
+                let server = tokio::task::spawn_local(async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut bytes = Vec::new();
+                    while !bytes.windows(4).any(|part| part == b"\r\n\r\n") {
+                        let mut part = [0; 4096];
+                        let count = stream.read(&mut part).await.unwrap();
+                        assert!(count > 0);
+                        bytes.extend_from_slice(&part[..count]);
+                    }
+                    assert!(String::from_utf8_lossy(&bytes).starts_with("GET /stats "));
+                    stream.write_all(format!("HTTP/1.1 {status} Source fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let xhr = factory::create(host, &safe_cex_transport::DirectTransport,
+                    Js::object(vec![("baseURL", Js::str(&origin))]),
+                    &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]), &owner).unwrap();
+                assert_eq!(await_js(xhr.call_method("get", vec![Js::str("/stats")]).unwrap()).await.is_ok(), status == 200);
+                server.await.unwrap();
+            }
+            let after = HTTP_STATS.lock().unwrap().get_stats(runtime.now_ms())["total"].as_u64().unwrap();
+            assert!(after >= before + 2, "both actual native HTTP attempts update the exported global tracker: {before} -> {after}");
+        })
+    );
 }

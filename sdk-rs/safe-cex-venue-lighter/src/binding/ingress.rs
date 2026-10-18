@@ -70,15 +70,7 @@ pub(crate) fn ops(realm: &Realm) -> IngressOps<Js, Thrown> {
             pair.close()?;
             Ok((first, second))
         }),
-        construct: Rc::new(|callee, args| {
-            if !callee.is_callable() {
-                return Err(Thrown::type_error(&format!(
-                    "{} is not a constructor",
-                    callee.to_display()
-                )));
-            }
-            callee.call(Js::Undefined, args)
-        }),
+        construct: Rc::new(|callee, args| callee.construct(args, None)),
         is_function: Rc::new(Js::is_callable),
         is_object: Rc::new(Js::is_object),
         for_of: Rc::new(|v, f| {
