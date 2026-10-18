@@ -235,9 +235,14 @@ fn leverage_matches_actual_typescript_and_store() {
                 *expected,
                 "leverage native parity: setMarketMaxLeverage fields; {row}"
             );
-            assert_eq!(
-                market.info.as_ref().unwrap().get("sentinel").unwrap(),
-                "preserve"
+            assert!(
+                market
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("sentinel")
+                    .unwrap()
+                    .text_equals("preserve")
             );
         }
     }

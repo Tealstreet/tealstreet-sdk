@@ -1,8 +1,5 @@
 //! Concrete bindings for the already-mapped account, REST, market, and quote reads.
-use crate::{
-    lifecycle::BreakoutpropExchange,
-    runtime::{RuntimeReads, raw_value},
-};
+use crate::{lifecycle::BreakoutpropExchange, runtime::RuntimeReads};
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
     external::ExternalPublicData,
@@ -196,7 +193,13 @@ impl RuntimeReads for NativeReads {
             .await?;
             // Source start/tick check truthiness, not only non-nullness.
             match input {
-                Some(input) if !safe_cex_num::js_truthy(Some(&raw_value(input.clone())?)) => {
+                Some(input)
+                    if !input
+                        .clone()
+                        .decode::<safe_cex_types::retained_json::RetainedJsonInput>()
+                        .map_err(|error| ExchangeError::new(error.to_string()))?
+                        .is_truthy() =>
+                {
                     Ok(None)
                 }
                 value => Ok(value),

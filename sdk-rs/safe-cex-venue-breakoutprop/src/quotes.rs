@@ -3,7 +3,7 @@ use safe_cex_exchange::{
     js_runtime::value::{Js, Thrown, from_retained_input, to_retained_input, to_typed},
     runtime::ExchangeError,
 };
-use safe_cex_num::numeric_ingress::JsNumberInput;
+use safe_cex_num::{js_truthy, numeric_ingress::JsNumberInput};
 use safe_cex_store::Store;
 use safe_cex_transport::provider::{RestBody, RestRequest};
 use safe_cex_types::{

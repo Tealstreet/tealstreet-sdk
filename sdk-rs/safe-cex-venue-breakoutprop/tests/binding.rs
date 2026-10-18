@@ -79,6 +79,7 @@ struct Wire {
     faults: RefCell<VecDeque<(String, u16, Value)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
     candle_response: RefCell<Option<Value>>,
+    native_responses: RefCell<VecDeque<(String, Js)>>,
 }
 fn instrument() -> Value {
     json!({"type":"FOREX","symbol":"BTCUSD","version":1,"description":"Bitcoin","priceIncrement":0.1,"pipSize":0.01,"currency":"USD","lotSize":1,"multiplier":1,"firstCurrency":"BTC"})
@@ -143,10 +144,20 @@ impl JsHttpHost for Wire {
                 _ => panic!("unscripted DXtrade request {method} {url}"),
             }
         };
+        let data = if self
+            .native_responses
+            .borrow()
+            .front()
+            .is_some_and(|(target, _)| target == &url)
+        {
+            self.native_responses.borrow_mut().pop_front().unwrap().1
+        } else {
+            from_json(&data)
+        };
         Box::pin(async move {
             Ok(Js::object(vec![
                 ("status", Js::Number(status as f64)),
-                ("data", from_json(&data)),
+                ("data", data),
                 ("headers", Js::object(vec![])),
                 ("config", config),
             ]))
@@ -1793,4 +1804,117 @@ fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
             "cancel then guarded replacement {label}"
         );
     }
+}
+
+fn retained_probe() -> Js {
+    let probe = Js::object(vec![
+        ("nan", Js::Number(f64::from_bits(0x7ff8000000000042))),
+        ("infinity", Js::Number(f64::INFINITY)),
+        ("negativeInfinity", Js::Number(f64::NEG_INFINITY)),
+        ("zero", Js::Number(-0.0)),
+        ("undefined", Js::Undefined),
+        ("text", Js::utf16(&[0xd800])),
+    ]);
+    probe.define_key(&[0xdfff], Js::utf16(&[0xd800])).unwrap();
+    probe
+}
+fn assert_retained_probe(model: &impl serde::Serialize, path: &[&str]) {
+    let mut value = safe_cex_exchange::js_runtime::value::from_typed(model)
+        .unwrap()
+        .get("info")
+        .unwrap();
+    for key in path {
+        value = value.get(key).unwrap();
+    }
+    let probe = value.get("retained_probe").unwrap();
+    for (field, bits) in [
+        ("nan", 0x7ff8000000000042),
+        ("infinity", f64::INFINITY.to_bits()),
+        ("negativeInfinity", f64::NEG_INFINITY.to_bits()),
+        ("zero", (-0.0f64).to_bits()),
+    ] {
+        assert_eq!(
+            probe.get(field).unwrap().as_f64().unwrap().to_bits(),
+            bits,
+            "native info {field}"
+        );
+    }
+    assert!(probe.has_own("undefined"));
+    assert!(probe.get("undefined").unwrap().is_undefined());
+    assert!(matches!(probe.get("text").unwrap(), Js::String(units) if units.as_ref() == [0xd800]));
+    assert!(
+        matches!(probe.get_key(&[0xdfff]).unwrap(), Js::String(units) if units.as_ref() == [0xd800])
+    );
+}
+#[test]
+fn native_market_info_retains_nonfinite_undefined_and_utf16() {
+    let f = fixture();
+    let row = from_json(&instrument());
+    row.set("retained_probe", retained_probe()).unwrap();
+    f.wire.native_responses.borrow_mut().push_back((
+        "instruments/query".into(),
+        Js::object(vec![("instruments", Js::array(vec![row]))]),
+    ));
+    let rows = f.run(f.exchange.fetch_markets()).unwrap();
+    assert_eq!(rows.len(), 1, "native market raw info row retained");
+    assert_retained_probe(&rows[0], &["instrument"]);
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            markets: Some(rows),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    assert_retained_probe(&f.store.markets()[0], &["instrument"]);
+}
+#[test]
+fn native_portfolio_info_retains_nonfinite_undefined_and_utf16() {
+    for method in ["order", "position"] {
+        let f = fixture();
+        f.fetch_markets();
+        let body = from_json(&source_only_portfolio());
+        let portfolio = body.get("portfolios").unwrap().get("0").unwrap();
+        portfolio
+            .get(if method == "order" {
+                "orders"
+            } else {
+                "positions"
+            })
+            .unwrap()
+            .get("0")
+            .unwrap()
+            .set("retained_probe", retained_probe())
+            .unwrap();
+        f.wire
+            .native_responses
+            .borrow_mut()
+            .push_back(("accounts/default:A/portfolio".into(), body));
+        if method == "order" {
+            let rows = f.run(f.exchange.fetch_orders(None)).unwrap();
+            assert_eq!(rows.len(), 1, "native order raw info row retained");
+            assert_retained_probe(&rows[0], &[]);
+        } else {
+            let rows = f
+                .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+                .unwrap();
+            assert_eq!(rows.len(), 1, "native position raw info row retained");
+            assert_retained_probe(&rows[0], &[]);
+        }
+    }
+}
+#[test]
+fn native_ticker_info_retains_nonfinite_undefined_and_utf16() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = from_json(&json!({"symbol":"BTCUSD","bid":91.25,"ask":94.5}));
+    row.set("retained_probe", retained_probe()).unwrap();
+    f.wire.native_responses.borrow_mut().push_back((
+        "marketdata".into(),
+        Js::object(vec![("events", Js::array(vec![row]))]),
+    ));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1, "native ticker raw info row retained");
+    assert_retained_probe(&rows[0], &[]);
 }
