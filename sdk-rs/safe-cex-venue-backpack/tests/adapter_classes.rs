@@ -60,10 +60,12 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
     )
     .unwrap();
     let put = |path: &str, body: serde_json::Value| {
-        wire.bodies
-            .lock()
-            .unwrap()
-            .insert(path.into(), RestResponseBody::Untransformed(body));
+        wire.bodies.lock().unwrap().insert(
+            path.into(),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+            ),
+        );
     };
     put(
         "/api/v1/markets",
@@ -272,7 +274,12 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
     );
     wire.bodies.lock().unwrap().insert(
         "/api/v1/markets".into(),
-        safe_cex_transport::RestResponseBody::Untransformed(json!({"error":{"msg":"same-base"}})),
+        safe_cex_transport::RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"error":{"msg":"same-base"}}),
+            )
+            .unwrap(),
+        ),
     );
     let e = ready(o.fetch_markets()).err().unwrap();
     assert!(e.message.contains("same-base"), "CLASS native API error");

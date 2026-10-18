@@ -21,6 +21,8 @@ execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-erro
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-hyperliquid-timeout.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-store.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-values.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-metadata.test.mjs')], { stdio: 'inherit' });
+
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-lifecycle.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-signer-availability.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-signer-rejections.test.mjs')], { stdio: 'inherit' });

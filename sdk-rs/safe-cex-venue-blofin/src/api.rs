@@ -2,9 +2,7 @@
 use crate::{order_services::body, types::BASE_URL};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use safe_cex_crypto::{Encoding, hmac_sha256};
-use safe_cex_num::{
-    JsJsonValue, js_json_stringify, js_number_string, js_own_keys, js_string, js_truthy,
-};
+use safe_cex_num::{js_number_string, js_own_keys, js_string, js_truthy};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse,
     rate_limit::RateLimitClock,
@@ -136,9 +134,14 @@ impl BlofinApi {
             .map_err(|e| e.to_string())?
             .map(|v| match v {
                 // A replayed config carries the body axios already serialized: sign those bytes.
-                Value::String(text) => Ok(Some(text.clone())),
-                v if js_truthy(Some(v)) => js_json_stringify(&JsJsonValue::from(v.clone()))
-                    .map_err(|e| e.message.to_owned()),
+                safe_cex_types::retained_json::RetainedJsonInput::Text(text) => {
+                    String::from_utf16(text)
+                        .map(Some)
+                        .map_err(|error| error.to_string())
+                }
+                v if safe_cex_num::js_retained_truthy(v) => {
+                    safe_cex_num::js_retained_json_stringify(v).map_err(|e| e.message.to_owned())
+                }
                 _ => Ok(None),
             })
             .transpose()?

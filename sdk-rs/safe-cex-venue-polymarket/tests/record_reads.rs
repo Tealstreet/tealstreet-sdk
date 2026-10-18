@@ -218,8 +218,13 @@ fn record_reads_actual_typescript() {
             let mut bodies = vec![RestResponseBody::Encoded(raw.as_bytes().to_vec())];
             if case["encodedOnly"] != true {
                 let value: Value = serde_json::from_str(raw).unwrap();
-                bodies.push(RestResponseBody::Untransformed(value.clone()));
-                bodies.push(RestResponseBody::Transformed(value));
+                bodies.push(RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                        .unwrap(),
+                ));
+                bodies.push(RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                ));
             }
             assert_eq!(
                 bodies.len(),
@@ -287,7 +292,12 @@ fn record_reads_actual_typescript() {
             message: "fixture failure".into(),
             response: Some(Box::new(RestResponse {
                 status: 429,
-                ..response(RestResponseBody::Transformed(json!({"error":"limit"})))
+                ..response(RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"error":"limit"}),
+                    )
+                    .unwrap(),
+                ))
             })),
             request: Box::new(RestRequest {
                 url: "/changed".into(),

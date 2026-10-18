@@ -108,7 +108,9 @@ fn client_object(realm: &Realm, client: Client) -> Value {
         let realm = r.clone();
         Ok(r.spawn_value(Box::pin(async move {
             let mut realm = realm;
-            let request = api.build_request(&url, &body);
+            let request = api
+                .build_request(&url, &body)
+                .map_err(|error| thrown_from(&mut realm, ExchangeError::new(error.to_string())))?;
             match api.execute(request, false).await {
                 Ok(response) => {
                     let data = match &response.body {
@@ -121,7 +123,11 @@ fn client_object(realm: &Realm, client: Client) -> Value {
                                 .unwrap_or_else(|_| Value::str(&text))
                         }
                         RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => {
-                            realm.from_serde(v)
+                            realm.restore_typed_value(
+                                &safe_cex_exchange::js_runtime::value::from_retained_input(
+                                    v.clone(),
+                                ),
+                            )?
                         }
                     };
                     let headers = realm.from_typed(&response.headers)?;
@@ -227,7 +233,9 @@ fn bind_fetch(realm: &Realm, http: Arc<dyn RestAdapter>) {
             let text = match &response.body {
                 RestResponseBody::Encoded(bytes) => String::from_utf8_lossy(bytes).into_owned(),
                 RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => {
-                    v.to_string()
+                    safe_cex_num::js_retained_json_stringify(v)
+                        .map_err(|error| realm.error(&error.to_string()))?
+                        .unwrap_or_default()
                 }
             };
             let status = response.status;
