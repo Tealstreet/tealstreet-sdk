@@ -113,3 +113,11 @@ The JS protocol calls the live receiver member, so venue arrow-field overrides
 run for watchdogs, send recovery and explicit native reconnects. The inherited
 JS member calls the shared base algorithm directly, preserving superclass calls
 without recursion. Native protocols inherit that same base algorithm by default.
+
+
+The base error listener runs before venue listeners and stops immediate
+propagation. Plain WebSocket dispatch therefore logs the error without invoking
+`WsProtocol::on_error`; grouped ReconnectingWebSocket dispatch still invokes it,
+as that dispatcher ignores the DOM propagation flag. Actual close events retain
+their normal protocol handling. The production Aster and Bitunix host witnesses
+are in registry's `native_socket_error_dispatch` target.

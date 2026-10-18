@@ -7,7 +7,11 @@ use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc, time::Duration};
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::oneshot};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    sync::oneshot,
+};
 use tokio_tungstenite::tungstenite::{
     Message,
     protocol::{CloseFrame, frame::coding::CloseCode},
@@ -54,13 +58,21 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
                 request.extend_from_slice(&bytes[..length]);
             }
             assert!(request.starts_with(b"GET / HTTP/1.1\r\n"));
-            tcp.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            tcp.write_all(
+                b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
             tcp.shutdown().await.unwrap();
         } else {
             let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
-            socket.send(Message::Close(Some(CloseFrame {
-                code: CloseCode::Away, reason: "server close".into(),
-            }))).await.unwrap();
+            socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Away,
+                    reason: "server close".into(),
+                })))
+                .await
+                .unwrap();
             released.await.unwrap();
             return;
         }
@@ -75,7 +87,10 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
     let venue = constructor
         .construct(
             name.clone(),
-            serde_json::from_value(json!({"key":"", "secret":"", "tuning":{"consoleLogging":false}})).unwrap(),
+            serde_json::from_value(
+                json!({"key":"", "secret":"", "tuning":{"consoleLogging":false}}),
+            )
+            .unwrap(),
             Rc::new(DefaultStore::new()),
         )
         .unwrap();
