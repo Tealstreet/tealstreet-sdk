@@ -354,6 +354,126 @@ fn timed_request(url: &str, timeout_ms: i64) -> RestRequest {
 }
 
 #[test]
+fn production_how_logs_redact_sensitive_utf16_keys_without_changing_delivery() {
+    const CHILD_CASES: &str = "SAFE_CEX_HOW_REDACTION_CASES";
+    if let Ok(cases) = std::env::var(CHILD_CASES) {
+        let cases: Vec<Value> = serde_json::from_str(&cases).unwrap();
+        for case in cases {
+            let host = FakeHost::new();
+            *host.venue.response_data_json.borrow_mut() =
+                Some(case["raw"].as_str().unwrap().into());
+            let adapter = HowRestAdapter::new(host.clone(), None, false).unwrap();
+            let mut request = request("/redaction");
+            request.body = Some(safe_cex_transport::RestBody::Untransformed(
+                Input::from_value(
+                    json!({"apiKey":"public-request-marker","ordinary":"public-control"}),
+                )
+                .unwrap(),
+            ));
+            let response = host.run(adapter.execute(request)).unwrap();
+            assert_eq!(
+                response.body.into_data(),
+                Input::parse_json(
+                    &case["raw"]
+                        .as_str()
+                        .unwrap()
+                        .encode_utf16()
+                        .collect::<Vec<_>>()
+                )
+                .unwrap(),
+                "logging must not redact or alter delivered native data: {}",
+                case["label"]
+            );
+        }
+        return;
+    }
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/how-redaction-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 23, "maintained source redaction controls");
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "production_how_logs_redact_sensitive_utf16_keys_without_changing_delivery",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD_CASES, String::from_utf8(source.stdout).unwrap())
+        .env("DEBUG", "1")
+        .env_remove("NEXT_PUBLIC_LOG_TRADETUNNEL_TO_CONSOLE_LOG")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let logs: Vec<_> = stdout
+        .lines()
+        .filter_map(|line| {
+            let start = line.find("[TradeTunnel] ")?;
+            let (kind, text) = line[start..].split_once(": ")?;
+            let value = Input::parse_json(&text.encode_utf16().collect::<Vec<_>>()).unwrap();
+            Some((kind, value))
+        })
+        .collect();
+    assert_eq!(
+        logs.len(),
+        cases.len() * 2,
+        "real HOW request and response logs"
+    );
+    let (pairs, remainder) = logs.as_chunks::<2>();
+    assert!(remainder.is_empty(), "each request has a response log");
+    for (case, pair) in cases.iter().zip(pairs) {
+        for (index, (kind, value)) in pair.iter().enumerate() {
+            assert_eq!(
+                *kind,
+                if index == 0 {
+                    "[TradeTunnel] REQUEST"
+                } else {
+                    "[TradeTunnel] RESPONSE"
+                }
+            );
+            let Input::Object(fields) = value else {
+                panic!("log record");
+            };
+            let data_key: Vec<_> = "data".encode_utf16().collect();
+            let data = &fields.iter().find(|(key, _)| *key == data_key).unwrap().1;
+            let expected = if index == 0 {
+                Input::from_value(json!({"apiKey":"[REDACTED]","ordinary":"public-control"}))
+                    .unwrap()
+            } else {
+                Input::parse_json(
+                    &case["sanitized"]
+                        .as_str()
+                        .unwrap()
+                        .encode_utf16()
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap()
+            };
+            assert_eq!(
+                *data, expected,
+                "native production log must match TS sanitizer: {}",
+                case["label"]
+            );
+        }
+    }
+}
+
+#[test]
 fn how_routes_and_preserves_signed_payload_and_resolves_non_2xx() {
     let host = FakeHost::new();
     let adapter = HowRestAdapter::new(host.clone(), None, false).unwrap();
