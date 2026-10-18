@@ -335,18 +335,13 @@ Every lifecycle row asserts pre-settlement/settled placement counts and executed
 slice count: merely generating zero, negative-zero and NaN cases missed a
 source truthiness mutation. That formerly surviving mutation now fails by name.
 
-Chaser price selection consumes shared predicted bid/ask, extrema and adjust
-helpers. Shared TableHit preserves inherited market TypeError and ticker NaN;
-missing-market logging re-reads options after reentrant listeners. Its 479-case
-source oracle constructs the real DefaultStore and asserts native numeric bits.
-A separate __proto__ market write poisoning a later precision lookup remains a
-shared Store FINDING; no worker-local prototype-write shim is introduced.
-Own-only lookup, wrong clamp and array-first mutations compile and fail named
-price assertions. The oracle passes all 479 cases in a disposable tracked-source
-mirror without ancestor node_modules; a missing compiler fails MODULE_NOT_FOUND.
-Source log/error listener throws also retain a separate shared-emit FINDING:
-a log throw prevents completion, while an error throw happens after completion.
-Core infallible listeners cannot propagate either source TypeError yet.
+Chaser price selection reads the canonical native Store facade's actual symbol
+maps and array fallback. Real inherited/prototype referents reach the numeric
+helpers; a stock inherited-name table cannot substitute for the Store graph.
+The 479-case maintained oracle and separate poisoned-map case compare numeric
+bits, precision throws and stop/event state. The old poisoned-map refusal is
+removed, with no worker-local Store sidecar. Missing-market logging re-reads
+options after reentrant listeners, and listener throws retain source order.
 
 Worker log forwarding spreads own context over exchange/account defaults and
 uses shared integer-key enumeration. Its post callback is fallible; errors
@@ -749,3 +744,10 @@ continue closing. Session ingress/config/replay/perf/opaque dispatch use native
 Js directly. Decode shared models only at their actual consumers, and keep
 buffered message identity. Separate ordinary output/report DTO findings remain
 tracked in the worker FIX-audit ledger.
+
+The frontier replay fixtures allocate fresh option rows per source case and
+observe numeric-key ordering at every margin publication. BBO subscriber identity
+is asserted on the retained subscriber cause separately from Error::source's
+retained transport-response origin, with complete metadata still checked. The
+actual DefaultStore/handler source oracle verifies original Error identity after
+post and committed bid/ask writes.

@@ -207,18 +207,9 @@ fn chaser_price_matches_live_store_lookup_and_numeric_paths() {
     assert_eq!(poisoned["events"], json!([]));
     let ours = run(poisoned);
     assert_eq!(
-        ours["result"]["error"]["name"], "Error",
-        "FINDING shared Store prototype writes are not represented"
-    );
-    assert_eq!(ours["stopped"], true);
-    assert_eq!(
-        ours["events"][1],
-        json!(["error", "Chaser no market or ticker found for precision"]),
-        "POISONED-MAP visible error"
-    );
-    assert_eq!(
-        ours["result"]["error"]["message"], "No market or ticker found for precision",
-        "POISONED-MAP caller receives Err"
+        ours,
+        json!({"result":poisoned["result"],"events":poisoned["events"],"stopped":poisoned["stopped"],"reason":poisoned["reason"]}),
+        "POISONED-MAP actual Store prototype referent reaches the source lookup"
     );
 }
 

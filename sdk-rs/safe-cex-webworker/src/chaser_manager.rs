@@ -236,98 +236,100 @@ pub fn check_and_mark_if_complete(
 pub fn find_best_price(
     instance: &ChaserOrderInstance,
 ) -> Result<f64, safe_cex_exchange::runtime::ExchangeError> {
+    use safe_cex_exchange::js_runtime::{
+        ops,
+        store::facade,
+        value::{Js, Thrown},
+    };
     use safe_cex_exchange::runtime::ExchangeError;
-    use safe_cex_num::sizing::{get_ticker_predicted_best_ask, get_ticker_predicted_best_bid};
-    use safe_cex_num::{TableHit, adjust, math_max, math_min};
+    use safe_cex_num::{adjust, math_max, math_min};
     let symbol = instance.options().borrow().symbol.clone();
-    let store = &instance.exchange.base().store;
-    let market = table_or_array(
-        store.markets_by_symbol()?.get(&symbol).cloned(),
-        &symbol,
-        || {
-            Ok(store
-                .markets()?
-                .iter()
-                .find(|m| m.symbol == symbol)
-                .cloned())
-        },
-    )?;
-    let ticker = table_or_array(
-        store.tickers_by_symbol()?.get(&symbol).cloned(),
-        &symbol,
-        || {
-            Ok(store
-                .tickers()?
-                .iter()
-                .find(|t| t.symbol == symbol)
-                .cloned())
-        },
-    )?;
-    if !market.is_truthy_by(|_| true) || !ticker.is_truthy_by(|_| true) {
+    let store = facade(instance.exchange.base().store.clone())?;
+    // Read the real dictionary first, including its current prototype. A typed
+    // map snapshot plus a stock inherited-name list cannot recover that value.
+    let lookup = |dictionary: &str, array: &str| -> Result<Js, Thrown> {
+        let value = store.get(dictionary)?.get(&symbol)?;
+        if value.truthy() {
+            return Ok(value);
+        }
+        let symbol = symbol.clone();
+        store.get(array)?.call_method(
+            "find",
+            vec![Js::function("chaserSymbol", move |_, args| {
+                Ok(Js::Bool(
+                    args.first()
+                        .unwrap_or(&Js::Undefined)
+                        .get("symbol")?
+                        .strict_equals(&Js::str(&symbol)),
+                ))
+            })],
+        )
+    };
+    let market = lookup("marketsBySymbol", "markets")?;
+    let ticker = lookup("tickersBySymbol", "tickers")?;
+    if !market.truthy() || !ticker.truthy() {
         log("no market or ticker found", instance)?;
         instance.mark_complete(Some("No market or ticker found"));
         let symbol = instance.options().borrow().symbol.clone();
         instance.exchange.base().emit(
             "error",
-            safe_cex_exchange::js_runtime::value::Js::str(&format!(
-                "Chaser no market or ticker found for {symbol}"
-            )),
+            Js::str(&format!("Chaser no market or ticker found for {symbol}")),
         )?;
         let symbol = instance.options().borrow().symbol.clone();
         return Err(ExchangeError::new(format!(
             "No market or ticker found for {symbol}"
         )));
     }
-    let TableHit::Mapped(market) = market else {
-        // ts-bug: inherited markets pass the guard, then precision.price throws.
-        let mut error = ExchangeError::new("Cannot read properties of undefined (reading 'price')");
-        error.name = "TypeError".into();
-        return Err(error);
-    };
-    let (best_bid, best_ask) = match ticker {
-        TableHit::Mapped(ticker) => (
-            get_ticker_predicted_best_bid(&ticker, Some(&market)),
-            get_ticker_predicted_best_ask(&ticker, Some(&market)),
-        ),
-        // ts-bug: inherited ticker fields are undefined, producing NaN in arithmetic.
-        TableHit::Inherited(_) => (f64::NAN, f64::NAN),
-        TableHit::Missing => {
-            return Err(ExchangeError::new(format!(
-                "No market or ticker found for {symbol}"
-            )));
+    // Preserve the maintained predicted-BBO helpers' live reads and optional
+    // precision guard before findBestPrice's non-optional precision.price read.
+    let predicted = |field: &str, ask: bool| -> Result<Js, Thrown> {
+        let quote = ticker.get(field)?;
+        if quote.truthy() {
+            return ticker.get(field);
         }
+        if ticker.get("last")?.truthy() {
+            let precision = market.get("precision")?;
+            if !precision.is_nullish() && precision.get("price")?.truthy() {
+                let last = ticker.get("last")?;
+                let step = market.get("precision")?.get("price")?;
+                return if ask {
+                    ops::add(&last, &step)
+                } else {
+                    Ok(Js::Number(math_max(
+                        ops::subtract(&last, &step)?.to_number()?,
+                        0.0,
+                    )))
+                };
+            }
+        }
+        ticker.get("last")
     };
-    let precision = market.precision.price;
+    let best_bid = predicted("bid", false)?;
+    let best_ask = predicted("ask", true)?;
+    let precision = market.get("precision")?.get("price")?;
     let side = instance.options().borrow().side;
+    let distance = ops::multiply(&precision, &Js::Number(instance.min_tick_distance()))?;
     let mut raw = if side == OrderSide::Buy {
-        best_bid - precision * instance.min_tick_distance()
+        ops::subtract(&best_bid, &distance)?
     } else {
-        best_ask + precision * instance.min_tick_distance()
+        ops::add(&best_ask, &distance)?
     };
-    if side == OrderSide::Buy && best_ask > 0.0 {
-        raw = math_min(raw, best_ask - precision);
+    if side == OrderSide::Buy && ops::greater_than(&best_ask, &Js::Number(0.0))? {
+        raw = Js::Number(math_min(
+            raw.to_number()?,
+            ops::subtract(&best_ask, &precision)?.to_number()?,
+        ));
     }
-    if side == OrderSide::Sell && best_bid > 0.0 {
-        raw = math_max(raw, best_bid + precision);
+    if side == OrderSide::Sell && ops::greater_than(&best_bid, &Js::Number(0.0))? {
+        raw = Js::Number(math_max(
+            raw.to_number()?,
+            ops::add(&best_bid, &precision)?.to_number()?,
+        ));
     }
-    Ok(adjust(math_max(raw, precision), precision))
-}
-
-fn table_or_array<T>(
-    own: Option<T>,
-    symbol: &str,
-    fallback: impl FnOnce() -> Result<Option<T>, ExchangeError>,
-) -> Result<safe_cex_num::TableHit<T>, ExchangeError> {
-    use safe_cex_num::TableHit;
-    if let Some(value) = own {
-        return Ok(TableHit::Mapped(value));
-    }
-    Ok(
-        match safe_cex_num::js_table_lookup::<&str, ()>(&[], symbol) {
-            TableHit::Inherited(member) => TableHit::Inherited(member),
-            _ => fallback()?.map_or(TableHit::Missing, TableHit::Mapped),
-        },
-    )
+    Ok(adjust(
+        math_max(raw.to_number()?, precision.to_number()?),
+        precision.to_number()?,
+    ))
 }
 
 use safe_cex_exchange::{

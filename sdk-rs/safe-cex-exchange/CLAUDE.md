@@ -246,7 +246,8 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     js_runtime::value::Js,
 };
-use safe_cex_store::{store::DefaultStore, Store, StoreUpdate};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, PlaceOrderOpts};
 use serde_json::{json, Value};
 use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc, task::{Context, Poll, Waker}};
