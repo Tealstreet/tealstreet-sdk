@@ -32,6 +32,7 @@ export async function streamRelay({
   let frozen = false,
     cancelled = false;
   const misses = [];
+  const progress = { frameIndex: -1, completed: 0 };
   const closePeer = (peer, code, reason) => {
     if (code === 1005)
       peer.close(); // An empty close frame, not a TCP abort.
@@ -177,6 +178,7 @@ export async function streamRelay({
   }
   return {
     ports,
+    progress,
     async ready(timeoutMs = 10000) {
       const until = Date.now() + timeoutMs;
       while (true) {
@@ -240,6 +242,64 @@ export async function streamRelay({
         maxLatenessMs,
       };
     },
+    async playControlled({ advance, receipt, timeoutMs = 60000 }) {
+      const expected = new Map(),
+        closes = new Map();
+      const transportExpected = new Map(
+        tape.connections.map((c) => [`${c.key}#${c.occurrence}`, { message: 0, ping: 0, pong: 0, close: 0 }]),
+      );
+      const sent = [];
+      let lastReceipt;
+      for (const [index, frame] of tape.frames.entries()) {
+        progress.frameIndex = index;
+        progress.atMs = frame.atMs;
+        await advance(frame.atMs);
+        const peer = peers.get(frame.connection);
+        if (!peer || peer.readyState !== WebSocket.OPEN) throw new Error(`Missing replay socket for frame ${index}`);
+        const bytes = Buffer.from(frame.base64, 'base64');
+        const connection = tape.connections.find((c) => c.id === frame.connection);
+        if (frame.kind === 'message') {
+          const key = `${connection.key}#${connection.occurrence}`;
+          expected.set(key, (expected.get(key) ?? 0) + 1);
+          peer.send(bytes, { binary: frame.binary });
+        } else if (frame.kind === 'close') closePeer(peer, frame.code, bytes);
+        else peer[frame.kind](bytes);
+        sent.push(frame);
+        const identity = `${connection.key}#${connection.occurrence}`;
+        transportExpected.get(identity)[frame.kind]++;
+        if (frame.kind === 'close') closes.set(identity, (closes.get(identity) ?? 0) + 1);
+        const deadline = Date.now() + timeoutMs;
+        while (true) {
+          lastReceipt = await receipt();
+          progress.receipt = lastReceipt;
+          if (
+            verifyDrain(tape, expected, lastReceipt, closes) &&
+            (!lastReceipt.transport || verifyTransportDrain(tape, lastReceipt, transportExpected))
+          )
+            break;
+          if (Date.now() >= deadline) throw new Error(`Native/TS processing drain timeout at frame ${index}`);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+        progress.completed = sent.length;
+      }
+      await advance(tape.durationMs + 350);
+      lastReceipt = await receipt();
+      const verified = verifyDrain(tape, expected, lastReceipt);
+      const nativeTransportVerified = verifyTransportDrain(tape, lastReceipt);
+      return {
+        delivered: sent.length,
+        dropped: 0,
+        inputHash: hash(JSON.stringify(sent)),
+        expectedInputHash: hash(JSON.stringify(tape.frames)),
+        processed: lastReceipt,
+        applicationDrainVerified: verified,
+        nativeTransportVerified,
+        // Ping/pong control bytes are delivered over TLS but terminate below the
+        // venue parser. They are deliberately excluded from application counts.
+        expectedApplicationFrames: Object.fromEntries(expected),
+        clockMs: tape.durationMs + 350,
+      };
+    },
     async close() {
       cancelled = frozen = true;
       for (const socket of upstreams) socket.terminate();
@@ -248,4 +308,63 @@ export async function streamRelay({
       await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
     },
   };
+}
+
+// Fail closed: compare exact counts per physical URL occurrence, rejecting extra
+// messages/sockets as well as missing or unfinished handlers.
+export function verifyDrain(tape, expected, receipt, expectedCloses = closeCounts(tape)) {
+  if (!receipt?.sockets || (receipt.pendingJobs ?? 0) !== 0) return false;
+  const occurrences = new Map(),
+    actual = new Map();
+  for (const socket of receipt.sockets) {
+    const key = streamKey(socket.url),
+      occurrence = occurrences.get(key) ?? 0;
+    occurrences.set(key, occurrence + 1);
+    const identity = `${key}#${occurrence}`;
+    if (!tape.connections.some((c) => c.key === key && c.occurrence === occurrence)) return false;
+    if (socket.consumed !== socket.processed) return false;
+    const closes = expectedCloses.get(identity) ?? 0;
+    if ((socket.closeConsumed ?? 0) !== closes || (socket.closeProcessed ?? 0) !== closes) return false;
+    actual.set(identity, socket.processed);
+  }
+  for (const [key, count] of expected) if (actual.get(key) !== count) return false;
+  for (const [key, count] of actual) if (count !== (expected.get(key) ?? 0)) return false;
+  return true;
+}
+
+export function verifyTransportDrain(tape, receipt, counts = transportCounts(tape)) {
+  if (!receipt?.transport) return false;
+  const expected = new Map(counts);
+  const occurrences = new Map();
+  for (const { url, counts } of receipt.transport) {
+    const key = streamKey(url),
+      occurrence = occurrences.get(key) ?? 0;
+    occurrences.set(key, occurrence + 1);
+    const identity = `${key}#${occurrence}`,
+      wanted = expected.get(identity);
+    if (!wanted || Object.keys(wanted).some((kind) => counts[kind] !== wanted[kind])) return false;
+    expected.delete(identity);
+  }
+  return expected.size === 0;
+}
+
+function transportCounts(tape) {
+  const expected = new Map(
+    tape.connections.map((c) => [`${c.key}#${c.occurrence}`, { message: 0, ping: 0, pong: 0, close: 0 }]),
+  );
+  for (const frame of tape.frames) {
+    const connection = tape.connections.find((c) => c.id === frame.connection);
+    expected.get(`${connection.key}#${connection.occurrence}`)[frame.kind]++;
+  }
+  return expected;
+}
+function closeCounts(tape) {
+  const counts = new Map();
+  for (const frame of tape.frames) {
+    if (frame.kind !== 'close') continue;
+    const connection = tape.connections.find((c) => c.id === frame.connection);
+    const key = `${connection.key}#${connection.occurrence}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
 }
