@@ -662,3 +662,70 @@ fn array_prototype_method_alias_uses_actual_call_receiver() {
         expected("prototypeAliases")
     );
 }
+
+#[test]
+fn array_coercion_uses_live_hooks_original_receivers_and_throw_identity() {
+    use safe_cex_exchange::js_runtime::ops;
+    let array = Js::array(vec![Js::Number(2.0)]);
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let captured = events.clone();
+    let original = array.clone();
+    array
+        .set(
+            "toString",
+            Js::function("toString", move |this, _| {
+                assert!(
+                    this.same_reference(&original),
+                    "ARRAY_COERCION original string receiver"
+                );
+                captured.borrow_mut().push("string");
+                Ok(Js::utf16(&[0xd800, 33]))
+            }),
+        )
+        .unwrap();
+    let captured = events.clone();
+    let original = array.clone();
+    array
+        .set(
+            "valueOf",
+            Js::function("valueOf", move |this, _| {
+                assert!(
+                    this.same_reference(&original),
+                    "ARRAY_COERCION original numeric receiver"
+                );
+                captured.borrow_mut().push("number");
+                Ok(Js::Number(-0.0))
+            }),
+        )
+        .unwrap();
+    let units = array.to_js_string().unwrap().to_vec();
+    let bits = format!("{:016x}", array.to_number().unwrap().to_bits());
+    let plus = ops::add(&array, &Js::str("!"))
+        .unwrap()
+        .to_js_string()
+        .unwrap()
+        .to_vec();
+    let token = Js::object(vec![]);
+    let thrown = token.clone();
+    let parent = Js::object(vec![(
+        "toString",
+        Js::function("throw", move |_, _| Err(Thrown::new(thrown.clone()))),
+    )]);
+    array
+        .delete(&"toString".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
+    object()
+        .call_method("setPrototypeOf", vec![array.clone(), parent])
+        .unwrap();
+    let error = array
+        .to_js_string()
+        .expect_err("ARRAY_COERCION inherited hook throws");
+    assert!(
+        error.value.same_reference(&token),
+        "ARRAY_COERCION exact thrown referent"
+    );
+    assert_eq!(
+        json!({"units":units,"bits":bits,"plus":plus,"events":*events.borrow(),"sameError":true}),
+        expected("coercionHooks")
+    );
+}

@@ -35,10 +35,19 @@ bindings. Its independent Node program covers descriptors/key order; native
 NaN/infinities/-0 and identity; frozen mutations; holes/inherited getters;
 symbol overrides; double length coercion/reentry/original throws; sparse uint32
 bounds; inherited setters; hidden for-in shadows; live map/slice/sort/JSON reads;
-and actual prototype method aliases. Test-only master checkpoint614ad01765 has
+actual prototype method aliases; and live ToString/ToNumber/default-hint hook order, original receivers and thrown identity. Test-only master checkpoint614ad01765 has
 compiled behavioral RED receipts; no compiler error is counted as behavioral RED.
 `scripts/array-storage-controls.py` independently faults readonly growth, named
 properties, inherited receivers and the iterator override, requires a compiled
 named assertion failure, restores exact source bytes and replays that same test.
 The worker-data-host Wasm example independently compares the real browser
 materializer and native structuredClone for the same array identity guarantees.
+
+Array coercion now goes through the existing OrdinaryToPrimitive operation, including
+actual Array.prototype methods and inherited overrides. The added coercion witness
+compiles and fails before that cutover, then matches independent Node UTF-16 units,
+negative-zero bits, hook order, receiver identity and original rejection. The
+canonical Store target retains its 18 generation/alias/poisoned-row controls.
+The browser `safe-cex-webworker/scripts/array-data-controls.py` independently drops
+a named property in the production materializer, requires the real Wasm/JS
+structuredClone assertion to fail, restores exact source and repeats it.

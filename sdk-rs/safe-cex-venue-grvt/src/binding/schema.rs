@@ -171,7 +171,10 @@ mod tests {
                 }
             }
             Value::Array(values) => {
-                let actual = actual.array_values()?.expect("array");
+                let actual = actual
+                    .array_values()
+                    .expect("fixture property reads")
+                    .expect("array");
                 assert_eq!(actual.len(), values.len(), "{label} array count");
                 for (index, (actual, value)) in actual.iter().zip(values).enumerate() {
                     compare(actual, value, &format!("{label}[{index}]"));

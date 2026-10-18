@@ -73,7 +73,7 @@ const expectedArray=structuredClone(sourceArray);
 for(const message of [arrayMessage,structuredClone(arrayMessage)]) {
  const array=message.data.array;
  assert(Array.isArray(array));assert.equal(array,message.data.alias,'WORKER-ARRAY root alias');
- assert.equal(array.length,expectedArray.length);assert.deepEqual(Object.keys(array),Object.keys(expectedArray));
+ assert.equal(array.length,expectedArray.length);assert.deepEqual(Object.keys(array),Object.keys(expectedArray),'WORKER-ARRAY enumerable named property keys');
  assert(!Object.hasOwn(array,'0'),'WORKER-ARRAY original hole');assert(Object.hasOwn(array,'1')&&array[1]===undefined);
  assert(Object.is(array[2],-0),'WORKER-ARRAY negative zero');assert.equal(array[3].bits,Infinity);
  assert.equal(array.tag,array[3]);assert.equal(array.read,array.tag,'WORKER-ARRAY enumerable getter result aliases');assert.equal(array.self,array,'WORKER-ARRAY original cycle');

@@ -757,7 +757,7 @@ impl Js {
 
     /// ToString, with OrdinaryToPrimitive's string hint for live objects.
     pub fn to_js_string(&self) -> Result<Str, Thrown> {
-        if matches!(self, Js::Object(_) | Js::Function(_)) {
+        if matches!(self, Js::Object(_) | Js::Function(_) | Js::Array(_)) {
             return self
                 .ordinary_to_primitive(["toString", "valueOf"])?
                 .to_js_string();
@@ -795,6 +795,7 @@ impl Js {
                             object.class
                         }
                         Js::Object(_) => "Object",
+                        Js::Array(_) => "Array",
                         _ => unreachable!(),
                     };
                     Js::str(&format!("[object {tag}]"))
@@ -898,10 +899,9 @@ impl Js {
             }
             Js::String(s) => string_to_number(&String::from_utf16_lossy(s)),
             Js::Builtin(reference) => string_to_number(&reference.js_string()),
-            Js::Object(_) | Js::Function(_) => self
+            Js::Object(_) | Js::Function(_) | Js::Array(_) => self
                 .ordinary_to_primitive(["valueOf", "toString"])?
                 .to_number()?,
-            Js::Array(_) => string_to_number(&String::from_utf16_lossy(&self.to_js_string()?)),
             _ => f64::NAN,
         })
     }

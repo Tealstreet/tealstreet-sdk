@@ -128,4 +128,18 @@ Object.defineProperty(jsonArray, '0', {get() { delete jsonArray[1]; return -0; }
 const liveReads = {mapped: JSON.stringify(mapped), mappedKeys: Object.keys(mapped), sliced, sorted: [sortedArray.finalFirst, sortedArray[1]], json: JSON.stringify(jsonArray)};
 const prototypeAliases = {samePrototype: Object.getPrototypeOf([]) === Array.prototype, sameMap: [].map === [].map, mapBorrow: Array.prototype.map.call({0: 4, length: 1}, v => v+1)};
 
-process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins, lengthCoercion, sparse, readonly, inheritedSetter, hiddenForIn, liveReads, prototypeAliases}));
+const coercionArray = [2], coercionEvents = [];
+coercionArray.toString = function () { if (this !== coercionArray) throw Error('receiver'); coercionEvents.push('string'); return '\ud800!'; };
+coercionArray.valueOf = function () { if (this !== coercionArray) throw Error('receiver'); coercionEvents.push('number'); return -0; };
+const coercionUnits = Array.from(String(coercionArray), c => c.charCodeAt(0));
+const coercionNumber = Number(coercionArray), coercionBuffer = Buffer.alloc(8);
+coercionBuffer.writeDoubleBE(coercionNumber);
+const coercionPlus = Array.from(coercionArray + '!', c => c.charCodeAt(0));
+const coercionToken = {};
+delete coercionArray.toString;
+Object.setPrototypeOf(coercionArray, {toString() { throw coercionToken; }});
+let sameCoercionError = false;
+try { String(coercionArray); } catch (e) { sameCoercionError = e === coercionToken; }
+const coercionHooks = {units:coercionUnits,bits:coercionBuffer.toString('hex'),plus:coercionPlus,events:coercionEvents,sameError:sameCoercionError};
+
+process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins, lengthCoercion, sparse, readonly, inheritedSetter, hiddenForIn, liveReads, prototypeAliases, coercionHooks}));
