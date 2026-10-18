@@ -64,11 +64,11 @@ method. RPS is a deterministic eleven-request scheduler probe, not a load test.
 
 ## Deliberate boundaries and review
 
-The API uses prepared JsJsonValue/UTF-8 Config values and preserves shallow header
-identity; it excludes executable Axios properties, symbols and prototype objects.
-Native model projections preserve numerical fields directly, but shared SDK
-models/JSON metadata do not retain every arbitrary JS extra field, sparse hole,
-executable getter or source alias. Placement/replacement body witnesses use
+Request configuration uses prepared JsJsonValue/UTF-8 values and preserves shallow
+header identity. Successful response data stays canonical retained Input through
+the shared Axios transform, interceptor and native callback; model info retains
+unread UTF-16 keys/values, nonfinite numbers and own undefined. These snapshots
+exclude executable Axios properties, symbols, sparse holes, getters and source aliases. Placement/replacement body witnesses use
 prepared Options and compatible existing-record reads, not arbitrary JS getters.
 
 Concrete classes use static Rust dispatch and host-provided HTTP/socket/crypto
