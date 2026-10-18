@@ -10,5 +10,17 @@
       "OrderTimeInForce": "5419b440de66b55c211ff04d29c6c61fa661c649624fdbe048404ac7c93f1537",
       "OrderType": "785b28216ac8f07dd990064153dcf08dfb7a0fb889bc0b0f1583a7d8d056d95c"
     }
+  },
+  "packages/lighter-sdk/package.json": {
+    "originalSha256": "2efb7140201dde8bba8ab747af7dbd52d76ed835a5301203cdaddd905a94c167",
+    "currentSha256": "c4815a67cf010bd7da4b534a325109c43b718a5abed5190838088474d56cc019",
+    "sourceCommit": "cd8ed4a6ceb5dd2bef7200d6cf50a950f57c1080",
+    "reason": "Upstream cd8ed4a6ce bumps only the development dependency @vitest/coverage-v8 from ^5.0.1 to ^5.0.3. Versions, runtime dependencies, exports and every signing source/Go WASM byte are unchanged. The original capture digest remains immutable; verify this exact current package digest before normalizing provenance to the original source hash. Fresh actual venue/SDK/Go WASM captures retain all 92 original cases and the 24-case field-identity supplement retains semantic SHA 260c28f1e11f4c5e73b1aad0e9ca5c28e7d809a7a3cb700e02a993dcffcc8f52. This later review changes no signing expectation and makes no retroactive independence claim."
+  },
+  "packages/poseidon-crypto/package.json": {
+    "originalSha256": "bba2d84fa124af95fcd0ab26fb332c198dba984f30d4210ff82aca6f159b1c6b",
+    "currentSha256": "021b6299378cacc428481fe880777a9ee5baa9289da3ba6c5c0e9f9c12d295a4",
+    "sourceCommit": "cd8ed4a6ceb5dd2bef7200d6cf50a950f57c1080",
+    "reason": "Upstream cd8ed4a6ce bumps only the development dependency @vitest/coverage-v8 from ^5.0.1 to ^5.0.3. Versions, runtime dependencies, exports and every signing source/Go WASM byte are unchanged. The original capture digest remains immutable; verify this exact current package digest before normalizing provenance to the original source hash. Fresh actual venue/SDK/Go WASM captures retain all 92 original cases and the 24-case field-identity supplement retains semantic SHA 260c28f1e11f4c5e73b1aad0e9ca5c28e7d809a7a3cb700e02a993dcffcc8f52. This later review changes no signing expectation and makes no retroactive independence claim."
   }
 }
