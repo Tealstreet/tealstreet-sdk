@@ -511,13 +511,18 @@ fn actual_typescript_trigger_order_classification() {
         "TRIGGER-ORDER Unicode native enum"
     );
     assert_eq!(strings[0]["result"], "take_profit_market");
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<String>(strings[1]["raw"].as_str().unwrap())
-            .is_err(),
-        "TRIGGER-ORDER surrogate ingress refusal"
+    typed_utf16::assert_projection(
+        strings[1]["raw"].as_str().unwrap(),
+        &(safe_cex_num::numeric_ingress::js_from_str::<String>(
+            strings[1]["raw"].as_str().unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     assert_eq!(
         strings[1]["result"], "take_profit_market",
         "TRIGGER-ORDER actual surrogate classification"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

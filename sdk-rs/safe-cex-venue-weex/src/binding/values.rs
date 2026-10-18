@@ -247,15 +247,104 @@ pub(super) fn ticker(_: &Host, raw: Js, market: Js, book: Js) -> Result<Js, Thro
     )
 }
 pub(super) fn candle(h: &Host, raw: Js) -> Result<Js, Thrown> {
-    from_typed(
-        &utils::normalize_candle(maybe_capture(&raw)?.as_ref(), |ms| {
-            (h.0.shared.extra.local_to_utc)(ms)
-        })
-        .map_err(utility_error)?,
-    )
+    // TS materializes tuple slots first, but reads object aliases lazily. Never
+    // capture the whole row: source does not inspect unrelated properties.
+    let source = if raw.is_array() {
+        Js::object(std::vec![
+            ("timestamp", raw.get("0")?),
+            ("open", raw.get("1")?),
+            ("high", raw.get("2")?),
+            ("low", raw.get("3")?),
+            ("close", raw.get("4")?),
+            ("volume", raw.get("5")?),
+        ])
+    } else {
+        raw
+    };
+    let pick = |keys: &[&str]| -> Result<Js, Thrown> {
+        let mut value = Js::Undefined;
+        for key in keys {
+            value = source.get(key)?;
+            if !value.is_nullish() {
+                break;
+            }
+        }
+        Ok(value)
+    };
+    let ms = timestamp(h, pick(&["timestamp", "t", "time"])?)?;
+    let timestamp = if ms == 0.0 {
+        0.0
+    } else {
+        (ms / 1000.0).floor()
+    };
+    let open = number(&pick(&["open", "o"])?, 0.0)?;
+    let high = number(&pick(&["high", "h"])?, 0.0)?;
+    let low = number(&pick(&["low", "l"])?, 0.0)?;
+    let close = number(&pick(&["close", "c"])?, 0.0)?;
+    let volume = number(&pick(&["volume", "v"])?, 0.0)?;
+    if [timestamp, open, high, low, close, volume]
+        .iter()
+        .any(|v| !v.is_finite())
+    {
+        return Ok(Js::Null);
+    }
+    Ok(Js::object(std::vec![
+        ("timestamp", Js::Number(timestamp)),
+        ("open", Js::Number(open)),
+        ("high", Js::Number(high)),
+        ("low", Js::Number(low)),
+        ("close", Js::Number(close)),
+        ("volume", Js::Number(volume)),
+    ]))
 }
-pub(super) fn book(_: &Host, raw: Js) -> Result<Js, Thrown> {
-    from_typed(&utils::normalize_order_book(maybe_capture(&raw)?.as_ref()).map_err(utility_error)?)
+pub(super) fn book_side(rows: Js) -> Result<Js, Thrown> {
+    use safe_cex_exchange::js_runtime::iterator::IteratorRecord;
+    let rows = if rows.truthy() {
+        rows
+    } else {
+        Js::array(std::vec![])
+    };
+    let reduce = Js::function("normalizeOrderBookSide", |_, args| {
+        let acc = arg(&args, 0);
+        // Destructuring reads exactly two iterator values, then closes it. In
+        // particular, an unused third tuple slot is never captured or traversed.
+        let iterator = IteratorRecord::get(&arg(&args, 1))?;
+        let price = iterator.step_value()?.unwrap_or(Js::Undefined);
+        let amount = iterator.step_value()?.unwrap_or(Js::Undefined);
+        iterator.close()?;
+        let price = number(&price, 0.0)?;
+        let amount = number(&amount, 0.0)?;
+        if price > 0.0 && amount >= 0.0 {
+            acc.call_method(
+                "push",
+                std::vec![Js::object(std::vec![
+                    ("price", Js::Number(price)),
+                    ("amount", Js::Number(amount)),
+                    ("total", Js::Number(0.0)),
+                ])],
+            )?;
+        }
+        Ok(acc)
+    });
+    rows.call_method("reduce", std::vec![reduce, Js::array(std::vec![])])
+}
+pub(super) fn book(h: &Host, raw: Js) -> Result<Js, Thrown> {
+    let bids = raw.get("bids")?;
+    let bids = book_side(if bids.is_nullish() {
+        raw.get("b")?
+    } else {
+        bids
+    })?;
+    let asks = raw.get("asks")?;
+    let asks = book_side(if asks.is_nullish() {
+        raw.get("a")?
+    } else {
+        asks
+    })?;
+    let book = Js::object(std::vec![("bids", bids), ("asks", asks)]);
+    h.global("calcOrderBookTotal")?
+        .call(Js::Undefined, std::vec![book.clone()])?;
+    Ok(book)
 }
 pub(super) fn public_trade(h: &Host, raw: Js, symbol: &Js) -> Result<Js, Thrown> {
     from_typed(

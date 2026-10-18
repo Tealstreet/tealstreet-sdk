@@ -245,10 +245,17 @@ pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
+    /// Tests may hold physical responses while the runtime owns their continuations.
     pub hold_responses: Rc<Cell<bool>>,
     pub response_wakers: Rc<RefCell<Vec<Waker>>>,
 }
 impl Http {
+    pub fn release_responses(&self) {
+        self.hold_responses.set(false);
+        for waker in self.response_wakers.take() {
+            waker.wake();
+        }
+    }
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
         self.route_native(method, path, status, from_json(&body));
     }
@@ -323,10 +330,13 @@ impl JsHttpHost for Http {
         let mut result = Some(result);
         Box::pin(std::future::poll_fn(move |cx| {
             if held.get() {
-                wakers.borrow_mut().push(cx.waker().clone());
+                let mut wakers = wakers.borrow_mut();
+                if !wakers.iter().any(|waker| waker.will_wake(cx.waker())) {
+                    wakers.push(cx.waker().clone());
+                }
                 Poll::Pending
             } else {
-                Poll::Ready(result.take().expect("HTTP completes once"))
+                Poll::Ready(result.take().expect("response settles once"))
             }
         }))
     }

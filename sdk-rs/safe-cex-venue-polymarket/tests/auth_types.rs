@@ -300,7 +300,19 @@ fn auth_string_boundary() {
                 "native_unicode_string:{name}:{raw}"
             );
         } else {
-            assert!(decoded.is_err(), "string_boundary_refusal:{name}:{raw}");
+            let retained = typed_utf16::retained(raw);
+            let key = match name {
+                "PolymarketCredentials" | "PolymarketDeriveKeyResponse" => "apiKey",
+                "PolymarketDeriveKeyRequest" => "address",
+                "PolymarketL2Headers" => "POLY_ADDRESS",
+                _ => unreachable!(),
+            };
+            let units = retained.get(key).unwrap().as_text().unwrap();
+            assert_eq!(
+                decoded.unwrap(),
+                String::from_utf16_lossy(units),
+                "typed auth U+FFFD field"
+            );
         }
     }
 }
@@ -357,9 +369,9 @@ fn wire_payload_records_actual_typescript() {
                     shape::<PolymarketBalanceAllowance>(name, &value, schema);
                     assert_eq!(serde_json::to_value(native).unwrap(), value, "balance_wire");
                 } else {
-                    assert!(
-                        decoded.is_err(),
-                        "payload_string_boundary:PolymarketBalanceAllowance"
+                    typed_utf16::assert_projection(
+                        raw,
+                        &decoded.expect("typed payload retains the record"),
                     );
                 }
             }
@@ -373,9 +385,9 @@ fn wire_payload_records_actual_typescript() {
                     shape::<PolymarketOrderBookLevel>(name, &value, schema);
                     assert_eq!(serde_json::to_value(native).unwrap(), value, "level_wire");
                 } else {
-                    assert!(
-                        decoded.is_err(),
-                        "payload_string_boundary:PolymarketOrderBookLevel"
+                    typed_utf16::assert_projection(
+                        raw,
+                        &decoded.expect("typed payload retains the record"),
                     );
                 }
             }
@@ -431,7 +443,7 @@ fn price_record_actual_typescript() {
                 "price_timestamp_wire_omission"
             );
         } else {
-            assert!(decoded.is_err(), "price_string_boundary_refusal");
+            typed_utf16::assert_projection(raw, &decoded.expect("typed record retains the frame"));
         }
     }
     let numeric = result["priceNumeric"].as_array().unwrap();
@@ -580,7 +592,7 @@ fn order_book_record_actual_typescript() {
                 "book_unicode_wire"
             );
         } else {
-            assert!(native.is_err(), "book_string_boundary_refusal");
+            typed_utf16::assert_projection(raw, &native.expect("typed record retains the frame"));
         }
     }
     let numeric = result["bookNumeric"].as_array().unwrap();
@@ -730,7 +742,7 @@ fn order_response_record_actual_typescript() {
                 "order_response_unicode_wire"
             );
         } else {
-            assert!(decoded.is_err(), "order_response_string_boundary_refusal");
+            typed_utf16::assert_projection(raw, &decoded.expect("typed record retains the frame"));
         }
     }
     assert_eq!(comparisons, 86, "response_total_native_hash_comparisons");
@@ -805,7 +817,7 @@ fn clob_market_record_actual_typescript() {
             assert_clob_native(&native.unwrap(), &source);
             comparisons += 1;
         } else {
-            assert!(native.is_err(), "clob_string_boundary_refusal");
+            typed_utf16::assert_projection(raw, &native.expect("typed record retains the frame"));
         }
     }
     let flags = result["clobFlagCases"].as_array().unwrap();
@@ -827,3 +839,6 @@ fn clob_market_record_actual_typescript() {
     }
     assert_eq!(comparisons, 41, "native_clob.total_record_comparisons");
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

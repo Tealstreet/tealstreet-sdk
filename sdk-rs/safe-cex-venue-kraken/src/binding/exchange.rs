@@ -18,6 +18,9 @@ mod accepted_diagnostic_receivers;
 #[path = "../../tests/support/accepted_handle_alias.rs"]
 mod accepted_handle_alias;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_loop_socket_aliases.rs"]
+mod accepted_loop_socket_aliases;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_member_aliases.rs"]
 mod accepted_member_aliases;
 #[cfg(test)]
@@ -225,14 +228,12 @@ impl KrakenExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let this = self.rt.this.clone();
+        // The assembled member already creates the canonical eager Promise.
+        // Start it now; this Rust future only waits and projects its result.
+        let value = self.rt.this.call_method(member, args);
+        let runtime = self.rt.exchange_runtime();
         Box::pin(async move {
-            let value = await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            let value = await_js(&runtime, value.map_err(err)?).await.map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
@@ -268,14 +269,10 @@ impl KrakenExchange {
         }))
     }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let this = self.rt.this.clone();
+        let value = self.rt.this.call_method(member, args);
+        let runtime = self.rt.exchange_runtime();
         Box::pin(async move {
-            await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            await_js(&runtime, value.map_err(err)?).await.map_err(err)?;
             Ok(())
         })
     }
