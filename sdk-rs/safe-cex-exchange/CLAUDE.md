@@ -19,6 +19,9 @@ granular writes mutate existing rows, while full replacement and reset publish
 new generations. Retained values have no back-reference to the Store owner.
 Native mutations use the shared property/iterator algorithms and notify the live
 ordered listener registry. Typed subscribers project only at their reached slot.
+Notification transport retains the complete typed boundary in the existing opaque
+error origin before recovery, preserving nested subscriber IDs and the original
+cause without rebuilding the thrown value or replaying getters.
 Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
