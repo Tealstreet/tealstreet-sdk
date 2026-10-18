@@ -751,6 +751,20 @@ fn retained_standalone_info(selected: usize) {
 
 #[test]
 fn discarded_ticker_call_still_sends_its_request() {
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/eager-operation-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["requests"].as_array().unwrap().len(), 1);
     let (venue, rt, store, wire) = support::fixture_with(false);
     wire.bodies.lock().unwrap().insert(
         "/api/v1/futures/market/tickers".into(),

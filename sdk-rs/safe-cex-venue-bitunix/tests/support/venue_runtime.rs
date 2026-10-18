@@ -219,6 +219,7 @@ impl WsRuntime for Runtime {
 pub struct Wire {
     pub requests: Mutex<Vec<RestRequest>>,
     pub bodies: Mutex<BTreeMap<String, Value>>,
+    pub held_responses: Mutex<BTreeMap<String, Arc<std::sync::atomic::AtomicBool>>>,
 }
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -230,7 +231,19 @@ impl RestAdapter for Wire {
             .get(&r.url)
             .cloned()
             .unwrap_or(json!({"code": 0, "msg": "Success", "data": {}}));
+        let gate = self.held_responses.lock().unwrap().get(&r.url).cloned();
         Box::pin(async move {
+            std::future::poll_fn(move |_| {
+                if gate
+                    .as_ref()
+                    .is_some_and(|gate| !gate.load(std::sync::atomic::Ordering::SeqCst))
+                {
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
             Ok(RestResponse {
                 status: 200,
                 reason: None,
