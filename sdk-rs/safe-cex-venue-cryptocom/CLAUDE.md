@@ -424,3 +424,13 @@ The SocketOps pair reader used by book listeners now reuses the existing
 IteratorRecord helpers. Numeric-key objects from real JSON frames are refused
 before the book callback, matching source array destructuring; the error remains
 visible and a later valid array frame still reaches the listener.
+
+The constructed ticker census in `tests/exchange_binding.rs` drives 96 cases
+through 288 real ticker, book and valuation frames, comparing every native
+Ticker number with the constructed TS exchange and DefaultStore. Source uses
+fresh exchanges per frame to isolate numeric mapping from throttle timing;
+native frames advance the terminal clock beyond the throttle window. Index
+fixtures retain the actual underlyingSymbol lookup. No throttle timing parity
+is claimed. The finite oracle exits after flushing captured output because the
+maintained disposal does not release all timer handles. A live last/bid mutation
+must compile and fail, then pass after exact source restoration.

@@ -31,12 +31,17 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
                 "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
                 "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),
                 "apexomni" => (format!("{asset}-USDC"), format!("{asset}USDC")),
-                "weex" | "phemex" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                "weex" | "phemex" | "binance" | "binancepm" | "binancespot" => {
+                    (format!("{asset}USDT"), format!("{asset}USDT"))
+                }
                 "kucoin" => (
                     format!("{}USDTM", if asset == "BTC" { "XBT" } else { asset }),
                     format!("{asset}USDT"),
                 ),
                 "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
+                "blofin" => (format!("{asset}-USDT"), format!("{asset}USDT")),
+                "cryptocom" => (format!("{asset}USD-PERP"), format!("{asset}USD-PERP")),
+                "coinbase" => (format!("{asset}-USDC"), format!("{asset}-USDC")),
                 "hyperliquid" => (asset.to_string(), format!("{asset}/USDC")),
                 "hyperliquidspot" => (
                     format!(

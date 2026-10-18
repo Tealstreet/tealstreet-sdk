@@ -45,7 +45,7 @@ directory, web-app URL, docs URL or release repo is spelled. `scripts/build.sh
 <brand>` inlines `TEALSTREET_BRAND` with `--define`; dev runs and tests carry no
 define and resolve to `tealstreet`, so every pinned `~/.tealstreet` and
 `tealstreet-*` expectation in the suite stays valid. The `disrupt` brand logs in
-through `https://disrupt.trade`, stores under `~/.disrupt/`, and self-updates
+through `https://app.disrupt.trade` (the apex is a landing page and 404s on `/api/cli/*`), stores under `~/.disrupt/`, and self-updates
 from `DisruptTrade/cli`.
 
 **That URL is the entire auth change.** The web app picks the Auth0 tenant from
@@ -66,14 +66,30 @@ the `DisruptTrade/cli` README, and `src/brand.test.ts` greps the disrupt brand
 for `tealstreet.io`. The internal HoW `Origin` header and the listener's origin
 allowlist are not user-visible and are exempt.
 
+**Docs for a whitelabel are GENERATED, never hand-maintained.**
+`scripts/brand-docs.mjs <brand> <out>` rebrands `apps/documentation/cli` (drops
+front matter and `:::` admonitions so GitHub renders it, rewrites binary name,
+config dir, env prefix, release repo, hosts and the routing flags, writes a
+`README.md` index in sidebar order) and REFUSES if any page still names the
+source brand. Pages whose content genuinely differs — install channels — are
+whole-file overrides in `docs-brands/<brand>/`; keep them in step with the
+source page when it changes. The release workflow pushes the result to the
+brand's release repo under `docs/` on every `<brand>-cli-v*` tag, authored as
+the token's owner, and `BRAND.docsUrl` points there. This is also why the REPL
+and `account add` help on a whitelabel show `--proxy` / `--tunnel` /
+`--ws-route`: both spellings are accepted on every brand (`cli-core`'s
+`getCliBrand().flags` picks which one help shows), so the docs never have to
+print a `--tealstreet-*` flag.
+
 **Release:** `BRAND=disrupt yarn release:patch` pushes `disrupt-cli-vX.Y.Z`.
 `cli-release.yml` derives brand, binary name and repo from the tag prefix and
 skips the npm and Homebrew steps for anything but tealstreet; the Windows smoke
 job skips disrupt tags because its install path is npm. Both brands share
-`package.json`'s version. The `TEALSTREET_CLI_RELEASE_TOKEN` secret must be
-able to create releases in `DisruptTrade/cli` — it is the owner's PAT and the
-owner is an org admin there, but that was not exercised until the first
-disrupt tag.
+`package.json`'s version. The release step publishes with
+`DISRUPT_CLI_RELEASE_TOKEN` for disrupt and `TEALSTREET_CLI_RELEASE_TOKEN`
+for tealstreet: the latter is scoped to the Tealstreet org and 403s on
+`DisruptTrade/cli`, which is how v0.10.17 ended up published by hand from a
+local `build.sh disrupt` of the tagged commit.
 
 ## Runtime
 

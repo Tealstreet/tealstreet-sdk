@@ -4,20 +4,20 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../../..');
 const { DefaultStore } = require(path.join(root, 'packages/safe-cex/src/store/store.base.ts'));
 const venue = process.argv[2];
-assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'polymarket', 'backpack', 'paradex'].includes(venue), `unsupported ticker corpus ${venue}`);
-const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', polymarket: 'PolymarketExchange', backpack: 'BackpackExchange', paradex: 'ParadexExchange' }[venue];
-const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid' }[venue] || venue;
+assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'blofin', 'cryptocom', 'coinbase', 'binance', 'binancepm', 'binancespot', 'polymarket', 'backpack', 'paradex'].includes(venue), `unsupported ticker corpus ${venue}`);
+const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', blofin: 'BlofinExchange', cryptocom: 'CryptocomExchange', coinbase: 'CoinbaseExchange', binance: 'BinanceExchange', binancepm: 'BinancePMExchange', binancespot: 'BinanceSpotExchange', polymarket: 'PolymarketExchange', backpack: 'BackpackExchange', paradex: 'ParadexExchange' }[venue];
+const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid', binancepm: 'binance', binancespot: 'binance' }[venue] || venue;
 const Exchange = require(path.join(root, `packages/safe-cex/src/exchanges/${directory}/${venue}.exchange.ts`))[name];
 const fields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'volume', 'quoteVolume', 'fundingRate', 'fundingTime', 'openInterest'];
 if (venue.startsWith('hyperliquid')) fields.push('midPrice');
 const store = new DefaultStore();
 const symbols = ['BTC', 'ETH', 'ADA'];
 const tickers = symbols.map(asset => ({
-  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), polymarket: `${asset}-token`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP` }[venue],
-  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, polymarket: `${asset}-Yes`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP` }[venue],
+  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), blofin: `${asset}-USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, polymarket: `${asset}-token`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP` }[venue],
+  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, blofin: `${asset}USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, polymarket: `${asset}-Yes`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP` }[venue],
   ...Object.fromEntries(fields.map((field, index) => [field, 101 + index])),
 }));
-store.update({ tickers: structuredClone(tickers), markets: tickers.map(t => ({ id: t.id, symbol: t.symbol })) });
+store.update({ tickers: structuredClone(tickers), markets: tickers.map(t => ({ id: t.id, symbol: t.symbol, ...(venue === 'cryptocom' ? { info: { underlyingSymbol: t.id.split('-')[0] } } : {}) })) });
 const exchange = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture' }, store);
 const socket = exchange.publicWebsocket;
 if (venue === 'bitrue') for (const row of tickers) socket.ensureTickerSubscription(row.symbol);
@@ -56,6 +56,10 @@ const paradexSummary = ['bid', 'ask', 'last_traded_price', 'last_price', 'last',
 const channels = venue === 'backpack' ? { ticker: ['c', 'P', 'v', 'q'], trade: ['p'], bookTicker: ['b', 'a'], depth: ['b', 'a'] }
   : venue === 'paradex' ? { markets_summary: paradexSummary, bbo: ['bid_price', 'ask_price', 'index_price'], 'order_book:inserts': ['bid', 'ask'], 'order_book:updates': ['bid', 'ask'], 'order_book:arrays': ['bid', 'ask'], 'order_book:objects': ['bid', 'ask'], trades: ['price', 'size', 'created_at', 'timestamp'], 'trades:single': ['price', 'size', 'created_at', 'timestamp'] }
   : venue === 'polymarket' ? { price_change: ['best_bid', 'best_ask'], last_trade_price: ['price'] }
+  : venue.startsWith('binance') ? { '24hrTicker': ['c', 'P', 'v', 'q'], ...(venue === 'binancespot' ? {} : { markPriceUpdate: ['p', 'i', 'r', 'T'] }), bookTicker: ['b', 'a'] }
+  : venue === 'blofin' ? { tickers: ['open24h', 'last', 'bidPrice', 'askPrice', 'volCurrency24h', 'vol24h'], 'funding-rate': ['fundingRate', 'fundingTime'] }
+  : venue === 'cryptocom' ? { ticker: ['b', 'k', 'a', 'c', 'v', 'vv', 'oi'], mark: ['v'], index: ['v'], funding: ['v'], book: ['bid', 'ask'] }
+  : venue === 'coinbase' ? { ticker_batch: ['price', 'price_percent_chg_24_h', 'volume_24_h', 'best_bid', 'best_ask', 'high_24_h', 'low_24_h'] }
   : venue === 'lighter' ? { ticker: Object.values(lighterTickerInputs).flat(), tickers: Object.values(lighterTickerInputs).flat(), 'market_stats:all': Object.values(lighterStatsInputs).flat() }
   : venue === 'hyperliquid' ? { allMids: ['mid'], fastAssetCtxs: ['markPx', 'midPx'] }
   : venue === 'hyperliquidspot' ? { allMids: ['mid'] }
@@ -113,6 +117,27 @@ const channels = venue === 'backpack' ? { ticker: ['c', 'P', 'v', 'q'], trade: [
           const data = { asset_id: ticker.id, best_bid: String(29.5 + offset), best_ask: String(33.75 + offset), price: String(31.5 + offset) };
           if (index === 0) data[key] = value;
           return channel === 'price_change' ? data : JSON.stringify({ event_type: channel, ...data });
+        }
+        if (venue.startsWith('binance')) {
+          const data = { e: channel, s: ticker.symbol, c: String(31.5 + offset), P: String(.125 + index), v: String(53.25 + offset), q: String(1091.75 + offset), p: String(37.75 + offset), i: String(38.25 + offset), r: String(.0025 + index), T: String(1700000000 + offset), b: String(29.5 + offset), a: String(33.75 + offset) };
+          if (index === 0) data[key] = value;
+          return data;
+        }
+        if (venue === 'blofin') {
+          const data = { instId: ticker.id, open24h: String(19.25 + offset), last: String(31.5 + offset), bidPrice: String(29.5 + offset), askPrice: String(33.75 + offset), volCurrency24h: String(53.25 + offset), vol24h: String(1091.75 + offset), fundingRate: String(.0025 + index), fundingTime: String(1700000000 + offset) };
+          if (index === 0) data[key] = value;
+          return JSON.stringify({ arg: { channel, instId: ticker.id }, data: [data] });
+        }
+        if (venue === 'cryptocom') {
+          const data = channel === 'ticker' ? { b: String(29.5 + offset), k: String(33.75 + offset), a: String(31.5 + offset), c: String(.125 + index), v: String(53.25 + offset), vv: String(1091.75 + offset), oi: String(91.25 + offset) } : { v: String(37.75 + offset) };
+          if (index === 0) data[key] = value;
+          const row = channel === 'book' ? { bids: [[index === 0 && key === 'bid' ? value : String(29.5 + offset), '1']], asks: [[index === 0 && key === 'ask' ? value : String(33.75 + offset), '2']] } : data;
+          return JSON.stringify({ method: 'subscribe', code: 0, result: { channel, instrument_name: channel === 'index' ? ticker.id.split('-')[0] : ticker.id, data: [row] } });
+        }
+        if (venue === 'coinbase') {
+          const data = { product_id: ticker.symbol, price: String(31.5 + offset), price_percent_chg_24_h: String(.125 + index), volume_24_h: String(53.25 + offset), best_bid: String(29.5 + offset), best_ask: String(33.75 + offset), high_24_h: String(45.25 + offset), low_24_h: String(19.75 + offset) };
+          if (index === 0) data[key] = value;
+          return data;
         }
         if (venue === 'lighter') {
           const groups = channel === 'market_stats:all' ? lighterStatsInputs : lighterTickerInputs;
@@ -183,6 +208,8 @@ const channels = venue === 'backpack' ? { ticker: ['c', 'P', 'v', 'q'], trade: [
       });
       if (venue === 'paradex' && ['markets_summary', 'trades'].includes(channel)) frames = [JSON.stringify({ jsonrpc: '2.0', method: 'subscription', params: { channel, data: [frames[1], frames[0], frames[2]] } })];
       if (venue === 'polymarket' && channel === 'price_change') frames = [JSON.stringify({ event_type: channel, price_changes: [frames[1], frames[0], frames[2]] })];
+      if (venue.startsWith('binance')) frames = [JSON.stringify([frames[1], frames[0], frames[2]])];
+      if (venue === 'coinbase') frames = [JSON.stringify({ channel, events: [{ type: 'update', tickers: [frames[1], frames[0], frames[2]] }] })];
       if (venue === 'lighter' && channel === 'tickers') frames = [JSON.stringify({ channel, data: [frames[1], frames[0], frames[2]] })];
       if (venue === 'lighter' && channel === 'market_stats:all') frames = [JSON.stringify({ channel, market_stats: Object.fromEntries([1, 0, 2].map(i => [`market-${tickers[i].id}`, frames[i]])) })];
       if (venue.startsWith('hyperliquid')) {
@@ -192,9 +219,10 @@ const channels = venue === 'backpack' ? { ticker: ['c', 'P', 'v', 'q'], trade: [
       if (venue === 'phemex') frames = [JSON.stringify({ method: 'perp_market24h_pack_p.update', data: [frames[1], frames[0], frames[2]] })];
       if (venue === 'apexomni') frames = [JSON.stringify({ topic: 'instrumentInfo.all', data: [frames[1], frames[0], frames[2]] })];
       for (const frame of frames) {
-        const receiver = venue === 'bitunix' && channel === 'price' ? exchange.publicWebsocketSecondary : socket;
-        if (['polymarket', 'backpack', 'paradex'].includes(venue)) {
-          const fresh = new Exchange(venue, { publicDataOnly: true, tuning: { consoleLogging: false } }, store);
+        const receiver = venue === 'bitunix' && channel === 'price' ? exchange.publicWebsocketSecondary
+          : venue.startsWith('binance') && venue !== 'binancespot' && channel !== 'bookTicker' ? socket.marketWebsocket : socket;
+        if (['cryptocom', 'polymarket', 'backpack', 'paradex'].includes(venue)) {
+          const fresh = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture', tuning: { consoleLogging: false } }, store);
           if (venue === 'polymarket') for (const ticker of tickers) fresh.tokenToSymbol.set(ticker.id, ticker.symbol);
           try { await fresh.publicWebsocket.onMessage({ data: frame }); } finally {
             const observedTickers = structuredClone(store.tickers);

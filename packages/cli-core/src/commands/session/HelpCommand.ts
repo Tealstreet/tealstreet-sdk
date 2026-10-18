@@ -1,6 +1,7 @@
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { commandRegistry } from '../CommandRegistry';
+import { getCliBrand } from '../../brand';
 
 /**
  * Help command - displays available commands and usage
@@ -26,13 +27,14 @@ export class HelpCommand extends BaseCommand {
   private showGeneralHelp(ctx: CommandContext): CommandResult {
     const isEmbedded = ctx.adapter.platformType === 'embedded';
 
-    const lines: string[] = ['', 'Tealstreet CLI Commands:', ''];
+    const brand = getCliBrand();
+    const lines: string[] = ['', `${brand.displayName} CLI Commands:`, ''];
 
     // Authentication - standalone only
     if (!isEmbedded) {
       lines.push(
         'Authentication:',
-        '  login              Authenticate with Tealstreet',
+        `  login              Authenticate with ${brand.displayName}`,
         '  logout             Log out',
         '  auth, whoami       Show authentication status',
         '',
@@ -149,12 +151,12 @@ export class HelpCommand extends BaseCommand {
 
     if (isEmbedded) {
       lines.push(
-        'Full reference + recipes: https://docs.tealstreet.io/cli',
+        `Full reference + recipes: ${brand.docsUrl}`,
         'Standalone-only surface (watch modes, hooks, recording, listener) lives there.',
         '',
       );
     } else {
-      lines.push('Full reference + recipes: https://docs.tealstreet.io/cli', '');
+      lines.push(`Full reference + recipes: ${brand.docsUrl}`, '');
     }
 
     this.print(ctx, lines);
