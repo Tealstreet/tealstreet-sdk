@@ -71,7 +71,8 @@ fn pm_position_mode_matches_source_through_production_store() {
                         .borrow_mut()
                         .push(json!(["post", url, body["dualSidePosition"]]));
                     let mut error = ExchangeError::new("request failed");
-                    error.response = Some(json!({"data":{"msg":case["msg"]}}));
+                    error =
+                        error.with_retained_response((json!({"data":{"msg":case["msg"]}})).into());
                     std::future::ready(if case["reject"] == true {
                         Err(error)
                     } else {

@@ -295,11 +295,10 @@ async fn run_request(
             let rejected = signature
                 && !signature_retried
                 && match &error.response {
-                    Some(response) => is_binance_style_signature_rejection(
-                        &response_data(response, client.transform.get())
-                            .into_value()
-                            .map_err(|error| failure(error.to_string()))?,
-                    )
+                    Some(response) => is_binance_style_signature_rejection(&response_data(
+                        response,
+                        client.transform.get(),
+                    ))
                     .map_err(|error| exchange_failure(error.into()))?,
                     None => false,
                 };
@@ -376,7 +375,15 @@ async fn dispatch(
         .await;
     match result {
         Ok(execution) => Ok((execution.response, execution.config)),
-        Err(error) => Err(Dispatch::Transport(error, raised.borrow_mut().take())),
+        Err(mut error) => {
+            if let Some(response) = error.response.as_mut() {
+                response.body = safe_cex_transport::RestResponseBody::Transformed(response_data(
+                    response,
+                    client.transform.get(),
+                ));
+            }
+            Err(Dispatch::Transport(error, raised.borrow_mut().take()))
+        }
     }
 }
 /// The axios config object request interceptors see.
@@ -503,10 +510,9 @@ fn response_value(
 }
 fn response_from_error(error: &Failure) -> Result<Option<EventValue>, Failure> {
     error
-        .response
-        .clone()
+        .retained_response_input()
         .map(|response| {
-            let response = EventValue::from_json(response);
+            let response = safe_cex_exchange::js_runtime::value::from_retained_input(response);
             if !response.nullish() {
                 let headers = response.read("headers")?;
                 if !headers.nullish() {
@@ -541,17 +547,9 @@ async fn respond(
     let transform = client.transform.get();
     let mut state: Result<EventValue, Failure> = match outcome {
         Ok((response, config)) => response_value(&response, &config, transform),
-        Err(Dispatch::Transport(error, raised)) => Err(raised.unwrap_or_else(|| {
-            let mut projected: ExchangeError = error.clone().into();
-            if let (Some(response), Some(view)) = (&error.response, projected.response.as_mut()) {
-                view["data"] = safe_cex_exchange::runtime::response_json_view(
-                    &safe_cex_transport::RestResponseBody::Transformed(response_data(
-                        response, transform,
-                    )),
-                );
-            }
-            Rc::new(projected)
-        })),
+        Err(Dispatch::Transport(error, raised)) => {
+            Err(raised.unwrap_or_else(|| Rc::new(ExchangeError::from(error))))
+        }
     };
     let stages: Vec<_> = client
         .response
@@ -609,7 +607,12 @@ fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<Even
             let mut error = ExchangeError::new(message);
             error.name = name.into();
             error.code = (!code.is_undefined()).then_some(code);
-            error.response = to_json(&response).ok().filter(|v| !v.is_null());
+            if !response.nullish() {
+                error = error.with_retained_response(
+                    safe_cex_exchange::js_runtime::value::to_retained_input(&response)
+                        .map_err(|cause| exchange_failure(cause.into()))?,
+                );
+            }
             Err(Rc::new(error))
         }
     }
@@ -695,8 +698,11 @@ impl ResponseBindings for NativeResponseBindings {
     // The truthy marker ends this pass; run_request re-dispatches the request once.
     fn resend(&mut self, response: EventValue) -> Result<EventValue, Failure> {
         if self.resend_allowed
-            && is_binance_style_signature_rejection(&to_json(&response.read("data")?)?)
-                .map_err(|error| exchange_failure(error.into()))?
+            && is_binance_style_signature_rejection(
+                &safe_cex_exchange::js_runtime::value::to_retained_input(&response.read("data")?)
+                    .map_err(|cause| exchange_failure(cause.into()))?,
+            )
+            .map_err(|error| exchange_failure(error.into()))?
         {
             self.resend_requested = true;
             return Ok(EventValue::Bool(true));

@@ -54,12 +54,12 @@ pub(crate) fn scope(weak: &Weak<Shared>, this: Js) -> Result<Rt, Thrown> {
     })
 }
 pub(crate) fn error(error: ExchangeError) -> Thrown {
-    let response = error.response.clone();
+    let response = error.retained_response_input();
     let thrown = Thrown::from(error);
-    if let Some(response) = &response {
+    if let Some(response) = response {
         let _ = thrown.value.define(
             "response",
-            safe_cex_exchange::js_runtime::value::from_json(response),
+            safe_cex_exchange::js_runtime::value::from_retained_input(response),
         );
     }
     thrown

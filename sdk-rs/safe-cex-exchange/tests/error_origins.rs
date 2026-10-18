@@ -254,7 +254,7 @@ fn shared_rest_conversion_retains_typed_request_response_and_transport() {
         "REST metadata code view"
     );
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["marker"],
+        error.response_json_view().as_ref().unwrap()["data"]["marker"],
         84,
         "REST metadata response view"
     );
@@ -392,7 +392,8 @@ fn rest_error_json_view_keeps_exact_native_body_in_original_failure() {
         (vec![0xd800], Input::Text(vec![0xd801])),
         "retained body exact key and value units"
     );
-    let view = &error.response.as_ref().unwrap()["data"];
+    let response_view = error.response_json_view().unwrap();
+    let view = &response_view["data"];
     assert!(
         view["nan"].is_null(),
         "legacy JSON view projects nonfinite to null"
@@ -464,8 +465,7 @@ fn retained_callback_rest_origin_keeps_code_response_context_and_request() {
         "retained cause keeps context view"
     );
     let view = error
-        .response
-        .as_ref()
+        .response_json_view()
         .expect("retained cause keeps response view");
     assert_eq!(view["status"], 503);
     assert_eq!(view["statusText"], "Unavailable");

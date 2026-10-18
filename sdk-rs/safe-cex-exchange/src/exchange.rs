@@ -1929,8 +1929,8 @@ impl BaseExchange {
         match result {
             Ok(()) => {}
             Err(error) => {
-                let response_message = error
-                    .response
+                let response = error.response_json_view();
+                let response_message = response
                     .as_ref()
                     .and_then(|response| response.get("data"))
                     .and_then(|data| data.get("msg"))

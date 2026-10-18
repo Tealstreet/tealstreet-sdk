@@ -133,8 +133,13 @@ impl Realm {
             };
             self.define_hidden(&thrown, PropKey::str("code"), code);
         }
-        if let Some(response) = &error.response {
-            let response = self.from_serde(response);
+        if let Some(response) = error.retained_response_input() {
+            let response = match self.restore_typed_value(
+                &safe_cex_exchange::js_runtime::value::from_retained_input(response),
+            ) {
+                Ok(response) => response,
+                Err(cause) => return cause,
+            };
             self.define_hidden(&thrown, PropKey::str("response"), response);
         }
         thrown.object().unwrap().borrow_mut().native_error = native_error;

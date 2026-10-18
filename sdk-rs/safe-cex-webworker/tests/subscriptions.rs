@@ -166,7 +166,6 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
             is_axios_error: true,
             request: Some(json!({"request":"bbo-request"})),
             stack: Some("bbo-stack".into()),
-            response: Some(json!({"response":"bbo-response"})),
             context: Some(json!({"origin":"subscriber"})),
             config: Some(json!({"config":"bbo-config"})),
             enhanced_message: Some("bbo-enhanced".into()),
@@ -175,6 +174,7 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
             original_error: Some(json!({"original":"bbo-original"})),
             code: Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197))),
         });
+        original = original.with_retained_response(json!({"response":"bbo-response"}).into());
         let original_cause: safe_cex_types::StoreSubscriberError = original.clone().into();
         let thrown = original_cause.clone();
         let calls = Rc::new(Cell::new(0));

@@ -609,7 +609,7 @@ fn secondary_native_ingress_and_error_projection() {
     );
     let mut original = ExchangeError::new("subscriber failed");
     original.name = "RootFailure".into();
-    original.response = Some(json!({"witness":42}));
+    original = original.with_retained_response(json!({"witness":42}).into());
     let cause = Rc::new(original);
     let failure = safe_cex_types::StoreSubscriberError::new("subscriber failed").with_cause(cause);
     let _unsubscribe = Store::subscribe(store.as_ref(), Box::new(move |_, _| Err(failure.clone())));
@@ -626,7 +626,7 @@ fn secondary_native_ingress_and_error_projection() {
         "SECONDARY native subscriber error message"
     );
     assert_eq!(
-        error.response,
+        error.response_json_view(),
         Some(json!({"witness":42})),
         "SECONDARY native subscriber response"
     );

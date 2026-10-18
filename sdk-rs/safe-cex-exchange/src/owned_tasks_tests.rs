@@ -470,7 +470,7 @@ fn exchange_dispose_error_still_cancels_every_owned_task_and_rejects_new_work() 
             "DISPOSE-ERROR reset failure reaches caller"
         );
         assert_eq!(
-            error.response,
+            error.response_json_view(),
             Some(serde_json::json!({"code": "reset-failure"})),
             "DISPOSE-ERROR failure metadata reaches caller"
         );

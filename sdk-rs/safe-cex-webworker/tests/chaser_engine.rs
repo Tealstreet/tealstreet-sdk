@@ -180,7 +180,7 @@ impl ChaserHost for Host {
         ready(Ok(()))
     }
     fn error_properties(&self, e: &ExchangeError) -> Value {
-        json!({"name":e.name,"message":e.message,"code":e.code.as_ref().map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap()),"response":e.response})
+        json!({"name":e.name,"message":e.message,"code":e.code.as_ref().map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap()),"response":e.response_json_view()})
     }
     fn console_error(&self, e: &ExchangeError) -> Result<(), ExchangeError> {
         self.events

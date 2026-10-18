@@ -1,4 +1,5 @@
 use crate::js_runtime::value::Js;
+use safe_cex_types::retained_json::RetainedJsonInput;
 use std::{future::Future, pin::Pin, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -45,6 +46,25 @@ impl PartialEq for ExchangeErrorOrigin {
 }
 impl Eq for ExchangeErrorOrigin {}
 
+#[derive(Debug)]
+struct RetainedResponseOrigin {
+    response: RetainedJsonInput,
+    cause: Option<ExchangeErrorOrigin>,
+}
+impl std::fmt::Display for RetainedResponseOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.cause {
+            Some(cause) => std::fmt::Display::fmt(cause.error(), f),
+            None => f.write_str("Retained HTTP response"),
+        }
+    }
+}
+impl std::error::Error for RetainedResponseOrigin {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause.as_ref().map(ExchangeErrorOrigin::error)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ExchangeErrorMetadata {
     /// Opaque local origin. This makes ExchangeError local-thread, matching its
@@ -60,7 +80,6 @@ pub struct ExchangeErrorMetadata {
     pub is_axios_error: bool,
     pub request: Option<serde_json::Value>,
     pub stack: Option<String>,
-    pub response: Option<serde_json::Value>,
     pub context: Option<serde_json::Value>,
     pub config: Option<serde_json::Value>,
     pub enhanced_message: Option<String>,
@@ -84,7 +103,6 @@ impl PartialEq for ExchangeErrorMetadata {
             && self.is_axios_error == other.is_axios_error
             && self.request == other.request
             && self.stack == other.stack
-            && self.response == other.response
             && self.context == other.context
             && self.config == other.config
             && self.enhanced_message == other.enhanced_message
@@ -101,6 +119,64 @@ pub struct ExchangeError {
     pub metadata: Box<ExchangeErrorMetadata>,
 }
 impl ExchangeError {
+    pub fn with_retained_response(mut self, response: RetainedJsonInput) -> Self {
+        let cause = self
+            .store_subscriber_cause
+            .as_ref()
+            .filter(|cause| std::error::Error::source(*cause).is_some())
+            .cloned()
+            .map(ExchangeErrorOrigin::new)
+            .or_else(|| self.origin.take())
+            .or_else(|| {
+                self.store_subscriber_cause
+                    .clone()
+                    .map(ExchangeErrorOrigin::new)
+            });
+        self.origin = Some(ExchangeErrorOrigin::new(RetainedResponseOrigin {
+            response,
+            cause,
+        }));
+        self
+    }
+    pub fn retained_response_input(&self) -> Option<RetainedJsonInput> {
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = source {
+            // source() exposes the opaque cause directly; retain access to the
+            // enclosing Store response without copying it into error metadata.
+            if let Some(exchange) = error.downcast_ref::<Self>()
+                && !exchange
+                    .origin
+                    .as_ref()
+                    .is_some_and(|origin| origin.error().is::<RetainedResponseOrigin>())
+                && let Some(response) = exchange
+                    .store_subscriber_cause
+                    .as_ref()
+                    .and_then(safe_cex_types::StoreSubscriberError::response)
+            {
+                return Some(response.clone().into());
+            }
+            if let Some(origin) = error.downcast_ref::<RetainedResponseOrigin>() {
+                return Some(origin.response.clone());
+            }
+            if let Some(failure) = error.downcast_ref::<safe_cex_transport::RestFailure>()
+                && let Some(response) = failure.response.as_deref()
+            {
+                return Some(retained_http_response(response));
+            }
+            if let Some(cause) = error.downcast_ref::<safe_cex_types::StoreSubscriberError>()
+                && let Some(response) = cause.response()
+            {
+                return Some(response.clone().into());
+            }
+            source = error.source();
+        }
+        None
+    }
+    pub fn response_json_view(&self) -> Option<serde_json::Value> {
+        self.retained_response_input().map(|response| {
+            response_json_view(&safe_cex_transport::RestResponseBody::Transformed(response))
+        })
+    }
     // Error.prototype.toString differs from message-only Display at TS String(error) sites.
     pub fn js_error_string(&self) -> String {
         match (self.name.is_empty(), self.message.is_empty()) {
@@ -135,6 +211,11 @@ impl std::fmt::Display for ExchangeError {
 }
 impl std::error::Error for ExchangeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        if let Some(origin) = self.origin.as_ref()
+            && origin.error().is::<RetainedResponseOrigin>()
+        {
+            return Some(origin.error());
+        }
         self.store_subscriber_cause
             .as_ref()
             .and_then(|cause| std::error::Error::source(cause))
@@ -177,7 +258,6 @@ impl From<safe_cex_store::StoreMutationError> for ExchangeError {
         }
         let mut projected = Self::new(error.to_string());
         if let safe_cex_store::StoreMutationError::Notification(notification) = &error {
-            projected.response = notification.cause().response().cloned();
             projected.store_subscriber_cause = Some(notification.cause().clone());
             projected
                 .store_subscriber_ids
@@ -215,25 +295,47 @@ impl From<safe_cex_transport::RestFailure> for ExchangeError {
             projected
         };
         projected.context = error.context.as_deref().cloned();
-        projected.response = error.response.as_ref().map(|response| {
-            // Existing JSON consumers receive a view. The retained RestFailure
-            // remains the native authority for request, response and transport.
-            let data = response_json_view(&response.body);
-            let mut view = serde_json::Map::new();
-            view.insert("status".into(), response.status.into());
-            if let Some(reason) = &response.reason {
-                view.insert("statusText".into(), reason.clone().into());
-            }
-            view.insert(
-                "headers".into(),
-                serde_json::to_value(&response.headers).expect("string response headers serialize"),
-            );
-            view.insert("data".into(), data);
-            serde_json::Value::Object(view)
-        });
         projected.origin = Some(ExchangeErrorOrigin::new(error));
         projected
     }
+}
+fn retained_http_response(response: &safe_cex_transport::RestResponse) -> RetainedJsonInput {
+    let data = match &response.body {
+        safe_cex_transport::RestResponseBody::Encoded(bytes) => {
+            let text = String::from_utf8_lossy(bytes)
+                .encode_utf16()
+                .collect::<Vec<_>>();
+            RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Text(text))
+        }
+        body => body.clone().into_data(),
+    };
+    let mut fields = vec![(
+        "status".encode_utf16().collect(),
+        RetainedJsonInput::Float(f64::from(response.status)),
+    )];
+    if let Some(reason) = &response.reason {
+        fields.push((
+            "statusText".encode_utf16().collect(),
+            RetainedJsonInput::Text(reason.encode_utf16().collect()),
+        ));
+    }
+    fields.push((
+        "headers".encode_utf16().collect(),
+        RetainedJsonInput::Object(
+            response
+                .headers
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.encode_utf16().collect(),
+                        RetainedJsonInput::Text(value.encode_utf16().collect()),
+                    )
+                })
+                .collect(),
+        ),
+    ));
+    fields.push(("data".encode_utf16().collect(), data));
+    RetainedJsonInput::Object(fields)
 }
 // Deliberately lossy legacy JSON error view. The origin retains the authoritative
 // RestFailure, including exact UTF-16, native number bits and transform phase.

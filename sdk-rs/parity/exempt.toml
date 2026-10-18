@@ -7652,3 +7652,15 @@ reason = "Rust typed mapper completion distinguishing existing coercion/input re
 [[exempt]]
 rs = "safe-cex-venue-bybit/src/inverse_position.rs::PositionMappingError"
 reason = "Rust completion envelope separating the existing typed Position refusal from a Store access failure; native error propagation retains the Store origin."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::with_retained_response"
+reason = "C3: native API-error construction glue attaches one existing RetainedJsonInput response to an origin wrapper while chaining the previous opaque cause. It neither parses nor duplicates a transport response authority. No standalone TypeScript declaration; actual Binance signed cancel and nearest-origin native tests exercise this boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::retained_response_input"
+reason = "C3: reads the nearest retained response origin deterministically, using the original RestFailure for transport errors and the same canonical RetainedJsonInput for API-created errors. It exposes no JSON cache or new value tree; native cause-chain and signed Binance error emission tests cover it. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::response_json_view"
+reason = "C3: explicit computed decision-5 Rust model/report boundary over retained_response_input. Reuses the existing lossy JSON projection without storing its result or mutating the original response. No standalone TypeScript declaration; raw consumers use retained_response_input."

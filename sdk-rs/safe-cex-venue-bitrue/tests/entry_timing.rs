@@ -177,7 +177,8 @@ fn native_entry_phases_match_actual_typescript() {
         let future = account_reads::fetch_balance_and_positions_raw(
             |_| {
                 let mut error = ExchangeError::new("start rejected");
-                error.response = Some(json!({"data":{"msg":"source-detail"}}));
+                error =
+                    error.with_retained_response((json!({"data":{"msg":"source-detail"}})).into());
                 Err::<std::future::Ready<Result<Option<Value>, ExchangeError>>, _>(error)
             },
             |message| {

@@ -216,7 +216,8 @@ fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
                 .unwrap();
             let mut original = ExchangeError::new("ticker subscriber rejected");
             original.name = "TickerSubscriberError".into();
-            original.response = Some(json!({"status":418,"data":{"reason":"listener"}}));
+            original = original
+                .with_retained_response(json!({"status":418,"data":{"reason":"listener"}}).into());
             original.store_subscriber_ids = vec![71];
             let cause: safe_cex_types::StoreSubscriberError = original.clone().into();
             let thrown = cause.clone();
@@ -258,7 +259,10 @@ fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
                 "native socket retains error name: {name:?}"
             );
             assert_eq!(error.message, original.message);
-            assert_eq!(error.response, original.response);
+            assert_eq!(
+                error.retained_response_input(),
+                original.retained_response_input()
+            );
             assert_eq!(error.store_subscriber_cause, Some(cause));
             assert_eq!(error.store_subscriber_ids.len(), 2);
             assert_eq!(error.store_subscriber_ids[0], 71);

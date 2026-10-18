@@ -210,7 +210,7 @@ fn non_exchange_subscriber_response_survives_overlay_recovery() {
     );
     let error = ExchangeError::from(store.set_setting("isHedged", true).unwrap_err());
     assert_eq!(
-        error.response,
+        error.response_json_view(),
         Some(expected),
         "canonical subscriber response must survive non-ExchangeError projection"
     );
@@ -499,7 +499,7 @@ fn store_notification_conversion_retains_subscriber_identity_on_both_paths() {
         "projected subscriber error retains subscriber identity"
     );
     assert_eq!(
-        projected.response,
+        projected.response_json_view(),
         Some(response),
         "subscriber identity preserves response"
     );

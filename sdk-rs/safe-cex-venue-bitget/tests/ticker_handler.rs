@@ -407,7 +407,7 @@ fn ticker_notification_preserves_second_subscriber_identity() {
         "ticker shared projection retains subscriber identity"
     );
     assert_eq!(
-        projected.response,
+        projected.response_json_view(),
         cause.response().cloned(),
         "ticker shared projection retains response"
     );

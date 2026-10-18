@@ -1897,6 +1897,21 @@ UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
+## Retained error responses
+
+ExchangeError has no cached JSON response field. retained_response_input reads the
+nearest response origin in its cause chain: the original RestFailure for transport
+failures, or the existing RetainedJsonInput inside the API-error origin wrapper.
+with_retained_response is construction glue for API-created errors, not a transport
+response update API. Prior opaque causes stay on the same source chain.
+
+Native error policies and callbacks read retained data before coercion or reporting.
+response_json_view computes the explicitly lossy decision-5 model/report view on
+demand; it never replaces the retained response or becomes a second authority.
+The real Binance cancel-symbol witness compares both signed DELETE calls, original
+failure propagation and emitted UTF-16/argument lists with the maintained class.
+error_response_origins separately pins nearest-origin selection across a chain.
+
 `eager::start_eager` is the typed async SDK call boundary. It starts the body
 through the existing canonical Promise driver at call time, retains native `T`
 without Clone/Serde/JSON, and returns a waiter. Dropping that waiter leaves the

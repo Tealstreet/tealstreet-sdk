@@ -87,13 +87,13 @@ fn milliseconds(value: Option<f64>) -> Option<f64> {
 }
 fn message(error: &ExchangeError) -> Result<String, ExchangeError> {
     if let Some(value) = error
-        .response
+        .retained_response_input()
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("msg"))
-        && safe_cex_num::js_truthy(Some(value))
+        && safe_cex_num::js_retained_truthy(value)
     {
-        return text(&J::from(value.clone()));
+        return text(value);
     }
     Ok(if error.message.is_empty() {
         error.js_error_string()

@@ -157,7 +157,14 @@ impl Realm {
             if let Ok(response) = self.get_str(thrown, "response")
                 && !response.is_nullish()
             {
-                error.response = self.to_serde(&response).ok();
+                let response = match self.capture_typed_value(&response, 0) {
+                    Ok(value) => value,
+                    Err(cause) => return self.exchange_error(&cause),
+                };
+                match safe_cex_exchange::js_runtime::value::to_retained_input(&response) {
+                    Ok(response) => error = error.with_retained_response(response),
+                    Err(cause) => return cause.into(),
+                }
             }
         }
         error

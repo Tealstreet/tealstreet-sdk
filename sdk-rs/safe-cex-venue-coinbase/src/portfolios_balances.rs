@@ -93,7 +93,10 @@ impl PortfolioThrown {
             ("name".into(), Value::String(error.name.clone())),
             ("message".into(), Value::String(error.message.clone())),
         ]);
-        for (key, field) in [("response", &error.response), ("config", &error.config)] {
+        for (key, field) in [
+            ("response", &error.response_json_view()),
+            ("config", &error.config),
+        ] {
             if let Some(field) = field {
                 value.insert(key.into(), field.clone());
             }

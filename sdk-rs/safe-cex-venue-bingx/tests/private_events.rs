@@ -663,7 +663,8 @@ fn refresh_catch_reports_original_subscriber_error() {
             let mut cause = ExchangeError::new("subscriber cause");
             cause.name = "ListenerError".into();
             cause.store_subscriber_ids = vec![71, 83];
-            cause.response = Some(json!({"data":{"msg":"subscriber denied"}}));
+            cause =
+                cause.with_retained_response((json!({"data":{"msg":"subscriber denied"}})).into());
             Err(StoreSubscriberError::new("subscriber cause").with_cause(Rc::new(cause)))
         }),
     );
@@ -679,7 +680,7 @@ fn refresh_catch_reports_original_subscriber_error() {
     assert_eq!(&reports[0].store_subscriber_ids[..2], &[71, 83]);
     assert_eq!(reports[0].store_subscriber_ids.len(), 3);
     assert_eq!(
-        reports[0].response,
+        reports[0].response_json_view(),
         Some(json!({"data":{"msg":"subscriber denied"}}))
     );
     assert_eq!(
