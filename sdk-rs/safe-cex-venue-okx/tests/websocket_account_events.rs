@@ -309,7 +309,7 @@ fn host(t: Rc<State>) -> Rc<SocketEventOps<V, E>> {
                 "Map" | "Set" | "WsDirectFallback" => {
                     let state = capture.clone();
                     let name = name.to_owned();
-                    Js::function(&name.clone(), move |_, _| {
+                    Js::constructor(&name.clone(), None, move |_, _| {
                         event(&state, "construct", vec![s(&name)])?;
                         Ok(match name.as_str() {
                             "Map" => Js::new_map(),
