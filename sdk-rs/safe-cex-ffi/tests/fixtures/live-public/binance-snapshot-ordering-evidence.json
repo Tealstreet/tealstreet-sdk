@@ -107,5 +107,18 @@
       "messageHandlerStats",
       "socketHealth"
     ]
+  },
+  "inheritedValidationFailure": {
+    "master": "597fc53f6c",
+    "reviewedMergeHead": "8887c0fa9b97aa772a90e2a46ab7497fe6235a60",
+    "target": "safe-cex-venue-binance/tests/send_notification.rs",
+    "cases": [
+      "nested_store_boundaries_retain_the_original_opaque_cause",
+      "send_notification_native_continuations_match_actual_source"
+    ],
+    "assertion": "nested subscriber boundary IDs expected [0,0], got [0]",
+    "logSha256": "c4ba2a910951bbdeaa0c0ec6b62adecf5ce4ccc0c3e6470c90c8e5aa932aff7a",
+    "scope": "two DefaultStore instances; does not invoke the Binance snapshot listener",
+    "disposition": "root authorized separate Store-owner repair; assertions retained"
   }
 }
