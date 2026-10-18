@@ -20336,7 +20336,7 @@
         "stp_mode",
         "public_accepts"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXPlaceOrderOpts>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"order\":serde_json::json!(v.order),\"stp_mode\":serde_json::json!({\"present\":v.stp_mode.is_some(),\"value\":v.stp_mode.as_ref().map(|inner| serde_json::json!(inner))})}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXPlaceOrderOpts>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"order\":serde_json::json!({\"symbol\":serde_json::json!((v.order).symbol),\"type\":serde_json::json!((v.order).r#type),\"side\":serde_json::json!((v.order).side),\"amount\":serde_json::json!({\"bits\":format!(\"{:016x}\",(v.order).amount.to_bits())}),\"price\":serde_json::json!({\"present\":(v.order).price.is_some(),\"value\":(v.order).price.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"trigger_price\":serde_json::json!({\"present\":(v.order).trigger_price.is_some(),\"value\":(v.order).trigger_price.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"stop_loss\":serde_json::json!({\"present\":(v.order).stop_loss.is_some(),\"value\":(v.order).stop_loss.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"take_profit\":serde_json::json!({\"present\":(v.order).take_profit.is_some(),\"value\":(v.order).take_profit.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"reduce_only\":serde_json::json!({\"present\":(v.order).reduce_only.is_some(),\"value\":(v.order).reduce_only.as_ref().map(|inner| serde_json::json!(inner))}),\"time_in_force\":serde_json::json!({\"present\":(v.order).time_in_force.is_some(),\"value\":(v.order).time_in_force.as_ref().map(|inner| serde_json::json!(inner))}),\"trigger_type\":serde_json::json!({\"present\":(v.order).trigger_type.is_some(),\"value\":(v.order).trigger_type.as_ref().map(|inner| serde_json::json!(inner))}),\"tp_trigger_type\":serde_json::json!({\"present\":(v.order).tp_trigger_type.is_some(),\"value\":(v.order).tp_trigger_type.as_ref().map(|inner| serde_json::json!(inner))}),\"sl_trigger_type\":serde_json::json!({\"present\":(v.order).sl_trigger_type.is_some(),\"value\":(v.order).sl_trigger_type.as_ref().map(|inner| serde_json::json!(inner))}),\"client_order_id\":serde_json::json!({\"present\":(v.order).client_order_id.is_some(),\"value\":(v.order).client_order_id.as_ref().map(|inner| serde_json::json!(inner))}),\"max_slippage_pct\":serde_json::json!({\"present\":(v.order).max_slippage_pct.is_some(),\"value\":(v.order).max_slippage_pct.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"close\":serde_json::json!({\"present\":(v.order).close.is_some(),\"value\":(v.order).close.as_ref().map(|inner| serde_json::json!(inner))}),\"implied_volatility\":serde_json::json!({\"present\":(v.order).implied_volatility.is_some(),\"value\":(v.order).implied_volatility.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))})}),\"stp_mode\":serde_json::json!({\"present\":v.stp_mode.is_some(),\"value\":v.stp_mode.as_ref().map(|inner| serde_json::json!(inner))})}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
       "cases": [
         {
           "label": "left-map",
@@ -20347,8 +20347,63 @@
               "symbol": "BTCUSDT",
               "type": "limit",
               "side": "buy",
-              "amount": 2,
-              "price": 10
+              "amount": {
+                "bits": "4000000000000000"
+              },
+              "price": {
+                "present": true,
+                "value": {
+                  "bits": "4024000000000000"
+                }
+              },
+              "trigger_price": {
+                "present": false,
+                "value": null
+              },
+              "stop_loss": {
+                "present": false,
+                "value": null
+              },
+              "take_profit": {
+                "present": false,
+                "value": null
+              },
+              "reduce_only": {
+                "present": false,
+                "value": null
+              },
+              "time_in_force": {
+                "present": false,
+                "value": null
+              },
+              "trigger_type": {
+                "present": false,
+                "value": null
+              },
+              "tp_trigger_type": {
+                "present": false,
+                "value": null
+              },
+              "sl_trigger_type": {
+                "present": false,
+                "value": null
+              },
+              "client_order_id": {
+                "present": false,
+                "value": null
+              },
+              "max_slippage_pct": {
+                "present": false,
+                "value": null
+              },
+              "close": {
+                "present": false,
+                "value": null
+              },
+              "implied_volatility": {
+                "present": false,
+                "value": null
+              }
             },
             "stp_mode": {
               "present": true,
@@ -20366,8 +20421,63 @@
               "symbol": "ETHUSDT",
               "type": "limit",
               "side": "sell",
-              "amount": 3,
-              "price": 20
+              "amount": {
+                "bits": "4008000000000000"
+              },
+              "price": {
+                "present": true,
+                "value": {
+                  "bits": "4034000000000000"
+                }
+              },
+              "trigger_price": {
+                "present": false,
+                "value": null
+              },
+              "stop_loss": {
+                "present": false,
+                "value": null
+              },
+              "take_profit": {
+                "present": false,
+                "value": null
+              },
+              "reduce_only": {
+                "present": false,
+                "value": null
+              },
+              "time_in_force": {
+                "present": false,
+                "value": null
+              },
+              "trigger_type": {
+                "present": false,
+                "value": null
+              },
+              "tp_trigger_type": {
+                "present": false,
+                "value": null
+              },
+              "sl_trigger_type": {
+                "present": false,
+                "value": null
+              },
+              "client_order_id": {
+                "present": false,
+                "value": null
+              },
+              "max_slippage_pct": {
+                "present": false,
+                "value": null
+              },
+              "close": {
+                "present": false,
+                "value": null
+              },
+              "implied_volatility": {
+                "present": false,
+                "value": null
+              }
             },
             "stp_mode": {
               "present": true,
@@ -20828,7 +20938,7 @@
         "o",
         "public_accepts"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXOrderUpdate>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"e\":serde_json::json!(v.e),\"capital_e\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_e.to_bits())}),\"capital_t\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_t.to_bits())}),\"o\":serde_json::json!(v.o)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXOrderUpdate>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"e\":serde_json::json!(v.e),\"capital_e\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_e.to_bits())}),\"capital_t\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_t.to_bits())}),\"o\":serde_json::json!({\"s\":serde_json::json!((v.o).s),\"c\":serde_json::json!((v.o).c),\"capital_s\":serde_json::json!((v.o).capital_s),\"o\":serde_json::json!((v.o).o),\"f\":serde_json::json!((v.o).f),\"q\":serde_json::json!((v.o).q),\"p\":serde_json::json!((v.o).p),\"ap\":serde_json::json!((v.o).ap),\"sp\":serde_json::json!((v.o).sp),\"x\":serde_json::json!((v.o).x),\"capital_x\":serde_json::json!((v.o).capital_x),\"i\":serde_json::json!({\"bits\":format!(\"{:016x}\",(v.o).i.to_bits())}),\"l\":serde_json::json!((v.o).l),\"z\":serde_json::json!((v.o).z),\"capital_l\":serde_json::json!((v.o).capital_l),\"capital_n\":serde_json::json!((v.o).capital_n),\"n\":serde_json::json!((v.o).n),\"capital_t\":serde_json::json!({\"bits\":format!(\"{:016x}\",(v.o).capital_t.to_bits())}),\"t\":serde_json::json!({\"bits\":format!(\"{:016x}\",(v.o).t.to_bits())}),\"b\":serde_json::json!((v.o).b),\"a\":serde_json::json!((v.o).a),\"m\":serde_json::json!((v.o).m),\"capital_r\":serde_json::json!((v.o).capital_r),\"wt\":serde_json::json!((v.o).wt),\"ot\":serde_json::json!((v.o).ot),\"ps\":serde_json::json!((v.o).ps),\"cp\":serde_json::json!((v.o).cp),\"capital_ap\":serde_json::json!((v.o).capital_ap),\"cr\":serde_json::json!((v.o).cr),\"p_p\":serde_json::json!((v.o).p_p),\"si\":serde_json::json!({\"bits\":format!(\"{:016x}\",(v.o).si.to_bits())}),\"ss\":serde_json::json!({\"bits\":format!(\"{:016x}\",(v.o).ss.to_bits())}),\"rp\":serde_json::json!((v.o).rp)})}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
       "cases": [
         {
           "label": "left-map",
@@ -20845,7 +20955,7 @@
             "o": {
               "s": "left:s",
               "c": "left:c",
-              "S": "left:capital_s",
+              "capital_s": "left:capital_s",
               "o": "left:o",
               "f": "left:f",
               "q": "left:q",
@@ -20853,28 +20963,38 @@
               "ap": "left:ap",
               "sp": "left:sp",
               "x": "left:x",
-              "X": "left:capital_x",
-              "i": 1.25,
+              "capital_x": "left:capital_x",
+              "i": {
+                "bits": "3ff4000000000000"
+              },
               "l": "left:l",
               "z": "left:z",
-              "L": "left:capital_l",
-              "N": "left:capital_n",
+              "capital_l": "left:capital_l",
+              "capital_n": "left:capital_n",
               "n": "left:n",
-              "T": 1.25,
-              "t": 1.25,
+              "capital_t": {
+                "bits": "3ff4000000000000"
+              },
+              "t": {
+                "bits": "3ff4000000000000"
+              },
               "b": "left:b",
               "a": "left:a",
               "m": true,
-              "R": true,
+              "capital_r": true,
               "wt": "left:wt",
               "ot": "left:ot",
               "ps": "left:ps",
               "cp": true,
-              "AP": "left:capital_ap",
+              "capital_ap": "left:capital_ap",
               "cr": "left:cr",
-              "pP": true,
-              "si": 1.25,
-              "ss": 1.25,
+              "p_p": true,
+              "si": {
+                "bits": "3ff4000000000000"
+              },
+              "ss": {
+                "bits": "3ff4000000000000"
+              },
               "rp": "left:rp"
             },
             "public_accepts": true
@@ -20895,7 +21015,7 @@
             "o": {
               "s": "left:s",
               "c": "left:c",
-              "S": "left:capital_s",
+              "capital_s": "left:capital_s",
               "o": "left:o",
               "f": "left:f",
               "q": "left:q",
@@ -20903,28 +21023,38 @@
               "ap": "left:ap",
               "sp": "left:sp",
               "x": "left:x",
-              "X": "left:capital_x",
-              "i": 1.25,
+              "capital_x": "left:capital_x",
+              "i": {
+                "bits": "3ff4000000000000"
+              },
               "l": "left:l",
               "z": "left:z",
-              "L": "left:capital_l",
-              "N": "left:capital_n",
+              "capital_l": "left:capital_l",
+              "capital_n": "left:capital_n",
               "n": "left:n",
-              "T": 1.25,
-              "t": 1.25,
+              "capital_t": {
+                "bits": "3ff4000000000000"
+              },
+              "t": {
+                "bits": "3ff4000000000000"
+              },
               "b": "left:b",
               "a": "left:a",
               "m": true,
-              "R": true,
+              "capital_r": true,
               "wt": "left:wt",
               "ot": "left:ot",
               "ps": "left:ps",
               "cp": true,
-              "AP": "left:capital_ap",
+              "capital_ap": "left:capital_ap",
               "cr": "left:cr",
-              "pP": true,
-              "si": 1.25,
-              "ss": 1.25,
+              "p_p": true,
+              "si": {
+                "bits": "3ff4000000000000"
+              },
+              "ss": {
+                "bits": "3ff4000000000000"
+              },
               "rp": "left:rp"
             },
             "public_accepts": false
@@ -20945,7 +21075,7 @@
             "o": {
               "s": "right:s",
               "c": "right:c",
-              "S": "right:capital_s",
+              "capital_s": "right:capital_s",
               "o": "right:o",
               "f": "right:f",
               "q": "right:q",
@@ -20953,28 +21083,38 @@
               "ap": "right:ap",
               "sp": "right:sp",
               "x": "right:x",
-              "X": "right:capital_x",
-              "i": -0.0,
+              "capital_x": "right:capital_x",
+              "i": {
+                "bits": "8000000000000000"
+              },
               "l": "right:l",
               "z": "right:z",
-              "L": "right:capital_l",
-              "N": "right:capital_n",
+              "capital_l": "right:capital_l",
+              "capital_n": "right:capital_n",
               "n": "right:n",
-              "T": -0.0,
-              "t": -0.0,
+              "capital_t": {
+                "bits": "8000000000000000"
+              },
+              "t": {
+                "bits": "8000000000000000"
+              },
               "b": "right:b",
               "a": "right:a",
               "m": false,
-              "R": false,
+              "capital_r": false,
               "wt": "right:wt",
               "ot": "right:ot",
               "ps": "right:ps",
               "cp": false,
-              "AP": "right:capital_ap",
+              "capital_ap": "right:capital_ap",
               "cr": "right:cr",
-              "pP": false,
-              "si": -0.0,
-              "ss": -0.0,
+              "p_p": false,
+              "si": {
+                "bits": "8000000000000000"
+              },
+              "ss": {
+                "bits": "8000000000000000"
+              },
               "rp": "right:rp"
             },
             "public_accepts": true
@@ -20995,7 +21135,7 @@
             "o": {
               "s": "right:s",
               "c": "right:c",
-              "S": "right:capital_s",
+              "capital_s": "right:capital_s",
               "o": "right:o",
               "f": "right:f",
               "q": "right:q",
@@ -21003,28 +21143,38 @@
               "ap": "right:ap",
               "sp": "right:sp",
               "x": "right:x",
-              "X": "right:capital_x",
-              "i": -0.0,
+              "capital_x": "right:capital_x",
+              "i": {
+                "bits": "8000000000000000"
+              },
               "l": "right:l",
               "z": "right:z",
-              "L": "right:capital_l",
-              "N": "right:capital_n",
+              "capital_l": "right:capital_l",
+              "capital_n": "right:capital_n",
               "n": "right:n",
-              "T": -0.0,
-              "t": -0.0,
+              "capital_t": {
+                "bits": "8000000000000000"
+              },
+              "t": {
+                "bits": "8000000000000000"
+              },
               "b": "right:b",
               "a": "right:a",
               "m": false,
-              "R": false,
+              "capital_r": false,
               "wt": "right:wt",
               "ot": "right:ot",
               "ps": "right:ps",
               "cp": false,
-              "AP": "right:capital_ap",
+              "capital_ap": "right:capital_ap",
               "cr": "right:cr",
-              "pP": false,
-              "si": -0.0,
-              "ss": -0.0,
+              "p_p": false,
+              "si": {
+                "bits": "8000000000000000"
+              },
+              "ss": {
+                "bits": "8000000000000000"
+              },
               "rp": "right:rp"
             },
             "public_accepts": false
@@ -23198,7 +23348,7 @@
         "a",
         "public_accepts"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXAccountUpdate>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"e\":serde_json::json!(v.e),\"capital_e\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_e.to_bits())}),\"capital_t\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_t.to_bits())}),\"a\":serde_json::json!(v.a)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXAccountUpdate>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"e\":serde_json::json!(v.e),\"capital_e\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_e.to_bits())}),\"capital_t\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.capital_t.to_bits())}),\"a\":serde_json::json!({\"m\":serde_json::json!((v.a).m),\"capital_b\":serde_json::json!((v.a).capital_b.iter().map(|item| serde_json::json!({\"a\":serde_json::json!((item).a),\"wb\":serde_json::json!((item).wb),\"cw\":serde_json::json!((item).cw),\"bc\":serde_json::json!((item).bc)})).collect::<Vec<_>>()),\"capital_p\":serde_json::json!((v.a).capital_p.iter().map(|item| serde_json::json!({\"s\":serde_json::json!((item).s),\"pa\":serde_json::json!((item).pa),\"ep\":serde_json::json!((item).ep),\"cr\":serde_json::json!((item).cr),\"up\":serde_json::json!((item).up),\"mt\":serde_json::json!((item).mt),\"iw\":serde_json::json!((item).iw),\"ps\":serde_json::json!((item).ps)})).collect::<Vec<_>>())})}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
       "cases": [
         {
           "label": "left-map",
@@ -23214,7 +23364,7 @@
             },
             "a": {
               "m": "left:m",
-              "B": [
+              "capital_b": [
                 {
                   "a": "left:a",
                   "wb": "left:wb",
@@ -23222,7 +23372,7 @@
                   "bc": "left:bc"
                 }
               ],
-              "P": [
+              "capital_p": [
                 {
                   "s": "left:s",
                   "pa": "left:pa",
@@ -23252,7 +23402,7 @@
             },
             "a": {
               "m": "left:m",
-              "B": [
+              "capital_b": [
                 {
                   "a": "left:a",
                   "wb": "left:wb",
@@ -23260,7 +23410,7 @@
                   "bc": "left:bc"
                 }
               ],
-              "P": [
+              "capital_p": [
                 {
                   "s": "left:s",
                   "pa": "left:pa",
@@ -23290,7 +23440,7 @@
             },
             "a": {
               "m": "right:m",
-              "B": [
+              "capital_b": [
                 {
                   "a": "right:a",
                   "wb": "right:wb",
@@ -23298,7 +23448,7 @@
                   "bc": "right:bc"
                 }
               ],
-              "P": [
+              "capital_p": [
                 {
                   "s": "right:s",
                   "pa": "right:pa",
@@ -23328,7 +23478,7 @@
             },
             "a": {
               "m": "right:m",
-              "B": [
+              "capital_b": [
                 {
                   "a": "right:a",
                   "wb": "right:wb",
@@ -23336,7 +23486,7 @@
                   "bc": "right:bc"
                 }
               ],
-              "P": [
+              "capital_p": [
                 {
                   "s": "right:s",
                   "pa": "right:pa",
@@ -23573,7 +23723,7 @@
         "capital_p",
         "public_accepts"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXAccountUpdateA>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"m\":serde_json::json!(v.m),\"capital_b\":serde_json::json!(v.capital_b),\"capital_p\":serde_json::json!(v.capital_p)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXAccountUpdateA>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"m\":serde_json::json!(v.m),\"capital_b\":serde_json::json!(v.capital_b.iter().map(|item| serde_json::json!({\"a\":serde_json::json!((item).a),\"wb\":serde_json::json!((item).wb),\"cw\":serde_json::json!((item).cw),\"bc\":serde_json::json!((item).bc)})).collect::<Vec<_>>()),\"capital_p\":serde_json::json!(v.capital_p.iter().map(|item| serde_json::json!({\"s\":serde_json::json!((item).s),\"pa\":serde_json::json!((item).pa),\"ep\":serde_json::json!((item).ep),\"cr\":serde_json::json!((item).cr),\"up\":serde_json::json!((item).up),\"mt\":serde_json::json!((item).mt),\"iw\":serde_json::json!((item).iw),\"ps\":serde_json::json!((item).ps)})).collect::<Vec<_>>())}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
       "cases": [
         {
           "label": "left-map",
@@ -32475,7 +32625,7 @@
         "positions",
         "public_accepts"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXAccountResponse>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"account_alias\":serde_json::json!(v.account_alias),\"fee_tier\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.fee_tier.to_bits())}),\"can_trade\":serde_json::json!(v.can_trade),\"can_deposit\":serde_json::json!(v.can_deposit),\"can_withdraw\":serde_json::json!(v.can_withdraw),\"update_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.update_time.to_bits())}),\"total_initial_margin\":serde_json::json!(v.total_initial_margin),\"total_maint_margin\":serde_json::json!(v.total_maint_margin),\"total_wallet_balance\":serde_json::json!(v.total_wallet_balance),\"total_unrealized_profit\":serde_json::json!(v.total_unrealized_profit),\"total_margin_balance\":serde_json::json!(v.total_margin_balance),\"total_position_initial_margin\":serde_json::json!(v.total_position_initial_margin),\"total_open_order_initial_margin\":serde_json::json!(v.total_open_order_initial_margin),\"total_cross_wallet_balance\":serde_json::json!(v.total_cross_wallet_balance),\"total_cross_un_pnl\":serde_json::json!(v.total_cross_un_pnl),\"available_balance\":serde_json::json!(v.available_balance),\"max_withdraw_amount\":serde_json::json!(v.max_withdraw_amount),\"assets\":serde_json::json!(v.assets),\"positions\":serde_json::json!(v.positions)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXAccountResponse>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"account_alias\":serde_json::json!(v.account_alias),\"fee_tier\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.fee_tier.to_bits())}),\"can_trade\":serde_json::json!(v.can_trade),\"can_deposit\":serde_json::json!(v.can_deposit),\"can_withdraw\":serde_json::json!(v.can_withdraw),\"update_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.update_time.to_bits())}),\"total_initial_margin\":serde_json::json!(v.total_initial_margin),\"total_maint_margin\":serde_json::json!(v.total_maint_margin),\"total_wallet_balance\":serde_json::json!(v.total_wallet_balance),\"total_unrealized_profit\":serde_json::json!(v.total_unrealized_profit),\"total_margin_balance\":serde_json::json!(v.total_margin_balance),\"total_position_initial_margin\":serde_json::json!(v.total_position_initial_margin),\"total_open_order_initial_margin\":serde_json::json!(v.total_open_order_initial_margin),\"total_cross_wallet_balance\":serde_json::json!(v.total_cross_wallet_balance),\"total_cross_un_pnl\":serde_json::json!(v.total_cross_un_pnl),\"available_balance\":serde_json::json!(v.available_balance),\"max_withdraw_amount\":serde_json::json!(v.max_withdraw_amount),\"assets\":serde_json::json!(v.assets.iter().map(|item| serde_json::json!({\"asset\":serde_json::json!((item).asset),\"wallet_balance\":serde_json::json!((item).wallet_balance),\"unrealized_profit\":serde_json::json!((item).unrealized_profit),\"margin_balance\":serde_json::json!((item).margin_balance),\"maint_margin\":serde_json::json!((item).maint_margin),\"initial_margin\":serde_json::json!((item).initial_margin),\"position_initial_margin\":serde_json::json!((item).position_initial_margin),\"open_order_initial_margin\":serde_json::json!((item).open_order_initial_margin),\"max_withdraw_amount\":serde_json::json!((item).max_withdraw_amount),\"cross_wallet_balance\":serde_json::json!((item).cross_wallet_balance),\"cross_un_pnl\":serde_json::json!((item).cross_un_pnl),\"available_balance\":serde_json::json!((item).available_balance),\"margin_available\":serde_json::json!((item).margin_available),\"update_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",(item).update_time.to_bits())})})).collect::<Vec<_>>()),\"positions\":serde_json::json!(v.positions.iter().map(|item| serde_json::json!({\"symbol\":serde_json::json!((item).symbol),\"initial_margin\":serde_json::json!((item).initial_margin),\"maint_margin\":serde_json::json!((item).maint_margin),\"unrealized_profit\":serde_json::json!((item).unrealized_profit),\"position_initial_margin\":serde_json::json!((item).position_initial_margin),\"open_order_initial_margin\":serde_json::json!((item).open_order_initial_margin),\"leverage\":serde_json::json!((item).leverage),\"isolated\":serde_json::json!((item).isolated),\"entry_price\":serde_json::json!((item).entry_price),\"max_notional\":serde_json::json!((item).max_notional),\"position_side\":serde_json::json!((item).position_side),\"position_amt\":serde_json::json!((item).position_amt),\"notional\":serde_json::json!((item).notional),\"isolated_wallet\":serde_json::json!((item).isolated_wallet),\"update_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",(item).update_time.to_bits())}),\"bid_notional\":serde_json::json!((item).bid_notional),\"ask_notional\":serde_json::json!((item).ask_notional)})).collect::<Vec<_>>())}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
       "cases": [
         {
           "label": "left-map",
@@ -32506,40 +32656,44 @@
             "assets": [
               {
                 "asset": "left:asset",
-                "walletBalance": "left:wallet_balance",
-                "unrealizedProfit": "left:unrealized_profit",
-                "marginBalance": "left:margin_balance",
-                "maintMargin": "left:maint_margin",
-                "initialMargin": "left:initial_margin",
-                "positionInitialMargin": "left:position_initial_margin",
-                "openOrderInitialMargin": "left:open_order_initial_margin",
-                "maxWithdrawAmount": "left:max_withdraw_amount",
-                "crossWalletBalance": "left:cross_wallet_balance",
-                "crossUnPnl": "left:cross_un_pnl",
-                "availableBalance": "left:available_balance",
-                "marginAvailable": true,
-                "updateTime": 1.25
+                "wallet_balance": "left:wallet_balance",
+                "unrealized_profit": "left:unrealized_profit",
+                "margin_balance": "left:margin_balance",
+                "maint_margin": "left:maint_margin",
+                "initial_margin": "left:initial_margin",
+                "position_initial_margin": "left:position_initial_margin",
+                "open_order_initial_margin": "left:open_order_initial_margin",
+                "max_withdraw_amount": "left:max_withdraw_amount",
+                "cross_wallet_balance": "left:cross_wallet_balance",
+                "cross_un_pnl": "left:cross_un_pnl",
+                "available_balance": "left:available_balance",
+                "margin_available": true,
+                "update_time": {
+                  "bits": "3ff4000000000000"
+                }
               }
             ],
             "positions": [
               {
                 "symbol": "left:symbol",
-                "initialMargin": "left:initial_margin",
-                "maintMargin": "left:maint_margin",
-                "unrealizedProfit": "left:unrealized_profit",
-                "positionInitialMargin": "left:position_initial_margin",
-                "openOrderInitialMargin": "left:open_order_initial_margin",
+                "initial_margin": "left:initial_margin",
+                "maint_margin": "left:maint_margin",
+                "unrealized_profit": "left:unrealized_profit",
+                "position_initial_margin": "left:position_initial_margin",
+                "open_order_initial_margin": "left:open_order_initial_margin",
                 "leverage": "left:leverage",
                 "isolated": true,
-                "entryPrice": "left:entry_price",
-                "maxNotional": "left:max_notional",
-                "positionSide": "left:position_side",
-                "positionAmt": "left:position_amt",
+                "entry_price": "left:entry_price",
+                "max_notional": "left:max_notional",
+                "position_side": "left:position_side",
+                "position_amt": "left:position_amt",
                 "notional": "left:notional",
-                "isolatedWallet": "left:isolated_wallet",
-                "updateTime": 1.25,
-                "bidNotional": "left:bid_notional",
-                "askNotional": "left:ask_notional"
+                "isolated_wallet": "left:isolated_wallet",
+                "update_time": {
+                  "bits": "3ff4000000000000"
+                },
+                "bid_notional": "left:bid_notional",
+                "ask_notional": "left:ask_notional"
               }
             ],
             "public_accepts": true
@@ -32574,40 +32728,44 @@
             "assets": [
               {
                 "asset": "left:asset",
-                "walletBalance": "left:wallet_balance",
-                "unrealizedProfit": "left:unrealized_profit",
-                "marginBalance": "left:margin_balance",
-                "maintMargin": "left:maint_margin",
-                "initialMargin": "left:initial_margin",
-                "positionInitialMargin": "left:position_initial_margin",
-                "openOrderInitialMargin": "left:open_order_initial_margin",
-                "maxWithdrawAmount": "left:max_withdraw_amount",
-                "crossWalletBalance": "left:cross_wallet_balance",
-                "crossUnPnl": "left:cross_un_pnl",
-                "availableBalance": "left:available_balance",
-                "marginAvailable": true,
-                "updateTime": 1.25
+                "wallet_balance": "left:wallet_balance",
+                "unrealized_profit": "left:unrealized_profit",
+                "margin_balance": "left:margin_balance",
+                "maint_margin": "left:maint_margin",
+                "initial_margin": "left:initial_margin",
+                "position_initial_margin": "left:position_initial_margin",
+                "open_order_initial_margin": "left:open_order_initial_margin",
+                "max_withdraw_amount": "left:max_withdraw_amount",
+                "cross_wallet_balance": "left:cross_wallet_balance",
+                "cross_un_pnl": "left:cross_un_pnl",
+                "available_balance": "left:available_balance",
+                "margin_available": true,
+                "update_time": {
+                  "bits": "3ff4000000000000"
+                }
               }
             ],
             "positions": [
               {
                 "symbol": "left:symbol",
-                "initialMargin": "left:initial_margin",
-                "maintMargin": "left:maint_margin",
-                "unrealizedProfit": "left:unrealized_profit",
-                "positionInitialMargin": "left:position_initial_margin",
-                "openOrderInitialMargin": "left:open_order_initial_margin",
+                "initial_margin": "left:initial_margin",
+                "maint_margin": "left:maint_margin",
+                "unrealized_profit": "left:unrealized_profit",
+                "position_initial_margin": "left:position_initial_margin",
+                "open_order_initial_margin": "left:open_order_initial_margin",
                 "leverage": "left:leverage",
                 "isolated": true,
-                "entryPrice": "left:entry_price",
-                "maxNotional": "left:max_notional",
-                "positionSide": "left:position_side",
-                "positionAmt": "left:position_amt",
+                "entry_price": "left:entry_price",
+                "max_notional": "left:max_notional",
+                "position_side": "left:position_side",
+                "position_amt": "left:position_amt",
                 "notional": "left:notional",
-                "isolatedWallet": "left:isolated_wallet",
-                "updateTime": 1.25,
-                "bidNotional": "left:bid_notional",
-                "askNotional": "left:ask_notional"
+                "isolated_wallet": "left:isolated_wallet",
+                "update_time": {
+                  "bits": "3ff4000000000000"
+                },
+                "bid_notional": "left:bid_notional",
+                "ask_notional": "left:ask_notional"
               }
             ],
             "public_accepts": false
@@ -32642,40 +32800,44 @@
             "assets": [
               {
                 "asset": "right:asset",
-                "walletBalance": "right:wallet_balance",
-                "unrealizedProfit": "right:unrealized_profit",
-                "marginBalance": "right:margin_balance",
-                "maintMargin": "right:maint_margin",
-                "initialMargin": "right:initial_margin",
-                "positionInitialMargin": "right:position_initial_margin",
-                "openOrderInitialMargin": "right:open_order_initial_margin",
-                "maxWithdrawAmount": "right:max_withdraw_amount",
-                "crossWalletBalance": "right:cross_wallet_balance",
-                "crossUnPnl": "right:cross_un_pnl",
-                "availableBalance": "right:available_balance",
-                "marginAvailable": false,
-                "updateTime": -0.0
+                "wallet_balance": "right:wallet_balance",
+                "unrealized_profit": "right:unrealized_profit",
+                "margin_balance": "right:margin_balance",
+                "maint_margin": "right:maint_margin",
+                "initial_margin": "right:initial_margin",
+                "position_initial_margin": "right:position_initial_margin",
+                "open_order_initial_margin": "right:open_order_initial_margin",
+                "max_withdraw_amount": "right:max_withdraw_amount",
+                "cross_wallet_balance": "right:cross_wallet_balance",
+                "cross_un_pnl": "right:cross_un_pnl",
+                "available_balance": "right:available_balance",
+                "margin_available": false,
+                "update_time": {
+                  "bits": "8000000000000000"
+                }
               }
             ],
             "positions": [
               {
                 "symbol": "right:symbol",
-                "initialMargin": "right:initial_margin",
-                "maintMargin": "right:maint_margin",
-                "unrealizedProfit": "right:unrealized_profit",
-                "positionInitialMargin": "right:position_initial_margin",
-                "openOrderInitialMargin": "right:open_order_initial_margin",
+                "initial_margin": "right:initial_margin",
+                "maint_margin": "right:maint_margin",
+                "unrealized_profit": "right:unrealized_profit",
+                "position_initial_margin": "right:position_initial_margin",
+                "open_order_initial_margin": "right:open_order_initial_margin",
                 "leverage": "right:leverage",
                 "isolated": false,
-                "entryPrice": "right:entry_price",
-                "maxNotional": "right:max_notional",
-                "positionSide": "right:position_side",
-                "positionAmt": "right:position_amt",
+                "entry_price": "right:entry_price",
+                "max_notional": "right:max_notional",
+                "position_side": "right:position_side",
+                "position_amt": "right:position_amt",
                 "notional": "right:notional",
-                "isolatedWallet": "right:isolated_wallet",
-                "updateTime": -0.0,
-                "bidNotional": "right:bid_notional",
-                "askNotional": "right:ask_notional"
+                "isolated_wallet": "right:isolated_wallet",
+                "update_time": {
+                  "bits": "8000000000000000"
+                },
+                "bid_notional": "right:bid_notional",
+                "ask_notional": "right:ask_notional"
               }
             ],
             "public_accepts": true
@@ -32710,40 +32872,44 @@
             "assets": [
               {
                 "asset": "right:asset",
-                "walletBalance": "right:wallet_balance",
-                "unrealizedProfit": "right:unrealized_profit",
-                "marginBalance": "right:margin_balance",
-                "maintMargin": "right:maint_margin",
-                "initialMargin": "right:initial_margin",
-                "positionInitialMargin": "right:position_initial_margin",
-                "openOrderInitialMargin": "right:open_order_initial_margin",
-                "maxWithdrawAmount": "right:max_withdraw_amount",
-                "crossWalletBalance": "right:cross_wallet_balance",
-                "crossUnPnl": "right:cross_un_pnl",
-                "availableBalance": "right:available_balance",
-                "marginAvailable": false,
-                "updateTime": -0.0
+                "wallet_balance": "right:wallet_balance",
+                "unrealized_profit": "right:unrealized_profit",
+                "margin_balance": "right:margin_balance",
+                "maint_margin": "right:maint_margin",
+                "initial_margin": "right:initial_margin",
+                "position_initial_margin": "right:position_initial_margin",
+                "open_order_initial_margin": "right:open_order_initial_margin",
+                "max_withdraw_amount": "right:max_withdraw_amount",
+                "cross_wallet_balance": "right:cross_wallet_balance",
+                "cross_un_pnl": "right:cross_un_pnl",
+                "available_balance": "right:available_balance",
+                "margin_available": false,
+                "update_time": {
+                  "bits": "8000000000000000"
+                }
               }
             ],
             "positions": [
               {
                 "symbol": "right:symbol",
-                "initialMargin": "right:initial_margin",
-                "maintMargin": "right:maint_margin",
-                "unrealizedProfit": "right:unrealized_profit",
-                "positionInitialMargin": "right:position_initial_margin",
-                "openOrderInitialMargin": "right:open_order_initial_margin",
+                "initial_margin": "right:initial_margin",
+                "maint_margin": "right:maint_margin",
+                "unrealized_profit": "right:unrealized_profit",
+                "position_initial_margin": "right:position_initial_margin",
+                "open_order_initial_margin": "right:open_order_initial_margin",
                 "leverage": "right:leverage",
                 "isolated": false,
-                "entryPrice": "right:entry_price",
-                "maxNotional": "right:max_notional",
-                "positionSide": "right:position_side",
-                "positionAmt": "right:position_amt",
+                "entry_price": "right:entry_price",
+                "max_notional": "right:max_notional",
+                "position_side": "right:position_side",
+                "position_amt": "right:position_amt",
                 "notional": "right:notional",
-                "isolatedWallet": "right:isolated_wallet",
-                "updateTime": -0.0,
-                "bidNotional": "right:bid_notional",
-                "askNotional": "right:ask_notional"
+                "isolated_wallet": "right:isolated_wallet",
+                "update_time": {
+                  "bits": "8000000000000000"
+                },
+                "bid_notional": "right:bid_notional",
+                "ask_notional": "right:ask_notional"
               }
             ],
             "public_accepts": false
@@ -35552,7 +35718,7 @@
         "market_take_bound",
         "public_accepts"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXMarketResponse>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"extra\":serde_json::json!(v.extra),\"symbol\":serde_json::json!(v.symbol),\"base_asset\":serde_json::json!(v.base_asset),\"quote_asset\":serde_json::json!(v.quote_asset),\"contract_type\":serde_json::json!(v.contract_type),\"delivery_date\":serde_json::json!({\"present\":v.delivery_date.is_some(),\"value\":v.delivery_date.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"onboard_date\":serde_json::json!({\"present\":v.onboard_date.is_some(),\"value\":v.onboard_date.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"status\":serde_json::json!(v.status),\"maint_margin_percent\":serde_json::json!(v.maint_margin_percent),\"required_margin_percent\":serde_json::json!(v.required_margin_percent),\"price_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.price_precision.to_bits())}),\"quantity_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.quantity_precision.to_bits())}),\"base_asset_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.base_asset_precision.to_bits())}),\"quote_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.quote_precision.to_bits())}),\"underlying_type\":serde_json::json!({\"present\":v.underlying_type.is_some(),\"value\":v.underlying_type.as_ref().map(|inner| serde_json::json!(inner))}),\"underlying_sub_type\":serde_json::json!({\"present\":v.underlying_sub_type.is_some(),\"value\":v.underlying_sub_type.as_ref().map(|inner| serde_json::json!(inner))}),\"settle_plan\":serde_json::json!({\"present\":v.settle_plan.is_some(),\"value\":v.settle_plan.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"trigger_protect\":serde_json::json!(v.trigger_protect),\"filters\":serde_json::json!(v.filters),\"order_types\":serde_json::json!(v.order_types),\"time_in_force\":serde_json::json!(v.time_in_force),\"liquidation_fee\":serde_json::json!(v.liquidation_fee),\"market_take_bound\":serde_json::json!(v.market_take_bound)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXMarketResponse>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"extra\":serde_json::json!(v.extra),\"symbol\":serde_json::json!(v.symbol),\"base_asset\":serde_json::json!(v.base_asset),\"quote_asset\":serde_json::json!(v.quote_asset),\"contract_type\":serde_json::json!(v.contract_type),\"delivery_date\":serde_json::json!({\"present\":v.delivery_date.is_some(),\"value\":v.delivery_date.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"onboard_date\":serde_json::json!({\"present\":v.onboard_date.is_some(),\"value\":v.onboard_date.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"status\":serde_json::json!(v.status),\"maint_margin_percent\":serde_json::json!(v.maint_margin_percent),\"required_margin_percent\":serde_json::json!(v.required_margin_percent),\"price_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.price_precision.to_bits())}),\"quantity_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.quantity_precision.to_bits())}),\"base_asset_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.base_asset_precision.to_bits())}),\"quote_precision\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.quote_precision.to_bits())}),\"underlying_type\":serde_json::json!({\"present\":v.underlying_type.is_some(),\"value\":v.underlying_type.as_ref().map(|inner| serde_json::json!(inner))}),\"underlying_sub_type\":serde_json::json!({\"present\":v.underlying_sub_type.is_some(),\"value\":v.underlying_sub_type.as_ref().map(|inner| serde_json::json!(inner))}),\"settle_plan\":serde_json::json!({\"present\":v.settle_plan.is_some(),\"value\":v.settle_plan.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"trigger_protect\":serde_json::json!(v.trigger_protect),\"filters\":serde_json::json!(v.filters.iter().map(|item| serde_json::json!({\"extra\":serde_json::json!((item).extra),\"filter_type\":serde_json::json!((item).filter_type),\"max_price\":serde_json::json!({\"present\":(item).max_price.is_some(),\"value\":(item).max_price.as_ref().map(|inner| serde_json::json!(inner))}),\"min_price\":serde_json::json!({\"present\":(item).min_price.is_some(),\"value\":(item).min_price.as_ref().map(|inner| serde_json::json!(inner))}),\"tick_size\":serde_json::json!({\"present\":(item).tick_size.is_some(),\"value\":(item).tick_size.as_ref().map(|inner| serde_json::json!(inner))}),\"max_qty\":serde_json::json!({\"present\":(item).max_qty.is_some(),\"value\":(item).max_qty.as_ref().map(|inner| serde_json::json!(inner))}),\"min_qty\":serde_json::json!({\"present\":(item).min_qty.is_some(),\"value\":(item).min_qty.as_ref().map(|inner| serde_json::json!(inner))}),\"step_size\":serde_json::json!({\"present\":(item).step_size.is_some(),\"value\":(item).step_size.as_ref().map(|inner| serde_json::json!(inner))}),\"limit\":serde_json::json!({\"present\":(item).limit.is_some(),\"value\":(item).limit.as_ref().map(|inner| serde_json::json!({\"bits\":format!(\"{:016x}\",inner.to_bits())}))}),\"notional\":serde_json::json!({\"present\":(item).notional.is_some(),\"value\":(item).notional.as_ref().map(|inner| serde_json::json!(inner))}),\"multiplier_up\":serde_json::json!({\"present\":(item).multiplier_up.is_some(),\"value\":(item).multiplier_up.as_ref().map(|inner| serde_json::json!(inner))}),\"multiplier_down\":serde_json::json!({\"present\":(item).multiplier_down.is_some(),\"value\":(item).multiplier_down.as_ref().map(|inner| serde_json::json!(inner))}),\"multiplier_decimal\":serde_json::json!({\"present\":(item).multiplier_decimal.is_some(),\"value\":(item).multiplier_decimal.as_ref().map(|inner| serde_json::json!(inner))})})).collect::<Vec<_>>()),\"order_types\":serde_json::json!(v.order_types),\"time_in_force\":serde_json::json!(v.time_in_force),\"liquidation_fee\":serde_json::json!(v.liquidation_fee),\"market_take_bound\":serde_json::json!(v.market_take_bound)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
       "cases": [
         {
           "label": "left-map",
@@ -35617,23 +35783,60 @@
             "trigger_protect": "left:trigger_protect",
             "filters": [
               {
-                "extensionMarker": "left",
-                "extensionNested": {
-                  "checked": true,
-                  "value": 17
+                "extra": {
+                  "extensionMarker": "left",
+                  "extensionNested": {
+                    "checked": true,
+                    "value": 17
+                  }
                 },
-                "filterType": "left:filter_type",
-                "maxPrice": "left:max_price",
-                "minPrice": "left:min_price",
-                "tickSize": "left:tick_size",
-                "maxQty": "left:max_qty",
-                "minQty": "left:min_qty",
-                "stepSize": "left:step_size",
-                "limit": 1.25,
-                "notional": "left:notional",
-                "multiplierUp": "left:multiplier_up",
-                "multiplierDown": "left:multiplier_down",
-                "multiplierDecimal": "left:multiplier_decimal"
+                "filter_type": "left:filter_type",
+                "max_price": {
+                  "present": true,
+                  "value": "left:max_price"
+                },
+                "min_price": {
+                  "present": true,
+                  "value": "left:min_price"
+                },
+                "tick_size": {
+                  "present": true,
+                  "value": "left:tick_size"
+                },
+                "max_qty": {
+                  "present": true,
+                  "value": "left:max_qty"
+                },
+                "min_qty": {
+                  "present": true,
+                  "value": "left:min_qty"
+                },
+                "step_size": {
+                  "present": true,
+                  "value": "left:step_size"
+                },
+                "limit": {
+                  "present": true,
+                  "value": {
+                    "bits": "3ff4000000000000"
+                  }
+                },
+                "notional": {
+                  "present": true,
+                  "value": "left:notional"
+                },
+                "multiplier_up": {
+                  "present": true,
+                  "value": "left:multiplier_up"
+                },
+                "multiplier_down": {
+                  "present": true,
+                  "value": "left:multiplier_down"
+                },
+                "multiplier_decimal": {
+                  "present": true,
+                  "value": "left:multiplier_decimal"
+                }
               }
             ],
             "order_types": [
@@ -35712,23 +35915,60 @@
             "trigger_protect": "right:trigger_protect",
             "filters": [
               {
-                "extensionMarker": "right",
-                "extensionNested": {
-                  "checked": false,
-                  "value": 23
+                "extra": {
+                  "extensionMarker": "right",
+                  "extensionNested": {
+                    "checked": false,
+                    "value": 23
+                  }
                 },
-                "filterType": "right:filter_type",
-                "maxPrice": "right:max_price",
-                "minPrice": "right:min_price",
-                "tickSize": "right:tick_size",
-                "maxQty": "right:max_qty",
-                "minQty": "right:min_qty",
-                "stepSize": "right:step_size",
-                "limit": -0.0,
-                "notional": "right:notional",
-                "multiplierUp": "right:multiplier_up",
-                "multiplierDown": "right:multiplier_down",
-                "multiplierDecimal": "right:multiplier_decimal"
+                "filter_type": "right:filter_type",
+                "max_price": {
+                  "present": true,
+                  "value": "right:max_price"
+                },
+                "min_price": {
+                  "present": true,
+                  "value": "right:min_price"
+                },
+                "tick_size": {
+                  "present": true,
+                  "value": "right:tick_size"
+                },
+                "max_qty": {
+                  "present": true,
+                  "value": "right:max_qty"
+                },
+                "min_qty": {
+                  "present": true,
+                  "value": "right:min_qty"
+                },
+                "step_size": {
+                  "present": true,
+                  "value": "right:step_size"
+                },
+                "limit": {
+                  "present": true,
+                  "value": {
+                    "bits": "8000000000000000"
+                  }
+                },
+                "notional": {
+                  "present": true,
+                  "value": "right:notional"
+                },
+                "multiplier_up": {
+                  "present": true,
+                  "value": "right:multiplier_up"
+                },
+                "multiplier_down": {
+                  "present": true,
+                  "value": "right:multiplier_down"
+                },
+                "multiplier_decimal": {
+                  "present": true,
+                  "value": "right:multiplier_decimal"
+                }
               }
             ],
             "order_types": [
