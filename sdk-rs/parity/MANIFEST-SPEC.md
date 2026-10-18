@@ -1572,6 +1572,20 @@ not establish Axios runtime validation. Separate string and snapshot observation
 remain governed by [§19](#forced-surrogate-conflict) and
 [§16](#owned-snapshot-vs-live-alias).
 
+Final strict-field policy for the constructed WEEX market batch: a row whose
+required string field cannot inhabit `Market` is refused alone, with a visible
+field/value warning, retaining good rows and returning empty when all are refused.
+`normalize_market_row` completes source coercions before this projection; genuine
+source/capture failures retain the original outer catch and cached-market result.
+The public utility retains its standalone refusal. The maintained `fetchMarkets`
+and `normalizeMarket` source probe keeps the raw malformed fields in twelve mixed
+pages, so this row loss is explicitly CHOSEN. Keeping shared model fields strict
+avoids introducing malformed identities/assets into every downstream consumer;
+per-row refusal avoids discarding the valid snapshot. Constructed Exchange HTTP
+regressions independently pin native IDs/assets, warning values, empty-page
+semantics and source coercion precedence. No source-equivalent row claim is made.
+
+
 <a id="weex-class-assembly-choice"></a>
 
 ### WEEX explicit class assembly
@@ -2049,18 +2063,22 @@ parser phase is inferred. No polling timer is implemented by this read body.
 Response field coercion, including string/null timestamps, uses shared JS number
 and parseFloat semantics. Inherited interval keys preserve stringification and
 NaN range arithmetic. Sort remains stable and compares timestamp differences.
-CHOSEN: mixed NaN/non-NaN timestamp collections are refused, because the source
-comparator is inconsistent and Rust requires a consistent ordering. A paired
-actual-source witness records V8 accepting `[3, 2, NaN, 1]` and ordering it as
-`[1, 2, 3, NaN]`; native refusal reports/emits a named TypeError and resolves
-empty. All-NaN collections retain source order.
+CHOSEN per-row admission: refuse only candles whose coerced timestamp is NaN,
+reporting each row index and `timestamp=NaN` through the existing error diagnostic.
+Sort and return every admitted row; an all-refused response returns empty after
+reporting every refusal. This follows decision 3's batch-retention rule. Source
+keeps NaN-timestamp rows, but their inconsistent comparator has no claimed
+ordering parity. Other numeric candle fields retain NaN and infinities. The
+constructed Exchange/HTTP witness compiles and fails on the prior whole-batch
+refusal, then passes with one or multiple refused rows and the all-refused case.
 
 Named ts-bug compatibility: missing candle data is diagnosed before an error is
 raised; the outer catch reports that error, emits its message or fallback text,
 and resolves empty. Failure of the missing-data diagnostic enters the catch;
 failure of the catch diagnostic or emitter propagates without flattening native
-error metadata. The actual-source supplement pins 47 cases, 74 records and 444
-direct numeric field comparisons. Capture records CPU/Node; only NaN is canonical.
+error metadata. The actual-source supplement pins 47 cases and 74 source records;
+native admission observes 73 rows and 438 numeric fields plus the refused row.
+Capture records CPU/Node; only NaN is canonical.
 
 
 ### Kraken Spot balance host

@@ -491,7 +491,7 @@
     },
     "unsized": false
   },
-  "safe_cex_registry::native_account::JsonFuture": {
+  "safe_cex_registry::native_account::NativeAccountFuture": {
     "canonical": "core::pin::Pin",
     "expectedType": "::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output=::core::result::Result<bool,::serde_json::Value>>+'static>>",
     "file": "safe-cex-registry/src/native_account.rs",

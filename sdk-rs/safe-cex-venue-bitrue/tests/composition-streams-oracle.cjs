@@ -51,8 +51,23 @@ async function run(group,raw){const c={connected:true,disposed:false,opts:{symbo
    if(c.frame)update();if(c.fireFallback)fire(3000);if(c.frame&&c.fireFallback)update();
    if(!(c.connectLater&&['cleanup-before-connect','cancel-wait'].includes(c.id)))for(let i=0;i<(c.cleanup||0);i++)callbackReturns.push(cleanup());
   }
- }catch(e){thrown={identity:e===error,message:e.message};}
+ }catch(e){thrown={identity:e===error,message:e.message,...(process.argv.includes('--book-pairs')?{name:e.name}:{})};}
  const state=['message','candles','book'].includes(group)?{disposed:r.isDisposed,connected:r.isConnected,topics:r.topics,handlers:Object.fromEntries(Object.entries(r.messageHandlers).map(([k,v])=>[k,v.length])),requests:Object.fromEntries(Object.entries(r.resolveRequests).map(([k,v])=>[k,v.length])),timers:[...timers].map(([id,v])=>({id,ms:v.ms})),book:retainedBook}:undefined;
  return {cfg:input,result:capture(result),identity:capture(identity),error:capture(thrown),events,state:capture(state),callbackReturns:capture(callbackReturns)};
 }
-(async()=>{const rows={};for(const[g,cs]of Object.entries(cases)){rows[g]=[];for(const c of cs)rows[g].push(await run(g,c));}process.stdout.write(JSON.stringify({hashes,rows}));})().catch(e=>{console.error(e);process.exitCode=1;});
+async function unhandledBookPair() {
+ const r={isConnected:true,isDisposed:false,topics:{},messageHandlers:{},resolveRequests:{},
+  parent:{store:{updateTicker(){}}},resolveMarketSymbol:()=> 'BTC',convertToWsSymbol:()=> 'e_btc',
+  recordMessageHandlerStats(){},cleanupMessageHandlerStats(){},send(){},trackLastReceived(){}};
+ let callbacks=0, rejection;
+ const bindings={JSON,nanoid:()=> 'request',calcOrderBookTotal,jsonParse,Blob:BlobValue,
+  setTimeout,clearTimeout};
+ const cleanup=body('listenOrderBook',bindings,r)('BTC',()=>callbacks++);
+ process.once('unhandledRejection',error=>{rejection={name:error.name,message:error.message};});
+ body('onMessage',bindings,r)({data:JSON.stringify({channel:'market_e_btc_simple_depth_step0',tick:{buys:[{0:2,1:3}],asks:[]}})});
+ await new Promise(resolve=>setTimeout(resolve,20));
+ cleanup();
+ assert.equal(rejection?.name,'TypeError');assert.match(rejection.message,/iterable/);assert.equal(callbacks,0);
+ return {hashes,rejection,callbacks};
+}
+(async()=>{if(process.argv.includes('--unhandled-book-pair')){process.stdout.write(JSON.stringify(await unhandledBookPair()));return;}const rows={};for(const[g,cs]of Object.entries(process.argv.includes('--book-pairs')?{book:[{id:'object-pair',frame:true,depth:{buys:[{0:2,1:3}],asks:[]}},{id:'number-pair',frame:true,depth:{buys:[2],asks:[]}},{id:'valid-pair',frame:true,depth:{buys:[[2,3]],asks:[[4,5]]}}]}:cases)){rows[g]=[];for(const c of cs)rows[g].push(await run(g,c));}process.stdout.write(JSON.stringify({hashes,rows}));})().catch(e=>{console.error(e);process.exitCode=1;});

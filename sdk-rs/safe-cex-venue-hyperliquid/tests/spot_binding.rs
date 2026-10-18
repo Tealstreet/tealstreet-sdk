@@ -682,3 +682,58 @@ fn private_spot_asset_data_updates_closed_position_configuration() {
     );
     assert!(fills.borrow().is_empty());
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("hyperliquidspot");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 8);
+    let f = started();
+    for wire in f.host.sockets.borrow().iter() {
+        wire.push(WsEvent::Open);
+    }
+    f.host.settle();
+    let wire = f
+        .host
+        .sockets
+        .borrow()
+        .iter()
+        .find(|wire| {
+            wire.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text)
+                    .is_ok_and(|v| v["subscription"]["type"] == "allMids")
+            })
+        })
+        .expect("constructed public subscription")
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.exchange.base().store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("hyperliquidspot")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            wire.push(WsEvent::Message(SocketFrame::Text(
+                frame.as_str().unwrap().into(),
+            )));
+            f.host.settle();
+        }
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+    }
+    assert!(
+        f.host.reports.borrow().is_empty(),
+        "{:?}",
+        f.host.reports.borrow()
+    );
+    f.exchange.dispose().unwrap();
+}

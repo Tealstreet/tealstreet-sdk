@@ -5,9 +5,10 @@ import chalk from 'chalk';
 import { getConfigDir } from './config';
 import { swapInPlace, updatePaths } from './windows-update';
 import packageJson from '../package.json';
+import { BRAND, releaseAssetName } from './brand';
 
-const PACKAGE_NAME = '@tealstreet/cli';
-const PUBLIC_REPO = 'Tealstreet/cli';
+const PACKAGE_NAME = BRAND.npmPackage;
+const PUBLIC_REPO = BRAND.releaseRepo;
 const GITHUB_API_URL = `https://api.github.com/repos/${PUBLIC_REPO}/releases/latest`;
 const GITHUB_RELEASES_URL = `https://github.com/${PUBLIC_REPO}/releases/download`;
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -93,7 +94,7 @@ async function fetchLatestVersion(): Promise<ReleaseInfo | null> {
     const response = await fetch(GITHUB_API_URL, {
       headers: {
         Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'tealstreet-cli',
+        'User-Agent': `${BRAND.binName}-cli`,
       },
     });
 
@@ -189,7 +190,7 @@ function showUpdateNotification(latestVersion: string, releaseNotes: string | nu
   console.log(
     chalk.yellow('│') +
       chalk.gray('  Run: ') +
-      chalk.cyan('tealstreet update') +
+      chalk.cyan(`${BRAND.binName} update`) +
       chalk.gray(' to update') +
       chalk.yellow('              │'),
   );
@@ -267,7 +268,7 @@ export async function performUpdate(): Promise<boolean> {
 
       case 'homebrew':
         console.log(chalk.gray('Updating via Homebrew...'));
-        execSync('brew upgrade tealstreet', { stdio: 'inherit' });
+        execSync(`brew upgrade ${BRAND.brewFormula}`, { stdio: 'inherit' });
         break;
 
       case 'binary':
@@ -278,8 +279,9 @@ export async function performUpdate(): Promise<boolean> {
       default:
         console.log(chalk.yellow('Could not determine install method.'));
         console.log(chalk.gray('Try one of:'));
-        console.log(chalk.gray('  npm update -g @tealstreet/cli'));
-        console.log(chalk.gray('  brew upgrade tealstreet'));
+        if (PACKAGE_NAME) console.log(chalk.gray(`  npm update -g ${PACKAGE_NAME}`));
+        if (BRAND.brewFormula) console.log(chalk.gray(`  brew upgrade ${BRAND.brewFormula}`));
+        console.log(chalk.gray(`  https://github.com/${PUBLIC_REPO}/releases/latest`));
         return false;
     }
 
@@ -308,14 +310,16 @@ function detectInstallMethod(): 'npm' | 'homebrew' | 'binary' | 'unknown' {
   // there. `stdio: 'pipe'` suppresses the output cross-platform instead.
   try {
     // Check if installed via Homebrew
-    const brewList = execSync('brew list tealstreet', { encoding: 'utf-8', stdio: 'pipe' });
+    const brewList = BRAND.brewFormula
+      ? execSync(`brew list ${BRAND.brewFormula}`, { encoding: 'utf-8', stdio: 'pipe' })
+      : '';
     if (brewList) return 'homebrew';
   } catch {}
 
   try {
     // Check if installed via npm
-    const npmList = execSync(`npm list -g ${PACKAGE_NAME}`, { encoding: 'utf-8', stdio: 'pipe' });
-    if (npmList.includes(PACKAGE_NAME)) return 'npm';
+    const npmList = PACKAGE_NAME ? execSync(`npm list -g ${PACKAGE_NAME}`, { encoding: 'utf-8', stdio: 'pipe' }) : '';
+    if (PACKAGE_NAME && npmList.includes(PACKAGE_NAME)) return 'npm';
   } catch {}
 
   // Check if running as compiled binary
@@ -354,20 +358,20 @@ async function downloadAndSwapWindows(version: string, binaryName: string): Prom
     throw error;
   }
 
-  console.log(chalk.gray('Replaced the binary. Restart tealstreet to run the new version.'));
+  console.log(chalk.gray(`Replaced the binary. Restart ${BRAND.binName} to run the new version.`));
 }
 
 async function downloadLatestBinary(version: string): Promise<void> {
   const platform = process.platform;
   const arch = process.arch;
 
-  let binaryName = 'tealstreet';
+  let binaryName = BRAND.binName;
   if (platform === 'darwin') {
-    binaryName = arch === 'arm64' ? 'tealstreet-darwin-arm64' : 'tealstreet-darwin-x64';
+    binaryName = releaseAssetName(BRAND, arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64');
   } else if (platform === 'linux') {
-    binaryName = arch === 'arm64' ? 'tealstreet-linux-arm64' : 'tealstreet-linux-x64';
+    binaryName = releaseAssetName(BRAND, arch === 'arm64' ? 'linux-arm64' : 'linux-x64');
   } else if (platform === 'win32') {
-    binaryName = 'tealstreet-windows-x64.exe';
+    binaryName = releaseAssetName(BRAND, 'windows-x64');
   } else {
     throw new Error(`Unsupported platform: ${platform}`);
   }

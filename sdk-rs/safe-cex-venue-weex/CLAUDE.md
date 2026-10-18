@@ -52,6 +52,16 @@ binding use one normalization pipeline; standalone utility error names/messages
 remain unchanged. This intentionally differs from TS retaining malformed rows.
 Mixed-page and all-refused-page regressions use the constructed exchange.
 
+Market snapshots apply the same strict-field policy per row. Source coercions
+finish before required-string admission; a malformed symbol or base is reported
+with its field and received value, then only that row is omitted. An all-refused
+page returns an empty snapshot. Source coercion/capture failures still use the
+existing error/cached-market catch. The utility and binding share one normalizer;
+the utility's prior error messages stay unchanged. Constructed tests cover twelve
+mixed-page refusals, an all-refused page and source-error precedence. An actual
+maintained-method probe separately pins TS retaining all raw fields; this is an
+intentional typed-output difference, not arbitrary malformed-input parity.
+
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
 request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
@@ -547,3 +557,14 @@ WEEX members: close all venue positions, replace the refreshed snapshot, then
 `exchange_binding` proves endpoint reachability from an empty Store and close/refresh/
 cancel order; private order, position and account frames assert actual Store changes
 alongside the retained fill-event witness.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` adds
+96 field-independent cases through the constructed production socket/Store:
+consecutive ticker frames, object/array payloads and finite fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py weex` fault must fail that test and
+pass after exact source restoration.

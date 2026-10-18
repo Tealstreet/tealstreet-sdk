@@ -34,6 +34,7 @@ pub struct Runtime {
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub reported_errors: RefCell<Vec<ExchangeError>>,
+    pub console: RefCell<Vec<(String, String)>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -96,7 +97,11 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console(&self, level: &str, message: &str) {
+        self.console
+            .borrow_mut()
+            .push((level.into(), message.into()));
+    }
     fn unique_id(&self) -> String {
         "00000000-0000-4000-8000-000000000000".into()
     }

@@ -1160,3 +1160,112 @@ fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers()
         private_account_frame_for_deployment(name);
     }
 }
+
+#[test]
+fn attributed_placement_preserves_nonfinite_tier_alias_precedence() {
+    use std::process::Command;
+    let source = Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args(["-e", r#"
+const fs=require('node:fs'),vm=require('node:vm');
+const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
+const exports={};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('packages/safe-cex/src/exchanges/lighter/lighter.account-tier.ts','utf8'),
+ {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports});
+process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
+ const wire=`{"code":200,"user_tier_name":${raw},"user_tier":"standard"}`;
+ const tier=exports.extractLighterAccountTierFromPayload(JSON.parse(wire));
+ return {wire,allowed:!tier||exports.isLighterAccountTierEligibleForPartnerAttribution(tier)};
+})));
+"#]).output().expect("maintained account-tier module");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 3);
+    for case in cases {
+        let h = harness(ExchangeName::Lighter, options(), lighter);
+        loaded(&h);
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != LIMITS);
+        h.http.ok(
+            "GET",
+            LIMITS,
+            serde_json::from_str(case["wire"].as_str().unwrap()).unwrap(),
+        );
+        let result = h.drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
+        ));
+        assert_eq!(
+            result.is_ok(),
+            case["allowed"].as_bool().unwrap(),
+            "real placement: {case}; {result:?}"
+        );
+        assert_eq!(h.http.calls(LIMITS).len(), 1, "actual tier lookup");
+        if case["allowed"] == true {
+            let ids = result.unwrap();
+            assert_eq!(ids.len(), 1);
+            let txs = sent_txs(&h, 0);
+            assert_eq!(txs.len(), 1, "one real signed placement");
+            assert_signed_by_account(&txs[0].1);
+        } else {
+            assert_eq!(result.unwrap_err().message,
+                safe_cex_venue_lighter::account_tier::LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+            assert!(
+                h.http.calls(SEND_TX).is_empty(),
+                "known Standard tier blocks transaction send"
+            );
+        }
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("lighter");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 1240);
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    let reports = h.runtime.reports.borrow().len();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("lighter")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert_eq!(
+        h.runtime.reports.borrow().len(),
+        reports,
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
