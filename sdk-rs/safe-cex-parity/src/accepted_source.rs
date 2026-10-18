@@ -101,7 +101,7 @@ pub fn nominal_names(source: &str) -> Result<Vec<String>, syn::Error> {
 }
 
 /// Check source modules independently of rustdoc's `doc` configuration.
-pub fn doc_guards(root: &Path) -> Result<(), String> {
+pub fn doc_guards(root: &Path) -> Result<Vec<std::path::PathBuf>, String> {
     fn file(
         path: &Path,
         root: bool,
@@ -186,7 +186,9 @@ pub fn doc_guards(root: &Path) -> Result<(), String> {
         }
         Ok(())
     }
-    file(root, true, &mut std::collections::BTreeSet::new())
+    let mut seen = std::collections::BTreeSet::new();
+    file(root, true, &mut seen)?;
+    Ok(seen.into_iter().collect())
 }
 
 struct DocGuards(bool);
@@ -545,6 +547,7 @@ pub fn module_recipes(paths: &[&Path]) -> super::Result<ModuleRecipes> {
 struct LocalTypes {
     depth: usize,
     verified_macro_origins: HashSet<String>,
+    dependency_glob_exports: HashMap<String, Vec<String>>,
     // A conditional nearest binding is present but unsupported (None). It must
     // never fall through to an outer recipe or a builtin of the same name.
     local_macro_scopes: Vec<HashMap<String, Option<proc_macro2::TokenStream>>>,
@@ -1065,6 +1068,60 @@ impl<'ast> Visit<'ast> for LocalTypes {
         visit::visit_item_extern_crate(self, item);
     }
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        // Expand only authenticated direct dependency-root globs. Every actual
+        // exported name goes through the same binding/shadow guards as an
+        // explicit import; missing evidence leaves the original glob opaque.
+        fn resolve(
+            tree: &syn::UseTree,
+            prefix: &str,
+            exports: &HashMap<String, Vec<String>>,
+        ) -> Option<syn::UseTree> {
+            Some(match tree {
+                syn::UseTree::Path(path) => {
+                    let mut path = path.clone();
+                    let prefix = if prefix.is_empty() {
+                        path.ident.to_string().trim_start_matches("r#").to_owned()
+                    } else {
+                        format!(
+                            "{prefix}::{}",
+                            path.ident.to_string().trim_start_matches("r#")
+                        )
+                    };
+                    path.tree = Box::new(resolve(&path.tree, &prefix, exports)?);
+                    syn::UseTree::Path(path)
+                }
+                syn::UseTree::Group(group) => {
+                    let mut group = group.clone();
+                    group.items = group
+                        .items
+                        .iter()
+                        .map(|tree| resolve(tree, prefix, exports))
+                        .collect::<Option<_>>()?;
+                    syn::UseTree::Group(group)
+                }
+                syn::UseTree::Glob(glob) => {
+                    let names = exports.get(prefix)?;
+                    let mut items = syn::punctuated::Punctuated::new();
+                    for name in names {
+                        let ident = syn::parse_str::<syn::Ident>(name)
+                            .or_else(|_| syn::parse_str::<syn::Ident>(&format!("r#{name}")))
+                            .ok()?;
+                        items.push(syn::UseTree::Name(syn::UseName { ident }));
+                    }
+                    syn::UseTree::Group(syn::UseGroup {
+                        brace_token: syn::token::Brace(glob.star_token.span),
+                        items,
+                    })
+                }
+                tree => tree.clone(),
+            })
+        }
+        let resolved = resolve(&item.tree, "", &self.dependency_glob_exports).map(|tree| {
+            let mut item = item.clone();
+            item.tree = tree;
+            item
+        });
+        let item = resolved.as_ref().unwrap_or(item);
         fn glob(tree: &syn::UseTree) -> bool {
             match tree {
                 syn::UseTree::Glob(_) => true,
@@ -1715,19 +1772,21 @@ pub fn local_types(
     path: &Path,
     macro_origins: &HashSet<String>,
 ) -> super::Result<Vec<(String, usize, usize)>> {
-    local_types_with_recipes(path, macro_origins, &ModuleRecipes::new())
+    local_types_with_recipes(path, macro_origins, &ModuleRecipes::new(), &HashMap::new())
 }
 
 pub fn local_types_with_recipes(
     path: &Path,
     macro_origins: &HashSet<String>,
     module_recipes: &ModuleRecipes,
+    dependency_glob_exports: &HashMap<String, Vec<String>>,
 ) -> super::Result<Vec<(String, usize, usize)>> {
     let source = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let syntax = syn::parse_file(&source).map_err(|error| error.to_string())?;
     let mut visitor = LocalTypes {
         verified_macro_origins: macro_origins.clone(),
         module_recipes: module_recipes.clone(),
+        dependency_glob_exports: dependency_glob_exports.clone(),
         generated_provider_file: path
             .ends_with(Path::new("safe-cex-num/src/collation_data/provider.rs"))
             && source.starts_with(
@@ -2491,6 +2550,47 @@ mod tests {
     }
 
     #[test]
+    fn dependency_globs_preserve_every_exported_binding_guard() {
+        let source = "use domain::*; fn owner() { let _ = vec![1]; }";
+        for names in [None, Some(vec!["vec".into()]), Some(vec!["std".into()])] {
+            let mut visitor = verified_test_visitor();
+            visitor.dependency_glob_exports = names
+                .map(|names| HashMap::from([("domain".into(), names)]))
+                .unwrap_or_default();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor.untrusted_macro_import
+                    || visitor
+                        .names
+                        .iter()
+                        .any(|row| row.0.starts_with("UNSUPPORTED_")),
+                "missing or shadowing exports must be refused"
+            );
+        }
+        let source = "use domain::*; #[derive(Deserialize)] struct Record { value: bool }";
+        let mut visitor = verified_test_visitor();
+        visitor
+            .dependency_glob_exports
+            .insert("domain".into(), vec!["Deserialize".into()]);
+        visitor.visit_file(&syn::parse_file(source).unwrap());
+        assert!(
+            visitor
+                .names
+                .iter()
+                .any(|row| row.0 == "UNSUPPORTED_ATTRIBUTE_IMPORT_SCOPE")
+        );
+        let mut visitor = verified_test_visitor();
+        visitor
+            .dependency_glob_exports
+            .insert("domain".into(), vec!["Order".into(), "ModelField".into()]);
+        visitor.visit_file(
+            &syn::parse_file("use domain::*; fn owner() { let _ = vec![1]; }").unwrap(),
+        );
+        assert!(!visitor.untrusted_macro_import && !visitor.glob_import);
+        assert!(visitor.names.is_empty(), "{:?}", visitor.names);
+    }
+
+    #[test]
     fn verified_import_roots_cannot_rename_opaque_macros_as_expressions() {
         for source in [
             "use std::include as vec; fn owner() { let _ = vec!(\"hidden.rs\"); }",
@@ -2612,7 +2712,7 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect();
-        let names = local_types_with_recipes(&path, &origins, &recipes).unwrap();
+        let names = local_types_with_recipes(&path, &origins, &recipes, &HashMap::new()).unwrap();
         fs::remove_dir_all(&directory).unwrap();
         names
     }
