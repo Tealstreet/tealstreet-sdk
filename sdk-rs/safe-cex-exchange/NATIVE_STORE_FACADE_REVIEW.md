@@ -46,3 +46,20 @@ measured 259.10/262.25 seconds versus TS 7.54/9.82 seconds. Both native runs
 consumed and processed all frames and emitted identical 237 books, 149 candles
 and 238 ticker Store deliveries. That preliminary run overlapped local build
 work and is not the final paired timing control.
+
+## Release measurement qualification
+
+The earlier development-profile timing is not a production throughput claim.
+The addon build script currently invokes Cargo without a profile flag, while the
+workspace customizes only dev debuginfo. The release target is being measured
+with explicit `cargo build --release --locked -p safe-cex-ffi --features node
+--jobs 1`, `CARGO_INCREMENTAL=0`, and Cargo's unchanged release defaults on both
+sides. No build/profile configuration is changed by this PR.
+
+The no-local-build development pair measured 183.83/180.02 seconds before the
+cache and 89.51/91.33 seconds after it. Both candidates byte-match one baseline
+variant. The other baseline repeats a two-entry combined Store/book ordering
+swap. The independent #1127 repair traced that to a raw Binance task before
+enqueue, not the FFI callback queues; release controls inherit its checked
+`start_eager` production change unchanged. Release timing and an unqualified
+full-output comparison remain pending.
