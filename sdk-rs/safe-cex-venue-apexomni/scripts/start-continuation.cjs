@@ -40,7 +40,11 @@ const drain=()=>new Promise(resolve=>setImmediate(resolve));
     try {
       await venue.start();
       // Start's catch has finished; its separate tick must really start too.
-      for(let i=0;i<20 && calls.filter(p=>p==='/v3/account').length<2;i++) await drain();
+      const deadline=Date.now()+5000;
+      while(calls.filter(p=>p==='/v3/account').length<2 || !calls.includes('/v3/open-orders')) {
+        assert.ok(Date.now()<deadline,'real tick terminal requests did not start');
+        await new Promise(resolve=>setTimeout(resolve,5));
+      }
       assert.equal(calls.filter(p=>p==='/v3/account').length,2);
       assert.equal(calls.filter(p=>p==='/v3/open-orders').length,1);
       assert.equal(store.positions.length,0);

@@ -2,6 +2,14 @@
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/apexomni/CLAUDE.md).
 
+Startup's complete `fetchPositions().then(...)` Store continuation belongs to the
+shared eager native Promise runtime. A balance rejection releases its join waiter
+while the positions continuation still finishes; disposal suppresses its Store
+write. The binding regression holds the original account response until startup
+settles and leaves the separate tick requests pending. The maintained full class,
+Store and API run the same live/disposed cases with terminal HTTP/socket gates.
+Prepared lifecycle fixtures must pump runtime jobs while awaiting startup.
+
 The production binding host names its shared type imports explicitly. A wildcard
 can import macros and make its unqualified expression macros ambiguous to the
 accepted-set scanner; keep that scope check enforced without a policy waiver.

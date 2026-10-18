@@ -59,8 +59,7 @@ impl safe_cex_exchange::js_runtime::client::JsHttpHost for StartContinuationHttp
     }
 }
 
-#[test]
-fn startup_positions_continuation_survives_balance_rejection() {
+fn startup_continuation_case(disposed: bool) {
     let runtime = std::rc::Rc::new(support::Runtime::default());
     runtime.now.set(1_700_000_000_000.0);
     // Neither socket opens. This prevents private onOpen resync from replacing
@@ -124,6 +123,9 @@ fn startup_positions_continuation_survives_balance_rejection() {
     assert_eq!(h.http.calls("/v3/account-balance").len(), 1);
     assert!(h.store.positions().is_empty());
     assert!(!h.store.loaded().positions && !h.store.loaded().orders && !h.store.loaded().balance);
+    if disposed {
+        h.venue().dispose().unwrap();
+    }
     gate.release();
     h.runtime.pump();
     assert_eq!(
@@ -132,10 +134,11 @@ fn startup_positions_continuation_survives_balance_rejection() {
             .iter()
             .find(|p| p.side == safe_cex_types::PositionSide::Long)
             .map(|p| p.contracts),
-        Some(4.0),
+        if disposed { None } else { Some(4.0) },
         "already-started positions.then must update Store after startup balance rejects"
     );
-    assert!(h.store.loaded().positions && h.store.loaded().orders);
+    assert_eq!(h.store.loaded().positions, !disposed);
+    assert_eq!(h.store.loaded().orders, !disposed);
     assert!(
         !h.store.loaded().balance,
         "failed balance branch must stay unloaded"
@@ -146,4 +149,41 @@ fn startup_positions_continuation_survives_balance_rejection() {
         "late update must come from initial request, not a new poll"
     );
     done(&h);
+}
+
+#[test]
+fn startup_positions_continuation_survives_balance_rejection() {
+    startup_continuation_case(false);
+}
+#[test]
+fn disposed_startup_continuation_does_not_write_positions() {
+    startup_continuation_case(true);
+}
+#[test]
+fn maintained_startup_continuation_capture() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/start-continuation.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows,
+        json!([
+            {"disposed":false,"contracts":4,"positions":true,"orders":true,"balance":false,"accounts":2},
+            {"disposed":true,"contracts":null,"positions":false,"orders":false,"balance":false,"accounts":2}
+        ])
+    );
 }
