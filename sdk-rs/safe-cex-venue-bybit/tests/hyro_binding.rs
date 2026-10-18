@@ -219,9 +219,9 @@ fn hyro_private_reads_are_validated_usdt_only_and_pure() {
         assert_eq!(requests[0].params["settleCoin"], "USDT");
         assert_eq!(requests[0].params["limit"], "50");
     }
-    assert!(h.store.orders().is_empty());
-    assert!(h.store.positions().is_empty());
-    assert_eq!(h.store.balance().total, 0.);
+    assert!(h.store.orders().unwrap().is_empty());
+    assert!(h.store.positions().unwrap().is_empty());
+    assert_eq!(h.store.balance().unwrap().total, 0.);
     h.venue().dispose().unwrap();
 }
 
@@ -262,7 +262,7 @@ fn hyro_malformed_private_rows_and_cursor_fail_without_publication() {
             expected
         );
         assert_eq!(h.wire.calls("/v5/position/list").len(), 1);
-        assert!(h.store.positions().is_empty());
+        assert!(h.store.positions().unwrap().is_empty());
         h.venue().dispose().unwrap();
     }
     let h = support::harness_as(ExchangeName::Hyrotrader, support::options(), |w| {
@@ -280,7 +280,7 @@ fn hyro_malformed_private_rows_and_cursor_fail_without_publication() {
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].params["cursor"], "");
     assert_eq!(calls[1].params["cursor"], "stuck");
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     h.venue().dispose().unwrap();
     for (account, expected) in [
         (
@@ -306,7 +306,7 @@ fn hyro_malformed_private_rows_and_cursor_fail_without_publication() {
         );
         assert!(result.balance.is_none());
         assert_eq!(h.wire.requests.borrow().len(), 1);
-        assert_eq!(h.store.balance().total, 0.);
+        assert_eq!(h.store.balance().unwrap().total, 0.);
         h.venue().dispose().unwrap();
     }
 }
@@ -366,7 +366,7 @@ fn hyro_public_start_uses_simulator_usdt_markets_and_ignores_optional_categories
     h.drive(h.venue().start())
         .expect("source public-only HyroTrader startup");
     h.runtime.pump();
-    let markets = h.store.markets();
+    let markets = h.store.markets().unwrap();
     assert_eq!(
         markets
             .iter()
@@ -378,7 +378,7 @@ fn hyro_public_start_uses_simulator_usdt_markets_and_ignores_optional_categories
         markets[0].precision.price, 0.5,
         "source Map keeps the last duplicate value"
     );
-    assert_eq!(h.store.tickers().len(), 2);
+    assert_eq!(h.store.tickers().unwrap().len(), 2);
     let sockets = h.runtime.sockets.borrow();
     assert_eq!(sockets.len(), 1);
     assert!(
@@ -509,7 +509,7 @@ fn hyro_private_session_awaits_both_acks_and_gates_position_delivery() {
     ));
     h.runtime.pump();
     assert_eq!(
-        h.store.positions()[0].leverage,
+        h.store.positions().unwrap()[0].leverage,
         10.,
         "pre-ready frames do not publish"
     );
@@ -542,13 +542,13 @@ fn hyro_private_session_awaits_both_acks_and_gates_position_delivery() {
         core.is_recovery_complete(),
         "acknowledged subscription and stable REST reconciliation complete the session"
     );
-    assert_eq!(h.store.balance().total, 95.);
-    assert_eq!(h.store.balance().upnl, 5.);
+    assert_eq!(h.store.balance().unwrap().total, 95.);
+    assert_eq!(h.store.balance().unwrap().upnl, 5.);
     private.events.borrow_mut().push_back(message(
         json!({"topic":"position","data":[private_position("12")]}).to_string(),
     ));
     h.runtime.pump();
-    assert_eq!(h.store.positions()[0].leverage, 12.);
+    assert_eq!(h.store.positions().unwrap()[0].leverage, 12.);
     h.venue().dispose().unwrap();
     assert!(private.closed.get());
 }
@@ -644,7 +644,7 @@ fn hyro_rejected_and_timed_out_auth_close_the_session_without_subscription() {
             "{:?}",
             errors.borrow()
         );
-        assert_eq!(h.store.positions()[0].leverage, 10.0);
+        assert_eq!(h.store.positions().unwrap()[0].leverage, 10.0);
         h.venue().dispose().unwrap();
         h.advance(20_000.0);
         assert!(frames(&private, "subscribe").is_empty());
@@ -694,7 +694,7 @@ fn hyro_reconnect_ignores_old_acks_and_retired_socket_frames() {
         &old,
         json!({"topic":"position","data":[private_position("99")]}),
     );
-    assert_eq!(h.store.positions()[0].leverage, 10.0);
+    assert_eq!(h.store.positions().unwrap()[0].leverage, 10.0);
     ack_private(&h, &private, "subscribe");
     assert!(core.is_recovery_complete());
     h.venue().dispose().unwrap();
@@ -756,13 +756,13 @@ fn hyro_private_reconciliation_retries_changed_revision_and_publishes_atomically
         &private,
         json!({"topic":"position","data":[private_position("13")]}),
     );
-    assert_eq!(h.store.positions()[0].leverage, 10.0);
+    assert_eq!(h.store.positions().unwrap()[0].leverage, 10.0);
     gate.set(true);
     h.runtime.pump();
     assert!(core.is_recovery_complete());
     assert_eq!(h.wire.calls("/v5/position/list").len(), before + 2);
-    assert_eq!(h.store.positions()[0].leverage, 30.0);
-    assert_eq!(h.store.balance().total, 195.0);
+    assert_eq!(h.store.positions().unwrap()[0].leverage, 30.0);
+    assert_eq!(h.store.balance().unwrap().total, 195.0);
     let snapshots = snapshots.lock().unwrap();
     assert!(snapshots.contains(&(Some(30.0), 195.0, 5.0)));
     assert!(
@@ -857,7 +857,7 @@ fn hyro_order_submission_mints_source_identity_and_records_acknowledgement() {
         .expect("source requiresOrderLinkId uses canonical nanoid");
     assert_eq!(link.len(), 21);
     assert_eq!(posts[0].body["positionIdx"], 0);
-    assert_eq!(h.store.orders()[0].id, "hyro-new-1");
+    assert_eq!(h.store.orders().unwrap()[0].id, "hyro-new-1");
     h.venue().dispose().unwrap();
 }
 
@@ -885,7 +885,7 @@ fn hyro_submission_disables_rejected_signature_replay() {
         .expect_err("explicit axios-retry retries:0 keeps a definitive rejection");
     assert_eq!(error.message, "Request failed with status code 400");
     assert_eq!(h.wire.calls("/v5/order/create").len(), 1);
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     h.venue().dispose().unwrap();
 }
 
@@ -947,6 +947,7 @@ fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() 
     assert!(
         h.store
             .orders()
+            .unwrap()
             .iter()
             .all(|order| order.id != "recovered-filled")
     );
@@ -1159,7 +1160,7 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
     assert_eq!(ids, ["hyro-batch-first", "hyro-batch-second"]);
     assert_eq!(h.drive(duplicate).unwrap(), ids);
     assert_eq!(h.wire.calls("/v5/order/create").len(), 2);
-    assert_eq!(h.store.orders().len(), 2);
+    assert_eq!(h.store.orders().unwrap().len(), 2);
     h.venue().dispose().unwrap();
 }
 
@@ -1372,8 +1373,8 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
         "stopOrderType":"","triggerPrice":"","stopLoss":"","takeProfit":"","tpslMode":"",
         "createType":"CreateByUser","positionIdx":0,"triggerBy":"","slTriggerBy":"MarkPrice","rejectReason":"EC_NoError"});
     feed(json!({"topic":"order","data":[order.clone()]}));
-    assert_eq!(h.store.orders().len(), 1);
-    assert_eq!(h.store.orders()[0].id, "hyro-frame");
+    assert_eq!(h.store.orders().unwrap().len(), 1);
+    assert_eq!(h.store.orders().unwrap()[0].id, "hyro-frame");
     order["orderStatus"] = json!("PartiallyFilled");
     order["cumExecQty"] = json!("0.004");
     order["cumExecValue"] = json!("100");
@@ -1397,18 +1398,21 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     feed(json!({"topic":"order","data":[order]}));
     assert_eq!(fills.borrow().len(), 2);
     assert_eq!(
-        h.store.orders()[0].status,
+        h.store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Closed
     );
     feed(json!({"topic":"position","data":[private_position("12")]}));
-    assert_eq!(h.store.positions()[0].leverage, 12.);
-    let balance = serde_json::to_value(&*h.store.balance()).unwrap();
+    assert_eq!(h.store.positions().unwrap()[0].leverage, 12.);
+    let balance = serde_json::to_value(&h.store.balance().unwrap()).unwrap();
     let requests = h.wire.requests.borrow().len();
     feed(json!({"topic":"wallet","data":[{"totalEquity":"999999"}]}));
     feed(
         json!({"topic":"execution","data":[{"orderId":"hyro-frame","execQty":"999","execPrice":"1"}]}),
     );
-    assert_eq!(serde_json::to_value(&*h.store.balance()).unwrap(), balance);
+    assert_eq!(
+        serde_json::to_value(&h.store.balance().unwrap()).unwrap(),
+        balance
+    );
     assert_eq!(fills.borrow().len(), 2);
     assert_eq!(h.wire.requests.borrow().len(), requests);
     h.venue().dispose().unwrap();
@@ -1499,7 +1503,7 @@ fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
     let (h, private, _) = start_private();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
-    let before = h.store.balance().clone();
+    let before = h.store.balance().unwrap().clone();
     assert_eq!(before.upnl, 5.0);
     let fills = Rc::new(Cell::new(0));
     let observed = fills.clone();
@@ -1515,13 +1519,13 @@ fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
     row["size"] = json!("0.75");
     let requests = h.wire.requests.borrow().len();
     feed_private(&h, &private, json!({"topic":"position","data":[row]}));
-    assert_eq!(h.store.positions()[0].contracts, 0.75);
-    assert_eq!(h.store.positions()[0].leverage, 12.0);
-    assert_eq!(h.store.positions()[0].unrealized_pnl, 17.25);
+    assert_eq!(h.store.positions().unwrap()[0].contracts, 0.75);
+    assert_eq!(h.store.positions().unwrap()[0].leverage, 12.0);
+    assert_eq!(h.store.positions().unwrap()[0].unrealized_pnl, 17.25);
     let mut expected = before;
     expected.upnl = 17.25;
     assert_eq!(
-        *h.store.balance(),
+        h.store.balance().unwrap(),
         expected,
         "acknowledged Hyro position frame updates only the unified balance PnL"
     );
@@ -1532,7 +1536,7 @@ fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
         "accountType":"UNIFIED","totalEquity":"999999","totalPerpUPL":"999"}]}),
     );
     assert_eq!(
-        *h.store.balance(),
+        h.store.balance().unwrap(),
         expected,
         "source does not subscribe to wallet updates"
     );

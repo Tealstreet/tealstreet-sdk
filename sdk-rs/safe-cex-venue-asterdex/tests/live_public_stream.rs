@@ -510,9 +510,12 @@ fn compare(family: &str) {
             let expected = &c["snapshots"][i];
             state(&s.subscriptions.state(), expected, name);
             if expected.get("ticker").is_none() {
-                assert!(store.tickers().is_empty(), "{name} native removed ticker");
+                assert!(
+                    store.tickers().unwrap().is_empty(),
+                    "{name} native removed ticker"
+                );
             } else {
-                ticker(&store.tickers()[0], &expected["ticker"], name);
+                ticker(&store.tickers().unwrap()[0], &expected["ticker"], name);
             }
             assert_eq!(
                 parent.events.borrow().len(),

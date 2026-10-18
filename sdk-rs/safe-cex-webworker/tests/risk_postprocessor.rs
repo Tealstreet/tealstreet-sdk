@@ -128,7 +128,7 @@ fn actual_processor_reports_and_explicitly_clears_prior_risk() {
         let real = DefaultStore::new();
         let store: &dyn Store = &real;
         install(store, &source["seed"]);
-        let mut data = store.serialize();
+        let mut data = store.serialize().unwrap();
         processor
             .process(&mut data, |e| {
                 Err(format!("unexpected seed failure: {}", e.message()))
@@ -167,7 +167,7 @@ fn actual_processor_reports_and_explicitly_clears_prior_risk() {
             )
             .unwrap();
         install(store, &row["input"]);
-        let mut data = store.serialize();
+        let mut data = store.serialize().unwrap();
         let prior_keys: Vec<_> = data.orders_risk.keys().cloned().collect();
         let observed = Rc::new(RefCell::new(Vec::new()));
         let captured = observed.clone();
@@ -237,14 +237,19 @@ fn actual_processor_reports_and_explicitly_clears_prior_risk() {
             );
             if !events.is_empty() {
                 assert!(
-                    store.orders_risk().is_empty(),
+                    store.orders_risk().unwrap().is_empty(),
                     "RISK-PROCESSOR no fabricated zero rows"
                 );
             }
         } else {
             assert!(observed.borrow().is_empty());
             assert_eq!(
-                store.orders_risk().keys().cloned().collect::<Vec<_>>(),
+                store
+                    .orders_risk()
+                    .unwrap()
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>(),
                 prior_keys,
                 "report failure precedes source clear"
             );
@@ -256,7 +261,7 @@ fn actual_processor_reports_and_explicitly_clears_prior_risk() {
     assert!(cache["fresh"].get("later").is_some());
     let real = DefaultStore::new();
     install(&real, &cache["input"]);
-    let mut data = Store::serialize(&real);
+    let mut data = Store::serialize(&real).unwrap();
     processor.process(&mut data, |e| Err(e.message())).unwrap();
     assert_native_risk(&data, &cache["fresh"]);
 }

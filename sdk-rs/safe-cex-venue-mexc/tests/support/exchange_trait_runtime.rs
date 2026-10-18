@@ -322,5 +322,5 @@ pub fn fixture_with_settings_and_local_time(
         },
         external,
     );
-    (venue, runtime, store, wire)
+    (venue.unwrap(), runtime, store, wire)
 }

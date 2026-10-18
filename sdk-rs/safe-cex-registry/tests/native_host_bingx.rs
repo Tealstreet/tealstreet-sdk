@@ -322,7 +322,7 @@ fn bingx_native_registry_bootstraps_signs_places_and_cancels() {
         )
         .await;
         h.exchange.start().await.expect("BingX native start");
-        let loaded = h.store.loaded().clone();
+        let loaded = h.store.loaded().unwrap().clone();
         assert!(
             loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions
         );
@@ -345,7 +345,7 @@ fn bingx_native_registry_bootstraps_signs_places_and_cancels() {
             .await
             .unwrap();
         assert_eq!(ids, ["9007199254740993"]);
-        let orders = h.store.orders().to_vec();
+        let orders = h.store.orders().unwrap().to_vec();
         assert_eq!(orders.len(), 1);
         h.exchange.cancel_orders(orders).await.unwrap();
         let seen = h.seen.borrow();
@@ -563,7 +563,7 @@ fn bingx_native_hosted_signer_keeps_secret_remote() {
                 .start()
                 .await
                 .expect("BingX starts with hosted signing");
-            assert!(h.store.loaded().orders && h.store.loaded().positions);
+            assert!(h.store.loaded().unwrap().orders && h.store.loaded().unwrap().positions);
             eventually("hosted BingX listen-key socket", || {
                 h.peers
                     .borrow()
@@ -580,7 +580,7 @@ fn bingx_native_hosted_signer_keeps_secret_remote() {
                     .unwrap(),
                 ["9007199254740993"]
             );
-            let orders = h.store.orders().to_vec();
+            let orders = h.store.orders().unwrap().to_vec();
             h.exchange.cancel_orders(orders).await.unwrap();
             {
                 let seen = h.seen.borrow();

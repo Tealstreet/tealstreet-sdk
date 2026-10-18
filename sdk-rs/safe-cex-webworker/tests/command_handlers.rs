@@ -349,9 +349,18 @@ fn class_context_and_base_telemetry_are_real() {
     assert!(Rc::ptr_eq(&ch.context.ctx, &h));
     assert_eq!(tw.context.exchange_name, ExchangeName::Bybit);
     assert!(Rc::ptr_eq(&ui.context.exchange(), &h.exchange));
-    assert!(ch.buffer_until_markets_loaded(payload(StoreWorkerOp::ChaserTerminate, json!("x"))));
-    assert!(tw.buffer_until_markets_loaded(payload(StoreWorkerOp::TwapPause, json!("x"))));
-    assert!(ui.buffer_until_markets_loaded(payload(StoreWorkerOp::UiState, json!({}))));
+    assert!(
+        ch.buffer_until_markets_loaded(payload(StoreWorkerOp::ChaserTerminate, json!("x")))
+            .unwrap()
+    );
+    assert!(
+        tw.buffer_until_markets_loaded(payload(StoreWorkerOp::TwapPause, json!("x")))
+            .unwrap()
+    );
+    assert!(
+        ui.buffer_until_markets_loaded(payload(StoreWorkerOp::UiState, json!({})))
+            .unwrap()
+    );
     h.clock.inner.advance(31000);
     assert_eq!(
         h.posts.borrow().len(),
@@ -381,15 +390,22 @@ fn class_context_and_base_telemetry_are_real() {
     let rui = UiStateHandler::new(rc);
     assert!(
         rch.buffer_until_markets_loaded(payload(StoreWorkerOp::ChaserTerminate, json!("buffered")))
+            .unwrap()
     );
-    assert!(rtw.buffer_until_markets_loaded(payload(
-        StoreWorkerOp::TwapState,
-        json!([restored("replay", "idle")])
-    )));
-    assert!(rui.buffer_until_markets_loaded(payload(
-        StoreWorkerOp::UiState,
-        json!({"activeSymbols":["BTC"]})
-    )));
+    assert!(
+        rtw.buffer_until_markets_loaded(payload(
+            StoreWorkerOp::TwapState,
+            json!([restored("replay", "idle")])
+        ))
+        .unwrap()
+    );
+    assert!(
+        rui.buffer_until_markets_loaded(payload(
+            StoreWorkerOp::UiState,
+            json!({"activeSymbols":["BTC"]})
+        ))
+        .unwrap()
+    );
     replay
         .exchange
         .base()
@@ -699,19 +715,22 @@ fn ui_symbol_error_prevents_margin_and_live_metadata_is_read_after_symbols() {
         &["symbols", "fetch:BTC"],
         "UI native symbols precede margin"
     );
-    let fetching = h.exchange.base().store.fetched_leverage()["BTC"].clone();
+    let fetching = h.exchange.base().store.fetched_leverage().unwrap()["BTC"].clone();
     assert_eq!(
         fetching.is_fetching,
         Some(true),
         "UI native placeholder before return"
     );
     assert_eq!(fetching.buy_leverage, 0.0);
-    assert_eq!(h.exchange.base().store.positions()[0].leverage, 5.0);
+    assert_eq!(
+        h.exchange.base().store.positions().unwrap()[0].leverage,
+        5.0
+    );
     assert_eq!(h.spawned.borrow().len(), 1);
     h.released.set(true);
     h.drain();
     assert_eq!(
-        h.exchange.base().store.positions()[0].leverage,
+        h.exchange.base().store.positions().unwrap()[0].leverage,
         11.0,
         "UI native fulfilled leverage"
     );
@@ -739,7 +758,12 @@ fn ui_symbol_error_prevents_margin_and_live_metadata_is_read_after_symbols() {
         "symbols failed"
     );
     assert!(
-        fail.exchange.base().store.fetched_leverage().is_empty(),
+        fail.exchange
+            .base()
+            .store
+            .fetched_leverage()
+            .unwrap()
+            .is_empty(),
         "UI native symbol throw prevents margin"
     );
     assert!(fail.events.borrow().is_empty());
@@ -753,7 +777,7 @@ fn ui_symbol_error_prevents_margin_and_live_metadata_is_read_after_symbols() {
         ))
         .unwrap();
     assert_eq!(
-        fast.exchange.base().store.positions()[0].leverage,
+        fast.exchange.base().store.positions().unwrap()[0].leverage,
         11.0,
         "UI native ready settlement before return chosen boundary"
     );

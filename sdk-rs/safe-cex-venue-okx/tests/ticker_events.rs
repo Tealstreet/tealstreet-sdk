@@ -197,7 +197,7 @@ fn maintained_typescript_first_ticker_update_numeric_bits() {
         );
         if case["error"].is_null() {
             result.unwrap();
-            let tickers = store.tickers();
+            let tickers = store.tickers().unwrap();
             assert_eq!(tickers.len(), 2, "TICKER-CARDINALITY native stored records");
             let fields: &[&str] = match case["method"].as_str().unwrap() {
                 "handleTickerEvents" => {
@@ -371,6 +371,7 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
             "notification later subscriber stop {method}"
         );
         let ticker = Store::tickers(&store)
+            .unwrap()
             .iter()
             .find(|ticker| ticker.id == "BTC")
             .unwrap()

@@ -1063,13 +1063,14 @@ fn class_snapshot_retains_native_notification_origin_after_commit_and_stops_disp
     assert_eq!(
         store
             .orders()
+            .unwrap()
             .iter()
             .map(|order| order.id.clone())
             .collect::<Vec<_>>(),
         ["pending", "one"],
         "class snapshot committed Store state survives failure"
     );
-    assert!(store.loaded().orders);
+    assert!(store.loaded().unwrap().orders);
     assert_eq!(
         host.snapshots.borrow().len(),
         1,
@@ -1100,7 +1101,7 @@ fn class_snapshot_retains_native_notification_origin_after_commit_and_stops_disp
     unsubscribe();
     send(&class, "snapshot", vec![]);
     assert!(
-        store.orders().is_empty(),
+        store.orders().unwrap().is_empty(),
         "class snapshot can publish after failing subscriber removed"
     );
     assert_eq!(

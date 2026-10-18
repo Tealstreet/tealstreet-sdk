@@ -419,7 +419,7 @@ fn mexc_rejected_order_state_matches_live_source() {
             )
             .unwrap();
         let actual = json!({
-            "orders":store.orders().iter().map(|order|json!({"id":order.id,"status":order.status})).collect::<Vec<_>>(),
+            "orders":store.orders().unwrap().iter().map(|order|json!({"id":order.id,"status":order.status})).collect::<Vec<_>>(),
             "shield":exchange.rejected.borrow().iter().map(|(id,time)|json!([id,time])).collect::<Vec<_>>(),
             "logs":runtime.1.borrow().clone()
         });
@@ -503,7 +503,7 @@ fn mexc_rejected_order_propagates_notification_after_commit() {
     assert_eq!(error.message, expected["message"]);
     assert_eq!(error.store_subscriber_ids, [0]);
     assert_eq!(
-        store.orders()[0].status,
+        store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Canceled,
         "Store status commits before notification failure"
     );
@@ -660,7 +660,7 @@ fn mexc_cancel_orders_matches_live_source() {
                 "cancelOrders payload identity: {name}/{request_index}"
             );
         }
-        let native_orders = store.orders();
+        let native_orders = store.orders().unwrap();
         assert_eq!(
             native_orders.len(),
             expected_source_counts[index],
@@ -2430,12 +2430,12 @@ fn mexc_reconciliation_live_store_transitions() {
             .map(order)
             .collect();
         assert_eq!(
-            view(&store.orders()),
+            view(&store.orders().unwrap()),
             view(&expected),
             "orders {index}: {case}"
         );
         assert_eq!(
-            serde_json::to_value(store.loaded().clone()).unwrap(),
+            serde_json::to_value(store.loaded().unwrap().clone()).unwrap(),
             case["loaded"],
             "loaded {index}"
         );
@@ -2445,7 +2445,7 @@ fn mexc_reconciliation_live_store_transitions() {
             "notifications {index}"
         );
         assert_eq!(
-            Store::update_ids(store.as_ref()).clone(),
+            Store::update_ids(store.as_ref()).unwrap().clone(),
             serde_json::from_value::<safe_cex_types::StoreUpdateIds>(case["updateIds"].clone())
                 .unwrap(),
             "update ids {index}"
@@ -2459,6 +2459,7 @@ fn mexc_reconciliation_live_store_transitions() {
         );
         let stored = store
             .orders()
+            .unwrap()
             .iter()
             .find(|o| o.id == result[0].id)
             .map(|o| o.last_update);
@@ -2571,13 +2572,16 @@ fn mexc_leverage_override_dispatches_through_dyn_exchange() {
         Some(json!({"symbol":"BTC_USDT"}))
     );
     assert_eq!(
-        store.fetched_leverage()["BTCUSDT"].buy_leverage,
+        store.fetched_leverage().unwrap()["BTCUSDT"].buy_leverage,
         expected["success"]["store"]["BTCUSDT"]["buyLeverage"]
             .as_f64()
             .unwrap()
     );
     assert_eq!(
-        store.markets_by_symbol()["BTCUSDT"].limits.leverage.max,
+        store.markets_by_symbol().unwrap()["BTCUSDT"]
+            .limits
+            .leverage
+            .max,
         expected["success"]["market"]["limits"]["leverage"]["max"]
             .as_f64()
             .unwrap()
@@ -3086,11 +3090,11 @@ fn mexc_orders_override_reaches_concrete_reconciliation() {
         .unwrap();
         assert!(!response.iter().any(|o| o.id == "placed"));
         assert!(
-            store.orders().iter().any(|o| o.id == "placed"),
+            store.orders().unwrap().iter().any(|o| o.id == "placed"),
             "concrete MEXC placement shield override must run, captured={captured}"
         );
         assert!(
-            store.loaded().orders,
+            store.loaded().unwrap().orders,
             "empty scope must dispatch full MEXC reconciliation"
         );
     }
@@ -3113,7 +3117,7 @@ fn mexc_reconciliation_drop_leaves_state_recoverable() {
     )
     .unwrap();
     let venue = venue(store.clone(), 1000.0, false);
-    let before = store.serialize();
+    let before = store.serialize().unwrap();
     for poll in [false, true] {
         let fetch = Box::pin(futures::future::pending());
         let mut future = venue.reconcile_orders(None, fetch, false);
@@ -3126,14 +3130,14 @@ fn mexc_reconciliation_drop_leaves_state_recoverable() {
             ));
         }
         drop(future);
-        assert_eq!(store.serialize(), before);
+        assert_eq!(store.serialize().unwrap(), before);
         assert_eq!(venue.placed.borrow().len(), 2);
     }
     // A canceled caller must not leave a gate that blocks the next snapshot.
     let next = Box::pin(async { Ok(vec![]) });
     futures::executor::block_on(venue.reconcile_orders(None, next, false)).unwrap();
-    assert!(store.loaded().orders);
-    assert_eq!(store.orders()[0].id, "placed");
+    assert!(store.loaded().unwrap().orders);
+    assert_eq!(store.orders().unwrap()[0].id, "placed");
 }
 
 #[test]
@@ -3245,7 +3249,7 @@ fn mexc_cancel_transport_projection_finding() {
         "MEXC cancellation native original response"
     );
     assert_eq!(
-        store.orders()[0].status,
+        store.orders().unwrap()[0].status,
         OrderStatus::Open,
         "MEXC transport rejection leaves native order open"
     );
@@ -3601,7 +3605,7 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
             "CHOSEN metadata native lazy request prefix"
         );
         assert!(
-            !store.fetched_leverage().contains_key("BTCUSDT"),
+            !store.fetched_leverage().unwrap().contains_key("BTCUSDT"),
             "CHOSEN metadata native no pre-poll write"
         );
         assert!(
@@ -3627,7 +3631,7 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
             "metadata independent native request calls"
         );
         assert_eq!(
-            store.markets_by_symbol()["BTCUSDT"]
+            store.markets_by_symbol().unwrap()["BTCUSDT"]
                 .limits
                 .leverage
                 .max
@@ -3635,7 +3639,7 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
             if public_only { 20_f64 } else { 60_f64 }.to_bits(),
             "metadata native committed market cap"
         );
-        let fetched = &store.fetched_leverage()["BTCUSDT"];
+        let fetched = &store.fetched_leverage().unwrap()["BTCUSDT"];
         assert_eq!(
             fetched.buy_leverage.to_bits(),
             21_f64.to_bits(),

@@ -77,12 +77,12 @@ fn public_writer_matches_numeric_bits_and_notification_failure() {
             _ => unreachable!(),
         };
         assert_eq!(
-            store.tickers().len(),
+            store.tickers().unwrap().len(),
             2,
             "WOO-WRITER native retained tickers"
         );
         assert_eq!(
-            store.tickers().len(),
+            store.tickers().unwrap().len(),
             case["tickers"].as_array().unwrap().len(),
             "WOO-WRITER expected/native ticker count"
         );
@@ -107,7 +107,7 @@ fn public_writer_matches_numeric_bits_and_notification_failure() {
                 case["notifications"],
                 "subscriber throw aborts ordered fanout"
             );
-            let native = store.tickers();
+            let native = store.tickers().unwrap();
             for index in 0..2 {
                 let actual = &native[index];
                 let expected = &case["tickers"][index];
@@ -151,7 +151,7 @@ fn public_writer_matches_numeric_bits_and_notification_failure() {
                 case["notifications"],
                 "writer notification order {input}"
             );
-            let native = store.tickers();
+            let native = store.tickers().unwrap();
             for index in 0..2 {
                 let actual = &native[index];
                 let expected = &case["tickers"][index];

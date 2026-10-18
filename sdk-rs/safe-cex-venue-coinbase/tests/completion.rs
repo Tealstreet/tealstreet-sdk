@@ -1485,10 +1485,12 @@ impl safe_cex_venue_coinbase::portfolios_balances::PortfolioHost for ClassHost {
         self.policy().errors.borrow_mut().push(args.to_vec());
         Ok(())
     }
-    fn cached_balance(&self) -> safe_cex_venue_coinbase::portfolios_balances::Balance {
+    fn cached_balance(
+        &self,
+    ) -> std::result::Result<safe_cex_types::Balance, std::rc::Rc<PortfolioThrown>> {
         panic!("policy must not read cached portfolio balance")
     }
-    fn position_upnls(&self) -> Vec<f64> {
+    fn position_upnls(&self) -> std::result::Result<Vec<f64>, std::rc::Rc<PortfolioThrown>> {
         panic!("policy must not read cached positions")
     }
 }

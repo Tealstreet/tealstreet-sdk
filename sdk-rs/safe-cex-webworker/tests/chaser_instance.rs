@@ -107,7 +107,7 @@ fn chaser_instance_matches_live_source_transitions_prototype_keys_and_disposal()
             capabilities: Default::default(),
         });
         let options=Rc::new(RefCell::new(serde_json::from_value::<ChaserOrderOptions>(json!({"symbol":"BTC","size":10,"side":s["side"],"maxAttempts":1,"delay":100,"reduceOnly":s["reduceOnly"]})).unwrap()));
-        let i = Rc::new(ChaserOrderInstance::new(venue, options.clone()));
+        let i = Rc::new(ChaserOrderInstance::new(venue, options.clone()).unwrap());
         let held_state = i.state();
         let held_ever = i.ever_tracked_order_ids();
         let log = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -235,7 +235,7 @@ fn owned_id_arrays_and_immutable_default_have_explicit_live_source_witnesses() {
         )
         .unwrap(),
     ));
-    let i = ChaserOrderInstance::new(venue, options);
+    let i = ChaserOrderInstance::new(venue, options).unwrap();
     assert!(i.current_order_ids().is_empty());
     let mut supplied = vec!["a".to_owned()];
     i.set_current_order_ids(supplied.clone());
@@ -337,10 +337,10 @@ fn active_chaser_postprocessor_matches_live_identity_filter_and_current_state() 
                     .get("origin")
                     .map(|v| serde_json::from_value(v.clone()).unwrap());
                 *runtimes[venue].id.borrow_mut() = Some(format!("id{n}"));
-                let i = Rc::new(ChaserOrderInstance::new(
-                    venues[venue].clone(),
-                    Rc::new(RefCell::new(options)),
-                ));
+                let i = Rc::new(
+                    ChaserOrderInstance::new(venues[venue].clone(), Rc::new(RefCell::new(options)))
+                        .unwrap(),
+                );
                 i.state().borrow_mut().attempts = attempts;
                 i.set_current_order_ids(ids.into_iter().map(str::to_owned).collect());
                 if n == 2 {

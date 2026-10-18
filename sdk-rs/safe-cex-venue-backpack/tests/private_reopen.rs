@@ -104,7 +104,7 @@ impl Drop for PrivateFixture {
 fn private_order_frame_commits_the_order_to_store() {
     let f = PrivateFixture::new();
     f.frame("account.orderUpdate.BTC_USDC", json!({"e":"orderUpdate","s":"BTC_USDC","i":"new-order","S":"Ask","o":"Limit","p":"12","q":"3","z":"0","X":"New","E":1234000,"f":"GTC"}));
-    let orders = f.store.orders();
+    let orders = f.store.orders().unwrap();
     assert_eq!(orders.len(), 1);
     assert_eq!(orders[0].id, "new-order");
     assert_eq!(orders[0].side, OrderSide::Sell);
@@ -132,8 +132,8 @@ fn private_fill_frame_emits_fill_and_updates_order() {
             json!({"orderId":"fill-order","symbol":"BTC_USDC","side":"buy","price":11.0,"amount":1.0,"timestamp":1234.0})
         ]
     );
-    assert_eq!(f.store.orders()[0].filled, 1.0);
-    assert_eq!(f.store.orders()[0].remaining, 2.0);
+    assert_eq!(f.store.orders().unwrap()[0].filled, 1.0);
+    assert_eq!(f.store.orders().unwrap()[0].remaining, 2.0);
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn private_position_frame_commits_the_position_to_store() {
         "account.positionUpdate",
         json!({"s":"BTC_USDC","q":"-2","b":"20","n":"40","f":"0.2","P":"3","l":"30","E":1234000}),
     );
-    let positions = f.store.positions();
+    let positions = f.store.positions().unwrap();
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].id, "BTC_USDC:short");
     assert_eq!(positions[0].side, PositionSide::Short);
@@ -159,7 +159,7 @@ fn private_fill_frame_refreshes_balance_through_real_rest_binding() {
     assert_eq!(count(&f.wire, "/api/v1/capital/collateral"), 0);
     f.fill();
     assert_eq!(count(&f.wire, "/api/v1/capital/collateral"), 1);
-    let balance = f.store.balance();
+    let balance = f.store.balance().unwrap();
     assert_eq!(balance.total, 25.0);
     assert_eq!(balance.free, 18.0);
     assert_eq!(balance.used, 7.0);

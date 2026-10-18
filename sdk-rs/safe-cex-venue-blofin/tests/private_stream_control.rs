@@ -412,7 +412,7 @@ impl PrivateStreamHost for Host {
                 disposed.set(true)
             }
             if i["changeLoadedOnResolve"].as_bool() == Some(true) {
-                let mut loaded = Store::loaded(store.as_ref()).clone();
+                let mut loaded = Store::loaded(store.as_ref()).unwrap().clone();
                 loaded.tickers = true;
                 loaded.positions = true;
                 Store::update(
@@ -441,7 +441,7 @@ struct Snapshot {
     loaded: StoreDataLoaded,
 }
 fn snapshot(s: &PrivateStreamState<u32>, h: &Host) -> Snapshot {
-    let d = Store::serialize(h.store.as_ref());
+    let d = Store::serialize(h.store.as_ref()).unwrap();
     Snapshot {
         ping: s.ping_at.get(),
         timeout: *s.orders_throttle_timeout.borrow(),
@@ -631,7 +631,7 @@ fn group(name: &str, floor: usize) {
                 "source price mutated to77"
             );
             let mut old = host.fetched.clone();
-            let current = Store::serialize(host.store.as_ref());
+            let current = Store::serialize(host.store.as_ref()).unwrap();
             if old.is_empty() {
                 let mut added: Order = js_from_value(corpus()["order"].clone()).unwrap();
                 added.price = (77.0).into();

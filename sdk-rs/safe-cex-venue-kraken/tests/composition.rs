@@ -1000,14 +1000,14 @@ impl TickHost for TickBridge {
     fn balance_truthy(&self, v: &Raw) -> bool {
         self.host.truthy(v)
     }
-    fn loaded(&self) -> safe_cex_types::StoreDataLoaded {
-        safe_cex_types::StoreDataLoaded {
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError> {
+        Ok(safe_cex_types::StoreDataLoaded {
             balance: false,
             orders: false,
             markets: false,
             tickers: false,
             positions: false,
-        }
+        })
     }
     fn update(&self, _update: TickUpdate<Raw, Raw, Raw>) -> Result<(), ExchangeError> {
         outside()

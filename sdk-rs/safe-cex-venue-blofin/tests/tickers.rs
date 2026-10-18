@@ -127,7 +127,7 @@ fn live_tickers_corpus() {
                     result
                         .as_ref()
                         .err()
-                        .is_some_and(|e| Rc::ptr_eq(e, &sentinel)),
+                        .is_some_and(|e| matches!(e, safe_cex_venue_blofin::reads::ReadError::Emitter(e) if Rc::ptr_eq(e, &sentinel))),
                     "ticker_host_error_identity"
                 );
             }
@@ -135,20 +135,22 @@ fn live_tickers_corpus() {
                 assert!(
                     result
                         .as_ref()
-                        .is_ok_and(|rows| rows.as_ptr() != store.tickers().as_ptr()),
+                        .is_ok_and(|rows| rows.as_ptr() != store.tickers().unwrap().as_ptr()),
                     "ticker_owned_fallback_boundary"
                 );
             }
             let actual = match result {
                 Ok(v) => json!({"ok":v.into_iter().map(native).collect::<Vec<_>>()}),
-                Err(e) => {
+                Err(safe_cex_venue_blofin::reads::ReadError::Emitter(e)) => {
                     json!({"error":"Error","message":e.as_str(),"identity":Rc::ptr_eq(&e,&sentinel)})
                 }
+                Err(e) => panic!("unexpected non-emitter fixture failure: {e:?}"),
             };
             assert_eq!(
                 json!(
                     store
                         .tickers()
+                        .unwrap()
                         .iter()
                         .cloned()
                         .map(native)

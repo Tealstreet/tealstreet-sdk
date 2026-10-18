@@ -87,13 +87,13 @@ fn exact_units_and_whole_input_prices() {
     );
     set_market_max_leverage(&store, replacement, 7.0).unwrap();
     assert_eq!(
-        store.markets()[0].limits.leverage.max.to_bits(),
+        store.markets().unwrap()[0].limits.leverage.max.to_bits(),
         7.0f64.to_bits(),
         "PRICE-NATIVE-REPLACEMENT-UPDATE"
     );
     let raw = inputs[6].replace("\\ud800", replacement);
     let data: OpaqueValue = js_from_str(&raw).unwrap();
-    let stored = store.balance_handle();
+    let stored = store.balance().unwrap();
     let balance = parse_balance(Some(&data.value), &stored, |warning| {
         panic!("unexpected refusal: {warning}")
     })

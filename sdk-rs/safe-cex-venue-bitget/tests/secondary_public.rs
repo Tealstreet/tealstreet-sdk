@@ -273,7 +273,7 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         "SECONDARY native delivered message count"
     );
     {
-        let rows = store.tickers();
+        let rows = store.tickers().unwrap();
         assert_eq!(rows.len(), 1, "SECONDARY native ticker count");
         let t = &rows[0];
         assert_eq!(t.id, "btc", "SECONDARY native ticker id");
@@ -305,13 +305,17 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         .borrow_mut()
         .push_back(WsEvent::Message(SocketFrame::Text("pong".into())));
     pump(&runtime);
-    assert_eq!(store.latency(), 7.0, "SECONDARY native bound pong latency");
+    assert_eq!(
+        store.latency().unwrap(),
+        7.0,
+        "SECONDARY native bound pong latency"
+    );
     assert_eq!(socket.message_count(), 2.0, "SECONDARY native pong counted");
     socket
         .on_message(&SocketFrame::Binary(b"pong".to_vec()))
         .unwrap();
     assert_eq!(
-        store.latency(),
+        store.latency().unwrap(),
         7.0,
         "SECONDARY binary pong is not text pong"
     );
@@ -326,8 +330,8 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         keys,
         sent: sends,
         count: socket.message_count(),
-        latency: store.latency(),
-        ticker: store.tickers()[0].clone(),
+        latency: store.latency().unwrap(),
+        ticker: store.tickers().unwrap()[0].clone(),
     };
     socket.base().dispose();
     runtime.discard_tasks();
@@ -594,7 +598,7 @@ fn secondary_native_ingress_and_error_projection() {
         "SECONDARY explicit typed-frame UTF16 projection refusal"
     );
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         0.0,
         "SECONDARY forced whole JSON ingress refusal"
     );
@@ -633,7 +637,7 @@ fn secondary_native_ingress_and_error_projection() {
         "SECONDARY native subscriber identifier"
     );
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         17.0,
         "SECONDARY failed notification commits first row"
     );

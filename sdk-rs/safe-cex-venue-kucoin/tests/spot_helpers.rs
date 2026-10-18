@@ -132,13 +132,13 @@ fn live_spot_position_and_leverage_helpers() {
             "KUCOIN-CARDINALITY helper native retained positions"
         );
         assert_eq!(
-            store.fetched_leverage().len(),
+            store.fetched_leverage().unwrap().len(),
             leverage_count,
             "KUCOIN-CARDINALITY helper native retained leverage"
         );
         compared_positions += positions.len();
-        compared_entries += store.fetched_leverage().len();
-        let actual = json!({"positions":positions,"max":max,"fetchedLeverage":&*store.fetched_leverage(),"updates":updates.get()});
+        compared_entries += store.fetched_leverage().unwrap().len();
+        let actual = json!({"positions":positions,"max":max,"fetchedLeverage":&store.fetched_leverage().unwrap(),"updates":updates.get()});
         compare(&actual, expected);
         unsubscribe();
     }
@@ -271,7 +271,7 @@ fn live_spot_store_notification_failure_finding() {
             assert_eq!(&*trace.borrow(), &[("first", 1.0), ("second", 1.0)]);
         }
         assert_eq!(
-            store.fetched_leverage()[row["symbol"].as_str().unwrap()].sell_leverage,
+            store.fetched_leverage().unwrap()[row["symbol"].as_str().unwrap()].sell_leverage,
             1.0
         );
         for unsubscribe in unsubscribers {

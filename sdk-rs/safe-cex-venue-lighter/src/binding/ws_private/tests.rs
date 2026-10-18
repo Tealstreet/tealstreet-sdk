@@ -574,7 +574,13 @@ fn account_all_payload_updates_orders_positions_and_throttled_balance() {
             "account": {"collateral": "100"}
         }),
     );
-    let orders: Vec<String> = world.store.orders().iter().map(|o| o.id.clone()).collect();
+    let orders: Vec<String> = world
+        .store
+        .orders()
+        .unwrap()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
     assert_eq!(
         orders,
         vec!["41"],
@@ -781,7 +787,7 @@ fn production_private_position_loop_consumes_live_iterators() {
             "{shape}: live source for-of trace"
         );
         assert!(
-            world.store.positions().is_empty(),
+            world.store.positions().unwrap().is_empty(),
             "nonzero unmapped rows do not synthesize closes"
         );
     }
@@ -919,7 +925,7 @@ fn production_private_position_close_spread_accepts_iterator_values() {
             Js::function("mapPosition", |_, _| Ok(Js::Undefined)),
         )
         .unwrap();
-    let revision = world.store.update_ids().positions;
+    let revision = world.store.update_ids().unwrap().positions;
     world
         .socket
         .call_method(
@@ -927,13 +933,13 @@ fn production_private_position_close_spread_accepts_iterator_values() {
             vec![Js::array(vec![Js::object(vec![("size", Js::str("0"))])])],
         )
         .unwrap();
-    let positions = world.store.positions();
+    let positions = world.store.positions().unwrap();
     assert_eq!(
         positions[0].contracts, 0.0,
         "spread must deliver its close pair to the actual Store"
     );
     assert!(positions[0].margin_size.is_undefined());
-    assert_eq!(world.store.update_ids().positions, revision + 1.0);
+    assert_eq!(world.store.update_ids().unwrap().positions, revision + 1.0);
 }
 
 #[test]

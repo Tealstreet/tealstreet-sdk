@@ -73,7 +73,7 @@ fn ticker_notification_retains_subscriber_identity_after_committed_patch() {
             "ticker stable subscriber identity"
         );
         assert_eq!(
-            store.tickers()[0].last,
+            store.tickers().unwrap()[0].last,
             last,
             "ticker patch commits before notification"
         );
@@ -169,7 +169,7 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
             case["notifications"].as_u64().unwrap(),
             "notification case {i}: {case}"
         );
-        let tickers = store.tickers();
+        let tickers = store.tickers().unwrap();
         let ticker = &tickers[0];
         let numbers = [
             ticker.bid,

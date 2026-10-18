@@ -264,7 +264,7 @@ fn fetch_positions_maps_the_account_snapshot_and_placeholders() {
     assert_eq!(p.margin_type, Some(MarginType::Cross));
     assert_eq!(p.position_mode, Some(PositionMode::OneWay));
     assert!(
-        h.store.positions().is_empty(),
+        h.store.positions().unwrap().is_empty(),
         "fetchPositions is a pure read"
     );
 }
@@ -290,7 +290,10 @@ fn fetch_orders_reads_all_markets_with_a_signed_auth_token() {
     assert_eq!(o.price, 49000.0);
     assert_eq!(o.amount, 0.5);
     assert_eq!(o.status, OrderStatus::Open);
-    assert!(h.store.orders().is_empty(), "fetchOrders is a pure read");
+    assert!(
+        h.store.orders().unwrap().is_empty(),
+        "fetchOrders is a pure read"
+    );
 }
 
 #[test]
@@ -508,7 +511,7 @@ fn cancel_orders_signs_a_cancel_for_the_order_index() {
     assert_eq!(info["Index"], json!(777));
     assert_eq!(info["Nonce"], json!(NONCE));
     assert!(
-        h.store.orders().is_empty(),
+        h.store.orders().unwrap().is_empty(),
         "cancelled orders leave the store"
     );
 }
@@ -550,7 +553,7 @@ fn start_dials_both_sockets_and_subscribes() {
     h.drive(h.venue().start()).expect("start");
     h.runtime.advance(50.0);
     {
-        let loaded = h.store.loaded();
+        let loaded = h.store.loaded().unwrap();
         assert!(loaded.markets && loaded.tickers);
         assert!(loaded.positions && loaded.orders && loaded.balance);
     }
@@ -776,19 +779,19 @@ fn real_trait_private_snapshot_updates_positions_orders_and_balance() {
     h.drive(h.venue().fetch_and_set_private_snapshot(1))
         .unwrap();
     assert_eq!(
-        h.store.positions().len(),
+        h.store.positions().unwrap().len(),
         1,
         "venue snapshot loads positions"
     );
-    assert_eq!(h.store.positions()[0].contracts, 0.5);
-    assert_eq!(h.store.orders().len(), 1);
-    assert_eq!(h.store.orders()[0].id, "777");
-    let state = h.store.loaded();
+    assert_eq!(h.store.positions().unwrap()[0].contracts, 0.5);
+    assert_eq!(h.store.orders().unwrap().len(), 1);
+    assert_eq!(h.store.orders().unwrap()[0].id, "777");
+    let state = h.store.loaded().unwrap();
     assert!(
         state.positions && state.orders && state.balance,
         "full venue snapshot flags"
     );
-    assert_eq!(h.store.balance().free, 800.0);
+    assert_eq!(h.store.balance().unwrap().free, 800.0);
 }
 
 #[test]
@@ -1058,11 +1061,15 @@ fn private_account_frame_for_deployment(name: ExchangeName) {
     }).to_string().replace("\"SURROGATE_FIELD\"", "\"\\ud800\""))));
     h.runtime.pump();
     assert!(
-        h.store.orders().iter().any(|order| order.id == "888"),
+        h.store
+            .orders()
+            .unwrap()
+            .iter()
+            .any(|order| order.id == "888"),
         "private order goes through real venue mapper"
     );
     assert_eq!(
-        h.store.positions()[0].contracts,
+        h.store.positions().unwrap()[0].contracts,
         0.75,
         "private position uses real venue mapper and Store"
     );
@@ -1077,13 +1084,13 @@ fn private_account_frame_for_deployment(name: ExchangeName) {
         "private trade produces source fill payload"
     );
     assert_eq!(
-        h.store.balance().free,
+        h.store.balance().unwrap().free,
         800.0,
         "balance refresh waits for the source throttle"
     );
     h.runtime.advance(500.0);
     assert_eq!(
-        h.store.balance().free,
+        h.store.balance().unwrap().free,
         645.0,
         "private account frame triggers real balance refresh"
     );
@@ -1295,7 +1302,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert_eq!(
         h.runtime.reports.borrow().len(),
@@ -1348,7 +1355,7 @@ fn market_info_keeps_native_numbers_and_opaque_fields_through_store_and_binding(
         false,
     )
     .unwrap();
-    let stored = h.store.markets();
+    let stored = h.store.markets().unwrap();
     let info = stored[0].info.as_ref().unwrap();
     assert!(
         info.get("amountDecimals")

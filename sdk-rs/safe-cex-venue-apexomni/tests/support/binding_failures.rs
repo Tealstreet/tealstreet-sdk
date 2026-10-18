@@ -107,8 +107,8 @@ fn read_disposal_guard_prevents_late_config_publication() {
     let exchange = h.exchange.clone();
     *h.http.after_send.borrow_mut() = Some(Box::new(move || exchange.dispose().unwrap()));
     assert!(h.drive(h.venue().fetch_positions(None)).unwrap().is_empty());
-    assert!(h.store.zk_link_config().is_none());
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.zk_link_config().unwrap().is_none());
+    assert!(h.store.positions().unwrap().is_empty());
     done(&h);
 }
 #[test]
@@ -117,7 +117,7 @@ fn orders_disposal_guard_prevents_late_results() {
     let exchange = h.exchange.clone();
     *h.http.after_send.borrow_mut() = Some(Box::new(move || exchange.dispose().unwrap()));
     assert!(h.drive(h.venue().fetch_orders(None)).unwrap().is_empty());
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     done(&h);
 }
 

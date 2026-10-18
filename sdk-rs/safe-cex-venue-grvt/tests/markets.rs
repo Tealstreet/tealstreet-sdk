@@ -431,7 +431,7 @@ fn refresh_markets_native_store_and_effect_order() {
                 }
             },
         ));
-        let current = store.markets();
+        let current = store.markets().unwrap();
         let expected = row["markets"].as_array().unwrap();
         assert_eq!(current.len(), 2, "REFRESH independent native count");
         assert_eq!(expected.len(), 2, "REFRESH independent source count");

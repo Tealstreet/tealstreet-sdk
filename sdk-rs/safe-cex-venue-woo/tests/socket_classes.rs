@@ -595,7 +595,7 @@ fn native_public_bindings_execute_and_retain_shared_state() {
     ] {
         h.method(&r, method, vec![h.payload(rows)]).unwrap();
     }
-    let tickers = h.store.tickers();
+    let tickers = h.store.tickers().unwrap();
     assert_eq!(tickers.len(), 1);
     let ticker = &tickers[0];
     assert_eq!(
@@ -937,7 +937,7 @@ fn native_immutable_ingress_prices_caller_mutation() {
     h.method(&r, "handleTickersStreamEvents", vec![input])
         .unwrap();
     assert_eq!(
-        h.store.tickers()[0].last,
+        h.store.tickers().unwrap()[0].last,
         31.,
         "WOO-CLASS native immutable ingress cost"
     );

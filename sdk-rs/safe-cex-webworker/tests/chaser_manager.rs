@@ -104,7 +104,7 @@ fn position_completion_and_fill_match_live_manager_transitions() {
         let mut options:ChaserOrderOptions=serde_json::from_value(json!({"symbol":"BTC","size":0,"side":row["side"],"maxAttempts":1,"delay":100,"reduceOnly":row["reduceOnly"]})).unwrap();
         options.size = number(&row["size"]);
         let options = Rc::new(RefCell::new(options));
-        let instance = ChaserOrderInstance::new(venue, options.clone());
+        let instance = ChaserOrderInstance::new(venue, options.clone()).unwrap();
         for (step_index, step) in row["steps"].as_array().unwrap().iter().enumerate() {
             Store::update(
                 store.as_ref(),
@@ -120,11 +120,11 @@ fn position_completion_and_fill_match_live_manager_transitions() {
             .unwrap();
             options.borrow_mut().size = number(&step["currentSize"]);
             assert_eq!(
-                has_reached_target_position(&instance),
+                has_reached_target_position(&instance).unwrap(),
                 step["reached"].as_bool().unwrap(),
                 "TARGET-POSITION row {row_index} step {step_index}"
             );
-            let actual = bybit_demo_position_fill(&instance);
+            let actual = bybit_demo_position_fill(&instance).unwrap();
             let expected = number(&step["filled"]);
             assert!(
                 actual.is_nan() && expected.is_nan() || actual.to_bits() == expected.to_bits(),

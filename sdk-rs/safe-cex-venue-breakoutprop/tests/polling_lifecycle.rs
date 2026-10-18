@@ -1321,8 +1321,11 @@ fn final_start_tick_native_order_and_disposal() {
         ],
         "START native initialization call order"
     );
-    assert!(ex.base.store.loaded().markets && ex.base.store.loaded().tickers);
-    assert_eq!(ex.base.store.tickers()[0].bid.to_bits(), 100f64.to_bits());
+    assert!(ex.base.store.loaded().unwrap().markets && ex.base.store.loaded().unwrap().tickers);
+    assert_eq!(
+        ex.base.store.tickers().unwrap()[0].bid.to_bits(),
+        100f64.to_bits()
+    );
     assert_eq!(
         &*calls.borrow(),
         &["book", "candle"],
@@ -1384,9 +1387,9 @@ fn final_start_tick_native_order_and_disposal() {
         "START native public-only skips account portfolio loop"
     );
     assert!(
-        pub_ex.base.store.loaded().balance
-            && pub_ex.base.store.loaded().positions
-            && pub_ex.base.store.loaded().orders
+        pub_ex.base.store.loaded().unwrap().balance
+            && pub_ex.base.store.loaded().unwrap().positions
+            && pub_ex.base.store.loaded().unwrap().orders
     );
     assert!(pub_reads.next.borrow().is_empty());
     finish(&pub_s, pub_ctx.tick()).unwrap();
@@ -1403,24 +1406,30 @@ fn final_portfolio_and_notification_cutovers() {
     *reads.portfolio.borrow_mut() = Some(portfolio_input());
     finish(&s, ctx.start()).unwrap();
     assert_eq!(
-        ex.base.store.balance().total.to_bits(),
+        ex.base.store.balance().unwrap().total.to_bits(),
         50.25f64.to_bits(),
         "START native formatted balance"
     );
-    assert_eq!(ex.base.store.balance().free.to_bits(), 50.25f64.to_bits());
-    assert_eq!(ex.base.store.balance().used.to_bits(), 0f64.to_bits());
     assert_eq!(
-        ex.base.store.positions().len(),
+        ex.base.store.balance().unwrap().free.to_bits(),
+        50.25f64.to_bits()
+    );
+    assert_eq!(
+        ex.base.store.balance().unwrap().used.to_bits(),
+        0f64.to_bits()
+    );
+    assert_eq!(
+        ex.base.store.positions().unwrap().len(),
         1,
         "START native missing-symbol position count"
     );
-    assert_eq!(ex.base.store.positions()[0].symbol, "BTC");
+    assert_eq!(ex.base.store.positions().unwrap()[0].symbol, "BTC");
     assert_eq!(
-        ex.base.store.positions()[0].contracts.to_bits(),
+        ex.base.store.positions().unwrap()[0].contracts.to_bits(),
         0f64.to_bits()
     );
-    assert!(ex.base.store.orders().is_empty());
-    let loaded = ex.base.store.loaded();
+    assert!(ex.base.store.orders().unwrap().is_empty());
+    let loaded = ex.base.store.loaded().unwrap();
     assert!(loaded.balance && loaded.positions && loaded.orders);
     drop(loaded);
     let (fail_s, fail_ex) = fixture();

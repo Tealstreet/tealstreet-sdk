@@ -121,8 +121,12 @@ fn startup_continuation_case(disposed: bool) {
         "real tick must start its own snapshot"
     );
     assert_eq!(h.http.calls("/v3/account-balance").len(), 1);
-    assert!(h.store.positions().is_empty());
-    assert!(!h.store.loaded().positions && !h.store.loaded().orders && !h.store.loaded().balance);
+    assert!(h.store.positions().unwrap().is_empty());
+    assert!(
+        !h.store.loaded().unwrap().positions
+            && !h.store.loaded().unwrap().orders
+            && !h.store.loaded().unwrap().balance
+    );
     if disposed {
         h.venue().dispose().unwrap();
     }
@@ -131,16 +135,17 @@ fn startup_continuation_case(disposed: bool) {
     assert_eq!(
         h.store
             .positions()
+            .unwrap()
             .iter()
             .find(|p| p.side == safe_cex_types::PositionSide::Long)
             .map(|p| p.contracts),
         if disposed { None } else { Some(4.0) },
         "already-started positions.then must update Store after startup balance rejects"
     );
-    assert_eq!(h.store.loaded().positions, !disposed);
-    assert_eq!(h.store.loaded().orders, !disposed);
+    assert_eq!(h.store.loaded().unwrap().positions, !disposed);
+    assert_eq!(h.store.loaded().unwrap().orders, !disposed);
     assert!(
-        !h.store.loaded().balance,
+        !h.store.loaded().unwrap().balance,
         "failed balance branch must stay unloaded"
     );
     assert_eq!(

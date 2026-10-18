@@ -11,6 +11,7 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
+use safe_cex_store::Store;
 use safe_cex_types::{ExchangeName, ExchangeOptions, Order};
 use std::{cell::RefCell, process::Command, rc::Rc, sync::Arc};
 #[path = "retained_info.rs"]

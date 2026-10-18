@@ -372,7 +372,7 @@ fn attached_amendment_recreates_only_after_matching_refusal_and_successful_cance
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            statuses(&serde_json::to_value(&*store.orders()).unwrap()),
+            statuses(&serde_json::to_value(&*store.orders().unwrap()).unwrap()),
             statuses(&case["orders"]),
             "cancel only the exact parent and children; neighbor survives: {label}"
         );
@@ -464,7 +464,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 rt.pump();
             }
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
     }
     assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
     assert!(
@@ -595,7 +595,7 @@ fn retained_model_info_survives_real_amendment_without_json_projection() {
         );
     }
     drop(requests);
-    for order in store.orders().iter() {
+    for order in store.orders().unwrap().iter() {
         assert_info(order);
     }
     venue.dispose().unwrap();

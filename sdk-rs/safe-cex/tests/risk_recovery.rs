@@ -187,7 +187,7 @@ fn prototype_risk_error_is_catchable_and_store_clearing_is_observable() {
         )
         .expect("fixture Store mutation must succeed");
         assert!(
-            host.orders_risk().is_empty(),
+            host.orders_risk().unwrap().is_empty(),
             "risk must be visibly cleared"
         );
         assert_eq!(

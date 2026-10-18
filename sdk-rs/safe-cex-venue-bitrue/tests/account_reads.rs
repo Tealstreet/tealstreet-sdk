@@ -247,8 +247,19 @@ fn account_reads_match_actual_typescript() {
             ));
             let actual = match result {
                 Ok(value) => {
-                    let stored = store.balance();
-                    json!({"kind":"balance","stored":std::ptr::eq(&*value,&*stored),"fields":([value.total,value.free,value.used,value.upnl].map(|v|format!("{:016x}",v.to_bits()))),"currencies":value.currencies.as_ref().map(|c|c.keys().collect::<Vec<_>>()),"info":value.info})
+                    let stored = store.balance_handle().unwrap();
+                    let same = value
+                        .native_value()
+                        .downcast::<safe_cex_exchange::js_runtime::value::Js>()
+                        .unwrap()
+                        .same_reference(
+                            &stored
+                                .native_value()
+                                .downcast::<safe_cex_exchange::js_runtime::value::Js>()
+                                .unwrap(),
+                        );
+                    let value = value.read().unwrap();
+                    json!({"kind":"balance","stored":same,"fields":([value.total,value.free,value.used,value.upnl].map(|v|format!("{:016x}",v.to_bits()))),"currencies":value.currencies.as_ref().map(|c|c.keys().collect::<Vec<_>>()),"info":value.info})
                 }
                 Err(error) => json!({"kind":"error","name":error.name,"message":error.message}),
             };

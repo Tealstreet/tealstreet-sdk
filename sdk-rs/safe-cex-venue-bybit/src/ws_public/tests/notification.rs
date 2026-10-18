@@ -139,7 +139,7 @@ fn notification_failure_from_no_socket_reconnect_reaches_owned_tail() {
             "one health publication"
         );
         assert_eq!(
-            parent.store.socket_health()["publicHealthy"],
+            parent.store.socket_health().unwrap()["publicHealthy"],
             true,
             "health commits before subscriber failure"
         );

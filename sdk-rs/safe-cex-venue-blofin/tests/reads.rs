@@ -403,6 +403,9 @@ fn live_reads_corpus() {
                             assert!(Rc::ptr_eq(&error, &sentinel), "READ emitter identity");
                             json!({"error":"Error","message":"host:unique","identity":true})
                         }
+                        Err(ReadError::Store(error)) => {
+                            panic!("unexpected fixture Store failure: {error}")
+                        }
                         Err(ReadError::Ingress(error)) => {
                             panic!("READ unexpected ingress {i}: {error}")
                         }

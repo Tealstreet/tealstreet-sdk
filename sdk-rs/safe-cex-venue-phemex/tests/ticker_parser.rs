@@ -211,9 +211,13 @@ fn ticker_parser_and_read_match_actual_typescript() {
         false,
     )
     .unwrap();
-    assert_eq!(store.markets().len(), 4, "PHEMEX-PARSER fixture markets");
     assert_eq!(
-        store.tickers().len(),
+        store.markets().unwrap().len(),
+        4,
+        "PHEMEX-PARSER fixture markets"
+    );
+    assert_eq!(
+        store.tickers().unwrap().len(),
         2,
         "PHEMEX-PARSER fixture cached tickers"
     );

@@ -28,10 +28,10 @@ fn unrelated_position_patch_preserves_every_existing_nonfinite_field() {
         });
         host.add_or_update_position(position.clone())
             .expect("fixture Store mutation must succeed");
-        same_number(host.positions()[0].entry_price, price);
+        same_number(host.positions().unwrap()[0].entry_price, price);
         host.update_position("p", json!({"contracts":2}).as_object().unwrap())
             .unwrap();
-        let rows = host.positions();
+        let rows = host.positions().unwrap();
         same_number(rows[0].entry_price, price);
         assert_eq!(rows[0].contracts, 2.0);
         assert!(
@@ -47,10 +47,10 @@ fn unrelated_position_patch_preserves_every_existing_nonfinite_field() {
         position.contracts = 3.0;
         host.add_or_update_position(position.clone())
             .expect("fixture Store mutation must succeed");
-        same_number(host.positions()[0].entry_price, price);
+        same_number(host.positions().unwrap()[0].entry_price, price);
         host.add_or_update_positions(vec![position])
             .expect("fixture Store mutation must succeed");
-        same_number(host.positions()[0].entry_price, price);
+        same_number(host.positions().unwrap()[0].entry_price, price);
         let mut patch = ModelPatch::default();
         patch.set_number("entryPrice", price);
         patch.set_native(
@@ -61,9 +61,9 @@ fn unrelated_position_patch_preserves_every_existing_nonfinite_field() {
             },
         );
         host.update_positions(&[(Some("p".into()), patch)]).unwrap();
-        same_number(host.positions()[0].entry_price, price);
+        same_number(host.positions().unwrap()[0].entry_price, price);
         assert!(
-            host.positions()[0]
+            host.positions().unwrap()[0]
                 .extra
                 .as_ref()
                 .unwrap()
@@ -96,7 +96,7 @@ fn ticker_and_bbo_native_updates_overwrite_old_prices_and_preserve_absence() {
             patch.set_number(field, value);
         }
         host.update_ticker("t", &patch).unwrap();
-        let ticks = host.tickers();
+        let ticks = host.tickers().unwrap();
         for actual in [
             ticks[0].last,
             ticks[0].bid,
@@ -107,22 +107,22 @@ fn ticker_and_bbo_native_updates_overwrite_old_prices_and_preserve_absence() {
         }
         assert_eq!(ticks[0].mark, 99.0);
         drop(ticks);
-        same_number(real.tickers_by_id()["t"].last, value);
-        same_number(real.tickers_by_symbol()["BTC"].bid, value);
+        same_number(real.tickers_by_id().unwrap()["t"].last, value);
+        same_number(real.tickers_by_symbol().unwrap()["BTC"].bid, value);
         let mut only_bid = ModelPatch::default();
         only_bid.set_number("bid", 7.0);
         host.update_ticker("t", &only_bid).unwrap();
-        same_number(host.tickers()[0].last, value);
+        same_number(host.tickers().unwrap()[0].last, value);
         let mut delta = ModelPatch::default();
         delta.set_number("ask", value);
         real.apply_ticker_deltas(&[(0.0, delta.clone())], true)
             .unwrap();
-        same_number(host.tickers()[0].ask, value);
+        same_number(host.tickers().unwrap()[0].ask, value);
         let packed = DefaultStore::pack_ticker_deltas(&[(0.0, delta)]).unwrap();
         same_number(packed.packed[0].values[0], value);
         host.apply_packed_ticker_deltas(packed.packed, true)
             .expect("fixture Store mutation must succeed");
-        same_number(host.tickers()[0].ask, value);
+        same_number(host.tickers().unwrap()[0].ask, value);
     }
 }
 #[test]
@@ -203,7 +203,7 @@ fn order_market_and_balance_do_not_roundtrip_existing_nonfinite_values() {
             .expect("fixture Store mutation must succeed");
         real.update_order("o", json!({"amount":2}).as_object().unwrap())
             .unwrap();
-        same_number(real.orders()[0].price.to_number(), value);
+        same_number(real.orders().unwrap()[0].price.to_number(), value);
         let mut market = seed().markets.remove(0);
         market.id = "m".into();
         market.precision.price = value;
@@ -220,8 +220,8 @@ fn order_market_and_balance_do_not_roundtrip_existing_nonfinite_values() {
         .expect("fixture Store mutation must succeed");
         real.update_market("m", json!({"quote":"USDC"}).as_object().unwrap())
             .unwrap();
-        same_number(real.markets()[0].precision.price, value);
-        same_number(real.balance().total, value);
+        same_number(real.markets().unwrap()[0].precision.price, value);
+        same_number(real.balance().unwrap().total, value);
         let mut patch = ModelPatch::default();
         patch.set_native(
             "precision",
@@ -231,8 +231,8 @@ fn order_market_and_balance_do_not_roundtrip_existing_nonfinite_values() {
             },
         );
         real.update_market("m", &patch).unwrap();
-        same_number(real.markets()[0].precision.amount, value);
-        same_number(real.markets_by_id()["m"].precision.price, value);
+        same_number(real.markets().unwrap()[0].precision.amount, value);
+        same_number(real.markets_by_id().unwrap()["m"].precision.price, value);
     }
 }
 
@@ -255,7 +255,7 @@ fn empty_and_info_only_deltas_preserve_duplicate_id_alias_owner() {
     for patch in [json!({}), json!({"info":{"discard":true}})] {
         real.apply_ticker_deltas(&[(0.0, patch.as_object().unwrap().clone())], true)
             .unwrap();
-        assert_eq!(real.tickers_by_id()["duplicate"].symbol, "B");
+        assert_eq!(real.tickers_by_id().unwrap()["duplicate"].symbol, "B");
     }
 }
 
@@ -297,20 +297,20 @@ fn invalid_later_fields_commit_no_state_aliases_counters_or_notifications() {
         counter.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }));
-    let before = real.update_ids();
-    let positions = real.positions().to_vec();
+    let before = real.update_ids().unwrap();
+    let positions = real.positions().unwrap().to_vec();
     let markets_version = real.get_markets_version();
     assert!(
         real.update_ticker("t", json!({"last":7,"bid":null}).as_object().unwrap())
             .is_err()
     );
-    assert_eq!(real.tickers()[0].last, 100.0);
-    assert_eq!(real.tickers_by_id()["t"].last, 100.0);
+    assert_eq!(real.tickers().unwrap()[0].last, 100.0);
+    assert_eq!(real.tickers_by_id().unwrap()["t"].last, 100.0);
     assert!(
         real.update_order("o", json!({"price":7,"amount":null}).as_object().unwrap())
             .is_err()
     );
-    assert_eq!(real.orders()[0].price, 100.0);
+    assert_eq!(real.orders().unwrap()[0].price, 100.0);
     assert!(
         real.update_market(
             "m",
@@ -320,8 +320,8 @@ fn invalid_later_fields_commit_no_state_aliases_counters_or_notifications() {
         )
         .is_err()
     );
-    assert_eq!(real.markets()[0].quote, "USDT");
-    assert_eq!(real.markets_by_id()["m"].quote, "USDT");
+    assert_eq!(real.markets().unwrap()[0].quote, "USDT");
+    assert_eq!(real.markets_by_id().unwrap()["m"].quote, "USDT");
     assert_eq!(real.get_markets_version(), markets_version);
     assert!(
         real.update_positions(&[
@@ -340,7 +340,7 @@ fn invalid_later_fields_commit_no_state_aliases_counters_or_notifications() {
         ])
         .is_err()
     );
-    assert_eq!(*real.positions(), positions);
+    assert_eq!(real.positions().unwrap(), positions);
     assert!(
         real.apply_ticker_deltas(
             &[
@@ -351,9 +351,9 @@ fn invalid_later_fields_commit_no_state_aliases_counters_or_notifications() {
         )
         .is_err()
     );
-    assert_eq!(real.tickers()[0].last, 100.0);
-    assert_eq!(real.tickers_by_id()["t"].last, 100.0);
-    assert_eq!(real.update_ids(), before);
+    assert_eq!(real.tickers().unwrap()[0].last, 100.0);
+    assert_eq!(real.tickers_by_id().unwrap()["t"].last, 100.0);
+    assert_eq!(real.update_ids().unwrap(), before);
     assert_eq!(notifications.load(Ordering::Relaxed), 0);
 }
 

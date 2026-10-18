@@ -148,7 +148,7 @@ fn run(scene: &'static str) -> Observed {
     let mut expected = seed.clone();
     if ["truthy-info-stripped", "info-id-error-stripped"].contains(&scene) {
         assert!(
-            Store::tickers(&store)[0].info.is_none(),
+            Store::tickers(&store).unwrap()[0].info.is_none(),
             "PROTO native required actual ingress strips truthy info"
         );
         expected[0].info = None;
@@ -171,13 +171,15 @@ fn run(scene: &'static str) -> Observed {
         _ => {}
     }
     assert_rows(
-        &Store::tickers(&store),
+        &Store::tickers(&store).unwrap(),
         &expected,
         "producer input before handler",
     );
     if scene == "symbol-sentinel" {
         assert!(
-            Store::tickers_by_symbol(&store).contains_key("__proto__"),
+            Store::tickers_by_symbol(&store)
+                .unwrap()
+                .contains_key("__proto__"),
             "PROTO native chosen borrowed own-entry view"
         );
         assert!(
@@ -297,7 +299,7 @@ fn run(scene: &'static str) -> Observed {
             "PROTO native handler success {scene}: {result:?}"
         )
     }
-    let rows = Store::tickers(&store).to_vec();
+    let rows = Store::tickers(&store).unwrap().to_vec();
     assert_rows(&rows, &expected, scene);
     assert_eq!(
         first.borrow().len(),
@@ -438,11 +440,13 @@ fn direct_id_cases() -> Vec<Value> {
         }
         if name != "reset-clear" {
             assert!(
-                Store::tickers_by_id(&store).contains_key("__proto__"),
+                Store::tickers_by_id(&store)
+                    .unwrap()
+                    .contains_key("__proto__"),
                 "PROTO native chosen ID own-entry view"
             );
             assert!(
-                Store::tickers(&store)[0].info.is_none(),
+                Store::tickers(&store).unwrap()[0].info.is_none(),
                 "PROTO native direct actual stored input"
             );
         }
@@ -551,7 +555,7 @@ fn direct_id_cases() -> Vec<Value> {
         if name == "own-shadow" {
             expected[1].last = 9.0;
         }
-        let rows = Store::tickers(&store).to_vec();
+        let rows = Store::tickers(&store).unwrap().to_vec();
         assert_rows(&rows, &expected, name);
         assert_eq!(
             *first.borrow(),

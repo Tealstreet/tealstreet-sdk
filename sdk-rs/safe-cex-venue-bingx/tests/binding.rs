@@ -167,7 +167,7 @@ fn bound_start() {
     let h = fixture();
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    let l = h.store.loaded().clone();
+    let l = h.store.loaded().unwrap().clone();
     assert!(l.markets && l.tickers && l.balance && l.positions && l.orders);
     assert!(
         h.runtime
@@ -200,12 +200,16 @@ fn bound_validate_account() {
 #[test]
 fn bound_fetch_positions() {
     let h = fixture();
-    let before = h.store.positions().to_vec();
+    let before = h.store.positions().unwrap().to_vec();
     let p = h.drive(h.venue().fetch_positions(None)).unwrap();
     assert_eq!(p.len(), 1);
     assert_eq!(p[0].symbol, "BTCUSDT");
     assert_eq!(p[0].contracts, 1.0);
-    assert_eq!(h.store.positions().to_vec(), before, "read must be pure");
+    assert_eq!(
+        h.store.positions().unwrap().to_vec(),
+        before,
+        "read must be pure"
+    );
     done(&h);
 }
 #[test]
@@ -214,7 +218,7 @@ fn bound_fetch_orders() {
     let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
     assert_eq!(orders.len(), 1);
     assert_eq!(orders[0].id, "9007199254740993");
-    assert!(h.store.orders().is_empty(), "read must be pure");
+    assert!(h.store.orders().unwrap().is_empty(), "read must be pure");
     done(&h);
 }
 #[test]
@@ -324,7 +328,7 @@ fn bound_cancel_orders() {
     h.drive(h.venue().cancel_orders(vec![order()])).unwrap();
     assert_eq!(h.http.calls(ORDER)[0].method, "DELETE");
     assert_eq!(h.http.calls(ORDER)[0].params["orderId"], "9007199254740993");
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
     done(&h);
 }
 #[test]
@@ -746,7 +750,13 @@ fn bound_batch_attempts_stop_loss_after_take_profit_rejection() {
     );
     assert_eq!(calls[1].data["type"], "TAKE_PROFIT_MARKET");
     assert_eq!(calls[2].data["type"], "STOP_MARKET");
-    assert!(h.store.orders().iter().any(|o| o.id == "stop-accepted"));
+    assert!(
+        h.store
+            .orders()
+            .unwrap()
+            .iter()
+            .any(|o| o.id == "stop-accepted")
+    );
     assert_eq!(h.http.calls("/openApi/swap/v1/positionSide/dual").len(), 1);
     h.runtime.reports.borrow_mut().clear();
     done(&h);
@@ -842,6 +852,7 @@ fn native_synced_clock_reaches_all_order_mapping_paths() {
         "private frame",
         h.store
             .orders()
+            .unwrap()
             .iter()
             .find(|o| o.id == "frame-order")
             .unwrap()
@@ -855,6 +866,7 @@ fn native_synced_clock_reaches_all_order_mapping_paths() {
         "placement",
         h.store
             .orders()
+            .unwrap()
             .iter()
             .find(|o| o.id == ids[0])
             .unwrap()
@@ -877,6 +889,7 @@ fn native_synced_clock_reaches_all_order_mapping_paths() {
         "replacement",
         h.store
             .orders()
+            .unwrap()
             .iter()
             .find(|o| o.id == "replacement-clock-id")
             .unwrap()
@@ -1005,7 +1018,7 @@ fn undefined_reduce_only_amendment_omits_the_signed_wire_field_like_source() {
     );
     // Control only clock and UUID entropy; execute the maintained class, actual
     // createAPI signer, installed qs and real HMAC over the source payload.
-    let input = json!({"order":source_order,"options":options(),"markets":&*h.store.markets(),"price":110,"timestamp":wire["timestamp"],"uuid":wire["clientOrderId"].as_str().unwrap().strip_prefix("ts").unwrap()});
+    let input = json!({"order":source_order,"options":options(),"markets":&*h.store.markets().unwrap(),"price":110,"timestamp":wire["timestamp"],"uuid":wire["clientOrderId"].as_str().unwrap().strip_prefix("ts").unwrap()});
     let source = Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1129,6 +1142,7 @@ fn refresh_markets_commits_valid_rows_around_bad_assets() {
     assert_eq!(
         h.store
             .markets()
+            .unwrap()
             .iter()
             .map(|m| m.symbol.as_str())
             .collect::<Vec<_>>(),
@@ -1180,7 +1194,7 @@ fn market_leverage_refusal_case(refresh: bool) {
         );
         let markets = if refresh {
             h.drive(h.venue().refresh_markets()).unwrap();
-            h.store.markets().to_vec()
+            h.store.markets().unwrap().to_vec()
         } else {
             h.drive(h.venue().fetch_markets()).unwrap()
         };
@@ -1278,7 +1292,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                     .unwrap();
                 h.runtime.pump();
             }
-            ticker_coercion::assert_native(&h.store.tickers(), case);
+            ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
         }
         assert!(
             h.runtime.reports.borrow().is_empty(),

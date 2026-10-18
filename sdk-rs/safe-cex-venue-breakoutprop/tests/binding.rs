@@ -298,15 +298,15 @@ fn start_loads_the_store_and_uses_polling_without_a_socket() {
     let f = fixture();
     f.run(f.exchange.start()).unwrap();
     assert!(
-        f.store.loaded().markets
-            && f.store.loaded().tickers
-            && f.store.loaded().balance
-            && f.store.loaded().orders
-            && f.store.loaded().positions
+        f.store.loaded().unwrap().markets
+            && f.store.loaded().unwrap().tickers
+            && f.store.loaded().unwrap().balance
+            && f.store.loaded().unwrap().orders
+            && f.store.loaded().unwrap().positions
     );
-    assert_eq!(f.store.balance().total, 50.25);
-    assert_eq!(f.store.markets().len(), 1);
-    assert_eq!(f.store.tickers().len(), 1);
+    assert_eq!(f.store.balance().unwrap().total, 50.25);
+    assert_eq!(f.store.markets().unwrap().len(), 1);
+    assert_eq!(f.store.tickers().unwrap().len(), 1);
     f.exchange.dispose().unwrap();
     assert!(f.runtime.exceptions.borrow().is_empty());
 }
@@ -352,14 +352,14 @@ fn fetch_tickers_reads_quotes() {
 fn fetch_positions_is_a_pure_portfolio_read() {
     let f = fixture();
     f.fetch_markets();
-    let before = f.store.positions().to_vec();
+    let before = f.store.positions().unwrap().to_vec();
     let rows = f
         .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].contracts, 0.0);
-    assert_eq!(&*f.store.positions(), before.as_slice());
-    assert!(!f.store.loaded().positions);
+    assert_eq!(&f.store.positions().unwrap(), before.as_slice());
+    assert!(!f.store.loaded().unwrap().positions);
     f.request("GET", "accounts/default:A/portfolio");
 }
 #[test]
@@ -367,8 +367,8 @@ fn fetch_orders_is_a_pure_portfolio_read() {
     let f = fixture();
     let rows = f.run(f.exchange.fetch_orders(None)).unwrap();
     assert!(rows.is_empty());
-    assert!(f.store.orders().is_empty());
-    assert!(!f.store.loaded().orders);
+    assert!(f.store.orders().unwrap().is_empty());
+    assert!(!f.store.loaded().unwrap().orders);
     let request = f.request("GET", "accounts/default:A/portfolio");
     assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
 }
@@ -653,9 +653,9 @@ fn observe_refusal(f: &Fixture, invoke: impl FnOnce() -> ExchangeError) -> Value
         }),
     );
     let snapshot = || {
-        let balance = f.store.balance();
+        let balance = f.store.balance().unwrap();
         (
-            serde_json::to_value(f.store.serialize()).unwrap(),
+            serde_json::to_value(f.store.serialize().unwrap()).unwrap(),
             [
                 balance.used.to_bits(),
                 balance.free.to_bits(),
@@ -846,7 +846,7 @@ pub fn accepted_typed_refusal(
 fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
     let f = fixture();
     f.fetch_markets();
-    let cached = f.store.markets().to_vec();
+    let cached = f.store.markets().unwrap().to_vec();
     let mut row = detail();
     row[field] = value;
     f.wire.faults.borrow_mut().push_back((
@@ -874,7 +874,7 @@ fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
         cached,
         "a valid prefix must not replace the cached markets"
     );
-    assert_eq!(&*f.store.markets(), cached.as_slice());
+    assert_eq!(&f.store.markets().unwrap(), cached.as_slice());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0].to_string().contains(cause),
@@ -968,12 +968,20 @@ fn assert_unknown_enum_survives_start(field: &str) {
     }
     f.run(f.exchange.start())
         .expect("unknown enum must not abort production startup");
-    assert!(f.store.loaded().balance && f.store.loaded().positions && f.store.loaded().orders);
-    assert_eq!(f.store.orders().len(), 1, "unknown rows must be retained");
+    assert!(
+        f.store.loaded().unwrap().balance
+            && f.store.loaded().unwrap().positions
+            && f.store.loaded().unwrap().orders
+    );
+    assert_eq!(
+        f.store.orders().unwrap().len(),
+        1,
+        "unknown rows must be retained"
+    );
     let row = if field == "positionSide" {
-        serde_json::to_value(&f.store.positions()[0]).unwrap()
+        serde_json::to_value(&f.store.positions().unwrap()[0]).unwrap()
     } else {
-        serde_json::to_value(&f.store.orders()[0]).unwrap()
+        serde_json::to_value(&f.store.orders().unwrap()[0]).unwrap()
     };
     let omitted = if field == "positionSide" {
         "side"
@@ -1344,7 +1352,7 @@ fn malformed_ticker_fallback(prefix: Value) {
         false,
     )
     .unwrap();
-    let cached = f.store.tickers().to_vec();
+    let cached = f.store.tickers().unwrap().to_vec();
     let errors = Rc::new(RefCell::new(Vec::<Js>::new()));
     let observed = errors.clone();
     f.exchange.base.on(
@@ -1359,7 +1367,7 @@ fn malformed_ticker_fallback(prefix: Value) {
     ]}));
     let rows = f.run(f.exchange.fetch_tickers()).unwrap();
     assert_eq!(rows, cached);
-    assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
+    assert_eq!(f.store.tickers().unwrap().as_slice(), cached.as_slice());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         String::from_utf16(
@@ -1388,7 +1396,11 @@ fn account_lookup_reads_only_selected_account_fields() {
         f.exchange.account_code.borrow().as_deref(),
         Some("default:A")
     );
-    assert!(f.store.loaded().orders && f.store.loaded().positions && f.store.loaded().balance);
+    assert!(
+        f.store.loaded().unwrap().orders
+            && f.store.loaded().unwrap().positions
+            && f.store.loaded().unwrap().balance
+    );
     f.request("GET", "accounts/default:A/portfolio");
     f.run(f.exchange.fetch_orders(None)).unwrap();
     assert_eq!(
@@ -1489,7 +1501,7 @@ fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
     queue_portfolio(&f, data.clone());
     f.run(f.exchange.start())
         .expect("TS balance ignores order rows");
-    let balance = f.store.balance().clone();
+    let balance = f.store.balance().unwrap().clone();
     assert_eq!(balance.total, 48.25);
     assert_eq!(balance.upnl, -2.0);
     assert_eq!(balance.used, 10.0);
@@ -1628,15 +1640,15 @@ fn portfolio_balance_and_filtered_positions_accept_native_intermediate_scalars()
         f.run(f.exchange.start()).unwrap();
         assert_eq!(
             (
-                f.store.balance().total,
-                f.store.balance().used,
-                f.store.balance().free
+                f.store.balance().unwrap().total,
+                f.store.balance().unwrap().used,
+                f.store.balance().unwrap().free
             ),
             (50.25, 10.0, 40.25)
         );
-        assert_eq!(f.store.positions().len(), 1);
-        assert_eq!(f.store.positions()[0].symbol, "BTCUSD");
-        assert_eq!(f.store.positions()[0].contracts, 0.0);
+        assert_eq!(f.store.positions().unwrap().len(), 1);
+        assert_eq!(f.store.positions().unwrap()[0].symbol, "BTCUSD");
+        assert_eq!(f.store.positions().unwrap()[0].contracts, 0.0);
         f.exchange.dispose().unwrap();
     }
 }
@@ -1906,7 +1918,7 @@ fn native_market_info_retains_nonfinite_undefined_and_utf16() {
         false,
     )
     .unwrap();
-    assert_retained_probe(&f.store.markets()[0], &["instrument"]);
+    assert_retained_probe(&f.store.markets().unwrap()[0], &["instrument"]);
 }
 #[test]
 fn native_portfolio_info_retains_nonfinite_undefined_and_utf16() {
@@ -2002,7 +2014,7 @@ fn native_balance_keeps_surrogate_symbol_info_without_premature_ticker_projectio
         ));
     }
     f.run(f.exchange.start()).unwrap();
-    let balance = f.store.balance().clone();
+    let balance = f.store.balance().unwrap().clone();
     for (name, number) in [
         ("total", balance.total),
         ("free", balance.free),

@@ -541,7 +541,7 @@ fn run(case: &Value, variant: u8) {
             }
         }
     }
-    native_orders(&store.orders(), &case["stored"]);
+    native_orders(&store.orders().unwrap(), &case["stored"]);
     // Request/clock/log records are compared only AFTER every native output/store assertion.
     wire_values(&Value::Array(trace.borrow().clone()), &case["trace"]);
     assert!(

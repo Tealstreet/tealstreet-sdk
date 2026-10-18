@@ -84,7 +84,7 @@ fn actual_typescript_current_margin_corpus() {
         )
         .expect("populate fixture Store");
         assert_eq!(
-            get_current_margin_type(row["symbol"].as_str().unwrap(), &cache, &store),
+            get_current_margin_type(row["symbol"].as_str().unwrap(), &cache, &store).unwrap(),
             margin(&row["expected"]),
             "current-margin/native/{label}"
         );

@@ -127,7 +127,7 @@ fn run(row: &Value) -> Value {
             }),
         );
     }
-    let instance = ChaserOrderInstance::new(venue, options);
+    let instance = ChaserOrderInstance::new(venue, options).unwrap();
     instance.set_min_tick_distance(number(&row["distance"]));
     let result = match find_best_price(&instance) {
         Ok(v) => json!({"price":bits(v)}),

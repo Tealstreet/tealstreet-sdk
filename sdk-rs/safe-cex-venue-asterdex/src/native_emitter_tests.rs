@@ -143,8 +143,8 @@ fn native_private_balance_frame_commits_store_and_emits_account() {
         let account = watch(&venue, "account");
         let data = json!({"e":"outboundAccountPosition","B":[{"a":"USDT","f":"70","l":"30"}]});
         frame(&venue, data.clone());
-        assert_eq!(store.balance().free, 70.0);
-        assert_eq!(store.balance().total, 100.0);
+        assert_eq!(store.balance().unwrap().free, 70.0);
+        assert_eq!(store.balance().unwrap().total, 100.0);
         assert_eq!(*account.borrow(), vec![data]);
     });
 }
@@ -159,11 +159,11 @@ fn native_private_position_frame_commits_store_and_emits_one_positions_array() {
             &venue,
             json!({"e":"ACCOUNT_UPDATE","E":1700000000000u64,"a":{"P":[{"s":"BTCUSDT","ps":"BOTH","pa":"2","ep":"102","up":"0"}],"B":[]}}),
         );
-        assert_eq!(store.positions()[0].contracts, 2.0);
-        assert_eq!(store.positions()[0].entry_price, 102.0);
+        assert_eq!(store.positions().unwrap()[0].contracts, 2.0);
+        assert_eq!(store.positions().unwrap()[0].entry_price, 102.0);
         assert_eq!(
             *positions.borrow(),
-            vec![serde_json::to_value(store.positions().to_vec()).unwrap()]
+            vec![serde_json::to_value(store.positions().unwrap().to_vec()).unwrap()]
         );
     });
 }

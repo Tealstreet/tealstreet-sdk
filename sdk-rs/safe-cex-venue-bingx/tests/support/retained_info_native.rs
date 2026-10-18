@@ -90,14 +90,14 @@ fn native_private_socket_and_store_keep_opaque_bingx_info() {
         let socket = ListenKeyHost::create_socket(venue.host.as_ref(), &url).unwrap();
         ListenKeyHost::add_listener(venue.host.as_ref(), socket, PrivateListener::Message).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
-            while store.orders().is_empty() {
+            while store.orders().unwrap().is_empty() {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         })
         .await
         .expect("actual BingX private frame must commit its retained order");
         {
-            let orders = store.orders();
+            let orders = store.orders().unwrap();
             assert_eq!(orders.len(), 1);
             assert_eq!(orders[0].id, "retained-order");
             assert_eq!(orders[0].symbol, "BTCUSDT");

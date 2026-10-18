@@ -234,7 +234,9 @@ fn spot_fetch_and_set_orders_replaces_the_full_set() {
     h.drive(h.venue().fetch_and_set_orders(Some(vec!["XBT/USD".into()])))
         .unwrap();
     assert!(
-        safe_cex_store::Store::orders(h.store.as_ref()).is_empty(),
+        safe_cex_store::Store::orders(h.store.as_ref())
+            .unwrap()
+            .is_empty(),
         "Kraken spot fetchAndSetOrders must replace every order"
     );
 }

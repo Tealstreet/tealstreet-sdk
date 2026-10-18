@@ -192,9 +192,9 @@ fn run(case: &Value) -> Trace {
             }
             "snapshot" => snapshots.push(Snapshot {
                 state: f.repairs.state(),
-                positions: f.store.positions().to_vec(),
-                orders: f.store.orders().to_vec(),
-                loaded: f.store.loaded().clone(),
+                positions: f.store.positions().unwrap().to_vec(),
+                orders: f.store.orders().unwrap().to_vec(),
+                loaded: f.store.loaded().unwrap().clone(),
                 timers: f.runtime.timers(),
                 requests: f.parent.requests.borrow().len(),
                 notifications: f.notifications.get(),

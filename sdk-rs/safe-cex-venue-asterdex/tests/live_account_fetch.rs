@@ -473,22 +473,22 @@ fn account_fetch_matches_source() {
         // Native Store values and logs are checked for all scenarios before any
         // request/wire comparison, not serialized from native models.
         assert_eq!(
-            store.options().is_hedged,
+            store.options().unwrap().is_hedged,
             c["state"]["isHedged"].as_bool().unwrap(),
             "{name} native hedged"
         );
         assert_eq!(
-            *store.balance(),
+            store.balance().unwrap(),
             serde_json::from_value::<Balance>(c["state"]["balance"].clone()).unwrap(),
             "{name} native balance"
         );
         assert_eq!(
-            *store.loaded(),
+            store.loaded().unwrap(),
             serde_json::from_value::<StoreDataLoaded>(c["state"]["loaded"].clone()).unwrap(),
             "{name} native loaded"
         );
         assert_native_models(
-            &store.positions(),
+            &store.positions().unwrap(),
             &c["state"]["positions"],
             &format!("{name} native stored positions"),
             |v| v.info.take(),

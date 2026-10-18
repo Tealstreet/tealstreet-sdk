@@ -61,7 +61,9 @@ fn live_symbols_corpus() {
                 market_id_to_symbol(key, &store)
             };
             assert_eq!(
-                actual.map_or(json!({"undefined":true}), Value::String),
+                actual
+                    .unwrap()
+                    .map_or(json!({"undefined":true}), Value::String),
                 case["expected"],
                 "symbols_{name}_native case={i} path={path}"
             );
@@ -98,7 +100,7 @@ fn live_symbols_corpus() {
             market_id_to_symbol("id", &store)
         };
         assert_eq!(
-            actual.as_deref(),
+            actual.unwrap().as_deref(),
             Some("id"),
             "typed_store_prototype_boundary"
         );

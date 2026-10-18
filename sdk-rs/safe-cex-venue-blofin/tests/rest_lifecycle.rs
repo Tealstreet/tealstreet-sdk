@@ -273,7 +273,7 @@ fn state(a: &StoreData, e: &Value) {
     }
 }
 fn snapshot(s: &DefaultStore) -> StoreData {
-    Store::serialize(s)
+    Store::serialize(s).unwrap()
 }
 fn store(i: &Value) -> DefaultStore {
     let models = &corpus()["models"];
@@ -414,7 +414,7 @@ fn read_cases(method: &str, expected_count: usize) {
                         *actual[0].info.as_mut().unwrap().get_mut("stored").unwrap() =
                             json!(false).into();
                         assert!(
-                            s.markets()[0]
+                            s.markets().unwrap()[0]
                                 .info
                                 .as_ref()
                                 .unwrap()
@@ -830,7 +830,7 @@ impl ConstructorHost for Constructor<'_> {
     ) -> Result<usize, String> {
         assert_eq!(name, ExchangeName::Blofin);
         assert_eq!(o.key, "k");
-        assert_eq!(s.markets().len(), 1);
+        assert_eq!(s.markets().unwrap().len(), 1);
         self.trace.push(json!(["super", "blofin"]));
         if self.stop == "super" {
             Err("super failed".into())
@@ -1370,7 +1370,7 @@ fn native_rest_boundaries() {
     assert_eq!(error(ready(start(&host)).unwrap_err()), "raw failure");
     host.markets_released.set(true);
     assert!(
-        !host.s.loaded().markets,
+        !host.s.loaded().unwrap().markets,
         "native pending peer dropped after Promise.all rejection"
     );
     assert_eq!(

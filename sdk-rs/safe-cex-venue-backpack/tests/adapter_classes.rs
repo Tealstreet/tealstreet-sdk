@@ -155,7 +155,10 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
         json!({"e":"ticker","s":"BTC_USDC","c":"100.5","P":"0.02","v":"3","q":"301.5"}),
     );
     assert_eq!(
-        (store.tickers()[0].last, store.tickers()[0].percentage),
+        (
+            store.tickers().unwrap()[0].last,
+            store.tickers().unwrap()[0].percentage
+        ),
         (100.5, 2.0)
     );
     frame(
@@ -318,7 +321,7 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
         [units("native-id")],
         "CLASS native bound order placement"
     );
-    assert_eq!(store.markets()[0].symbol, "BTC_USDC");
+    assert_eq!(store.markets().unwrap()[0].symbol, "BTC_USDC");
     o.dispose().unwrap();
     assert!(o.base.is_disposed(), "CLASS native disposal");
 }
@@ -331,12 +334,12 @@ fn concrete_public_throttle_and_weak_listener_lifetime() {
     };
     p.ticker_handler.call(data("10")).unwrap();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         10.0f64.to_bits(),
         "PUBLIC CLASS native ticker binding"
     );
     assert_eq!(
-        store.tickers()[0].percentage.to_bits(),
+        store.tickers().unwrap()[0].percentage.to_bits(),
         50.0f64.to_bits(),
         "PUBLIC CLASS native percentage binding"
     );
@@ -345,14 +348,14 @@ fn concrete_public_throttle_and_weak_listener_lifetime() {
     rt.now.set(1000.0);
     p.ticker_handler.call(data("30")).unwrap();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         30.0f64.to_bits(),
         "PUBLIC CLASS native throttle leading value"
     );
     rt.now.set(2000.0);
     rt.pump();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         30.0f64.to_bits(),
         "PUBLIC CLASS native stale trailing canceled"
     );
@@ -360,7 +363,7 @@ fn concrete_public_throttle_and_weak_listener_lifetime() {
     rt.now.set(2100.0);
     p.ticker_handler.call(data("40")).unwrap();
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         40.0f64.to_bits(),
         "PUBLIC CLASS native cancel resets timestamp"
     );
@@ -394,28 +397,28 @@ fn concrete_public_depth_ticker_throttle_uses_source_100ms_window() {
         |bid: &str| Native::from_prepared(json!({"s":"BTC_USDC","b":[[bid,"1"]],"a":[]}).into());
     depth.call(data("10")).unwrap();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         10.0f64.to_bits(),
         "DEPTH leading"
     );
     rt.now.set(50.0);
     depth.call(data("15")).unwrap();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         10.0f64.to_bits(),
         "DEPTH inside window deferred"
     );
     rt.now.set(100.0);
     rt.pump();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         15.0f64.to_bits(),
         "DEPTH trailing fires at the source throttle(updateTickerFromDepth, 100) window"
     );
     rt.now.set(250.0);
     depth.call(data("20")).unwrap();
     assert_eq!(
-        store.tickers()[0].bid.to_bits(),
+        store.tickers().unwrap()[0].bid.to_bits(),
         20.0f64.to_bits(),
         "DEPTH leading after window"
     );
@@ -447,11 +450,11 @@ fn concrete_private_handler_and_throttle_state() {
     p.on_message(&safe_cex_transport::socket::SocketFrame::Text(raw))
         .unwrap();
     assert_eq!(
-        store.orders().len(),
+        store.orders().unwrap().len(),
         1,
         "PRIVATE CLASS native dispatcher order count"
     );
-    let order = store.orders()[0].clone();
+    let order = store.orders().unwrap()[0].clone();
     assert_eq!(order.id, "private-id", "PRIVATE CLASS native dispatcher ID");
     assert_eq!(
         order.amount.to_bits(),
@@ -551,10 +554,10 @@ fn shared_runtime_graph_reaches_backpack_throttled_ticker_without_projection() {
         ("v", Js::Number(f64::INFINITY)),
         ("q", Js::Number(f64::NEG_INFINITY)),
     ]);
-    let prior_percentage = store.tickers()[0].percentage;
+    let prior_percentage = store.tickers().unwrap()[0].percentage;
     assert!(data.field("P").unwrap().as_f64().unwrap().is_nan());
     socket.ticker_handler.call(data.clone()).unwrap();
-    let ticker = store.tickers()[0].clone();
+    let ticker = store.tickers().unwrap()[0].clone();
     assert_eq!(ticker.last.to_bits(), (-0.0f64).to_bits());
     assert_eq!(ticker.percentage.to_bits(), prior_percentage.to_bits());
     assert_eq!(ticker.volume, f64::INFINITY);
@@ -576,7 +579,7 @@ fn shared_runtime_graph_reaches_backpack_throttled_ticker_without_projection() {
     runtime.now.set(1000.0);
     runtime.pump();
     assert_eq!(
-        store.tickers()[0].last,
+        store.tickers().unwrap()[0].last,
         37.5,
         "SHARED GRAPH deferred reader sees runtime mutation"
     );

@@ -107,6 +107,7 @@ impl CoinbasePrivateOrderSnapshot<Order> {
 mod tests {
     use super::CoinbasePrivateOrderSnapshot;
     use safe_cex_exchange::native_store::DefaultStore;
+    use safe_cex_store::Store;
     use safe_cex_types::{
         Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, StoreSubscriberError,
     };
@@ -160,18 +161,18 @@ mod tests {
         snapshot
             .apply_order_snapshot_batch(&store, 50, &first)
             .unwrap();
-        assert!(store.orders()?.is_empty());
+        assert!(store.orders().unwrap().is_empty());
 
         let replacement = [order("one", 11.0)];
         snapshot
             .apply_order_snapshot_batch(&store, 1, &replacement)
             .unwrap();
-        let actual = store.orders()?;
+        let actual = store.orders().unwrap();
         assert_eq!(actual.len(), 2, "snapshot batch count fixture");
         assert_eq!(actual[0].id, "one", "snapshot insertion order");
         assert_eq!(actual[0].price, 11.0, "snapshot replacement identity");
         assert_eq!(actual[1].id, "two", "snapshot second field identity");
-        assert!(store.loaded()?.orders);
+        assert!(store.loaded().unwrap().orders);
         assert_eq!(snapshot.pending_raw_order_count(), 0);
     }
 
@@ -182,11 +183,14 @@ mod tests {
         let mut snapshot = CoinbasePrivateOrderSnapshot::default();
         snapshot.apply_order_snapshot_batch(&store, 1, &[]).unwrap();
         assert_eq!(
-            store.orders()?[0].id,
+            store.orders().unwrap()[0].id,
             "old",
             "quarantined snapshot retention"
         );
-        assert!(!store.loaded()?.orders, "quarantined snapshot loaded flag");
+        assert!(
+            !store.loaded().unwrap().orders,
+            "quarantined snapshot loaded flag"
+        );
     }
 
     #[test]
@@ -195,8 +199,11 @@ mod tests {
         store.add_or_update_order(order("old", 9.0)).unwrap();
         let mut snapshot = CoinbasePrivateOrderSnapshot::default();
         snapshot.apply_order_snapshot_batch(&store, 0, &[]).unwrap();
-        assert!(store.orders()?.is_empty(), "empty snapshot clears orders");
-        assert!(store.loaded()?.orders, "empty snapshot loaded flag");
+        assert!(
+            store.orders().unwrap().is_empty(),
+            "empty snapshot clears orders"
+        );
+        assert!(store.loaded().unwrap().orders, "empty snapshot loaded flag");
     }
 
     #[test]
@@ -212,11 +219,14 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.to_string(), "subscriber failed");
         assert_eq!(
-            store.orders()?[0].id,
+            store.orders().unwrap()[0].id,
             "one",
             "snapshot commits before error"
         );
-        assert!(store.loaded()?.orders, "loaded flag commits before error");
+        assert!(
+            store.loaded().unwrap().orders,
+            "loaded flag commits before error"
+        );
         assert_eq!(
             snapshot.pending_raw_order_count(),
             0,

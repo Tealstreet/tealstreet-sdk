@@ -202,7 +202,12 @@ fn futures_tickers_live_oracle() {
             "TICKER native trace arguments"
         );
         assert_eq!(
-            store.tickers().iter().map(snapshot).collect::<Vec<_>>(),
+            store
+                .tickers()
+                .unwrap()
+                .iter()
+                .map(snapshot)
+                .collect::<Vec<_>>(),
             case["storeAfter"].as_array().unwrap().clone(),
             "TICKER post-trace Store state"
         );
@@ -223,7 +228,7 @@ fn futures_tickers_live_oracle() {
                 assert_eq!(case["sameFallback"], true, "TICKER source fallback alias");
                 assert_ne!(
                     tickers.as_ptr(),
-                    store.tickers().as_ptr(),
+                    store.tickers().unwrap().as_ptr(),
                     "TICKER CHOSEN owned fallback snapshot"
                 );
             }

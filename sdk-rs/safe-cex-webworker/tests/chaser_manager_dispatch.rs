@@ -178,7 +178,7 @@ fn venue(rt: Rc<runtime::Runtime>, events: Rc<RefCell<Vec<Event>>>) -> Rc<dyn Ex
 fn instance(ex: Rc<dyn Exchange>, rt: &runtime::Runtime, id: &str) -> Rc<ChaserOrderInstance> {
     *rt.id.borrow_mut() = Some(id.into());
     let o:ChaserOrderOptions=serde_json::from_value(json!({"symbol":"BTC","size":3,"side":"buy","maxAttempts":10,"delay":100,"reduceOnly":false})).unwrap();
-    Rc::new(ChaserOrderInstance::new(ex, Rc::new(RefCell::new(o))))
+    Rc::new(ChaserOrderInstance::new(ex, Rc::new(RefCell::new(o))).unwrap())
 }
 fn profile(e: &[Event]) -> Value {
     json!(

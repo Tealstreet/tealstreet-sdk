@@ -195,7 +195,7 @@ fn position_pnl_native_bits() {
     assert_eq!(rows.len(), 19, "PNL independent source floor");
     for row in rows {
         let store = store(row["raw"].as_str().unwrap());
-        let positions = store.positions();
+        let positions = store.positions().unwrap();
         let expected = row["derived"]
             .get("bits")
             .map(|_| expected_bits(&row["derived"]));
@@ -214,7 +214,10 @@ fn total_pnl_native_bits() {
     for row in rows {
         let store = store(row["raw"].as_str().unwrap());
         assert_eq!(
-            bits(calculate_upnl_from_positions(&store.positions(), &store)),
+            bits(calculate_upnl_from_positions(
+                &store.positions().unwrap(),
+                &store
+            )),
             expected_bits(&row["total"]),
             "TOTAL PNL native bits {row}"
         );
@@ -233,6 +236,7 @@ fn sync_native_store_order() {
         let prior = RefCell::new(
             store
                 .positions()
+                .unwrap()
                 .iter()
                 .map(|p| bits(p.unrealized_pnl))
                 .collect::<Vec<_>>(),
@@ -258,12 +262,16 @@ fn sync_native_store_order() {
         sync_balance_upnl_from_positions(&store, None).unwrap();
         let expected = row["positions"].as_array().unwrap();
         let count = if index <= 16 { 1 } else { 2 };
-        assert_eq!(store.positions().len(), count, "SYNC native position count");
+        assert_eq!(
+            store.positions().unwrap().len(),
+            count,
+            "SYNC native position count"
+        );
         assert_eq!(expected.len(), count, "SYNC source position count");
-        for (actual, expected) in store.positions().iter().zip(expected) {
+        for (actual, expected) in store.positions().unwrap().iter().zip(expected) {
             assert_position(actual, expected, "SYNC");
         }
-        let balance = store.balance();
+        let balance = store.balance().unwrap();
         for (field, value) in [
             ("free", balance.free),
             ("used", balance.used),
@@ -536,12 +544,12 @@ fn sync_subscriber_failure_preserves_error() {
         "SYNC original listener context"
     );
     assert_eq!(
-        store.balance().upnl,
+        store.balance().unwrap().upnl,
         0.0,
         "SYNC failed position notification prevents balance write"
     );
     assert_eq!(
-        store.positions()[0].unrealized_pnl,
+        store.positions().unwrap()[0].unrealized_pnl,
         4.0,
         "SYNC position mutation precedes failure"
     );
@@ -561,7 +569,7 @@ fn sync_reads_balance_after_position_notification() {
             count.set(n + 1);
             if n == 0 {
                 let store = weak.upgrade().unwrap();
-                let mut balance = store.balance().clone();
+                let mut balance = store.balance().unwrap().clone();
                 balance.free = -123.0;
                 Store::update(
                     &*store,
@@ -578,12 +586,12 @@ fn sync_reads_balance_after_position_notification() {
     );
     sync_balance_upnl_from_positions(&*store, None).unwrap();
     assert_eq!(
-        store.balance().free,
+        store.balance().unwrap().free,
         -123.0,
         "SYNC live balance read after notification"
     );
     assert_eq!(
-        store.balance().upnl,
+        store.balance().unwrap().upnl,
         2.0,
         "SYNC balance sum after notification"
     );

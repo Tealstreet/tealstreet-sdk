@@ -261,7 +261,7 @@ fn fixture(
     let mut opts:ChaserOrderOptions=serde_json::from_value(json!({"symbol":"BTC","size":3,"side":"buy","maxAttempts":10,"delay":100,"reduceOnly":false})).unwrap();
     opts.size = size;
     *host.runtime.id.borrow_mut() = Some("i".into());
-    let instance = Rc::new(ChaserOrderInstance::new(ex, Rc::new(RefCell::new(opts))));
+    let instance = Rc::new(ChaserOrderInstance::new(ex, Rc::new(RefCell::new(opts))).unwrap());
     *host.instance.borrow_mut() = Rc::downgrade(&instance);
     let manager = ChaserOrderManager::new();
     manager.instances().borrow_mut().push(instance.clone());

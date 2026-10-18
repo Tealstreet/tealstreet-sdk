@@ -427,7 +427,7 @@ impl WorkerBootstrapHost for Host {
     fn construct_exchange_start(&self, ex: Rc<dyn Exchange>) -> ExchangeFuture<'static, ()> {
         if let Some(expected) = self.state.expected_seed.get() {
             assert_eq!(
-                ex.base().store.serialize().latency.to_bits(),
+                ex.base().store.serialize().unwrap().latency.to_bits(),
                 expected.to_bits(),
                 "SESSION native store seeded inside venue start prefix"
             );
@@ -769,7 +769,7 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
     w.handle_payload(payload(StoreWorkerOp::Store, Some(json!({"latency":17}))))
         .unwrap();
     assert_eq!(
-        w.store().serialize().latency.to_bits(),
+        w.store().serialize().unwrap().latency.to_bits(),
         17f64.to_bits(),
         "BOOT native decoded store update"
     );
@@ -778,7 +778,7 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
         Some(json!({"tickers":true})),
     ))
     .unwrap();
-    assert!(w.store().loaded().tickers);
+    assert!(w.store().loaded().unwrap().tickers);
     w.handle_payload(payload(
         StoreWorkerOp::MergeMessageHandlerStats,
         Some(json!({"private":1})),
@@ -792,6 +792,7 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
     assert_eq!(
         w.store()
             .message_handler_stats()
+            .unwrap()
             .as_ref()
             .unwrap()
             .get("private"),
@@ -800,6 +801,7 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
     assert_eq!(
         w.store()
             .message_handler_stats()
+            .unwrap()
             .as_ref()
             .unwrap()
             .get("public"),
@@ -941,7 +943,7 @@ fn session_registry_seed_reuse_precedence_mismatch_and_dispose() {
     let worker = session.get_worker().unwrap();
     assert!(Rc::ptr_eq(&table.borrow()["a"], &worker));
     assert_eq!(
-        worker.store().serialize().latency.to_bits(),
+        worker.store().serialize().unwrap().latency.to_bits(),
         7f64.to_bits(),
         "SESSION native store seeded before start"
     );

@@ -251,7 +251,7 @@ fn fixture(
     )
 }
 fn state(store: &DefaultStore) -> Value {
-    json!(store.orders().iter().map(|o|{let mut out=json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number((o.price).to_number()),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"close":o.close.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"timeInForce":o.time_in_force.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"lastUpdate":number(o.last_update)});out["info"]=o.info.as_ref().map(retained_observe::observe).unwrap_or(json!({"undefined":true}));out}).collect::<Vec<_>>())
+    json!(store.orders().unwrap().iter().map(|o|{let mut out=json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number((o.price).to_number()),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"close":o.close.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"timeInForce":o.time_in_force.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"lastUpdate":number(o.last_update)});out["info"]=o.info.as_ref().map(retained_observe::observe).unwrap_or(json!({"undefined":true}));out}).collect::<Vec<_>>())
 }
 fn invoke(venue: &Rc<BingxPlacement>, method: &str, input: &Value) -> Result<Value, ExchangeError> {
     let opts: PlaceOrderOpts = serde_json::from_value(input["opts"].clone()).unwrap();
@@ -576,7 +576,7 @@ fn callable_legacy_and_inherited_mapper_boundaries_are_explicit() {
         "BINGX-PLACE typed batch mapper refuses inherited TIF"
     );
     assert!(
-        store.orders().is_empty(),
+        store.orders().unwrap().is_empty(),
         "BINGX-PLACE no callable order cache"
     );
     assert_eq!(

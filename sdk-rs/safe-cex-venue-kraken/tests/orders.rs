@@ -349,17 +349,17 @@ fn futures_orders_live_source() {
                     aliases += 1;
                     assert_ne!(
                         values.as_ptr(),
-                        store.orders().as_ptr(),
+                        store.orders().unwrap().as_ptr(),
                         "ORDERS CHOSEN owned fallback"
                     );
                     assert_eq!(
                         case["storeAfterAlias"][0]["id"], "ALIASED",
                         "ORDERS source alias witness"
                     );
-                    let before = store.orders()[0].id.clone();
+                    let before = store.orders().unwrap()[0].id.clone();
                     values[0].id = "NATIVE-ONLY".into();
                     assert_eq!(
-                        store.orders()[0].id,
+                        store.orders().unwrap()[0].id,
                         before,
                         "ORDERS CHOSEN fallback mutation isolation"
                     );
@@ -368,6 +368,7 @@ fn futures_orders_live_source() {
         }
         for (native, expected) in store
             .orders()
+            .unwrap()
             .iter()
             .zip(case["storeBefore"].as_array().unwrap())
         {

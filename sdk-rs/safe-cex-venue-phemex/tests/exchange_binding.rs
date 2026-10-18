@@ -282,7 +282,7 @@ fn fetch_markets_preserves_distinct_steps_and_filters_products() {
     assert_eq!(m.len(), 1, "markets census");
     assert_eq!((m[0].precision.amount, m[0].precision.price), (0.003, 0.25));
     assert_eq!(m[0].limits.leverage.max, 50.0);
-    assert!(h.store.markets().is_empty(), "read stays pure");
+    assert!(h.store.markets().unwrap().is_empty(), "read stays pure");
     let req = &h.http.calls("/public/products")[0];
     assert_eq!(req.base_url, "https://api.phemex.com");
     assert_eq!(req.headers["X-PHEMEX-ACCESS-TOKEN"], "fixture-key");
@@ -321,7 +321,7 @@ fn validate_account_returns_balance_and_keeps_store_pure() {
     let v = h.drive(h.venue().validate_account()).unwrap();
     let b = v.balance.unwrap();
     assert_eq!((b.total, b.used, b.free), (1000.0, 200.0, 800.0));
-    assert_eq!(h.store.balance().total, 0.0);
+    assert_eq!(h.store.balance().unwrap().total, 0.0);
     assert_eq!(serde_json::to_value(v.error).unwrap(), "");
 }
 #[test]
@@ -335,10 +335,10 @@ fn fetch_positions_supports_symbol_recovery_and_pure_full_snapshots() {
     assert_eq!(p[0].contracts, 2.0);
     assert_eq!(p[0].unrealized_pnl, 20.0);
     assert_eq!(p[0].margin_type, Some(MarginType::Cross));
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.positions().unwrap().is_empty());
     let all = h.drive(h.venue().fetch_positions(None)).unwrap();
     assert_eq!(all.len(), 2, "both settlement replies mapped");
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.positions().unwrap().is_empty());
 }
 #[test]
 fn fetch_orders_returns_the_store_snapshot_without_http() {
@@ -362,10 +362,10 @@ fn start_populates_snapshots_and_opens_both_sockets() {
     let h = venue();
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    assert_eq!(h.store.markets().len(), 1);
-    assert_eq!(h.store.tickers().len(), 1);
-    assert_eq!(h.store.balance().total, 2000.0);
-    assert!(h.store.loaded().positions);
+    assert_eq!(h.store.markets().unwrap().len(), 1);
+    assert_eq!(h.store.tickers().unwrap().len(), 1);
+    assert_eq!(h.store.balance().unwrap().total, 2000.0);
+    assert!(h.store.loaded().unwrap().positions);
     assert_eq!(h.runtime.sockets.borrow().len(), 2);
     let private = h.runtime.sockets.borrow()[1].1.clone();
     let sent = private.sent.borrow().clone();
@@ -411,7 +411,7 @@ fn place_order_honors_id_and_distinct_amount_price_precision() {
     assert_eq!(calls[0].params["orderQtyRq"], "0.009");
     assert_eq!(calls[0].params["priceRp"], "100");
     assert_eq!(calls[0].data, Value::Null);
-    assert_eq!(h.store.orders().len(), 1);
+    assert_eq!(h.store.orders().unwrap().len(), 1);
 }
 #[test]
 fn update_order_cancels_then_replaces() {
@@ -456,7 +456,7 @@ fn cancel_orders_deduplicates_parent_and_updates_status() {
     let calls = h.http.calls("/g-orders/cancel");
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].params["orderID"], "o-old");
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
 }
 #[test]
 fn set_leverage_retains_cross_margin_and_records_confirmed_metadata() {
@@ -467,7 +467,7 @@ fn set_leverage_retains_cross_margin_and_records_confirmed_metadata() {
     let calls = h.http.calls("/g-positions/leverage");
     assert_eq!(calls[0].params["longLeverageRr"], -7.0);
     assert_eq!(calls[0].params["shortLeverageRr"], -7.0);
-    let all = serde_json::to_value(&*h.store.fetched_leverage()).unwrap();
+    let all = serde_json::to_value(&h.store.fetched_leverage().unwrap()).unwrap();
     assert_eq!(all[SYMBOL]["buyLeverage"], 7.0);
     assert_eq!(all[SYMBOL]["marginType"], "cross");
 }
@@ -482,7 +482,7 @@ fn change_position_mode_sends_symbol_and_records_raw_mode() {
         calls[0].params,
         json!({"symbol":SYMBOL,"targetPosMode":"OneWay"})
     );
-    let all = serde_json::to_value(&*h.store.fetched_leverage()).unwrap();
+    let all = serde_json::to_value(&h.store.fetched_leverage().unwrap()).unwrap();
     assert_eq!(all[SYMBOL]["positionMode"], "hedged");
 }
 #[test]
@@ -495,7 +495,7 @@ fn change_margin_type_retains_existing_leverage() {
         h.http.calls("/g-positions/leverage")[0].params["longLeverageRr"],
         10.0
     );
-    let all = serde_json::to_value(&*h.store.fetched_leverage()).unwrap();
+    let all = serde_json::to_value(&h.store.fetched_leverage().unwrap()).unwrap();
     assert_eq!(all[SYMBOL]["marginType"], "isolated");
 }
 #[test]
@@ -541,10 +541,10 @@ fn public_only_start_has_no_private_requests_or_socket() {
     h.runtime.pump();
     assert_eq!(h.runtime.sockets.borrow().len(), 1);
     assert!(h.http.calls("/g-accounts/accountPositions").is_empty());
-    assert_eq!(h.store.balance().total, 0.0);
-    assert!(h.store.loaded().balance);
-    assert!(h.store.loaded().orders);
-    assert!(h.store.loaded().positions);
+    assert_eq!(h.store.balance().unwrap().total, 0.0);
+    assert!(h.store.loaded().unwrap().balance);
+    assert!(h.store.loaded().unwrap().orders);
+    assert!(h.store.loaded().unwrap().positions);
 }
 #[test]
 fn invalid_client_id_rejects_before_any_http_or_store_effect() {
@@ -556,7 +556,7 @@ fn invalid_client_id_rejects_before_any_http_or_store_effect() {
         .unwrap_err();
     assert!(error.message.contains("Phemex"));
     assert!(h.http.requests.borrow().is_empty());
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
 }
 #[test]
 fn disposal_during_start_ignores_late_market_reply() {
@@ -578,9 +578,9 @@ fn disposal_during_start_ignores_late_market_reply() {
     h.venue().dispose().unwrap();
     release.set(true);
     h.drive(future).unwrap();
-    assert!(h.store.markets().is_empty());
-    assert!(h.store.tickers().is_empty());
-    assert_eq!(h.store.balance().total, 0.0);
+    assert!(h.store.markets().unwrap().is_empty());
+    assert!(h.store.tickers().unwrap().is_empty());
+    assert_eq!(h.store.balance().unwrap().total, 0.0);
     assert!(h.runtime.sockets.borrow().is_empty());
 }
 #[derive(Default)]
@@ -859,7 +859,7 @@ fn unloaded_positions_omit_reduce_only_after_raw_mode_lookup() {
     // mode recovery may read REST; it must not populate the positions cache.
     let h = one_way_venue();
     seed(&h);
-    assert!(!h.store.loaded().positions);
+    assert!(!h.store.loaded().unwrap().positions);
     let mut opts = order();
     opts.reduce_only = Some(true);
     h.drive(h.venue().base().place_order(h.venue(), opts))
@@ -875,13 +875,13 @@ fn unloaded_positions_omit_reduce_only_after_raw_mode_lookup() {
         1,
         "only raw mode recovery reads the account"
     );
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.positions().unwrap().is_empty());
 }
 #[test]
 fn loaded_missing_position_is_fetched_once_and_cached_for_formatting() {
     let h = one_way_venue();
     seed(&h);
-    let mut loaded = h.store.loaded().clone();
+    let mut loaded = h.store.loaded().unwrap().clone();
     loaded.positions = true;
     Store::update(
         h.store.as_ref(),
@@ -902,7 +902,7 @@ fn loaded_missing_position_is_fetched_once_and_cached_for_formatting() {
         "order-side fetch must be reused by reduceOnly formatting"
     );
     assert_eq!(
-        h.store.positions().len(),
+        h.store.positions().unwrap().len(),
         1,
         "recovery commits the fetched row"
     );
@@ -946,7 +946,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),

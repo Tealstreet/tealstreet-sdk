@@ -362,7 +362,7 @@ fn fallback_snapshot_boundary() {
             assert_eq!(returned.free, 123.0);
             assert_eq!(expected["observed"], 123, "source_balance_fallback_alias");
             assert_eq!(
-                safe_cex_store::Store::balance(&store).free,
+                safe_cex_store::Store::balance(&store).unwrap().free,
                 893.0,
                 "owned_balance_fallback"
             );
@@ -377,7 +377,7 @@ fn fallback_snapshot_boundary() {
                 "source_orders_fallback_alias"
             );
             assert_eq!(
-                safe_cex_store::Store::orders(&store)[0].id,
+                safe_cex_store::Store::orders(&store).unwrap()[0].id,
                 "cached-order",
                 "owned_orders_fallback"
             );

@@ -712,7 +712,7 @@ fn fetch_leverage_native_cache_and_fallback() {
         }
         let expected_count = if index == 2 { 1 } else { 2 };
         assert_eq!(
-            s.fetched_leverage().len(),
+            s.fetched_leverage().unwrap().len(),
             expected_count,
             "FETCH LEVERAGE independent cache count"
         );
@@ -721,7 +721,11 @@ fn fetch_leverage_native_cache_and_fallback() {
             expected_count,
             "FETCH LEVERAGE independent source cache count"
         );
-        native_cache(&s.fetched_leverage(), &row["cache"], "FETCH LEVERAGE");
+        native_cache(
+            &s.fetched_leverage().unwrap(),
+            &row["cache"],
+            "FETCH LEVERAGE",
+        );
         let expected_notifications = if index == 2 {
             0
         } else if index == 17 {
@@ -825,12 +829,16 @@ fn set_leverage_native_clamp_and_position_order() {
         }
         let changed = matches!(index, 7 | 8 | 17 | 18);
         assert_eq!(
-            s.fetched_leverage().len(),
+            s.fetched_leverage().unwrap().len(),
             if changed { 2 } else { 1 },
             "SET LEVERAGE independent cache count"
         );
-        native_cache(&s.fetched_leverage(), &row["cache"], "SET LEVERAGE");
-        let positions = s.positions();
+        native_cache(
+            &s.fetched_leverage().unwrap(),
+            &row["cache"],
+            "SET LEVERAGE",
+        );
+        let positions = s.positions().unwrap();
         assert_eq!(
             positions.len(),
             2,
@@ -859,7 +867,7 @@ fn set_leverage_native_clamp_and_position_order() {
 #[test]
 fn declared_owned_market_alias_boundaries() {
     let s = store();
-    let original = s.markets().to_vec();
+    let original = s.markets().unwrap().to_vec();
     let result = run(update_market_leverage_limits(
         &original,
         true,
@@ -959,7 +967,10 @@ fn declared_owned_market_alias_boundaries() {
     .unwrap()
     .unwrap();
     assert!(
-        !std::ptr::eq(&result, s.fetched_leverage().get("BTC_USDT_PERP").unwrap()),
+        !std::ptr::eq(
+            &result,
+            s.fetched_leverage().unwrap().get("BTC_USDT_PERP").unwrap()
+        ),
         "FETCH LEVERAGE declared returned/cache ownership"
     );
     assert_eq!(
@@ -1003,7 +1014,7 @@ fn set_reads_position_after_cache_notification() {
         |_, _| Ok(()),
     ))
     .unwrap();
-    let positions = s.positions();
+    let positions = s.positions().unwrap();
     assert_eq!(
         positions.len(),
         1,

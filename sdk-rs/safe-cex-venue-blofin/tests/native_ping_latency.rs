@@ -53,7 +53,7 @@ fn public_and_private_pongs_record_latency_from_the_sent_ping() {
         ));
         rt.pump();
         assert_eq!(
-            store.latency(),
+            store.latency().unwrap(),
             (elapsed / 2.0).round(),
             "socket {index} pong records source half-roundtrip latency"
         );
@@ -131,7 +131,7 @@ fn order_row() -> serde_json::Value {
 fn private_orders_frame_updates_the_production_store() {
     let live = Live::new();
     live.frame("orders", json!([order_row()]));
-    let rows = live.store.orders();
+    let rows = live.store.orders().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(
         (rows[0].id.as_str(), rows[0].symbol.as_str()),
@@ -167,7 +167,7 @@ fn private_fill_frame_updates_order_and_emits_original_fill_fields() {
     row["averagePrice"] = json!("102");
     row["fillTime"] = json!("1710000000000");
     live.frame("orders", json!([row]));
-    let rows = live.store.orders();
+    let rows = live.store.orders().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!((rows[0].filled, rows[0].remaining), (0.0005, 0.0015));
     assert_eq!(
@@ -238,12 +238,15 @@ fn cumulative_private_fills_emit_execution_prices_and_suppress_terminal_replays(
 fn private_positions_frame_updates_positions_and_balance() {
     let live = Live::new();
     live.frame("positions", json!([{"positionId":"p1","instId":"BTC-USDT","instType":"SWAP","marginMode":"cross","positionSide":"net","positions":"2","availablePositions":"2","averagePrice":"100","markPrice":"102","liquidationPrice":"50","unrealizedPnl":"1.23","maintenanceMargin":"0.01","leverage":"10"}]));
-    let rows = live.store.positions();
+    let rows = live.store.positions().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].symbol, "BTCUSDT");
     assert_eq!((rows[0].contracts, rows[0].entry_price), (0.002, 100.0));
     assert_eq!(
-        (live.store.balance().used, live.store.balance().upnl),
+        (
+            live.store.balance().unwrap().used,
+            live.store.balance().unwrap().upnl
+        ),
         (0.01, 1.23)
     );
 }
@@ -251,7 +254,7 @@ fn private_positions_frame_updates_positions_and_balance() {
 fn private_account_frame_updates_balance() {
     let live = Live::new();
     live.frame("account", json!({"totalEquity":"123.45"}));
-    let b = live.store.balance();
+    let b = live.store.balance().unwrap();
     assert_eq!(
         (b.total, b.free, b.used, b.upnl),
         (123.45, 123.45, 0.0, 0.0)
@@ -295,7 +298,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             live.rt.pump();
         }
-        ticker_coercion::assert_native(&live.store.tickers(), case);
+        ticker_coercion::assert_native(&live.store.tickers().unwrap(), case);
     }
     assert!(
         live.rt.errors.borrow().is_empty(),

@@ -536,12 +536,13 @@ fn run_service(case: &Value, path: u8) {
                     orders.iter().map(|o| &o.id).collect::<Vec<_>>()
                 ]));
                 std::future::ready(if let Some(message) = input["cancelThrow"].as_str() {
-                    Err(message.to_owned())
+                    Err(safe_cex_exchange::runtime::ExchangeError::new(message))
                 } else {
                     Ok(())
                 })
             },
-        )),
+        ))
+        .map_err(|error| error.message),
         _ => panic!("unknown service"),
     };
     match failure {
@@ -571,7 +572,7 @@ fn run_service(case: &Value, path: u8) {
         margin(&case["cache"]["margin"]),
         "native_{name}_margin_cache"
     );
-    let positions = Store::positions(&store);
+    let positions = Store::positions(&store).unwrap();
     let expected_positions = case["store"]["positions"].as_array().unwrap();
     assert_eq!(
         positions.len(),
@@ -585,7 +586,7 @@ fn run_service(case: &Value, path: u8) {
         assert_eq!(native.margin_type, margin(&expected["marginType"]));
         assert_eq!(native.contracts, expected["contracts"].as_f64().unwrap());
     }
-    let leverage = Store::fetched_leverage(&store);
+    let leverage = Store::fetched_leverage(&store).unwrap();
     let expected_leverage = case["store"]["leverage"].as_object().unwrap();
     assert_eq!(leverage.len(), expected_leverage.len());
     for (symbol, value) in leverage.iter() {

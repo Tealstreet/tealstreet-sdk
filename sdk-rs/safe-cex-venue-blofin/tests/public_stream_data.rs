@@ -205,11 +205,12 @@ impl PublicStreamHost for Host {
     fn is_testnet(&self) -> bool {
         false
     }
-    fn market_ids(&self) -> Vec<String> {
-        Store::markets(&self.store)
+    fn market_ids(&self) -> Result<Vec<std::string::String>, std::string::String> {
+        Ok(Store::markets(&self.store)
+            .unwrap()
             .iter()
             .map(|m| m.id.clone())
-            .collect()
+            .collect())
     }
     fn has_socket(&self) -> bool {
         self.socket.get()
@@ -518,7 +519,7 @@ fn run(c: &Value) -> Run {
             }
             "opts-symbol" => Ok(()),
             "loaded" => {
-                let mut loaded = Store::loaded(&host.store).clone();
+                let mut loaded = Store::loaded(&host.store).unwrap().clone();
                 loaded.markets = arg.as_bool().unwrap();
                 Store::update(
                     &host.store,
@@ -572,8 +573,8 @@ fn run(c: &Value) -> Run {
             notified: stream.core.connection_failure_notified.get(),
             disposed: host.disposed.get(),
             connected: host.connected.get(),
-            ticker: Store::tickers(&host.store)[0].clone(),
-            loaded: Store::loaded(&host.store).markets,
+            ticker: Store::tickers(&host.store).unwrap()[0].clone(),
+            loaded: Store::loaded(&host.store).unwrap().markets,
         });
     }
     Run {
@@ -904,7 +905,7 @@ fn native_callback_ownership() {
     )))
     .unwrap();
     assert_eq!(
-        Store::tickers(&host.store)[0].last,
+        Store::tickers(&host.store).unwrap()[0].last,
         100.0,
         "weak default callback releases facade"
     );

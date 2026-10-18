@@ -1,5 +1,6 @@
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::js_number_string;
+use safe_cex_store::Store;
 use safe_cex_types::{PlaceOrderOpts, Position, retained_json::RetainedJsonInput as Input};
 use safe_cex_venue_bitget::{
     inverse_logic::*, normalization::*, numeric::*, order_logic::*, pnl::*,
@@ -1431,7 +1432,7 @@ fn check(oracle: Value, field_identity: bool) {
         let fresh = DefaultStore::new();
         fresh.add_or_update_position(position(price)).unwrap();
         assert_eq!(
-            encoded(fresh.positions()[0].liquidation_price),
+            encoded(fresh.positions().unwrap()[0].liquidation_price),
             c["inserted"],
             "stored liquidation typed insertion"
         );
@@ -1439,12 +1440,12 @@ fn check(oracle: Value, field_identity: bool) {
             .update_position("p", json!({"contracts":3}).as_object().unwrap())
             .expect("unrelated position patch succeeds");
         assert_eq!(
-            fresh.positions()[0].contracts,
+            fresh.positions().unwrap()[0].contracts,
             3.0,
             "unrelated contracts update is applied"
         );
         assert_eq!(
-            encoded(fresh.positions()[0].liquidation_price),
+            encoded(fresh.positions().unwrap()[0].liquidation_price),
             c["afterUnrelated"],
             "shared native Store preserves nonfinite target during unrelated patch"
         );
@@ -1460,7 +1461,7 @@ fn check(oracle: Value, field_identity: bool) {
             "TS Store accepts nonfinite position updates"
         );
         assert_eq!(
-            encoded(patched.positions()[0].liquidation_price),
+            encoded(patched.positions().unwrap()[0].liquidation_price),
             c["patched"],
             "shared native Store patch preserves nonfinite and signed zero"
         );
@@ -1472,7 +1473,7 @@ fn check(oracle: Value, field_identity: bool) {
                 "lossy JSON null patch refuses explicitly instead of panicking"
             );
             assert_eq!(
-                encoded(patched.positions()[0].liquidation_price),
+                encoded(patched.positions().unwrap()[0].liquidation_price),
                 c["patched"],
                 "refused JSON patch does not erase native value"
             );

@@ -754,6 +754,7 @@ fn run(name: &str) {
         if name != "dispose" {
             let zk = store
                 .zk_link_config()
+                .unwrap()
                 .as_deref()
                 .cloned()
                 .map_or(J::Undefined, |v| native::retained(&v));

@@ -215,7 +215,7 @@ fn leverage_matches_actual_typescript_and_store() {
             row["laterNotifications"].as_u64().unwrap(),
             "leverage native parity: setMarketMaxLeverage fanout stops; {row}"
         );
-        let markets = store.markets();
+        let markets = store.markets().unwrap();
         let expected_markets = row["markets"].as_array().unwrap();
         assert_eq!(
             expected_markets.len(),

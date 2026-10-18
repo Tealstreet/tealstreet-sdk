@@ -143,7 +143,8 @@ fn live_orders_corpus() {
                 now
             });
             if case["invalid"] == true {
-                let err = result.expect_err("orders_typed_boundary");
+                let err: safe_cex_exchange::runtime::ExchangeError =
+                    result.expect_err("orders_typed_boundary").into();
                 assert_eq!(err.name, "RepresentationError", "orders_typed_boundary");
                 assert!(
                     case["result"]["ok"]
@@ -182,7 +183,10 @@ fn live_orders_corpus() {
             }
             let actual = match result {
                 Ok(rows) => json!({"ok":rows.into_iter().map(native).collect::<Vec<_>>()}),
-                Err(error) => json!({"error":error.name,"message":error.message}),
+                Err(error) => {
+                    let error: safe_cex_exchange::runtime::ExchangeError = error.into();
+                    json!({"error":error.name,"message":error.message})
+                }
             };
             assert_eq!(
                 actual, case["result"],
@@ -261,6 +265,7 @@ fn audit_order_refusal_preempts_source_evaluation() {
             1700000000000.125
         })
         .unwrap_err();
+        let error: safe_cex_exchange::runtime::ExchangeError = error.into();
         assert_eq!(
             error.name, "RepresentationError",
             "BLOFIN-AUDIT native early refusal"

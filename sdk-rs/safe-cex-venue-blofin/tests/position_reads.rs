@@ -728,10 +728,10 @@ fn run(case: &Value, variant: u8, boundary: bool) {
             Output::Positions(mut v) => {
                 native_positions(&v, expected);
                 if case["aliases"]["firstPosition"] == true {
-                    let before = store.positions()[0].leverage;
+                    let before = store.positions().unwrap()[0].leverage;
                     v[0].leverage += 1000.0;
                     assert_eq!(
-                        store.positions()[0].leverage,
+                        store.positions().unwrap()[0].leverage,
                         before,
                         "native owned position snapshot"
                     );
@@ -743,7 +743,7 @@ fn run(case: &Value, variant: u8, boundary: bool) {
                             json!(true).into(),
                         ));
                         assert!(
-                            store.positions()[0]
+                            store.positions().unwrap()[0]
                                 .info
                                 .as_ref()
                                 .unwrap()
@@ -768,10 +768,10 @@ fn run(case: &Value, variant: u8, boundary: bool) {
                 native_balance(&v.balance, &expected["balance"]);
                 native_positions(&v.positions, &expected["positions"]);
                 if case["aliases"]["balance"] == true {
-                    let before = store.balance().free;
+                    let before = store.balance().unwrap().free;
                     v.balance.free += 1000.0;
                     assert_eq!(
-                        store.balance().free,
+                        store.balance().unwrap().free,
                         before,
                         "native owned balance snapshot"
                     );
@@ -790,7 +790,7 @@ fn run(case: &Value, variant: u8, boundary: bool) {
             }
         }
     }
-    let native_markets = store.markets();
+    let native_markets = store.markets().unwrap();
     let expected_markets = case["markets"].as_array().unwrap();
     assert_eq!(
         native_markets.len(),
@@ -812,8 +812,8 @@ fn run(case: &Value, variant: u8, boundary: bool) {
         number(m.precision.price, &e["precision"]["price"]);
         opt_number(m.contract_size, e.get("contractSize"));
     }
-    native_positions(&store.positions(), &case["positions"]);
-    native_balance(&store.balance(), &case["balance"]);
+    native_positions(&store.positions().unwrap(), &case["positions"]);
+    native_balance(&store.balance().unwrap(), &case["balance"]);
     assert_eq!(
         modes.margin_type.get(),
         margin(case.get("marginMode")),

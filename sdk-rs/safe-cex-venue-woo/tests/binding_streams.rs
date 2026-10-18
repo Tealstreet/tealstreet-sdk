@@ -56,7 +56,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
         let reports = h.runtime.reports.borrow().join("\n");
         ticker_coercion::assert_refusals(&reports, case);
         assert_eq!(
@@ -168,7 +168,7 @@ fn listen(h: &Harness, event: &str) -> Rc<RefCell<Vec<Value>>> {
 }
 
 fn ticker(h: &Harness) -> Value {
-    json_of(&*h.store.tickers())[0].clone()
+    json_of(&h.store.tickers().unwrap())[0].clone()
 }
 
 fn started(extra: Value, script: impl FnOnce(&binding_harness::Http)) -> Harness {
@@ -325,7 +325,7 @@ fn authed(mode: &str, script: impl FnOnce(&binding_harness::Http)) -> (Harness, 
 }
 
 fn order(h: &Harness, id: &str) -> Option<Value> {
-    json_of(&*h.store.orders())
+    json_of(&h.store.orders().unwrap())
         .as_array()
         .unwrap()
         .iter()
@@ -459,7 +459,10 @@ fn zero_price_market_execution_report_emits_fill_and_closes_order_through_real_m
 }
 
 fn position_rows(h: &Harness) -> Vec<Value> {
-    json_of(&*h.store.positions()).as_array().unwrap().clone()
+    json_of(&h.store.positions().unwrap())
+        .as_array()
+        .unwrap()
+        .clone()
 }
 
 #[test]
@@ -1057,9 +1060,9 @@ fn assert_unsupported_private_topics_preserve_store(topics: &[&str], data: Value
         order(&h, "777").is_some(),
         "known private order makes preservation non-vacuous"
     );
-    let orders = h.store.orders().to_vec();
-    let positions = h.store.positions().to_vec();
-    let balance = h.store.balance().clone();
+    let orders = h.store.orders().unwrap().to_vec();
+    let positions = h.store.positions().unwrap().to_vec();
+    let balance = h.store.balance().unwrap().clone();
     assert!(balance.total > 0.0);
     let fills = Rc::new(std::cell::Cell::new(0usize));
     let observed = fills.clone();
@@ -1073,17 +1076,17 @@ fn assert_unsupported_private_topics_preserve_store(topics: &[&str], data: Value
     for topic in topics {
         push(&h, &private, json!({"topic":topic,"data":data}));
         assert_eq!(
-            h.store.orders().to_vec(),
+            h.store.orders().unwrap().to_vec(),
             orders,
             "{topic} cannot change source orders"
         );
         assert_eq!(
-            h.store.positions().to_vec(),
+            h.store.positions().unwrap().to_vec(),
             positions,
             "{topic} has no source position handler"
         );
         assert_eq!(
-            *h.store.balance(),
+            h.store.balance().unwrap(),
             balance,
             "{topic} has no source balance handler"
         );
@@ -1113,7 +1116,7 @@ fn private_balance_topics_preserve_the_rest_owned_store() {
 fn ticker_row_refusals(topic: &str, source: &str, target: &str, surrogate: bool) {
     use safe_cex_store::{Store, StoreUpdate};
     let h = started(json!({"publicDataOnly":true}), public_routes);
-    let template = h.store.tickers()[0].clone();
+    let template = h.store.tickers().unwrap()[0].clone();
     let mut tickers = vec![];
     for symbol in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "LTCUSDT"] {
         let mut row = template.clone();
@@ -1151,7 +1154,7 @@ fn ticker_row_refusals(topic: &str, source: &str, target: &str, surrogate: bool)
     } else {
         push(&h, &public, frame);
     }
-    let rows = json_of(&*h.store.tickers());
+    let rows = json_of(&h.store.tickers().unwrap());
     let field = |symbol: &str| {
         rows.as_array()
             .unwrap()
@@ -1223,7 +1226,7 @@ fn retained_ticker_frame_ignores_unread_surrogate_metadata() {
         .borrow_mut()
         .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
     h.runtime.pump();
-    assert_eq!(h.store.tickers()[0].last, 123.);
+    assert_eq!(h.store.tickers().unwrap()[0].last, 123.);
     assert!(
         h.runtime.reports.borrow().is_empty(),
         "{:?}",
@@ -1241,8 +1244,11 @@ fn retained_ticker_frame_preserves_overflow_and_signed_zero_numbers() {
         .borrow_mut()
         .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
     h.runtime.pump();
-    assert_eq!(h.store.tickers()[0].last, f64::INFINITY);
-    assert_eq!(h.store.tickers()[0].volume.to_bits(), (-0.0f64).to_bits());
+    assert_eq!(h.store.tickers().unwrap()[0].last, f64::INFINITY);
+    assert_eq!(
+        h.store.tickers().unwrap()[0].volume.to_bits(),
+        (-0.0f64).to_bits()
+    );
     assert!(
         h.runtime.reports.borrow().is_empty(),
         "{:?}",
@@ -1261,7 +1267,7 @@ fn retained_ticker_frame_normalizes_before_identifier_admission() {
         .borrow_mut()
         .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
     h.runtime.pump();
-    assert_eq!(h.store.tickers()[0].last, 999.);
+    assert_eq!(h.store.tickers().unwrap()[0].last, 999.);
     assert_eq!(h.runtime.reports.borrow().len(), 1);
     let reports = h.runtime.reports.borrow().join("\n");
     assert!(

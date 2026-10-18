@@ -208,8 +208,11 @@ impl PublicMarketReadHost for ReadHost {
             .find(|(v, _)| Rc::ptr_eq(v, e))
             .map(|(_, v)| v.clone())
     }
-    fn cached_markets(&self) -> CatalogMarkets {
-        self.cache.clone()
+    fn cached_markets(
+        &self,
+    ) -> std::result::Result<Rc<RefCell<Vec<Rc<RefCell<CatalogMarket>>>>>, Rc<PortfolioThrown>>
+    {
+        Ok(self.cache.clone())
     }
     fn emit_and_log_error(&self, v: Option<Value>) -> Result<(), PortfolioFailure> {
         self.emits.borrow_mut().push(v);

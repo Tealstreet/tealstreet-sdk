@@ -301,8 +301,8 @@ fn typed_private_reconnect_renews_kucoin_session() {
 fn native_private_order_frame_commits_source_store_row() {
     run(async |f| {
         private_frame(&f, order("open", 0, None)).await;
-        assert_eq!(f.store.orders().len(), 1);
-        let row = &f.store.orders()[0];
+        assert_eq!(f.store.orders().unwrap().len(), 1);
+        let row = &f.store.orders().unwrap()[0];
         assert_eq!(row.id, "o1");
         assert_eq!(row.symbol, "BTCUSDT");
         assert_eq!(row.status, OrderStatus::Open);
@@ -324,8 +324,8 @@ fn native_private_match_emits_incremental_base_fill() {
         private_frame(&f, order("open", 0, None)).await;
         private_frame(&f, order("match", 4, Some(4))).await;
         private_frame(&f, order("filled", 10, None)).await;
-        assert_eq!(f.store.orders()[0].status, OrderStatus::Closed);
-        assert_eq!(f.store.orders()[0].filled, 0.004);
+        assert_eq!(f.store.orders().unwrap()[0].status, OrderStatus::Closed);
+        assert_eq!(f.store.orders().unwrap()[0].filled, 0.004);
         let fills = fills.borrow();
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].own_keys().len(), 5);
@@ -351,14 +351,17 @@ fn seed_private_state(f: &Fixture) {
 fn native_private_position_frame_runs_source_orders_snapshot() {
     run(async |f| {
         seed_private_state(&f);
-        let positions = f.store.positions().to_vec();
+        let positions = f.store.positions().unwrap().to_vec();
         private_frame(&f,json!({"type":"message","topic":"/contract/position:XBTUSDTM","data":{"changeReason":"positionChange"}})).await;
-        wait_for("position topic orders snapshot", || f.store.loaded().orders).await;
+        wait_for("position topic orders snapshot", || {
+            f.store.loaded().unwrap().orders
+        })
+        .await;
         assert_eq!(
-            serde_json::to_value(f.store.positions().to_vec()).unwrap(),
+            serde_json::to_value(f.store.positions().unwrap().to_vec()).unwrap(),
             serde_json::to_value(positions).unwrap()
         );
-        assert!(f.store.orders().is_empty());
+        assert!(f.store.orders().unwrap().is_empty());
         assert!(
             f.requests
                 .borrow()
@@ -376,12 +379,15 @@ fn native_private_balance_frame_runs_source_orders_snapshot() {
             json!({"type":"message","topic":"/contractAccount/wallet","data":{"currency":"USDT"}}),
         )
         .await;
-        wait_for("wallet topic orders snapshot", || f.store.loaded().orders).await;
-        assert_eq!(f.store.balance().free, 70.0);
-        assert_eq!(f.store.balance().used, 5.0);
-        assert_eq!(f.store.balance().total, 100.0);
-        assert_eq!(f.store.balance().upnl, 1.5);
-        assert!(f.store.orders().is_empty());
+        wait_for("wallet topic orders snapshot", || {
+            f.store.loaded().unwrap().orders
+        })
+        .await;
+        assert_eq!(f.store.balance().unwrap().free, 70.0);
+        assert_eq!(f.store.balance().unwrap().used, 5.0);
+        assert_eq!(f.store.balance().unwrap().total, 100.0);
+        assert_eq!(f.store.balance().unwrap().upnl, 1.5);
+        assert!(f.store.orders().unwrap().is_empty());
         assert!(
             f.requests
                 .borrow()

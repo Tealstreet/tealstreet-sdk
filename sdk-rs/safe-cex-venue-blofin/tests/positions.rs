@@ -212,6 +212,7 @@ fn live_positions_corpus() {
             }
             let actual = match result {
                 Ok(rows) => json!({"ok":rows.into_iter().map(native).collect::<Vec<_>>()}),
+                Err(PositionMapError::Store(e)) => panic!("unexpected fixture Store failure: {e}"),
                 Err(PositionMapError::Coercion(e)) => {
                     json!({"error":e.name,"message":e.message,"identity":false})
                 }

@@ -1,6 +1,6 @@
 include!("cardinality.rs.inc");
 use safe_cex_exchange::native_store::DefaultStore;
-use safe_cex_num::{JsCoercionError, numeric_ingress::js_from_str};
+use safe_cex_num::numeric_ingress::js_from_str;
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_venue_bitrue::read_helpers::*;
 use safe_cex_venue_bitrue::wire::OpaqueValue;
@@ -16,10 +16,16 @@ fn undefined() -> Value {
 fn string(value: String) -> Value {
     json!({"type":"string","value":value})
 }
-fn result<T>(result: Result<T, JsCoercionError>, observe: impl FnOnce(T) -> Value) -> Value {
+fn result<T, E: Into<safe_cex_exchange::runtime::ExchangeError>>(
+    result: Result<T, E>,
+    observe: impl FnOnce(T) -> Value,
+) -> Value {
     match result {
         Ok(value) => observe(value),
-        Err(error) => json!({"type":"error","name":error.name}),
+        Err(error) => {
+            let error = error.into();
+            json!({"type":"error","name":error.name})
+        }
     }
 }
 fn raw(arg: &Value) -> Option<Value> {

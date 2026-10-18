@@ -67,11 +67,11 @@ fn concrete_markets_and_public_start() {
     assert_eq!(tickers[0].last, 0.62);
     h.drive(h.venue().start()).unwrap();
     assert!(
-        h.store.loaded().markets
-            && h.store.loaded().tickers
-            && h.store.loaded().positions
-            && h.store.loaded().orders
-            && h.store.loaded().balance,
+        h.store.loaded().unwrap().markets
+            && h.store.loaded().unwrap().tickers
+            && h.store.loaded().unwrap().positions
+            && h.store.loaded().unwrap().orders
+            && h.store.loaded().unwrap().balance,
         "start commits public snapshots and private loaded flags"
     );
     assert_eq!(
@@ -229,7 +229,7 @@ fn concrete_fetch_positions_uses_holdings_and_keeps_snapshot_pure() {
         {"asset":"456","size":0.0,"avgPrice":0.6,"curPrice":0.4,"cashPnl":0.0}
     ]))
     });
-    let before = h.store.serialize();
+    let before = serde_json::to_value(h.store.serialize().unwrap()).unwrap();
     let positions = h.drive(h.venue().fetch_positions(None)).unwrap();
     assert_eq!(
         positions.len(),
@@ -240,7 +240,11 @@ fn concrete_fetch_positions_uses_holdings_and_keeps_snapshot_pure() {
     assert_eq!(positions[0].contracts, 10.);
     assert_eq!(positions[0].notional, 6.2);
     assert_eq!(positions[0].unrealized_pnl, 2.25);
-    assert_private_read_snapshot(before, h.store.serialize(), 0);
+    assert_private_read_snapshot(
+        before,
+        serde_json::to_value(h.store.serialize().unwrap()).unwrap(),
+        0,
+    );
     assert_eq!(
         h.http.calls("/positions")[0].base_url,
         "https://data-api.polymarket.com"
@@ -267,7 +271,7 @@ fn concrete_fetch_orders_maps_all_pages_without_store_commit() {
             json!({"data":[row],"next_cursor":"LTE="}),
         );
     });
-    let before = h.store.serialize();
+    let before = serde_json::to_value(h.store.serialize().unwrap()).unwrap();
     let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
     assert_eq!(orders.len(), 2, "fetch_orders retains pages");
     assert_eq!(orders[0].id, "rest-order");
@@ -283,7 +287,11 @@ fn concrete_fetch_orders_maps_all_pages_without_store_commit() {
         h.http.calls("/data/orders")[1].params["next_cursor"],
         "page-two"
     );
-    assert_private_read_snapshot(before, h.store.serialize(), 1);
+    assert_private_read_snapshot(
+        before,
+        serde_json::to_value(h.store.serialize().unwrap()).unwrap(),
+        1,
+    );
 }
 #[test]
 fn concrete_place_order_posts_real_signed_gtc_payload() {
@@ -488,13 +496,15 @@ fn concrete_private_start_authenticates_and_commits_authoritative_tick() {
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
     assert!(
-        h.store.loaded().balance && h.store.loaded().positions && h.store.loaded().orders,
+        h.store.loaded().unwrap().balance
+            && h.store.loaded().unwrap().positions
+            && h.store.loaded().unwrap().orders,
         "private startup publishes all loaded flags"
     );
-    assert_eq!(h.store.balance().total, 123.456789);
-    assert_eq!(h.store.balance().upnl, 2.25);
-    assert_eq!(h.store.positions().len(), 1);
-    assert_eq!(h.store.orders().len(), 1);
+    assert_eq!(h.store.balance().unwrap().total, 123.456789);
+    assert_eq!(h.store.balance().unwrap().upnl, 2.25);
+    assert_eq!(h.store.positions().unwrap().len(), 1);
+    assert_eq!(h.store.orders().unwrap().len(), 1);
     assert_eq!(
         h.runtime.sockets.borrow().len(),
         1,
@@ -550,14 +560,18 @@ fn concrete_private_read_failure_rethrows_and_preserves_snapshot() {
             false,
         )
         .unwrap();
-    let before = h.store.serialize();
+    let before = serde_json::to_value(h.store.serialize().unwrap()).unwrap();
     let error = h.drive(h.venue().fetch_orders(None)).unwrap_err();
     assert!(
         error.message.contains("try later"),
         "source failure survives: {}",
         error.message
     );
-    assert_private_read_snapshot(before, h.store.serialize(), 2);
+    assert_private_read_snapshot(
+        before,
+        serde_json::to_value(h.store.serialize().unwrap()).unwrap(),
+        2,
+    );
     assert_eq!(
         h.http.calls("/data/orders").len(),
         1,
@@ -768,7 +782,7 @@ fn concrete_private_order_frame_commits_native_store_order() {
     row["id"] = json!("ws-order-42");
     row["event_type"] = json!("order");
     private_frame(&h, row);
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let actual = orders.iter().find(|o| o.id == "ws-order-42").unwrap();
     assert_eq!(actual.symbol, "event-Yes");
     assert_eq!(actual.price, 0.57);
@@ -795,7 +809,7 @@ fn concrete_private_matched_order_commits_store_and_emits_fill() {
     row["status"] = json!("MATCHED");
     row["size_matched"] = json!("10.25");
     private_frame(&h, row);
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Closed);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Closed);
     assert_eq!(fills.borrow().len(), 1);
     assert!(
         fills.borrow()[0]
@@ -814,8 +828,8 @@ fn concrete_private_matched_order_commits_store_and_emits_fill() {
 #[test]
 fn concrete_private_trade_emits_fill_and_refreshes_positions_with_rest_balance_retained() {
     let h = started_private();
-    assert!(h.store.positions().is_empty());
-    let balance_before = h.store.balance().clone();
+    assert!(h.store.positions().unwrap().is_empty());
+    let balance_before = h.store.balance().unwrap().clone();
     h.http
         .routes
         .borrow_mut()
@@ -848,12 +862,12 @@ fn concrete_private_trade_emits_fill_and_refreshes_positions_with_rest_balance_r
             .strict_equals(&Js::str("event-Yes"))
     );
     assert_eq!(fills.borrow()[0].get("amount").unwrap().as_f64(), Some(7.0));
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contracts, 7.0);
     assert_eq!(positions[0].unrealized_pnl, 1.54);
-    assert_eq!(h.store.balance().total, balance_before.total);
-    assert_eq!(h.store.balance().upnl, balance_before.upnl);
+    assert_eq!(h.store.balance().unwrap().total, balance_before.total);
+    assert_eq!(h.store.balance().unwrap().upnl, balance_before.upnl);
     drop(positions);
     h.venue().dispose().unwrap();
 }
@@ -934,7 +948,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 .unwrap();
             runtime.pump();
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
     }
     assert!(
         runtime.reports.borrow().is_empty(),

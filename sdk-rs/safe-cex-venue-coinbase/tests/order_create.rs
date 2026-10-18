@@ -184,24 +184,44 @@ impl CoinbaseOrderHost for Host {
         self.record(Event::Clock);
         self.input.get("now").map(number).unwrap_or(10000.0)
     }
-    fn orders_loaded(&mut self) -> bool {
+    fn orders_loaded(
+        &mut self,
+    ) -> std::result::Result<bool, safe_cex_venue_coinbase::order_create::CoinbaseOrderFailure>
+    {
         self.record(Event::Loaded);
-        self.input
+        Ok(self
+            .input
             .get("loaded")
             .and_then(Value::as_bool)
-            .unwrap_or(false)
+            .unwrap_or(false))
     }
-    fn orders(&mut self) -> Vec<Rc<Order>> {
+    fn orders(
+        &mut self,
+    ) -> std::result::Result<
+        Vec<Rc<Order>>,
+        safe_cex_venue_coinbase::order_create::CoinbaseOrderFailure,
+    > {
         self.record(Event::Orders);
-        self.stored.clone()
+        Ok(self.stored.clone())
     }
-    fn market_by_symbol(&mut self, symbol: &str) -> Option<Rc<Market>> {
+    fn market_by_symbol(
+        &mut self,
+        symbol: &str,
+    ) -> std::result::Result<
+        Option<Rc<safe_cex_types::Market>>,
+        safe_cex_venue_coinbase::order_create::CoinbaseOrderFailure,
+    > {
         self.record(Event::Market(symbol.into()));
-        self.markets.get(symbol).cloned()
+        Ok(self.markets.get(symbol).cloned())
     }
-    fn markets_by_id(&mut self) -> &IndexMap<String, Rc<Market>> {
+    fn markets_by_id(
+        &mut self,
+    ) -> std::result::Result<
+        &IndexMap<std::string::String, Rc<safe_cex_types::Market>>,
+        safe_cex_venue_coinbase::order_create::CoinbaseOrderFailure,
+    > {
         self.record(Event::Markets);
-        &self.markets
+        Ok(&self.markets)
     }
     fn resolve_caller_client_order_id(
         &mut self,
@@ -626,7 +646,7 @@ fn native_poll_order_matches_live_source() {
         let mut state = CoinbaseOrderPolling {
             next_orders_poll_at: number(&input["next"]),
         };
-        let a = should_poll_orders(&mut state, &mut h);
+        let a = should_poll_orders(&mut state, &mut h).unwrap();
         let label = input["label"].as_str().unwrap();
         assert_eq!(
             a,
@@ -649,7 +669,7 @@ fn native_rest_merge_matches_live_source() {
                 .map(order)
                 .collect::<Vec<_>>(),
         );
-        let a = merge_rest_orders_with_fresh_ws_state(&mut h, rest.clone());
+        let a = merge_rest_orders_with_fresh_ws_state(&mut h, rest.clone()).unwrap();
         let label = input["label"].as_str().unwrap();
         let expected = e["result"].as_array().unwrap();
         assert_eq!(
@@ -697,7 +717,8 @@ fn native_fetch_error_matches_live_source() {
 fn native_market_resolver_matches_live_source() {
     for (input, e) in cases("resolve", 7) {
         let mut h = Host::new(&input);
-        let a = resolve_market_by_coinbase_product_id(&mut h, input["product"].as_str().unwrap());
+        let a = resolve_market_by_coinbase_product_id(&mut h, input["product"].as_str().unwrap())
+            .unwrap();
         let label = input["label"].as_str().unwrap();
         assert_eq!(
             a.is_none(),

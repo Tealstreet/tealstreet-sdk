@@ -216,6 +216,7 @@ fn production_store_currency_order_selects_first_margin_asset() {
         .expect("account helper store setup update");
         let mut keys: Vec<String> = store
             .balance()
+            .unwrap()
             .currencies
             .as_ref()
             .unwrap()
@@ -225,9 +226,12 @@ fn production_store_currency_order_selects_first_margin_asset() {
         if std::env::var("ASTERDEX_STORE_ORDER_CONTROL").as_deref() == Ok("sort") {
             keys.sort();
         }
-        let actual =
-            get_account_update_upnl_deltas(Some(&case["input"]), &Store::positions(&store), &keys)
-                .unwrap();
+        let actual = get_account_update_upnl_deltas(
+            Some(&case["input"]),
+            &Store::positions(&store).unwrap(),
+            &keys,
+        )
+        .unwrap();
         let expected: Vec<(String, f64)> =
             serde_json::from_value(case["output"]["value"].clone()).unwrap();
         assert_eq!(

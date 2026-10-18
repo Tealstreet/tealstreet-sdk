@@ -66,7 +66,11 @@ fn bound_start() {
     let h = fixture();
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    assert!(h.store.loaded().markets && h.store.loaded().tickers && h.store.loaded().balance);
+    assert!(
+        h.store.loaded().unwrap().markets
+            && h.store.loaded().unwrap().tickers
+            && h.store.loaded().unwrap().balance
+    );
     assert_eq!(h.runtime.sockets.borrow().len(), 2);
     done(&h);
 }
@@ -99,7 +103,7 @@ fn bound_fetch_positions() {
     let positions = h.drive(h.venue().fetch_positions(None)).unwrap();
     assert_eq!(positions.len(), 2);
     assert_eq!(positions[0].leverage, 10.);
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.positions().unwrap().is_empty());
     done(&h);
 }
 #[test]
@@ -108,7 +112,7 @@ fn bound_fetch_orders() {
     let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
     assert_eq!(orders.len(), 1);
     assert_eq!(orders[0].id, "order-1");
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     done(&h);
 }
 #[test]
@@ -286,7 +290,7 @@ fn market_field_refusal_case(field: &str, wire_field: &str) {
             );
             let markets = if refresh {
                 h.drive(h.venue().refresh_markets()).unwrap();
-                h.store.markets().to_vec()
+                h.store.markets().unwrap().to_vec()
             } else {
                 h.drive(h.venue().fetch_markets()).unwrap()
             };
@@ -384,7 +388,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),

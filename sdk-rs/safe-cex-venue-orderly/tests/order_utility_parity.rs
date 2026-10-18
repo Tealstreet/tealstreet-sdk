@@ -59,7 +59,8 @@ fn actual_typescript_order_utility_corpus() {
             false,
         )
         .expect("populate fixture Store");
-        let result = resolve_margin_type_for_order(&opts, &cache, &store);
+        let result =
+            resolve_margin_type_for_order(&opts, &cache, &store).map_err(|error| error.message);
         if row["expected"].get("margin").is_some() {
             assert_eq!(
                 result,

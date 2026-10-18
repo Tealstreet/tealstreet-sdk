@@ -141,7 +141,12 @@ fn product_ids_live_source() {
             json!(["active"]),
             "PUBLIC-HELPER source callback count"
         );
-        let after: Vec<_> = store.markets().iter().map(|m| m.symbol.clone()).collect();
+        let after: Vec<_> = store
+            .markets()
+            .unwrap()
+            .iter()
+            .map(|m| m.symbol.clone())
+            .collect();
         assert_eq!(
             json!(after),
             case["after"],

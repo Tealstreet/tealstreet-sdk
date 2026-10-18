@@ -363,7 +363,7 @@ fn order_execution_matches_live_typescript() {
             }
         }
         if c["numbers"] == true {
-            let actual = store.tickers();
+            let actual = store.tickers().unwrap();
             assert!(actual[0].open_interest.is_nan(), "native NaN OI");
             assert_eq!(actual[1].open_interest, f64::INFINITY, "native infinite OI");
             assert_eq!(
@@ -375,10 +375,14 @@ fn order_execution_matches_live_typescript() {
             assert_eq!(c["tickers"][1]["openInterest"]["number"], "Infinity");
         } else {
             let tickers: Vec<Ticker> = serde_json::from_value(c["tickers"].clone()).unwrap();
-            assert_eq!(*store.tickers(), tickers, "{name} native ticker state");
+            assert_eq!(
+                *store.tickers().unwrap(),
+                tickers,
+                "{name} native ticker state"
+            );
         }
         assert_eq!(
-            store.options().is_hedged,
+            store.options().unwrap().is_hedged,
             c["hedged"].as_bool().unwrap(),
             "{name} native hedge setting"
         );

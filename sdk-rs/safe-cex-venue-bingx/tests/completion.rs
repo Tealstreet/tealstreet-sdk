@@ -738,9 +738,20 @@ fn run(case: &Value) {
         }
     };
     let clock = clock.finish();
-    let mut native_orders = json!(s.orders().iter().map(order_value).collect::<Vec<_>>());
+    let mut native_orders = json!(
+        s.orders()
+            .unwrap()
+            .iter()
+            .map(order_value)
+            .collect::<Vec<_>>()
+    );
     clock.normalize_orders(&mut native_orders, &case["orders"]);
-    for (native, expected) in s.orders().iter().zip(case["orders"].as_array().unwrap()) {
+    for (native, expected) in s
+        .orders()
+        .unwrap()
+        .iter()
+        .zip(case["orders"].as_array().unwrap())
+    {
         for (field, n) in [
             ("price", native.price.to_number()),
             ("amount", native.amount),
@@ -781,7 +792,7 @@ fn run(case: &Value) {
             "BINGX-C direct native retained info"
         );
     }
-    let native_balance = s.balance();
+    let native_balance = s.balance().unwrap();
     assert_eq!(
         native_balance.info,
         case["balance"].get("info").cloned().map(Into::into),
@@ -799,7 +810,7 @@ fn run(case: &Value) {
             "BINGX-C direct native balance {field} {method}"
         );
     }
-    let loaded = s.loaded();
+    let loaded = s.loaded().unwrap();
     for (field, value) in [
         ("orders", loaded.orders),
         ("balance", loaded.balance),
@@ -845,13 +856,13 @@ fn run(case: &Value) {
         "BINGX-C native orders {method}"
     );
     assert_eq!(
-        serde_json::to_value(&*s.loaded()).unwrap(),
+        serde_json::to_value(&s.loaded().unwrap()).unwrap(),
         case["loaded"],
         "BINGX-C loaded {method}"
     );
-    let b = s.balance();
+    let b = s.balance().unwrap();
     assert_eq!(
-        observe(&serde_json::to_value(&*b).unwrap()),
+        observe(&serde_json::to_value(&b).unwrap()),
         observe(&case["balance"]),
         "BINGX-C native balance {method}"
     );

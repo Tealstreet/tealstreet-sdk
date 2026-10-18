@@ -456,9 +456,9 @@ fn fixture(
     )
 }
 fn state(store: &DefaultStore) -> Value {
-    let l = store.loaded();
-    let b = store.balance();
-    json!({"orders":store.orders().iter().map(order_value).collect::<Vec<_>>(),"loaded":{"orders":l.orders,"balance":l.balance,"positions":l.positions,"markets":l.markets,"tickers":l.tickers},"balance":{"total":number(b.total),"free":number(b.free),"used":number(b.used),"upnl":number(b.upnl)}})
+    let l = store.loaded().unwrap();
+    let b = store.balance().unwrap();
+    json!({"orders":store.orders().unwrap().iter().map(order_value).collect::<Vec<_>>(),"loaded":{"orders":l.orders,"balance":l.balance,"positions":l.positions,"markets":l.markets,"tickers":l.tickers},"balance":{"total":number(b.total),"free":number(b.free),"used":number(b.used),"upnl":number(b.upnl)}})
 }
 fn subscribe(
     subs: &Rc<BingxSubscriptions>,
