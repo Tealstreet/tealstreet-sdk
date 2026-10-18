@@ -266,21 +266,81 @@ impl From<ExchangeError> for Thrown {
                             .expect("fresh error metadata property");
                     }
                 }
-                for field in ["stack", "cause", "isAxiosError"] {
+                for field in [
+                    "stack",
+                    "cause",
+                    "isAxiosError",
+                    "enhancedMessage",
+                    "context",
+                    "originalError",
+                ] {
                     if let Some(cell) = cause.value().get(field) {
                         value
                             .define(field, cell.to_js())
                             .expect("fresh retained error property");
                     }
                 }
+                if matches!(
+                    cause.value().get("originalErrorIsError"),
+                    Some(OwnedJsValue::Bool(true))
+                ) {
+                    let snapshot = value.get("originalError").expect("captured original error");
+                    let original = error_object(
+                        &snapshot.get("name").expect("name").to_display(),
+                        &snapshot.get("message").expect("message").to_display(),
+                    );
+                    for (key, cell) in snapshot.own_entries().expect("captured error fields") {
+                        if key.as_ref() == "name".encode_utf16().collect::<Vec<_>>()
+                            && cell.strict_equals(&original.get("name").expect("name"))
+                        {
+                            continue;
+                        }
+                        if !value.own_keys().contains(&key) {
+                            value
+                                .define_key(&key, cell.clone())
+                                .expect("fresh error snapshot data");
+                        }
+                        original
+                            .define_key(&key, cell)
+                            .expect("fresh original error snapshot");
+                    }
+                    value
+                        .define("originalError", original)
+                        .expect("fresh original error snapshot");
+                }
+                if cause.value().get("enhancedMessage").is_some()
+                    && matches!(cause.value().get("message"), Some(OwnedJsValue::String(units)) if String::from_utf16_lossy(units) == error.message)
+                {
+                    value
+                        .define_accessor(
+                            "message",
+                            Some(Rc::new(|this| {
+                                let message = this.get("enhancedMessage")?;
+                                if message.truthy() {
+                                    Ok(message)
+                                } else {
+                                    this.get("originalError")?.get("message")
+                                }
+                            })),
+                            None,
+                        )
+                        .expect("fresh enhanced error accessor");
+                }
                 break;
             }
             source = original.source();
         }
         if let Some(response) = error.retained_response_input() {
+            let response = from_retained_input(response);
             value
-                .define("response", from_retained_input(response))
+                .define("response", response.clone())
                 .expect("fresh retained response property");
+            let original = value.get("originalError").expect("fresh error field");
+            if matches!(&original, Js::Object(object) if object.class == "Error") {
+                original
+                    .define("response", response)
+                    .expect("fresh original response property");
+            }
         }
         if let Some(code) = &error.code {
             value

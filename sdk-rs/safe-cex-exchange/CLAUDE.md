@@ -1,5 +1,12 @@
 # Exchange core contract
 
+The native Axios factory enhances rejections before venue interceptors, using
+the maintained helper's field order and live message getter. Its originalError
+Error snapshot excludes the self-reference under decision 2; existing owned
+metadata preserves diagnostics, extra/config data and nearest-response authority.
+Executable config capabilities retain the owned-data boundary. Constructed Aster
+and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.

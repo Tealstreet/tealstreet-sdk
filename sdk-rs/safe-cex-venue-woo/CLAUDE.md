@@ -1,5 +1,11 @@
 # WOO venue port
 
+`binding/native_error_tests.rs` exercises the shared factory enhancer through the
+constructed signed client and typed REST adapter. Its acyclic originalError
+snapshot keeps Error diagnostics, extra/config data and response authority;
+callable config capabilities remain outside owned data. The actual maintained
+Aster/WOO classes independently establish the source behavior.
+
 `FIX_AUDIT_LEDGER.md` tracks the exact 60-row follow-up cohort. The isolated V3
 orderbook recovery port and its facade-only tests are retired after caller and
 constructed-runtime checks; the live legacy snapshot/delta/cleanup path remains.
