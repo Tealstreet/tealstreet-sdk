@@ -22,6 +22,31 @@ fn describe(value: &Js) -> Value {
         _ => json!({"kind":value.type_of()}),
     }
 }
+fn thenable(trace: Rc<RefCell<Vec<Value>>>, value: Js, label: &str, token: Js) -> Js {
+    let object = Js::object(vec![]);
+    let Js::Object(data) = &object else {
+        unreachable!()
+    };
+    let weak = Rc::downgrade(data);
+    let label = label.to_owned();
+    object.define_accessor("then", Some(Rc::new(move |_| {
+        trace.borrow_mut().push(json!("getThen"));
+        if label == "then-getter-throws" { return Err(Thrown::new(token.clone())); }
+        let trace = trace.clone();
+        let weak = weak.clone();
+        let label = label.clone();
+        let value = value.clone();
+        let token = token.clone();
+        Ok(Js::function("then", move |this, args| {
+            trace.borrow_mut().push(json!({"thenThis":weak.upgrade().is_some_and(|data|this.same_reference(&Js::Object(data)))}));
+            if label == "then-rejects" { args[1].call(Js::Undefined, vec![token.clone()])?; }
+            args[0].call(Js::Undefined, vec![value.clone()])?;
+            Ok(Js::Undefined)
+        }))
+    })), None);
+    object
+}
+
 fn scope() -> Rc<ScopeShared<()>> {
     scope_at_install(true)
 }
@@ -63,6 +88,12 @@ async fn observe(shared: &Rc<ScopeShared<()>>, method: &str, label: &str) -> Val
     let explicit = Js::object(vec![]);
     let runtime: Rc<dyn ExchangeRuntime> = shared.runtime.clone();
     let array = match label {
+        "thenable-item" | "then-getter-throws" | "then-rejects" => Js::array(vec![thenable(
+            trace.clone(),
+            Js::Number(7.0),
+            label,
+            token.clone(),
+        )]),
         "holes" => Js::holey_array(vec![None, Some(Js::Number(8.0)), None, None]),
         "promised-item" => Js::array(vec![Js::Promise(Promise::settled(
             &runtime,
@@ -140,7 +171,11 @@ async fn observe(shared: &Rc<ScopeShared<()>>, method: &str, label: &str) -> Val
             .push(json!({"value":describe(&args[0]),"index":index,
             "sourceSame":args[2].same_reference(&input),"thisModule":this.same_reference(&module),
             "thisExplicit":this.same_reference(&expected_receiver)}));
-        Ok(args[0].clone())
+        Ok(if scenario == "thenable-callback" {
+            thenable(events.clone(), args[0].clone(), &scenario, error.clone())
+        } else {
+            args[0].clone()
+        })
     });
     let call = callback.get("call").unwrap();
     let events = trace.clone();
@@ -206,7 +241,7 @@ fn installed_series_helpers_match_package_live_slots_awaits_and_receivers() {
         String::from_utf8_lossy(&output.stderr)
     );
     let expected: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(expected.len(), 40);
+    assert_eq!(expected.len(), 48);
     let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
