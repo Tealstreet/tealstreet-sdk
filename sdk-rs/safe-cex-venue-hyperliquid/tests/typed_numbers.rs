@@ -534,11 +534,26 @@ fn shared_utf8_refusal_and_scalar_unicode_remain_separate_from_numeric_flips() {
                 case["raw"].as_str().unwrap(),
             );
             if case["refusal"] == true {
-                assert!(
-                    actual.is_err(),
-                    "shared UTF8 representation refusal {}",
+                let expected =
+                    serde_json::from_value::<BTreeMap<String, Vec<u16>>>(case["strings"].clone())
+                        .unwrap()
+                        .into_iter()
+                        .map(|(path, units)| {
+                            (
+                                path,
+                                String::from_utf16_lossy(&units)
+                                    .encode_utf16()
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<BTreeMap<_, _>>();
+                assert_eq!(
+                    actual.unwrap(),
+                    expected,
+                    "typed String native units {}",
                     case["name"]
                 );
+                typed_utf16::retained(case["raw"].as_str().unwrap());
                 assert!(
                     case["sourceJson"].as_str().unwrap().contains("\\ud"),
                     "source retains valid escaped lone surrogate"
@@ -560,3 +575,6 @@ fn shared_utf8_refusal_and_scalar_unicode_remain_separate_from_numeric_flips() {
         );
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

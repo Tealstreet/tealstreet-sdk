@@ -214,10 +214,17 @@ fn check<T: DeserializeOwned + Serialize>(
     let raw = serde_json::to_string(&boundary)
         .unwrap()
         .replace("\"SURROGATE_WITNESS\"", r#""\ud800""#);
-    assert!(
-        serde_json::from_str::<T>(&raw).is_err(),
-        "{name}: shared UTF-8 ingress refuses lone surrogate"
-    );
+    if name == "MultiChainObject" {
+        // Its opaque `chains: Value` reader still refuses this boundary before
+        // any typed String is read. This is not the shared String expectation.
+        assert!(
+            serde_json::from_str::<T>(&raw).is_err(),
+            "opaque chains Value boundary"
+        );
+        typed_utf16::retained(&raw);
+    } else {
+        typed_utf16::assert_projection(&raw, &serde_json::from_str::<T>(&raw).unwrap());
+    }
     for field in schema["fields"].as_array().unwrap() {
         let key = field["name"].as_str().unwrap();
         let mut missing = positive.clone();
@@ -2091,3 +2098,6 @@ fn collection_cardinality_guards_are_independent() {
 
 #[path = "support/signer_records.rs"]
 mod signer_records;
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

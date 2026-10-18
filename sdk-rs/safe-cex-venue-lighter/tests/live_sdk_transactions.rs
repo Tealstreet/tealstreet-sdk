@@ -407,7 +407,7 @@ fn check<T: DeserializeOwned + Serialize + JsNumberOutput + NativeIdentity>(
                 }
             }
         } else {
-            assert!(result.is_err(), "{name} shared UTF8 representation refusal");
+            typed_utf16::assert_projection(w["encoded"].as_str().unwrap(), &result.unwrap());
         }
     }
 }
@@ -1122,10 +1122,8 @@ fn check_opts<T: DeserializeOwned + Serialize + JsNumberOutput>(
                 );
             }
         } else {
-            assert!(
-                bare.is_err() && shared.is_err(),
-                "{name}.opts.gasPrice UTF8 refusal"
-            );
+            typed_utf16::assert_projection(raw, &bare.unwrap());
+            typed_utf16::assert_projection(raw, &shared.unwrap());
         }
     }
 }
@@ -1348,12 +1346,12 @@ fn sdk_l2_union_matches_live_typescript() {
                         js_from_str::<L2TxInfo>(raw).map_err(|e| e.to_string()),
                     ),
                 ] {
-                    assert_eq!(
-                        result.is_ok(),
-                        w["representable"] == true,
-                        "{name} {category} {path} union Unicode"
-                    );
+                    assert!(result.is_ok(), "{name} {category} {path} union Unicode");
                     if let Ok(value) = result {
+                        if w["representable"] != true {
+                            typed_utf16::assert_projection(raw, &value);
+                            continue;
+                        }
                         assert_eq!(
                             serde_json::to_value(value).unwrap(),
                             serde_json::from_str::<Value>(raw).unwrap(),
@@ -1620,13 +1618,13 @@ fn sdk_signed_transaction_matches_live_typescript() {
             serde_json::from_str::<SignedTx>(raw).map_err(|e| e.to_string()),
             js_from_str::<SignedTx>(raw).map_err(|e| e.to_string()),
         ] {
-            assert_eq!(
+            assert!(
                 result.is_ok(),
-                w["representable"] == true,
                 "SignedTx {} {} unknown Unicode",
                 w["name"],
                 w["path"]
             );
+            typed_utf16::retained(raw);
         }
     }
     for w in oracle["signedStrings"].as_array().unwrap() {
@@ -1635,14 +1633,17 @@ fn sdk_signed_transaction_matches_live_typescript() {
             serde_json::from_str::<SignedTx>(raw).map_err(|e| e.to_string()),
             js_from_str::<SignedTx>(raw).map_err(|e| e.to_string()),
         ] {
-            assert_eq!(
+            assert!(
                 result.is_ok(),
-                w["representable"] == true,
                 "SignedTx {} {} Unicode",
                 w["name"],
                 w["field"]
             );
             if let Ok(v) = result {
+                if w["representable"] != true {
+                    typed_utf16::assert_projection(raw, &v);
+                    continue;
+                }
                 assert_eq!(
                     serde_json::to_value(v).unwrap(),
                     serde_json::from_str::<Value>(raw).unwrap(),
@@ -2100,15 +2101,20 @@ fn sdk_receipt_matches_live_source() {
             serde_json::from_str::<TxReceipt>(raw),
             js_from_str::<TxReceipt>(raw),
         ] {
-            assert_eq!(
-                value.is_ok(),
-                row["representable"].as_bool().unwrap(),
-                "TxReceipt {} Unicode",
-                row["field"]
-            );
+            assert!(value.is_ok(), "TxReceipt {} Unicode", row["field"]);
+            typed_utf16::retained(raw);
             if let Ok(value) = value {
                 let units: Vec<u16> = serde_json::from_value(row["units"].clone()).unwrap();
-                let expected = String::from_utf16(&units).unwrap();
+                let expected = String::from_utf16_lossy(&units);
+                if row["field"] == "data" {
+                    let raw: safe_cex_types::retained_json::RetainedJsonInput =
+                        value.data.as_ref().unwrap().clone().decode().unwrap();
+                    assert_eq!(
+                        raw.as_text().unwrap(),
+                        units,
+                        "TxReceipt.data retained units"
+                    );
+                }
                 let actual = match row["field"].as_str().unwrap() {
                     "txHash" => value.tx_hash,
                     "gasUsed" => value.gas_used.unwrap(),
@@ -2212,3 +2218,5 @@ fn sdk_receipt_source_controls_fail_by_name() {
         assert!(log.contains(name), "{log}");
     }
 }
+
+use unknown_depth::typed_utf16;

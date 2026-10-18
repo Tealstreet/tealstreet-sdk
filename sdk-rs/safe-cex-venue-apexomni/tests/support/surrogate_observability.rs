@@ -40,7 +40,7 @@ fn check_observations(name: &str) {
     let mut source_outputs = Vec::new();
     let mut native_outputs = Vec::new();
     let mut native_count = 0;
-    let mut refusal_count = 0;
+    let mut typed_boundary_count = 0;
     for (row, (label, expected_input, query)) in rows.iter().zip(expected) {
         let label = format!("APEX-SURROGATE {name}/{label}");
         assert_eq!(
@@ -78,11 +78,14 @@ fn check_observations(name: &str) {
             .any(|unit| (0xd800..=0xdfff).contains(unit))
             && expected_input != [0xd83d, 0xde00]
         {
-            assert!(
-                decoded.is_err(),
-                "{label} native shared ingress must refuse whole payload"
+            let decoded = decoded.unwrap();
+            assert_eq!(
+                decoded["x"],
+                String::from_utf16_lossy(expected_input),
+                "{label} typed String replacement"
             );
-            refusal_count += 1;
+            typed_utf16::assert_projection(row["json"].as_str().unwrap(), &decoded);
+            typed_boundary_count += 1;
             continue;
         }
         let decoded = decoded.unwrap();
@@ -124,10 +127,10 @@ fn check_observations(name: &str) {
         "APEX-SURROGATE {name} independent native floor"
     );
     assert_eq!(
-        refusal_count, 4,
-        "APEX-SURROGATE {name} independent refusal floor"
+        typed_boundary_count, 4,
+        "APEX-SURROGATE {name} independent typed-boundary floor"
     );
-    // Complete every decoded-native input/refusal assertion before query output assertions.
+    // Complete every decoded-native input/boundary assertion before query output assertions.
     for (label, actual, expected) in native_outputs {
         assert_eq!(actual, expected, "{label} native result");
     }
@@ -135,6 +138,9 @@ fn check_observations(name: &str) {
         assert_eq!(actual, expected, "{label} source observable result");
     }
 }
+
+#[path = "../../../test-support/typed_utf16.rs"]
+mod typed_utf16;
 #[test]
 fn primary_surrogate_observability() {
     check_observations("serializeApexPayload");

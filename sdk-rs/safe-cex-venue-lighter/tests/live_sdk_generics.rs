@@ -398,14 +398,27 @@ fn sdk_generic_types_match_live_typescript() {
                 );
             }
         } else {
-            assert!(
-                api.is_err(),
-                "ApiResponse retained payload shared UTF8 refusal"
-            );
-            assert!(
-                page.is_err(),
-                "PaginatedResponse retained payload shared UTF8 refusal"
-            );
+            let expected: Vec<u16> = witness["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|unit| u16::try_from(unit.as_u64().unwrap()).unwrap())
+                .collect();
+            for payload in [api.unwrap().data.unwrap(), page.unwrap().items.remove(0)] {
+                let raw: safe_cex_types::retained_json::RetainedJsonInput =
+                    payload.clone().decode().unwrap();
+                assert_eq!(
+                    raw.as_text().unwrap(),
+                    expected,
+                    "retained generic payload exact units"
+                );
+                let typed: String = payload.decode().unwrap();
+                assert_eq!(
+                    typed,
+                    String::from_utf16_lossy(&expected),
+                    "generic typed String replacement"
+                );
+            }
         }
         let raw = witness["encoded"].as_str().unwrap();
         let result =
@@ -420,7 +433,8 @@ fn sdk_generic_types_match_live_typescript() {
                 );
             }
         } else {
-            assert!(result.is_err(), "ApiResponse shared UTF8 refusal");
+            assert!(result.is_err(), "ApiResponse upstream Value refusal");
+            let _: ApiResponse<f64> = typed_utf16::decode(raw);
         }
     }
     // Nested typed payload decoders must retain a lexical negative zero too.
@@ -554,6 +568,9 @@ fn sdk_generic_types_match_live_typescript() {
         }
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
 #[test]
 #[ignore = "requires Node and maintained TypeScript"]
 fn sdk_generic_source_controls_fail_by_name() {

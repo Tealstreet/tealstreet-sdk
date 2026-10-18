@@ -53,13 +53,13 @@ fn check<T: DeserializeOwned + Serialize + JsNumberOutput + Native>(case: &Value
     let label = case["label"].as_str().unwrap();
     let input = case["input"].as_str().unwrap();
     if label == "chosen UTF-8 surrogate refusal" {
-        assert!(
-            serde_json::from_str::<T>(input).is_err(),
-            "UTF-8 refusal: {name}"
+        typed_utf16::assert_projection(
+            input,
+            &(serde_json::from_str::<T>(input)).expect("typed surrogate record is retained"),
         );
-        assert!(
-            js_from_str::<T>(input).is_err(),
-            "shared UTF-8 refusal: {name}"
+        typed_utf16::assert_projection(
+            input,
+            &(js_from_str::<T>(input)).expect("typed surrogate record is retained"),
         );
         return;
     }
@@ -131,3 +131,6 @@ fn declared_types_match_live_source_and_native_values() {
     );
     native_comparisons(594, "wire");
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
