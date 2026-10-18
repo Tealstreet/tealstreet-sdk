@@ -31,3 +31,8 @@ classification. All three constructed-Scope tests pass; Handle/keyed,
 ReadResult/field and Entries/entries semantic faults each produced a named
 compiled assertion failure and an exact-restored pass. No compile failure was
 counted as a negative control.
+
+After these three profiles, the canonical complete Kraken inventory clears all
+25 receivers and these three aliases, then stops on the separate
+`private_accounts::PageFuture<'a,H>` fixed-future shape requirement. That is the
+next cohort; this PR makes no full-inventory or remaining-21-alias claim.
