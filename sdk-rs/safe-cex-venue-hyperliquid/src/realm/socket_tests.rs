@@ -1,8 +1,6 @@
 //! Exercise the source private class through the production realm/socket bridge.
-#[allow(dead_code)]
-#[path = "../../tests/support/binding_runtime.rs"]
-mod host;
 use super::Value;
+use crate::binding_test_runtime as host;
 use crate::{
     binding::{HyperliquidDependencies, RuntimeClock},
     exchange::HyperliquidExchange,
