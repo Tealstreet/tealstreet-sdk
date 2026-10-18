@@ -403,3 +403,32 @@ fn native_private_handler_and_event_array_keep_numeric_fields_before_transport()
     assert!(Rc::ptr_eq(&same, &rows));
     owner.dispose().unwrap();
 }
+#[test]
+fn native_bulk_placement_retains_post_result_until_signed_http_settles() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Arc::new(Http::default());
+    http.response("/fapi/v1/order", 200, json!({"orderId":"9007199254740993"}));
+    http.held.store(true, Ordering::SeqCst);
+    let owner = owner(http.clone(), runtime.clone());
+    let opts = EventValue::from_json(json!({
+        "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+        "price":91.2, "amount":3, "clientOrderId":"batch-native"
+    }));
+    let mut call = Box::pin(owner.invoke(Method::PlaceOrders, vec![EventValue::array(vec![opts])]));
+    assert!(poll(&runtime, &mut call).is_pending());
+    assert_eq!(http.count("/fapi/v1/order"), 1);
+    let request = http.requests.lock().unwrap()[0].clone();
+    assert!(request.method.eq_ignore_ascii_case("POST"));
+    assert!(request.url.contains("symbol=BTCUSDT"));
+    assert!(request.url.contains("price=91.2"));
+    assert!(request.url.contains("quantity=3"));
+    assert!(request.url.contains("signature="));
+    assert!(request.url.contains("newClientOrderId=batch-native"));
+    http.held.store(false, Ordering::SeqCst);
+    let result = run(&runtime, call).unwrap();
+    let rows = result.array_values().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(text(&rows[0]), "9007199254740993");
+    assert_eq!(http.count("/fapi/v1/order"), 1);
+    owner.dispose().unwrap();
+}

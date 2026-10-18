@@ -870,3 +870,9 @@ Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+The five `order_batches` function contracts distinguish static endpoint and native
+POST-forwarding roles from executed dense-array, iterable-guard and ID outputs.
+`ORDER_BATCH_CONTRACT_REVIEW.md` documents their finite native profiles, actual
+signed bulk-placement witness, compiled controls and canonical scoped measure.
+Keep the three existing callable alias records and their separate evidence.
