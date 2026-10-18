@@ -17,7 +17,7 @@ use safe_cex_types::ExchangeName;
 use serde_json::json;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-fn owner(name: ExchangeName) -> CoinbaseExchange {
+fn owner(name: ExchangeName) -> Rc<CoinbaseExchange> {
     let runtime = native_runtime();
     let http = client::rest_http_host(
         runtime.clone(),

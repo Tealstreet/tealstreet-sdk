@@ -311,3 +311,14 @@ callback body or every generic argument. `scripts/generic-alias-contracts.mjs`
 authenticates those thirteen fixed types and classifies their non-decoder roles;
 its controls independently remove the signing and bound-method registrations,
 require the unchanged monomorphization refusal, then restore exact policy bytes.
+
+Seven public-stream aliases retain explicit non-decoder capability roles. The
+finite `scripts/public-stream-alias-contracts.mjs` runner authenticates compiler
+identities and refuses any future Deserialize capability hidden by a role record.
+`public_stream_alias_native` uses constructed Advanced/Spot classes, production
+frame dispatch, the actual TickHost callback adapter and the native book adapter;
+it observes callback/frame/book roots, live iteration, errors and numeric bits.
+`public-stream-alias-controls.py` changes the real dispatch iteration and book
+price projection independently, requires named compiled failures, restores exact
+source bytes and reruns the corresponding witness. This is a finite capability
+census, not full transport or all-callback coverage.
