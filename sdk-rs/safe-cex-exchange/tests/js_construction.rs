@@ -57,14 +57,16 @@ fn callable_error_constructor_keeps_message_units_and_construct_order() {
     let target = Js::constructor("Target", None, |target, _| target.allocate_instance());
     let events = trace.clone();
     let prototype = error.get("prototype").unwrap();
-    target.define_accessor(
-        "prototype",
-        Some(Rc::new(move |_| {
-            events.borrow_mut().push("prototype");
-            Ok(prototype.clone())
-        })),
-        None,
-    );
+    target
+        .define_accessor(
+            "prototype",
+            Some(Rc::new(move |_| {
+                events.borrow_mut().push("prototype");
+                Ok(prototype.clone())
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     let events = trace.clone();
     let message = Js::object(vec![(
         "toString",

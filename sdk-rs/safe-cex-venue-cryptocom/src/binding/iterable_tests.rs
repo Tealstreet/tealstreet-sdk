@@ -170,19 +170,21 @@ fn production_subscription_body_throw_closes_and_keeps_the_original_cause() {
     let reads = Rc::new(Cell::new(0));
     let original = Js::object(vec![("marker", Js::str("body failure"))]);
     let failure = original.clone();
-    socket.define_accessor(
-        "subscriptions",
-        Some(Rc::new(move |_| {
-            let index = reads.get();
-            reads.set(index + 1);
-            if index > 0 {
-                Err(Thrown::new(failure.clone()))
-            } else {
-                Ok(subscriptions.clone())
-            }
-        })),
-        None,
-    );
+    socket
+        .define_accessor(
+            "subscriptions",
+            Some(Rc::new(move |_| {
+                let index = reads.get();
+                reads.set(index + 1);
+                if index > 0 {
+                    Err(Thrown::new(failure.clone()))
+                } else {
+                    Ok(subscriptions.clone())
+                }
+            })),
+            None,
+        )
+        .expect("fresh test accessor target");
     let error = socket
         .call_method("registerAndSubscribe", vec![iterator])
         .unwrap_err();
@@ -269,7 +271,8 @@ fn production_subscription_step_failures_do_not_close_the_iterator() {
                         mode,
                         Some(Rc::new(move |_| Err(Thrown::new(failure.clone())))),
                         None,
-                    );
+                    )
+                    .expect("fresh test accessor target");
                     Ok(step)
                 }),
             )

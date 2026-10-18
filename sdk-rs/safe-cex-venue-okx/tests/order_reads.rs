@@ -345,7 +345,9 @@ fn invoke(t: &Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
             ]);
             if matches!(t.scenario, "iterator-error" | "close-error") {
                 let error = t.err.clone();
-                record.define_accessor("tranId", Some(Rc::new(move |_| Err(error.clone()))), None);
+                record
+                    .define_accessor("tranId", Some(Rc::new(move |_| Err(error.clone()))), None)
+                    .expect("fresh test accessor target");
             }
             t.returned.borrow_mut().push(record.clone());
             let mut records = vec![record];

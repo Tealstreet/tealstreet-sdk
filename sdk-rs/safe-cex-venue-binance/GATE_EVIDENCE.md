@@ -376,7 +376,7 @@ by name at case 348; restored baseline passes. Reviewer MERGE.
 
 Merged a99f1fffe1 after read-only reviewer MERGE. CI multiset union is63/63
 parents to64 merged;249 unique exemptions retain both parents and seven venue
-dependencies remain. Scoped locked compile,120 wiring tests and all32 venue
+dependencies remain. Scoped locked compile,120 wiring tests and all 32 venue
 tests pass. Layer audit initially could not spawn cargo because PATH was omitted;
 exporting the toolchain PATH and rerunning passes37 crates.
 
@@ -3572,3 +3572,8 @@ the sole difference is documentation. Frozen install, format and diff checks pas
 Independent draft review found only the corrected test prefix bound. CodeRabbit
 returned its review limit and has not completed a bot review. These are native-host
 ID and topic witnesses; they do not claim whole-venue parity or live order probes.
+
+`PRIVATE_HELPERS_GATE_EXITS.json` and `PRIVATE_HELPERS_MERGE_GATE_EXITS.json`
+are historical extraction receipts, including the retired timer-only copies.
+The current shared detach target retains its 32 source cases; actual receiver
+key/retry/refresh evidence is documented in `PRIVATE_ORDER_ALIAS_REVIEW.md`.
