@@ -147,7 +147,7 @@
         }
       },
       {
-        "input": " \ufeff ",
+        "input": " ﻿ ",
         "output": {
           "kind": "finite",
           "bits": "0000000000000000"
@@ -4109,7 +4109,7 @@
     "call": "serde_json::json!($type($value.as_str().expect(\"frame\")))",
     "cases": [
       {
-        "input": " PING\u00a0",
+        "input": " PING ",
         "output": true
       },
       {
@@ -23149,7 +23149,7 @@
         }
       },
       {
-        "input": "\ufeff2\u00a0",
+        "input": "﻿2 ",
         "output": {
           "bits": "4000000000000000",
           "nan": false
@@ -23403,7 +23403,7 @@
         }
       },
       {
-        "input": "\ud83d\ude80",
+        "input": "🚀",
         "output": {
           "tag": "string",
           "units": [
@@ -24145,7 +24145,7 @@
           {
             "input": {
               "kind": "string",
-              "text": "\u96ea\ud83d\ude00"
+              "text": "雪😀"
             },
             "output": {
               "tag": "string",
@@ -24227,7 +24227,7 @@
             }
           },
           {
-            "input": "\ud83d\ude80",
+            "input": "🚀",
             "output": {
               "units": [
                 55357,
@@ -25338,7 +25338,7 @@
         },
         "input": "observed",
         "reason": "GetIterator calls the actual retained protocol method and verifies its native object result. Array and astral-string fixtures step that returned iterator and observe iterable-self identity, values and exhaustion.",
-        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A\ud83d\ude00\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
+        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A😀\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
         "cases": [
           {
             "input": "array",
@@ -25357,7 +25357,7 @@
               "self": true,
               "values": [
                 "A",
-                "\ud83d\ude00"
+                "😀"
               ],
               "done": true
             }
@@ -30862,7 +30862,7 @@
   },
   "safe_cex_exchange::js_runtime::iterator::IteratorRecord": {
     "shape": "observed",
-    "evidence": "safe-cex-exchange/src/js_runtime/iterator.rs; actual compiler-selected get API constructs retained native IteratorRecord state. Five independently executed Node strict iterator cases in tests/js_iterator_records_source.cjs contract mode pin native values/bits/UTF16, terminal state and non-iterable refusals. Eleven additional native/Node abrupt-close, elision, cached-next and normal-close cases exercise the production helper/global consumer; no raw JSON decoder, full runtime or HL cutover claim.",
+    "evidence": "safe-cex-exchange/src/js_runtime/iterator.rs; actual compiler-selected get API constructs retained native IteratorRecord state. Five independently executed Node strict iterator cases in tests/js_iterator_records_source.cjs contract mode pin native values/bits/UTF16, terminal state and non-iterable refusals. Eleven additional native/Node abrupt-close, elision, cached-next and normal-close cases exercise the production helper/global consumer; no raw JSON decoder, full runtime or HL cutover claim. Public from_iterator has the same unchanged protocol body as the former crate-private helper; Kraken needs it after resolving one protocol method while retaining the source spread diagnostic. Each exact constructor has its own executed native corpus; no method bypasses generated entrypoint dispatch.",
     "entrypoints": [
       {
         "api": {
@@ -30915,75 +30915,190 @@
           }
         },
         "input": "observed",
-        "reason": "GetIterator over an already native Js retains the original iterator and next method. This exact constructor is executed before observing yielded tags, binary64 bits, UTF16 units, exhaustion and strict TypeError refusals; no borrowed-input echo or nondecoder exemption."
-      }
-    ],
-    "call": "{ use crate::js_runtime::value::{Js,from_json}; let input=from_json($value); match $type::get(&input) {\nOk(record)=>{let mut values=Vec::new();while let Some(value)=record.step_value().expect(\"reviewed builtin iterator\"){assert!(values.len()<8,\"fixture iterator must terminate\");values.push(match value{Js::Number(number)=>serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits())}),Js::String(units)=>serde_json::json!({\"units\":units.as_ref()}),Js::Null=>serde_json::json!({\"null\":true}),_=>panic!(\"unreviewed fixture value\")});}let exhausted=record.step().expect(\"terminal record\").is_none();let closed=record.close().is_ok();serde_json::json!({\"values\":values,\"exhausted\":exhausted,\"closed\":closed})},\nErr(error)=>serde_json::json!({\"error\":error.value.get(\"name\").expect(\"native rejection name\").to_display()})} }",
-    "cases": [
-      {
-        "input": [],
-        "output": {
-          "values": [],
-          "exhausted": true,
-          "closed": true
-        }
-      },
-      {
-        "input": [
-          7,
-          "\ud83d\ude00",
-          null
-        ],
-        "output": {
-          "values": [
-            {
-              "bits": "401c000000000000"
-            },
-            {
-              "units": [
-                55357,
-                56832
-              ]
-            },
-            {
-              "null": true
+        "reason": "GetIterator over an already native Js retains the original iterator and next method. This exact constructor is executed before observing yielded tags, binary64 bits, UTF16 units, exhaustion and strict TypeError refusals; no borrowed-input echo or nondecoder exemption.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; let input=from_json($value); match $type::get(&input) {\nOk(record)=>{let mut values=Vec::new();while let Some(value)=record.step_value().expect(\"reviewed builtin iterator\"){assert!(values.len()<8,\"fixture iterator must terminate\");values.push(match value{Js::Number(number)=>serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits())}),Js::String(units)=>serde_json::json!({\"units\":units.as_ref()}),Js::Null=>serde_json::json!({\"null\":true}),_=>panic!(\"unreviewed fixture value\")});}let exhausted=record.step().expect(\"terminal record\").is_none();let closed=record.close().is_ok();serde_json::json!({\"values\":values,\"exhausted\":exhausted,\"closed\":closed})},\nErr(error)=>serde_json::json!({\"error\":error.value.get(\"name\").expect(\"native rejection name\").to_display()})} }",
+        "cases": [
+          {
+            "input": [],
+            "output": {
+              "values": [],
+              "exhausted": true,
+              "closed": true
             }
-          ],
-          "exhausted": true,
-          "closed": true
-        }
-      },
-      {
-        "input": "A\ud83d\ude00",
-        "output": {
-          "values": [
-            {
-              "units": [
-                65
-              ]
-            },
-            {
-              "units": [
-                55357,
-                56832
-              ]
+          },
+          {
+            "input": [
+              7,
+              "😀",
+              null
+            ],
+            "output": {
+              "values": [
+                {
+                  "bits": "401c000000000000"
+                },
+                {
+                  "units": [
+                    55357,
+                    56832
+                  ]
+                },
+                {
+                  "null": true
+                }
+              ],
+              "exhausted": true,
+              "closed": true
             }
-          ],
-          "exhausted": true,
-          "closed": true
-        }
+          },
+          {
+            "input": "A😀",
+            "output": {
+              "values": [
+                {
+                  "units": [
+                    65
+                  ]
+                },
+                {
+                  "units": [
+                    55357,
+                    56832
+                  ]
+                }
+              ],
+              "exhausted": true,
+              "closed": true
+            }
+          },
+          {
+            "input": 7,
+            "output": {
+              "error": "TypeError"
+            }
+          },
+          {
+            "input": null,
+            "output": {
+              "error": "TypeError"
+            }
+          }
+        ]
       },
       {
-        "input": 7,
-        "output": {
-          "error": "TypeError"
-        }
-      },
-      {
-        "input": null,
-        "output": {
-          "error": "TypeError"
-        }
+        "api": {
+          "kind": "inherent",
+          "name": "from_iterator",
+          "signature": {
+            "inputs": [
+              [
+                "iterator",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Captures an already acquired native iterator and caches its next member without another Symbol.iterator lookup. The native contract independently invokes get and from_iterator on fresh real array/string iterators, observes both native value sequences and exhaustion, and refuses primitive iterator results. Kraken constructed-Scope cached-next/getter-error tests exercise the new external consumer.",
+        "call": "{ use crate::js_runtime::value::{Js,from_json}; let input=from_json($value); let iterator = if matches!(&input, Js::Array(_) | Js::String(_)) { input.iterator() } else { Ok(input) }; match iterator.and_then($type::from_iterator) {\nOk(record)=>{let mut values=Vec::new();while let Some(value)=record.step_value().expect(\"reviewed builtin iterator\"){assert!(values.len()<8,\"fixture iterator must terminate\");values.push(match value{Js::Number(number)=>serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits())}),Js::String(units)=>serde_json::json!({\"units\":units.as_ref()}),Js::Null=>serde_json::json!({\"null\":true}),_=>panic!(\"unreviewed fixture value\")});}let exhausted=record.step().expect(\"terminal record\").is_none();let closed=record.close().is_ok();serde_json::json!({\"values\":values,\"exhausted\":exhausted,\"closed\":closed})},\nErr(error)=>serde_json::json!({\"error\":error.value.get(\"name\").expect(\"native rejection name\").to_display()})} }",
+        "cases": [
+          {
+            "input": [],
+            "output": {
+              "values": [],
+              "exhausted": true,
+              "closed": true
+            }
+          },
+          {
+            "input": [
+              7,
+              "😀",
+              null
+            ],
+            "output": {
+              "values": [
+                {
+                  "bits": "401c000000000000"
+                },
+                {
+                  "units": [
+                    55357,
+                    56832
+                  ]
+                },
+                {
+                  "null": true
+                }
+              ],
+              "exhausted": true,
+              "closed": true
+            }
+          },
+          {
+            "input": "A😀",
+            "output": {
+              "values": [
+                {
+                  "units": [
+                    65
+                  ]
+                },
+                {
+                  "units": [
+                    55357,
+                    56832
+                  ]
+                }
+              ],
+              "exhausted": true,
+              "closed": true
+            }
+          },
+          {
+            "input": 7,
+            "output": {
+              "error": "TypeError"
+            }
+          },
+          {
+            "input": null,
+            "output": {
+              "error": "TypeError"
+            }
+          }
+        ]
       }
     ]
   },

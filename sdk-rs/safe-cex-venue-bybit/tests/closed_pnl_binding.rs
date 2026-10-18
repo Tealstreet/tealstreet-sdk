@@ -128,7 +128,7 @@ fn closed_pnl_page_cap_warns_with_symbol_and_keeps_twenty_pages() {
     let opts = serde_json::from_value(json!({"symbol":"BTCUSDT","from":1,"to":2})).unwrap();
     assert_eq!(h.drive(h.venue().fetch_closed_pnl(opts)).unwrap().len(), 20);
     assert_eq!(h.wire.calls("/v5/position/closed-pnl").len(), 20);
-    assert!(h.runtime.logs.borrow().iter().any(|s| s == "warning: Closed-PnL paging hit the 20-page cap for BTCUSDT; older rows in this window were not fetched"));
+    assert!(h.runtime.logs.borrow().iter().any(|s| s == "warning: Closed-PnL paging hit the 20-page cap for BTCUSDT; older rows in this window were not fetched warning"));
     h.venue().dispose().unwrap();
 }
 

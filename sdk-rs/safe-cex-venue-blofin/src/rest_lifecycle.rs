@@ -204,6 +204,7 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                 }
             }
             markets.push(Market {
+                runtime: Default::default(),
                 id: id.into(),
                 symbol: id.strip_suffix("-SWAP").unwrap_or(id).replace('-', ""),
                 pretty_symbol: None,
@@ -211,10 +212,13 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                 quote: quote.into(),
                 active: row.get("state").and_then(Value::as_str) == Some("live"),
                 precision: MarketPrecision {
+                    base: None,
+                    quote: None,
                     amount: lot,
                     price: parse(row.get("tickSize"))?,
                 },
                 limits: MarketLimits {
+                    cost: None,
                     amount: MarketLimitsAmount {
                         min: parse(row.get("minSize"))? * contract,
                         max: max_amount,

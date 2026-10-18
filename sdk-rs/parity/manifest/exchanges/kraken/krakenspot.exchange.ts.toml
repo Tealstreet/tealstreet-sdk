@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/spot_cancel.rs::cancel_orders"
 status = "ported"
-note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-periodic-synchronization-and-spot-cancellation-hosts. tests/spot_cancel.rs::cancel_orders_live_source executes the actual TypeScript body, asserts native current flags/IDs, opaque original identity, ordering and settlement. scripts/periodic-sync-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Promise ownership, loop scheduling, live arrays, HTTP, Store and shared exception representation remain bound dependencies; no complete-class/runtime claim. Rename target: `safe-cex-venue-kraken/src/spot_cancel.rs::cancel_orders`."
+note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-periodic-synchronization-and-spot-cancellation-hosts. tests/spot_cancel.rs::cancel_orders_live_source executes the actual TypeScript body, asserts native current flags/IDs, opaque original identity, ordering and settlement. scripts/periodic-sync-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Promise ownership, loop scheduling, live arrays, HTTP, Store and shared exception representation remain bound dependencies; no complete-class/runtime claim. Concrete cancellation now retains native Thrown/message cells through reporting and fresh Error construction; tests/support/accepted_additional_receivers.rs and scripts/additional-receiver-source.cjs cover original UTF-16 units, truthy native values and falsy fallback. Rename target: `safe-cex-venue-kraken/src/spot_cancel.rs::cancel_orders`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.listenOrderBook"

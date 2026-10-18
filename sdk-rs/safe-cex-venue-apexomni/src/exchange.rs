@@ -798,8 +798,14 @@ impl ApexOmniExchange {
             let max_leverage = float(get(row, "displayMaxLeverage"))?;
             mapped.push((
                 row,
-                MarketPrecision { amount, price },
+                MarketPrecision {
+                    base: None,
+                    quote: None,
+                    amount,
+                    price,
+                },
                 MarketLimits {
+                    cost: None,
                     amount: MarketLimitsAmount {
                         min: min_amount,
                         max: max_amount,
@@ -830,6 +836,7 @@ impl ApexOmniExchange {
                     )));
                 };
                 Ok(Market {
+                    runtime: Default::default(),
                     id: typed_string("id", "symbol")?,
                     symbol: typed_string("symbol", "crossSymbolName")?,
                     base: typed_string("base", "baseTokenId")?,

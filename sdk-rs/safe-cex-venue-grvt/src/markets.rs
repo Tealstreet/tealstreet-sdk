@@ -88,6 +88,7 @@ fn project_instrument(inst: &Input) -> Result<Result<Market, ExchangeError>, Exc
         )));
     };
     Ok(Ok(Market {
+        runtime: Default::default(),
         id,
         symbol,
         pretty_symbol: None,
@@ -95,10 +96,13 @@ fn project_instrument(inst: &Input) -> Result<Result<Market, ExchangeError>, Exc
         quote,
         active: inst.get("ia") != Some(&Input::Bool(false)),
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: min_size,
             price: tick_size,
         },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount { min: min_size, max },
             leverage: MarketLimitsLeverage {
                 min: 1.0,

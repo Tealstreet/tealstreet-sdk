@@ -476,6 +476,11 @@ an own balance property (None is undefined); Invalid has error only. Concrete
 class/client/fetch composition and arbitrary executable callback behaviors remain
 outside these extractions; preserve this boundary when wiring the classes.
 
+The three request-weight function contracts execute actual header presence/order,
+rate-limit coercion/effect and native error outputs. Keep all seven alias reviews
+separate. `REQUEST_WEIGHT_REVIEW.md` records the finite profiles, real signed HTTP
+Futures pause witness, PM/Spot no-guard controls and independent compiled faults
+with exact restoration. No receiver/local-function/cancellation pin is widened.
 
 ## Concrete class closure
 
@@ -523,11 +528,25 @@ clients get it as the HTTP signer (the venue interceptor leaves requests unsigne
 when `options.remoteSigner` is set) and `remote_sign` relays ws-auth to it; the
 options token is stripped before typed decoding, since typed options cannot hold it.
 
+The API factory cohort retains executed native query/retry/property outputs and
+individual static-endpoint/outbound-HMAC role classifications. Preserve the four
+existing aliases and raw nominal method observations.
+`API_FACTORY_CONTRACT_REVIEW.md` records the actual native listen-key retry,
+signed income query, Spot authentication and failure-report bindings plus five
+independent compiled faults with byte-exact restoration.
+
 `ExchangeImports::request` args are the query params for GET/DELETE and the body
 for POST/PUT — never an axios config object; every call site passes that shape.
 Binance ledger ids arrive as JSON numbers and the class keeps them raw as TS
 does; `income_records` projects them through `String()` only at the typed
 `IncomeRecord` boundary (trait income methods, pager, fold).
+
+The six private-event value owners have individual typed rendering, construction,
+property-selection and iteration roles; their classification receipts do not
+execute decoders. `PRIVATE_EVENT_ROLE_REVIEW.md` records actual native private
+message/Store witnesses, current-realm referent identity and later-mutation
+observations, plus six independent compiled faults with exact restoration. Keep
+the existing EventArray alias and both local-helper/external receiver pins exact.
 
 The family value graph is the canonical `js_runtime::value::Js`: `EventValue`
 is an alias and `EventOps` retains the decoded-data operations without separate
@@ -956,6 +975,22 @@ private_classes source-case guard keeps all 164 cases live in CI. Preserve the
 208 constructed native Store cases and seven independent compiled body controls
 when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
 
+The exchange assembly bridge cohort measures exactly `failure`, `json_value` and
+`typed<Vec<Market>>` through the maintained canonical accepted-set driver. Read
+`EXCHANGE_BRIDGE_REVIEW.md` for its finite String/JSON/typed boundaries. Native
+output fields and number bits are observed before serialization; do not broaden
+this to arbitrary JS graphs or generic T. The companion
+`scripts/exchange-bridge-controls.py` requires independent compiled named failures
+and exact byte restoration for all three bridges.
+
+The four native assembly context contracts (`ExchangeOwner`, `Context`,
+`RestContext`, `emit_json`) require the production native host. Read
+`EXCHANGE_NATIVE_CONTEXT_REVIEW.md` for their finite observations, typed handle
+and Order boundaries, and compiled controls. The canonical driver delegates
+these requiredFeatures rows to native; a default native-gated receipt is not
+execution. Keep the real NativeImports/client/Store path and actual raw console
+and reporter arguments; do not substitute a parallel venue/receiver implementation.
+
 The four orderbook function contracts execute the real snapshot, borrowed update
 selector, apply algorithm and private indexed-cell reader. Native number bits,
 sequence state, borrowed record identity and partial mutation are observed before
@@ -965,6 +1000,21 @@ keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell'
 immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
 requires four independent compiled faults to fail actual constructed native
 socket/HTTP tests, with exact source restoration and a passing rerun after each.
+
+`inherited_refusal_binding --features native -- --include-ignored` executes the
+three actual native classes and compares 16 genuine inherited refusal profiles
+with the full maintained TS constructors. `INHERITED_REFUSAL_REVIEW.md` records
+its finite scope; `scripts/inherited-refusal-controls.py` requires eight compiled
+method-specific failures and exact-restoration passes. Keep these execution
+witnesses separate from decoder classification and constant-output permission.
+
+The inherited-refusal proof constructs the actual Futures/PM/Spot classes with
+native_dependencies and compares eight methods/two genuine argument profiles
+against maintained constructors. Native name/message and zero HTTP/events/reports
+are read before projection. inherited-refusal-controls.py independently faults
+each actual Exchange method and requires a named runtime failure plus exact
+restoration. The exact-method constant-output gate support is preparatory: no
+partial class contract or Binance constant-policy permission is installed.
 
 The nine public listener functions have individual typed capability role reviews
 in PUBLIC_LISTENER_FUNCTION_REVIEW.md. Their classification receipts do not
@@ -976,3 +1026,17 @@ production-body controls in scripts/public-listener-function-controls.py, with
 named native failures and byte-exact restoration passes. The canonical scoped
 runner is scripts/public-listener-function-contracts.mjs; the seven existing
 alias reviews and separate Book decoder remain unchanged.
+
+`class_jobs::Settlement<T>` has an exact typed Future::poll contract, separate
+from its existing Clone construction review and the native future alias. The
+classification receipt does not execute a decoder. SETTLEMENT_REVIEW.md describes
+the actual native held listen-key/cloned-handle witness and direct eager-job
+identity/wakeup checks. Keep scripts/settlement-controls.py's independently
+compiled Pending fault, bounded native failure and exact restoration pass; use
+scripts/settlement-contracts.mjs for the canonical one-owner receipt.
+
+Four unused ExchangeState forwarding methods are retired; source rows now map
+only to the canonical order_logic/request_weight helpers. The actual interceptor
+and post-only classifier bindings already call those helpers directly. Keep the
+native signed-client and batch-rejection canaries in DEAD_STATE_FORWARDER_REVIEW.md
+when changing either live binding. The complete State receipt remains separate.

@@ -17,7 +17,7 @@ use crate::{
 use safe_cex_exchange::{
     js_runtime::{
         promise::{Promise as JsPromise, await_js},
-        value::{Js, Thrown, from_typed, to_json},
+        value::{Js, Thrown, from_typed},
     },
     runtime::ExchangeError,
 };
@@ -244,12 +244,8 @@ impl LifecycleHost for Host {
         Ok(())
     }
     fn clear_timeout(&self, timer: LifecycleTimer) -> Result<(), PortfolioFailure> {
-        self.global(
-            "clearTimeout",
-            vec![safe_cex_exchange::js_runtime::value::from_json(
-                &timer.borrow(),
-            )],
-        )?;
+        let handle = timer.borrow().clone();
+        self.global("clearTimeout", vec![handle])?;
         Ok(())
     }
     fn set_timeout(
@@ -262,7 +258,7 @@ impl LifecycleHost for Host {
             Ok(Js::Undefined)
         });
         let timer = self.global("setTimeout", vec![callback, Js::Number(delay_ms)])?;
-        Ok(Rc::new(RefCell::new(to_json(&timer).map_err(from_thrown)?)))
+        Ok(Rc::new(RefCell::new(timer)))
     }
     fn last_private_user_stream_message_at(&self) -> f64 {
         self.class()

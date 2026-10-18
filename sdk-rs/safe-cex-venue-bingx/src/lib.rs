@@ -1,4 +1,7 @@
 //! Function-by-function BingX port; see the per-source parity manifests.
+#[cfg(test)]
+extern crate self as safe_cex_venue_bingx;
+
 pub mod account_reads;
 pub mod amendment;
 pub mod api;

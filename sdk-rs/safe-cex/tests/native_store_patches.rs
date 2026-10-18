@@ -226,6 +226,8 @@ fn order_market_and_balance_do_not_roundtrip_existing_nonfinite_values() {
         patch.set_native(
             "precision",
             safe_cex_types::MarketPrecision {
+                base: None,
+                quote: None,
                 amount: value,
                 price: value,
             },
