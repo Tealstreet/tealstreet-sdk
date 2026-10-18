@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {root,load,ts,dependencies}=require('../../safe-cex-types/scripts/accounts-source.cjs');
 const enums=load(path.join(root,'packages/safe-cex/src/types.ts'));
 const constants=load(path.join(root,'packages/safe-cex/src/exchanges/blofin/blofin.types.ts'));
-const {DefaultStore}=load(path.join(root,'packages/safe-cex/src/store/store.base.ts'));
+const {DefaultStore,isTerminalOrder}=load(path.join(root,'packages/safe-cex/src/store/store.base.ts'));
 const {adjust}=load(path.join(root,'packages/safe-cex/src/utils/safe-math.ts'));
 const {omitUndefined}=load(path.join(root,'packages/safe-cex/src/utils/omitUndefined.ts'));
 const {inverseObj}=load(path.join(root,'packages/safe-cex/src/utils/inverseObj.ts'));
@@ -12,7 +12,7 @@ const ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.
 const klass=ast.statements.find(s=>ts.isClassDeclaration(s)&&s.name?.text==='BlofinExchange');
 const names=['formatTriggerOrder','formatAlgoOrder','formatNormalOrder','getOrFetchPositionMode','getOrFetchMarginType','fetchLeverageForSymbol','changePositionMode','placeTriggerOrder','cancelSymbolOrders','getPositionSide','toBlofinTriggerType','applyConfirmedPositionMode'];
 let active;
-const context={...enums,...constants,adjust,omitUndefined,inverseObj,createPositionId,times:dependencies('lodash/times'),uniqBy:dependencies('lodash/uniqBy'),uuid:()=>{const id='u'+String(++active.uuidCount).padStart(3,'0');active.trace.push(['uuid',id]);return id;},process:{env:{NODE_ENV:'production'}}};
+const context={...enums,...constants,adjust,omitUndefined,inverseObj,createPositionId,isTerminalOrder,times:dependencies('lodash/times'),uniqBy:dependencies('lodash/uniqBy'),uuid:()=>{const id='u'+String(++active.uuidCount).padStart(3,'0');active.trace.push(['uuid',id]);return id;},process:{env:{NODE_ENV:'production'}}};
 const factories={};
 for(const name of names){const member=klass.members.find(m=>m.name?.text===name);assert(member&&ts.isPropertyDeclaration(member)&&ts.isArrowFunction(member.initializer),'method_shape:'+name);const code=ts.transpileModule(`return function(){return ${member.initializer.getText(ast)}};`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;factories[name]=new Function(...Object.keys(context),code)(...Object.values(context));}
 const market=(info={lotSize:'3',minSize:'0.2'})=>({id:'BTC-USDT',symbol:'BTCUSDT',base:'BTC',quote:'USDT',active:true,precision:{amount:0.01,price:0.25},limits:{amount:{min:0.01,max:100},leverage:{min:1,max:50}},contractSize:0.001,info});

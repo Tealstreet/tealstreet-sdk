@@ -1305,3 +1305,37 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     );
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn symbol_cancel_signs_only_live_orders() {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    let mut orders = stored_orders(&h);
+    for (id, status) in [("101", OrderStatus::Closed), ("102", OrderStatus::Canceled)] {
+        let mut terminal = orders[0].clone();
+        terminal.id = id.into();
+        terminal.status = status.into();
+        orders.push(terminal);
+    }
+    Store::update(
+        &*h.store,
+        StoreUpdate {
+            orders: Some(orders),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let before = h.http.count();
+    h.drive(h.venue().cancel_symbol_orders("BTC".into()))
+        .unwrap();
+    let txs = sent_txs(&h, before);
+    assert_eq!(
+        txs.len(),
+        1,
+        "terminal rows produce no cancellation request"
+    );
+    assert_eq!(txs[0].0, "15");
+    assert_eq!(txs[0].1["Index"], json!(777));
+    assert_signed_by_account(&txs[0].1);
+}

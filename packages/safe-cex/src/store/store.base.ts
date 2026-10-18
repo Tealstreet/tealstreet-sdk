@@ -11,6 +11,10 @@ const TERMINAL_ORDER_MEMORY_MS = 60_000;
 const TERMINAL_ORDER_MEMORY_MAX = 1_000;
 const TERMINAL_STATUSES = new Set<OrderStatus>([OrderStatus.Closed, OrderStatus.Canceled]);
 
+// A filled or canceled order stays in `orders` until the next snapshot replaces the
+// list, so anything that treats `orders` as "live on the venue" has to skip these.
+export const isTerminalOrder = (order: Pick<Order, 'status'>) => TERMINAL_STATUSES.has(order.status);
+
 export const PACKED_TICKER_FIELDS = [
   'bid',
   'ask',

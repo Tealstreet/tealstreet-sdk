@@ -12,6 +12,7 @@ import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
 import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
+import { isTerminalOrder } from '../../store/store.base';
 import {
   Balance,
   Candle,
@@ -1662,13 +1663,14 @@ export class BinanceExchange extends BaseExchange {
 
     if (!wantsClosePosition) return;
 
-    // Use the local store — `cancelOrders` already silently absorbs -2011 ("Unknown order sent"),
-    // so a stale row triggers a harmless no-op cancel instead of a REST roundtrip on every placement.
+    // Use the local store, skipping known terminal rows. `cancelOrders` absorbs
+    // -2011 ("Unknown order sent") if an apparently live row is already gone.
     // The previous fetchOrders here was a major contributor to Binance's 2400 RPM IP rate limit
     // (each call = 2 parallel REST requests, amplified per placement across all accounts on this IP).
     const existingCloseOrders = this.store.orders.filter((o) => {
       return (
         o.symbol === opts.symbol &&
+        !isTerminalOrder(o) &&
         o.close === true &&
         !o.amount && // Only cancel infinite closePosition orders (no size)
         o.type === opts.type &&

@@ -841,6 +841,15 @@ fn host(t: Rc<State>) -> Rc<CompositionOps<V, E>> {
         parallel_map: Rc::new(|_, _, _| unused()),
     };
     let order = OrderMutationOps {
+        is_terminal_order: Rc::new(|order| {
+            let status = match get(order, "status").as_ref() {
+                Native::S(status) => String::from_utf16(status).ok().and_then(|status| {
+                    serde_json::from_value(serde_json::Value::String(status)).ok()
+                }),
+                _ => None,
+            };
+            Ok(safe_cex_store::store::is_terminal_order_status(status))
+        }),
         value: Rc::new(value),
         has: Rc::new(|_, _| unused()),
         filter: Rc::new(|_, _| unused()),

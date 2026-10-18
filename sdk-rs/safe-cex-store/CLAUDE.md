@@ -184,3 +184,9 @@ Order.reduceOnly follows the same ModelField overlay policy: an absent incoming
 property retains the existing value, while own undefined replaces it. The native
 Store facade regression exercises all four presence states across single/bulk
 upsert and updateOrder, alongside the actual TypeScript Store.
+
+`store::is_terminal_order_status` is the shared cancellation predicate:
+Closed and Canceled are terminal; absent/undefined status remains nonterminal.
+The exchange runtime's `store::is_terminal_order` bridge reads native Js status
+once, retains strict string membership and propagates property-access failures.
+Symbol/all cancellation filters terminal rows before selecting batches or symbols.

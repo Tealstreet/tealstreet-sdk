@@ -747,7 +747,12 @@ impl BitunixVenue {
                 &symbol,
                 || Ok(orders.len()),
                 |i| Ok(orders.get(i).cloned()),
-                |o: &Order, s: &String| Ok(&o.symbol == s),
+                |o: &Order, s: &String| {
+                    Ok(
+                        &o.symbol == s
+                            && !safe_cex_store::store::is_terminal_order_status(o.status),
+                    )
+                },
                 |selected| me.cancel_orders(selected),
             )
             .await

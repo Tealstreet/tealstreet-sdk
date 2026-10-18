@@ -544,6 +544,15 @@ fn ops(t: Rc<State>) -> Rc<OrderMutationOps<V, E>> {
     });
     let find = t.clone();
     Rc::new(OrderMutationOps {
+        is_terminal_order: Rc::new(|order| {
+            let status = match get(order, "status").as_ref() {
+                Native::S(status) => {
+                    serde_json::from_value(serde_json::Value::String(status.clone())).ok()
+                }
+                _ => None,
+            };
+            Ok(safe_cex_store::store::is_terminal_order_status(status))
+        }),
         value,
         has: Rc::new(|key, v| {
             let Native::O(fields) = v.as_ref() else {

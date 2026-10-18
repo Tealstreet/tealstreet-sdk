@@ -42,6 +42,7 @@ struct Info {
 }
 #[derive(Clone, Debug)]
 struct O {
+    status: Option<safe_cex_types::OrderStatus>,
     id: CancelKey,
     symbol: CancelKey,
     tag: usize,
@@ -164,6 +165,7 @@ fn orders(c: &Case) -> Vec<Rc<O>> {
     };
     let make = |id: CancelKey, symbol: CancelKey, tag, kind, info| {
         Rc::new(O {
+            status: None,
             id,
             symbol,
             tag,
@@ -699,6 +701,7 @@ impl CancellationHost for Host {
     type Value = Rc<V>;
     fn undefined_order() -> Self::Order {
         Rc::new(O {
+            status: None,
             id: vec![],
             symbol: vec![],
             tag: usize::MAX,
@@ -832,6 +835,9 @@ impl CancellationHost for Host {
     fn with_id(&self, mut o: Self::Order, id: CancelKey) -> Self::Order {
         Rc::get_mut(&mut o).expect("CANCEL fresh spread").id = id;
         o
+    }
+    fn is_terminal_order(&self, o: &Self::Order) -> Result<bool, Self::Error> {
+        Ok(safe_cex_store::store::is_terminal_order_status(o.status))
     }
     fn symbol(&self, o: &Self::Order) -> Result<CancelKey, Self::Error> {
         if self.c.mutation == "filter" && o.tag == 0 {

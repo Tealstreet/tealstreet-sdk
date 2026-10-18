@@ -187,6 +187,9 @@ impl CancellationHost for Rt {
         let _ = spread.define("id", Js::String(id.into()));
         spread
     }
+    fn is_terminal_order(&self, order: &Js) -> Result<bool, Thrown> {
+        safe_cex_exchange::js_runtime::store::is_terminal_order(order)
+    }
     fn symbol(&self, order: &Js) -> Result<CancelKey, Thrown> {
         Ok(order.get("symbol")?.to_js_string()?.to_vec())
     }

@@ -309,6 +309,11 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
                 is_lighter_account_tier_eligible_for_partner_attribution(tier(&arg(&a, 0))?),
             ))
         }),
+        helper("isTerminalOrder", |a| {
+            Ok(Js::Bool(
+                safe_cex_exchange::js_runtime::store::is_terminal_order(&arg(&a, 0))?,
+            ))
+        }),
     ];
     for (name, function) in helpers {
         globals.define(&name, function)?;

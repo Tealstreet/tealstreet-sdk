@@ -6,7 +6,10 @@ const names=['cancelAllOrders','cancelOrders','cancelNormalOrders','cancelUtaNor
 const bodies=fields('packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts','BitgetExchange',names,'Classic')+fields('packages/safe-cex/src/exchanges/bitget/bitgetinverse.exchange.ts','BitgetInverseExchange',['cancelAllOrders','cancelNormalOrders','cancelAlgoOrders'],'Inverse');
 const types=ast('packages/safe-cex/src/exchanges/bitget/bitget.types.ts');const endpoints=types.statements.flatMap(n=>ts.isVariableStatement(n)?[...n.declarationList.declarations]:[]).find(n=>n.name.getText(types)==='ENDPOINTS');assert(endpoints?.initializer);
 const omitAst=ast('packages/safe-cex/src/utils/omitUndefined.ts');const omit=omitAst.statements.flatMap(n=>ts.isVariableStatement(n)?[...n.declarationList.declarations]:[]).find(n=>n.name.getText(omitAst)==='omitUndefined');assert(omit?.initializer);
-const code=ts.transpileModule('const ENDPOINTS='+endpoints.initializer.getText(types)+';const omitUndefined='+omit.initializer.getText(omitAst)+';'+bodies,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const storeAst=ast('packages/safe-cex/src/store/store.base.ts'),typesAst=ast('packages/safe-cex/src/types.ts');
+const terminal=storeAst.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>['TERMINAL_STATUSES','isTerminalOrder'].includes(d.name.getText(storeAst))));assert.equal(terminal.length,2,'CANCEL actual terminal selector');
+const statusEnum=typesAst.statements.find(n=>ts.isEnumDeclaration(n)&&n.name.text==='OrderStatus').getText(typesAst).replace(/^export /,'');
+const code=ts.transpileModule(statusEnum+';'+terminal.map(n=>n.getText(storeAst).replace(/^export /,'')).join('\n')+';const ENDPOINTS='+endpoints.initializer.getText(types)+';const omitUndefined='+omit.initializer.getText(omitAst)+';'+bodies,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 const {Classic,Inverse}=new Function('partition','uniqBy','groupBy','chunk','omitBy',code+';return {Classic,Inverse};')(...['partition','uniqBy','groupBy','chunk','omitBy'].map(n=>require('lodash/'+n)));
 const string=u=>String.fromCharCode(...u),units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i));
 const pack=v=>v===undefined?{undefined:true}:v===null?{null:true}:typeof v==='string'?{string:units(v)}:typeof v==='object'?{object:v.units}:{scalar:v};
