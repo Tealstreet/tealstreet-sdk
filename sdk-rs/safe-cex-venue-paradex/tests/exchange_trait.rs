@@ -1655,6 +1655,53 @@ fn order_identity_source_keeps_raw_fields_and_date_error() {
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "13");
 }
 
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("paradex");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 264);
+    let (venue, runtime, store, _) = support::fixture_with(
+        json!({"key":"", "secret":"", "publicDataOnly":true}),
+        |_| {},
+    );
+    let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    assert!(socket.is_connected(), "production ticker socket opens");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("paradex")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            runtime.now.set(runtime.now.get() + 1100.0);
+            runtime.pump();
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
 fn side_order(id: &str, side: Option<serde_json::Value>) -> serde_json::Value {
     let mut row = json!({"id":id,"market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","price":"101.5","size":"0.006","remaining_size":"0.003","created_at":1784505600000i64,"reduce_only":false});
     if let Some(side) = side {

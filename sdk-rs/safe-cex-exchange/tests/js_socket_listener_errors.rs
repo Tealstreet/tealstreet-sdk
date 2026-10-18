@@ -63,6 +63,13 @@ fn native_socket_listener_failures_are_not_transport_errors() {
             4,
             "{stderr}"
         );
+        assert_eq!(
+            stderr
+                .matches("[safe-cex uncaught] Error: listener rejection")
+                .count(),
+            8,
+            "{stderr}"
+        );
         assert!(!stderr.contains("WebSocket error:"), "{stderr}");
         return;
     }
@@ -89,6 +96,7 @@ fn native_socket_listener_failures_are_not_transport_errors() {
             for case in &cases {
                 let grouped = case["grouped"].as_bool().unwrap();
                 let rejection = case["rejection"].as_bool().unwrap();
+                let deferred = case["deferred"].as_bool().unwrap();
                 let listener = TcpListener::bind("127.0.0.1:0").unwrap();
                 let url = format!("ws://{}", listener.local_addr().unwrap());
                 let (release, released) = std::sync::mpsc::channel();
@@ -192,7 +200,16 @@ fn native_socket_listener_failures_are_not_transport_errors() {
                                     "listener throw"
                                 },
                             );
-                            if rejection {
+                            if deferred {
+                                let first = Promise::settled(&promise_runtime, Ok(Js::Undefined));
+                                Ok(Js::Promise(Promise::spawn(
+                                    &promise_runtime,
+                                    Box::pin(async move {
+                                        first.wait().await?;
+                                        Err(thrown)
+                                    }),
+                                )))
+                            } else if rejection {
                                 Ok(Js::Promise(Promise::settled(&promise_runtime, Err(thrown))))
                             } else {
                                 Err(thrown)

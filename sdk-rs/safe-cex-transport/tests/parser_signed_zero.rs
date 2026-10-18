@@ -1,4 +1,3 @@
-use safe_cex_transport::how::{big_int_as_string_json_parse, json_parse};
 use serde_json::Value;
 
 fn compare(parser: fn(&str) -> Value, export: &str) {
@@ -60,4 +59,18 @@ fn plain_parser_preserves_signed_zero_before_serialization() {
 #[test]
 fn bigint_parser_preserves_signed_zero_before_serialization() {
     compare(big_int_as_string_json_parse, "bigIntAsStringJsonParse");
+}
+
+fn big_int_as_string_json_parse(text: &str) -> serde_json::Value {
+    safe_cex_transport::RestResponseBody::Transformed(
+        safe_cex_transport::how::big_int_as_string_json_parse(text),
+    )
+    .json_value()
+    .unwrap()
+}
+
+fn json_parse(text: &str) -> serde_json::Value {
+    safe_cex_transport::RestResponseBody::Transformed(safe_cex_transport::how::json_parse(text))
+        .json_value()
+        .unwrap()
 }

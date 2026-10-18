@@ -4313,6 +4313,7 @@ dependencies = [
 name = "safe-cex-venue-kucoin"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "indexmap 2.14.2",
  "safe-cex-crypto",
  "safe-cex-exchange",
@@ -4322,6 +4323,8 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
