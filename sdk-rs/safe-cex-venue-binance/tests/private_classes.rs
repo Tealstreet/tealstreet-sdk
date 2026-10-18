@@ -4717,3 +4717,93 @@ fn production_ticker_coercion_pm_matches_constructed_typescript() {
 fn production_ticker_coercion_spot_matches_constructed_typescript() {
     native_ticker_coercion(Venue::Spot, "binancespot", 48);
 }
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_request_weight_callbacks_observe_success_and_rejection() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{Arc, Mutex};
+    struct Response {
+        status: u16,
+        header: &'static str,
+        value: &'static str,
+        requests: Arc<Mutex<Vec<RestRequest>>>,
+    }
+    impl RestAdapter for Response {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request);
+            let response = RestResponse {
+                status: self.status,
+                reason: None,
+                headers: [(self.header.into(), self.value.into())]
+                    .into_iter()
+                    .collect(),
+                body: RestResponseBody::Encoded(if self.status == 200 {
+                    b"[]".to_vec()
+                } else {
+                    br#"{"code":-1003,"msg":"weight limit"}"#.to_vec()
+                }),
+            };
+            Box::pin(async move { Ok(response) })
+        }
+    }
+    for (status, header, value, duration) in [
+        (200, "x-mbx-used-weight-1m", "1920", 60_000.0),
+        (429, "retry-after", "2.5", 2_500.0),
+        (429, "retry-after", "invalid", 60_000.0),
+    ] {
+        let runtime = Rc::new(Runtime::default());
+        runtime.now.set(1_000.0);
+        let requests = Arc::<Mutex<Vec<RestRequest>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Response {
+                status,
+                header,
+                value,
+                requests: requests.clone(),
+            }),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let owner = ExchangeOwner::new(
+            Venue::Futures,
+            safe_cex_types::ExchangeName::Binance,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            dependencies,
+        )
+        .unwrap();
+        let request = owner
+            .imports
+            .request(
+                owner.clients.get("xhr").unwrap().clone(),
+                safe_cex_venue_binance::exchange_classes::HttpMethod::Get,
+                "/fapi/v1/openOrders",
+                None,
+            )
+            .unwrap();
+        let result = run(&runtime, request).result;
+        if status == 200 {
+            assert!(
+                matches!(result.unwrap(), EventValue::Array(ref rows) if rows.borrow().is_empty())
+            );
+        } else {
+            let error = result.unwrap_err();
+            let response = error
+                .response
+                .as_ref()
+                .expect("the original HTTP response is retained");
+            assert_eq!(response["status"], 429);
+            assert_eq!(response["data"]["code"], -1003);
+        }
+        assert_eq!(owner.paused_until.get(), 1_000.0 + duration);
+        assert!(owner.paused());
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        assert_eq!(requests.lock().unwrap()[0].url, "/fapi/v1/openOrders");
+        owner.dispose().unwrap();
+    }
+}
