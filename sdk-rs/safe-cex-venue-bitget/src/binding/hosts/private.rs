@@ -130,7 +130,7 @@ impl PrivateTopicsHost for Rt {
     }
     fn length(&self, array: &Js) -> Result<usize, Thrown> {
         match array {
-            Js::Array(items) => Ok(items.borrow().len()),
+            Js::Array(items) => Ok(items.len()),
             other => Err(Thrown::type_error(&format!(
                 "{} is not an array",
                 other.to_display()
@@ -139,7 +139,7 @@ impl PrivateTopicsHost for Rt {
     }
     fn has_index(&self, array: &Js, index: usize) -> Result<bool, Thrown> {
         match array {
-            Js::Array(items) => Ok(matches!(items.borrow().get(index), Some(Some(_)))),
+            Js::Array(_) => Ok(array.has_index(index)), 
             other => Err(Thrown::type_error(&format!(
                 "{} is not an array",
                 other.to_display()

@@ -175,7 +175,7 @@ fn release(this: &Js) {
         }
     }
     if let Ok(list) = this.get("snapshotWebsockets") {
-        objects.extend(list.array_values().unwrap_or_default());
+        objects.extend(list.array_values()?.unwrap_or_default());
     }
     for object in objects {
         if let Js::Object(o) = object {

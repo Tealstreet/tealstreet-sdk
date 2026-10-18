@@ -181,13 +181,13 @@ impl Host for Frame {
             return Err(Thrown::type_error("r.symbol.split is not a function"));
         }
         let parts = method.call(v.clone(), vec![Js::str(separator)])?;
-        Ok(parts.array_values().unwrap_or_default())
+        Ok(parts.array_values()?.unwrap_or_default())
     }
     fn is_array(&self, v: &Js) -> bool {
         v.is_array()
     }
     fn length(&mut self, v: &Js, method: &str) -> Result<usize, Thrown> {
-        if let Some(items) = v.array_items() {
+        if let Some(items) = v.array_items()? {
             return Ok(items.len());
         }
         if method != "length" || v.is_nullish() {

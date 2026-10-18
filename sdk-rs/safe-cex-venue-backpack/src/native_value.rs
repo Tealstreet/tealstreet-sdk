@@ -4,13 +4,13 @@ use crate::public_control::JsString;
 pub use safe_cex_exchange::js_runtime::value::Js as Value;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::JsJsonValue;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 /// The adapter's explicit prepared-data/UTF-8 boundary over the shared graph.
 /// These operations do not allocate a second live value representation.
 pub trait NativeValue: Sized {
     fn field(&self, key: &str) -> Result<Self, ExchangeError>;
-    fn array(&self) -> Result<Rc<RefCell<Vec<Option<Self>>>>, ExchangeError>;
+    fn array(&self) -> Result<Self, ExchangeError>;
     fn string(&self) -> Result<JsString, ExchangeError>;
     fn utf8(&self) -> Result<String, ExchangeError>;
     fn float(&self) -> Result<f64, ExchangeError>;
@@ -36,17 +36,17 @@ impl NativeValue for Value {
             _ => Ok(Self::Undefined),
         }
     }
-    fn array(&self) -> Result<Rc<RefCell<Vec<Option<Self>>>>, ExchangeError> {
-        if let Self::Array(v) = self {
-            Ok(v.clone())
+    fn array(&self) -> Result<Self, ExchangeError> {
+        if matches!(self,Self::Array(_)) {
+            Ok(self.clone())
         } else {
             Err(ExchangeError::new("Value is not an array"))
         }
     }
     fn string(&self) -> Result<JsString, ExchangeError> {
         match self {
-            Self::Array(items) => {
-                let items = items.borrow().clone();
+            Self::Array(_) => {
+                let items = self.array_items()?.expect("array variant");
                 let mut text = vec![];
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
@@ -109,11 +109,7 @@ impl NativeValue for Value {
             JsJsonValue::Bool(b) => Self::Bool(b),
             JsJsonValue::Number(n) => Self::Number(n),
             JsJsonValue::String(s) => Self::String(s.encode_utf16().collect()),
-            JsJsonValue::Array(a) => Self::Array(Rc::new(RefCell::new(
-                a.into_iter()
-                    .map(|v| Some(Self::from_prepared(v)))
-                    .collect(),
-            ))),
+            JsJsonValue::Array(a) => Self::array(a.into_iter().map(Self::from_prepared).collect()),
             JsJsonValue::Object(o) => {
                 let value = Self::object(vec![]);
                 for (key, item) in o {
@@ -134,8 +130,8 @@ impl NativeValue for Value {
             Self::Number(n) => JsJsonValue::Number(*n),
             Self::BigInt(n) => JsJsonValue::BigInt((**n).clone()),
             Self::String(_) => JsJsonValue::String(self.utf8()?),
-            Self::Array(a) => JsJsonValue::Array(
-                a.borrow()
+            Self::Array(_) => JsJsonValue::Array(
+                self.array_items()?.expect("array variant")
                     .iter()
                     .map(|v| v.as_ref().unwrap_or(&Self::Undefined).prepared())
                     .collect::<Result<_, _>>()?,

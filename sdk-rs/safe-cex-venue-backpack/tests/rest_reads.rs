@@ -1,3 +1,4 @@
+type Array<V> = std::rc::Rc<std::cell::RefCell<Vec<Option<V>>>>;
 use safe_cex_types::{MarginType, OrderSide, OrderType, PositionMode, PositionSide};
 use safe_cex_venue_backpack::{public_control::JsString, rest_reads::*};
 use serde_json::{Value as Json, json};
@@ -387,6 +388,11 @@ fn param(v: Param<V>) -> V {
     }
 }
 impl Host for H {
+    type Array = Array<V>;
+    fn array_length(&mut self,a:&Array<V>)->Result<usize,Rc<str>>{Ok(a.borrow().len())}
+    fn array_element(&mut self,a:&Array<V>,index:usize)->Result<Option<V>,Rc<str>>{Ok(a.borrow().get(index).cloned().flatten())}
+    fn array_set(&mut self,a:&Array<V>,index:usize,value:V)->Result<(),Rc<str>>{a.borrow_mut()[index]=Some(value);Ok(())}
+    fn array_from(&mut self,values:Vec<Option<V>>)->Array<V>{Rc::new(RefCell::new(values))}
     type Value = V;
     type Error = Rc<str>;
     type LogTarget = ();

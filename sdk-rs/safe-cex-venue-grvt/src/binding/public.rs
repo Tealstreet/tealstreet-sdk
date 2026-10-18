@@ -462,7 +462,7 @@ impl PublicFeedHost for Public {
             .call_method("split", vec![Js::str(separator)])
             .map_err(err)?;
         parts
-            .array_values()
+            .array_values()?
             .expect("split array")
             .iter()
             .map(|v| text(v).map_err(err))
@@ -496,7 +496,7 @@ impl PublicFeedHost for Public {
     fn book_levels(&self, v: Js) -> Result<Vec<OrderBookOrders>, ExchangeError> {
         let refuse =
             || ExchangeError::new("Orderbook callback requires dense own-data numeric levels");
-        let items = v.array_items().ok_or_else(refuse)?;
+        let items = v.array_items()?.ok_or_else(refuse)?;
         let mut levels = vec![];
         for level in items {
             let Js::Object(level) = level.ok_or_else(refuse)? else {

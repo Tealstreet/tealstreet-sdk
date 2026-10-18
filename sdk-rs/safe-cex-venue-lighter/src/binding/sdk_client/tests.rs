@@ -741,7 +741,7 @@ fn transaction_client_retains_native_flags_while_signing_their_truthiness() {
     );
     let batch = match result {
         Ok(txs) => {
-            let txs = txs.array_values().unwrap();
+            let txs = txs.array_values().expect("fixture array property reads").unwrap();
             assert_eq!(txs.len(), 3);
             Value::Array(
                 txs.into_iter()
@@ -840,7 +840,7 @@ fn poison_unread_helper_fields(value: &Js) {
     if !value.is_object() {
         return;
     }
-    if let Some(values) = value.array_values() {
+    if let Some(values) = value.array_values().expect("fixture array property reads") {
         for child in values {
             poison_unread_helper_fields(&child);
         }
@@ -965,11 +965,11 @@ fn production_lighter_helpers_read_only_sparse_source_fields() {
         let observed = match result {
             Ok(result) => {
                 if helper == "resolveLighterCancelTargets" {
-                    let orders = args[0].array_values().unwrap();
+                    let orders = args[0].array_values().expect("fixture array property reads").unwrap();
                     let mut rows = vec![];
                     let mut retained = vec![];
                     let mut id_units = vec![];
-                    for row in result.array_values().unwrap() {
+                    for row in result.array_values().expect("fixture array property reads").unwrap() {
                         let id = row.get("orderId").unwrap();
                         let index = orders
                             .iter()

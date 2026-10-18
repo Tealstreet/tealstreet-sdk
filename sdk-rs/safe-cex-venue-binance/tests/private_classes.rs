@@ -3459,14 +3459,14 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
                 (result, EventValue::array(vec![]))
             };
             assert_eq!(
-                regular.array_values().unwrap().len() + algo.array_values().unwrap().len(),
+                regular.array_values().expect("fixture array property reads").unwrap().len() + algo.array_values().expect("fixture array property reads").unwrap().len(),
                 count,
                 "real formatted payload count {venue:?} {kind}"
             );
-            for row in regular.array_values().unwrap() {
+            for row in regular.array_values().expect("fixture array property reads").unwrap() {
                 check(&row, "newClientOrderId", true);
             }
-            for row in algo.array_values().unwrap() {
+            for row in algo.array_values().expect("fixture array property reads").unwrap() {
                 check(&row, "clientAlgoId", true);
             }
         }
@@ -3477,7 +3477,7 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
             result
         };
         assert_eq!(
-            rows.array_values().unwrap()[0]
+            rows.array_values().expect("fixture array property reads").unwrap()[0]
                 .read("newClientOrderId")
                 .unwrap()
                 .text()
@@ -3487,9 +3487,9 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
         if venue != Venue::Spot {
             let opts = serde_json::from_value(json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"buy","amount":1,"price":90})).unwrap();
             let rows = owner.format_trailing(&opts).unwrap();
-            assert_eq!(rows.array_values().unwrap().len(), 1);
+            assert_eq!(rows.array_values().expect("fixture array property reads").unwrap().len(), 1);
             check(
-                &rows.array_values().unwrap()[0],
+                &rows.array_values().expect("fixture array property reads").unwrap()[0],
                 if venue == Venue::PM {
                     "newClientOrderId"
                 } else {
@@ -3505,9 +3505,9 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
             } else {
                 rows
             };
-            assert_eq!(rows.array_values().unwrap().len(), 1);
+            assert_eq!(rows.array_values().expect("fixture array property reads").unwrap().len(), 1);
             check(
-                &rows.array_values().unwrap()[0],
+                &rows.array_values().expect("fixture array property reads").unwrap()[0],
                 if venue == Venue::PM {
                     "newClientOrderId"
                 } else {
@@ -3885,7 +3885,7 @@ fn native_stop_limit_snapshot_case(venue: Venue) {
             safe_cex_venue_binance::class_jobs::reaction(owner.invoke(Method::Orders, vec![])),
         )
         .unwrap();
-        let raw = mapped.array_values().unwrap();
+        let raw = mapped.array_values().expect("fixture array property reads").unwrap();
         assert_eq!(raw.len(), 3);
         for row in raw.iter().skip(1) {
             if unmapped {

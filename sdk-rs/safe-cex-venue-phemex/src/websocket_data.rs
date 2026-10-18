@@ -1094,7 +1094,7 @@ mod accepted_outbound_contract {
                 .unwrap()
                 .strict_equals(&Js::str("trade.subscribe"))
         );
-        let params = frame.get("params").unwrap().array_values().unwrap();
+        let params = frame.get("params").unwrap().array_values()?.unwrap();
         assert_eq!(params.len(), 2);
         assert!(params[0].strict_equals(&Js::str("BTCUSDT")));
         let Js::Number(n) = params[1] else {

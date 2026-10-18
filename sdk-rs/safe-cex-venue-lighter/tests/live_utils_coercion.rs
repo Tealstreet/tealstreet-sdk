@@ -163,7 +163,7 @@ fn lighter_utils_coercion_matches_live_typescript() {
         let markets = native(Some(&case["markets"]));
         let orders = native(Some(&case["orders"]));
         let actual = resolve_lighter_cancel_targets(&orders, &markets).unwrap();
-        let rows = actual.array_values().unwrap();
+        let rows = actual.array_values().expect("fixture array property reads").unwrap();
         let expected = case["expected"].as_array().unwrap();
         assert_eq!(
             rows.len(),

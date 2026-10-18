@@ -172,7 +172,7 @@ impl body::Host for Frame {
         Ok(v.own_entries()?.into_iter().map(|(_, v)| v).collect())
     }
     fn flattenable_values(&mut self, v: &Js) -> Option<Vec<Js>> {
-        v.array_values()
+        v.array_values()?
     }
     fn track_last_received(&mut self) -> Result<(), Thrown> {
         self.call_own("trackLastReceived", vec![])
@@ -190,7 +190,7 @@ impl body::Host for Frame {
         iterate(handlers)
     }
     fn next(&mut self, iterator: &mut Iter) -> Result<Option<Js>, Thrown> {
-        Ok(next(iterator))
+        next(iterator)
     }
     fn callback(&mut self, callback: Js, json: &Js) -> Result<(), Thrown> {
         callback.call(Js::Undefined, vec![json.clone()])?;
@@ -340,7 +340,7 @@ fn update_order_book_by_price(a: Vec<Js>) -> Result<Js, Thrown> {
         }
     }
     let zero = amount.strict_equals(&Js::Number(0.0));
-    let Js::Array(cells) = &levels else {
+    let Js::Array(_) = &levels else {
         return Err(Thrown::type_error("levels.splice is not a function"));
     };
     Ok(Js::Number(match found {
@@ -351,11 +351,11 @@ fn update_order_book_by_price(a: Vec<Js>) -> Result<Js, Thrown> {
                 ("amount", amount),
                 ("total", Js::Number(0.0)),
             ]);
-            cells.borrow_mut().insert(left as usize, Some(level));
+            levels.splice_array(left as usize,0,vec![level])?;
             left as f64
         }
         Some(i) if zero => {
-            cells.borrow_mut().remove(i as usize);
+            levels.splice_array(i as usize,1,vec![])?;
             -1.0
         }
         Some(i) => {

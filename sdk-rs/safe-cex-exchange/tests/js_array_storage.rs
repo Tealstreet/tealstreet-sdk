@@ -316,7 +316,7 @@ fn array_freeze_blocks_builtin_mutations_without_detaching_original_alias() {
         assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
         refused += 1;
     }
-    a.delete(&[b'0' as u16]);
+    assert_eq!(a.delete(&[b'0' as u16]).unwrap_err().value.get("name").unwrap().to_display(), "TypeError");
     assert_eq!(
         json!({
             "refused": refused, "retainedIndex": a.has_own("0"),

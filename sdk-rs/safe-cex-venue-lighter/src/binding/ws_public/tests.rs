@@ -1006,7 +1006,7 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
                 continue;
             }
         };
-        let entries = items.array_items().unwrap();
+        let entries = items.array_items().expect("fixture array property reads").unwrap();
         let observed = entries
             .iter()
             .flatten()
@@ -1025,7 +1025,7 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
             "bidsIdentity":book.get("bids").unwrap().same_reference(&bids),
             "asksIdentity":book.get("asks").unwrap().same_reference(&asks),
             "tickerIdentity":items.same_reference(&tickers),
-            "bidHole":book.get("bids").unwrap().array_items().unwrap()[0].is_none(),
+            "bidHole":book.get("bids").unwrap().array_items().expect("fixture array property reads").unwrap()[0].is_none(),
             "tags":tags,
             "rowIdentity":entries.iter().flatten().filter(|v| !v.is_undefined()).all(|v| v.same_reference(&row)),
             "nan":observed.get("price").unwrap().to_number().unwrap().is_nan(),

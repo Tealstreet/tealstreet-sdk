@@ -127,9 +127,9 @@ fn lighter_ws_state_helpers_match_live_typescript() {
             .then(|| from_json(&case["payload"]));
         let include = case["include"].as_bool().unwrap();
         let flattened = private::flatten_by_market_payload(payload.as_ref(), include).unwrap();
-        compared_items[0] += flattened.array_values().unwrap().len();
+        compared_items[0] += flattened.array_values().expect("fixture array property reads").unwrap().len();
         assert_eq!(
-            flattened.array_values().unwrap().len(),
+            flattened.array_values().expect("fixture array property reads").unwrap().len(),
             case["expected"].as_array().unwrap().len(),
             "FLATTEN-CARDINALITY native payload count"
         );
@@ -139,9 +139,9 @@ fn lighter_ws_state_helpers_match_live_typescript() {
             "flattenByMarketPayload {case}"
         );
         let orders = private::flatten_orders_by_market(payload.as_ref()).unwrap();
-        compared_items[1] += orders.array_values().unwrap().len();
+        compared_items[1] += orders.array_values().expect("fixture array property reads").unwrap().len();
         assert_eq!(
-            orders.array_values().unwrap().len(),
+            orders.array_values().expect("fixture array property reads").unwrap().len(),
             case["orders"].as_array().unwrap().len(),
             "FLATTEN-CARDINALITY native orders count"
         );
@@ -213,7 +213,7 @@ fn lighter_ws_state_helpers_match_live_typescript() {
         let flattened =
             private::flatten_by_market_payload(Some(&payload), case["include"].as_bool().unwrap())
                 .unwrap();
-        let items = flattened.array_values().unwrap();
+        let items = flattened.array_values().expect("fixture array property reads").unwrap();
         let tags: Vec<_> = items
             .iter()
             .map(|value| {
@@ -230,7 +230,7 @@ fn lighter_ws_state_helpers_match_live_typescript() {
             .collect();
         let actual = serde_json::json!({
             "tags": tags,
-            "dense": flattened.array_items().unwrap().iter().all(Option::is_some),
+            "dense": flattened.array_items().expect("fixture array property reads").unwrap().iter().all(Option::is_some),
             "rowIdentity": items.iter().filter(|value| !value.is_nullish()).all(|value| value.same_reference(&row)),
             "nanBits":format!("{:016x}",row.get("price").unwrap().as_f64().unwrap().to_bits()),
             "zeroBits":format!("{:016x}",row.get("zero").unwrap().as_f64().unwrap().to_bits()),
@@ -238,7 +238,7 @@ fn lighter_ws_state_helpers_match_live_typescript() {
             "units":row.get("label").unwrap().as_str().unwrap().as_ref(),
             "ownUndefined":row.has_own("missing") && row.get("missing").unwrap().is_undefined(),
             "cycle":row.get("cycle").unwrap().same_reference(&row),
-            "ordersLength":private::flatten_orders_by_market(Some(&payload)).unwrap().array_values().unwrap().len(),
+            "ordersLength":private::flatten_orders_by_market(Some(&payload)).unwrap().array_values().expect("fixture array property reads").unwrap().len(),
         });
         assert_eq!(actual, case["expected"], "native flatten values {case}");
         row.delete(&"cycle".encode_utf16().collect::<Vec<_>>())

@@ -110,10 +110,10 @@ fn current_reads_the_live_exchange_and_store_slots() {
     assert_eq!(
         rt.current("positions")
             .unwrap()
-            .array_values()
+            .array_values().expect("fixture array property reads")
             .unwrap()
             .len(),
-        actual.array_values().unwrap().len()
+        actual.array_values().expect("fixture array property reads").unwrap().len()
     );
     store
         .call_method(

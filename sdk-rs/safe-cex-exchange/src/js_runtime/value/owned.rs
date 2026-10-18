@@ -70,7 +70,7 @@ impl OwnedJsValue {
             }
             Js::Array(_) => Self::Array(
                 value
-                    .array_values()
+                    .array_values().map_err(|e|e.to_exchange_error())?
                     .expect("array variant has values")
                     .iter()
                     .map(|value| Self::capture(value, ancestors))

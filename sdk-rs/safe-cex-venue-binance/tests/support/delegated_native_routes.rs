@@ -72,7 +72,7 @@ fn production_native_historical_positions_keeps_symbol_scoped_fold() {
     }
     let result =
         settled.expect("actual native history settles within independent virtual-clock bound");
-    assert!(result.array_values().unwrap().is_empty());
+    assert!(result.array_values().expect("fixture array property reads").unwrap().is_empty());
     let requests = http.requests.lock().unwrap();
     assert!(!requests.is_empty(), "real signed income HTTP must execute");
     assert!(

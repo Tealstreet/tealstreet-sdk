@@ -780,7 +780,7 @@ impl Socket {
         &self,
         payload: &safe_cex_exchange::js_runtime::value::Js,
     ) -> Result<(), ExchangeError> {
-        let added = payload.get("added")?.array_values().unwrap_or_default();
+        let added = payload.get("added")?.array_values()?.unwrap_or_default();
         let mut tracked = vec![];
         crate::websocket_public::on_markets_changed(
             || Ok(!added.is_empty()),

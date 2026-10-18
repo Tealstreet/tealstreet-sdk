@@ -336,7 +336,7 @@ fn native_update_capabilities_cancel_then_format_and_place() {
         ),
     )
     .unwrap();
-    let ids = result.array_values().unwrap();
+    let ids = result.array_values().expect("fixture array property reads").unwrap();
     assert_eq!(ids.len(), 1);
     assert_eq!(text(&ids[0]), "new-order");
     let requests = http.requests.lock().unwrap();
@@ -369,7 +369,7 @@ fn native_batch_capabilities_classify_rejections_and_log_close_conflicts() {
         ),
     )
     .unwrap();
-    let ids = result.array_values().unwrap();
+    let ids = result.array_values().expect("fixture array property reads").unwrap();
     assert_eq!(ids.len(), 1);
     assert_eq!(text(&ids[0]), "accepted");
     let errors = errors.borrow();
@@ -569,7 +569,7 @@ fn native_bulk_placement_retains_post_result_until_signed_http_settles() {
     assert!(request.url.contains("newClientOrderId=batch-native"));
     http.held.store(false, Ordering::SeqCst);
     let result = run(&runtime, call).unwrap();
-    let rows = result.array_values().unwrap();
+    let rows = result.array_values().expect("fixture array property reads").unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(text(&rows[0]), "9007199254740993");
     assert_eq!(http.count("/fapi/v1/order"), 1);

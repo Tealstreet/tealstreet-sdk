@@ -41,7 +41,7 @@ fn metadata_aliases_keep_native_units_cache_identity_and_signed_fields() {
             ],
         )
         .unwrap()
-        .array_values()
+        .array_values().expect("fixture array property reads")
         .unwrap();
     assert_eq!(
         rows.len(),
@@ -76,7 +76,7 @@ fn metadata_aliases_keep_native_units_cache_identity_and_signed_fields() {
         "fetchPositionMetadataForSymbol",
         vec![Js::str("BTCUSDT"), mode.clone()],
     );
-    assert_eq!(first.array_values().unwrap().len(), 2);
+    assert_eq!(first.array_values().expect("fixture array property reads").unwrap().len(), 2);
     let state = h.exchange.rt.shared.extra.metadata.get().unwrap();
     let key: JsString = "BTCUSDT:hedged".encode_utf16().collect();
     let cached: Rows = state.cache.borrow().get(&key).unwrap().metadata;

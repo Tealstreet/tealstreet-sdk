@@ -32,7 +32,7 @@ fn live_algo_mapper_preserves_partial_stop_and_copied_fields() {
     let input = from_json(&partial());
     let result =
         map(&h, "mapAlgoOrder", input.clone()).expect("real algo mapper must retain partial STOP");
-    let rows = result.array_values().unwrap();
+    let rows = result.array_values().expect("fixture array property reads").unwrap();
     assert_eq!(rows.len(), 1, "partial STOP remains an order");
     let row = &rows[0];
     assert!(row.has_own("type") && row.get("type").unwrap().is_undefined());
@@ -83,7 +83,7 @@ fn live_algo_fetch_keeps_partial_stop_and_both_bracket_children() {
             }
         }))
         .unwrap();
-    let rows = result.array_values().unwrap();
+    let rows = result.array_values().expect("fixture array property reads").unwrap();
     assert_eq!(
         rows.len(),
         3,
@@ -142,7 +142,7 @@ fn observe(actual: &Js, expected: &Value, label: &str) {
             "{label}: native UTF16"
         ),
         Value::Array(values) => {
-            let rows = actual.array_values().expect(label);
+            let rows = actual.array_values().expect("fixture array property reads").expect(label);
             assert_eq!(rows.len(), values.len(), "{label}: count");
             for (index, (row, value)) in rows.iter().zip(values).enumerate() {
                 observe(row, value, &format!("{label}[{index}]"));
@@ -194,7 +194,7 @@ fn live_mappers_execute_all_103_source_records_without_typed_refusal_exemptions(
         let result = result
             .unwrap_or_else(|error| panic!("{label}: actual mapper refused {}", error.message()));
         observe(&result, &case["result"], &label);
-        for row in result.array_values().unwrap_or_else(|| {
+        for row in result.array_values().expect("fixture array property reads").unwrap_or_else(|| {
             if matches!(result, Js::Null) {
                 vec![]
             } else {
@@ -237,7 +237,7 @@ fn live_mapper_numeric_fields_keep_all_36_source_bit_witnesses() {
             serde_json::from_str(case["lexeme"].as_str().unwrap()).unwrap();
         let result = map(&h, method, from_json(&row)).unwrap();
         let order = if method == "mapAlgoOrder" {
-            result.array_values().unwrap().remove(0)
+            result.array_values().expect("fixture array property reads").unwrap().remove(0)
         } else {
             result
         };
@@ -359,7 +359,7 @@ fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
                 );
                 rows
             };
-            let rows = rows.array_values().unwrap();
+            let rows = rows.array_values().expect("fixture array property reads").unwrap();
             assert_eq!(
                 rows.iter()
                     .map(|row| row.get("id").unwrap().to_display())

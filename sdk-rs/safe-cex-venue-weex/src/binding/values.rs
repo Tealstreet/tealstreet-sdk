@@ -187,7 +187,7 @@ pub(super) fn query_value(value: &Js) -> Result<QueryValue, Thrown> {
         }
         Js::Array(_) => QueryValue::Array(
             value
-                .array_values()
+                .array_values()?
                 .unwrap()
                 .iter()
                 .map(query_value)

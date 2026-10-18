@@ -307,7 +307,7 @@ async fn place_option_order(
     )
     .await?;
     let responses = responses
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
     let Some(response) = responses.first().cloned() else {
         return Err(Thrown::new(error_object(
@@ -481,7 +481,7 @@ fn fetch_position_mode_body(rt: &Rt, symbol: Js, primary: bool) -> Result<Js, Th
         } else {
             result.get("list")?
         };
-        let rows = list.array_items().unwrap_or_default();
+        let rows = list.array_items()?.unwrap_or_default();
         if primary && !meta.get("isSuccess")?.truthy() && rows.is_empty() {
             let message = meta.get("retMsg")?;
             let code = meta.get("retCode")?;
@@ -937,7 +937,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         )
         .await?;
         let responses = responses
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
         collect_ids(&rt, &opts, responses)
     })))

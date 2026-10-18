@@ -238,7 +238,7 @@ impl crate::market_data::MarketDataHost for Host {
         c: &mut dyn FnMut(Js, Js) -> Result<Js, Thrown>,
     ) -> Result<Js, Thrown> {
         let a = v
-            .array_items()
+            .array_items()?
             .ok_or_else(|| Thrown::type_error("value.reduce is not a function"))?;
         for v in a.into_iter().flatten() {
             x = c(x, v)?;
@@ -247,7 +247,7 @@ impl crate::market_data::MarketDataHost for Host {
     }
     fn for_each(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<(), Thrown>) -> Result<(), Thrown> {
         for v in v
-            .array_items()
+            .array_items()?
             .ok_or_else(|| Thrown::type_error("value.forEach is not a function"))?
             .into_iter()
             .flatten()
@@ -264,18 +264,18 @@ impl crate::market_data::MarketDataHost for Host {
     }
     fn map(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<Js, Thrown>) -> Result<Js, Thrown> {
         let a = v
-            .array_items()
+            .array_items()?
             .ok_or_else(|| Thrown::type_error("value.map is not a function"))?;
-        Ok(Js::Array(Rc::new(std::cell::RefCell::new(
+        Ok(Js::holey_array(
             a.into_iter()
                 .map(|v| v.map(&mut *c).transpose())
                 .collect::<Result<Vec<_>, _>>()?,
-        ))))
+        ))
     }
     fn filter(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<bool, Thrown>) -> Result<Js, Thrown> {
         let mut out = vec![];
         for v in v
-            .array_items()
+            .array_items()?
             .ok_or_else(|| Thrown::type_error("value.filter is not a function"))?
             .into_iter()
             .flatten()
@@ -288,7 +288,7 @@ impl crate::market_data::MarketDataHost for Host {
     }
     fn sort(&self, v: Js, c: &mut dyn FnMut(Js, Js) -> Result<f64, Thrown>) -> Result<Js, Thrown> {
         let mut a = v
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("value.sort is not a function"))?;
         let mut error = None;
         a.sort_by(|x, y| match c(x.clone(), y.clone()) {
@@ -301,9 +301,7 @@ impl crate::market_data::MarketDataHost for Host {
         if let Some(e) = error {
             return Err(e);
         }
-        if let Js::Array(out) = &v {
-            *out.borrow_mut() = a.into_iter().map(Some).collect();
-        }
+        for (index,value) in a.into_iter().enumerate(){v.set(&index.to_string(),value)?;}
         Ok(v)
     }
     fn select_log(&self) -> Result<Js, Thrown> {
@@ -424,18 +422,18 @@ impl crate::order_execution::OrderExecutionHost for Host {
         c: &mut dyn FnMut(Js, f64) -> Result<Js, Thrown>,
     ) -> Result<Js, Thrown> {
         let a = v
-            .array_items()
+            .array_items()?
             .ok_or_else(|| Thrown::type_error("value.map is not a function"))?;
-        Ok(Js::Array(Rc::new(std::cell::RefCell::new(
+        Ok(Js::holey_array(
             a.into_iter()
                 .enumerate()
                 .map(|(i, v)| v.map(|v| c(v, i as f64)).transpose())
                 .collect::<Result<Vec<_>, _>>()?,
-        ))))
+        ))
     }
     fn find(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<bool, Thrown>) -> Result<Js, Thrown> {
         for v in v
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("value.find is not a function"))?
         {
             if c(v.clone())? {
@@ -846,13 +844,13 @@ impl crate::typed_data_signing::TypedDataSigningHost for Host {
             return Err(Thrown::type_error("sig.map is not a function"));
         }
         let values = r
-            .array_items()
+            .array_items()?
             .ok_or_else(|| Thrown::type_error("sig.map receiver must be an array"))?;
-        Ok(Js::Array(Rc::new(std::cell::RefCell::new(
+        Ok(Js::holey_array(
             values
                 .into_iter()
                 .map(|v| v.map(&mut *c).transpose())
                 .collect::<Result<Vec<_>, _>>()?,
-        ))))
+        ))
     }
 }

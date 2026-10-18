@@ -47,7 +47,7 @@ fn json_arg(value: &Js) -> Result<Option<serde_json::Value>, Thrown> {
 
 fn to_orders(value: &Js) -> Result<CancelOrders<Js>, Thrown> {
     value
-        .array_values()
+        .array_values()?
         .map(|items| Rc::new(RefCell::new(items)))
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", value.to_display())))
 }
@@ -241,7 +241,7 @@ impl CancellationHost for Rt {
     }
     fn market_bases(&self) -> Result<Vec<CancelKey>, Thrown> {
         let markets = self.path("store.markets")?;
-        let Some(items) = markets.array_items() else {
+        let Some(items) = markets.array_items()? else {
             return Err(Thrown::type_error(
                 "this.store.markets.map is not a function",
             ));
@@ -375,7 +375,7 @@ impl JsIterator {
     fn next(&mut self) -> Option<Js> {
         match self {
             JsIterator::Array { array, index } => {
-                let len = array.array_items().map_or(0, |items| items.len());
+                let len = array.array_items()?.map_or(0, |items| items.len());
                 if *index >= len {
                     return None;
                 }
@@ -478,7 +478,7 @@ impl OrderReadsHost for Rt {
     }
     /// Array.prototype.flatMap(mapper): depth 1, holes skipped, mapper(value, index, array).
     fn flat_map(&self, value: Js, mapper: Js) -> Result<Js, Thrown> {
-        let Some(len) = value.array_items().map(|items| items.len()) else {
+        let Some(len) = value.array_items()?.map(|items| items.len()) else {
             return Err(Thrown::type_error(&format!(
                 "{}.flatMap is not a function",
                 value.type_of()
@@ -501,7 +501,7 @@ impl OrderReadsHost for Rt {
                 Js::Undefined,
                 vec![element, Js::Number(i as f64), value.clone()],
             )?;
-            match mapped.array_items() {
+            match mapped.array_items()? {
                 Some(items) => out.extend(items.into_iter().filter(Option::is_some)),
                 None => out.push(Some(mapped)),
             }

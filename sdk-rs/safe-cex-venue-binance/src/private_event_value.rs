@@ -287,7 +287,7 @@ pub fn native_json(value: &EventValue) -> safe_cex_num::JsJsonValue {
 /// Values yielded by a source array iterator; holes yield undefined.
 pub fn array_values(array: &EventArray) -> Vec<EventValue> {
     EventValue::Array(array.clone())
-        .array_values()
+        .array_values()?
         .expect("native array")
 }
 

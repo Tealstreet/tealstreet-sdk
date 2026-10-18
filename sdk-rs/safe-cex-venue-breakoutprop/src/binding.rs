@@ -293,7 +293,7 @@ impl BreakoutpropExchange {
             // The source returns its single opaque orderId; the shared native ABI
             // returns a list of scalar IDs. Preserve numeric/string ID spelling.
             let ids = if value.is_array() {
-                value.array_values().unwrap_or_default()
+                value.array_values()?.unwrap_or_default()
             } else {
                 vec![value]
             };

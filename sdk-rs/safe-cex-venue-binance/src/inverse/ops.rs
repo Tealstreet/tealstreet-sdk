@@ -71,7 +71,7 @@ pub(crate) async fn request(
     .get("data")
 }
 pub(crate) fn require_array(endpoint: &Js, data: Js) -> Result<Vec<Js>, Thrown> {
-    if let Some(rows) = data.array_values() {
+    if let Some(rows) = data.array_values()? {
         return Ok(rows);
     }
     let shape = if data.is_nullish() && !data.is_undefined() {

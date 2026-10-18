@@ -155,25 +155,36 @@ pub(crate) fn iterator_next_method(brand: &'static str) -> Js {
 }
 
 pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
-    if let Js::Object(data) = value {
-        if let Some(prop) = data.symbol_iterator.borrow().clone() {
-            return match prop {
-                Prop::Data(value) | Prop::DataDescriptor { value, .. } => Ok(value),
-                Prop::Accessor { get: Some(get), .. } => get.call(value.clone(), vec![]),
-                Prop::Accessor { get: None, .. } => Ok(Js::Undefined),
+    iterator_method_receiver(value,value)
+}
+fn iterator_method_receiver(value:&Js,receiver:&Js)->Result<Js,Thrown> {
+    if let Some(slot)=value.symbol_iterator_slot() {
+        let property=slot.borrow().clone();
+        if let Some(property)=property {
+            return match property {
+                Prop::Data(value)|Prop::DataDescriptor{value,..}=>Ok(value),
+                Prop::Accessor{get:Some(get),..}=>get.call(receiver.clone(),vec![]),
+                Prop::Accessor{get:None,..}=>Ok(Js::Undefined),
             };
         }
-        if data.iterator_next.borrow().is_some() {
-            return Ok(Js::function("[Symbol.iterator]", |this, _| Ok(this)));
-        }
-        if let Some(proto) = data.proto.borrow().clone() {
-            return iterator_method(&proto);
-        }
+        if let Js::Object(data)=value && data.iterator_next.borrow().is_some() {return Ok(Js::function("[Symbol.iterator]",|this,_| Ok(this)));}
+        if let Some(proto)=value.prototype() {return iterator_method_receiver(&proto,receiver);}
+        return Ok(Js::Undefined);
     }
     match value {
         Js::Map(_) => value.get("entries"),
         Js::Set(_) => value.get("values"),
-        Js::Array(_) | Js::String(_) => Ok(Js::function("values", |this, _| {
+        Js::String(_) => Ok(array_iterator_method()),
+        _ => Ok(Js::Undefined),
+    }
+}
+
+#[cfg(test)]
+#[path = "collection_contract_tests.rs"]
+pub(super) mod accepted_contract_tests;
+
+pub(crate) fn array_iterator_method() -> Js {
+    Js::function("values", |this, _| {
             if !matches!(this, Js::Array(_) | Js::String(_)) {
                 return Err(Thrown::type_error("value is not iterable"));
             }
@@ -190,10 +201,7 @@ pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
                     None
                 } else {
                     match &this {
-                        Js::Array(items) => items
-                            .borrow()
-                            .get(at)
-                            .map(|v| v.clone().unwrap_or(Js::Undefined)),
+                        Js::Array(items) if at < items.len() => Some(this.get(&at.to_string())?),
                         Js::String(units) if at < units.len() => {
                             let pair = (0xD800..=0xDBFF).contains(&units[at])
                                 && units
@@ -217,11 +225,5 @@ pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
                 ]))
             });
             Ok(iterator_object(tag, next))
-        })),
-        _ => Ok(Js::Undefined),
-    }
+        })
 }
-
-#[cfg(test)]
-#[path = "collection_contract_tests.rs"]
-pub(super) mod accepted_contract_tests;

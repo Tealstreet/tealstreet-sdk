@@ -23,7 +23,7 @@ fn spawn(rt: &Rt, body: safe_cex_exchange::js_runtime::promise::JsFuture<'static
 }
 fn bytes(value: &Js) -> Result<Vec<u8>, Thrown> {
     let values = value
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("expected a byte array"))?;
     values
         .iter()

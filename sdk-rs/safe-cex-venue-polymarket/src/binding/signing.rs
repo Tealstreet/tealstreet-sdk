@@ -15,7 +15,7 @@ const ZERO: &str = "0x0000000000000000000000000000000000000000000000000000000000
 const ORDER_TYPE: &str = "Order(uint256 salt,address maker,address signer,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,uint256 timestamp,bytes32 metadata,bytes32 builder)";
 
 fn bytes(v: &Js) -> Result<Vec<u8>, Thrown> {
-    v.array_values()
+    v.array_values()?
         .ok_or_else(|| Thrown::type_error("Expected bytes"))?
         .iter()
         .map(|v| v.to_number().map(|n| n as u8))

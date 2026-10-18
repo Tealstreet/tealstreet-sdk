@@ -202,7 +202,7 @@ impl PublicSubscriptionHost for SocketHost {
     }
     fn ticker_product_ids(&self) -> Result<Vec<Topic>, ExchangeError> {
         let ids = self.call("getTickerProductIds", vec![])?;
-        ids.array_values()
+        ids.array_values()?
             .unwrap_or_default()
             .iter()
             .map(|v| v.to_js_string().map(|s| s.to_vec()).map_err(ex))
@@ -215,7 +215,7 @@ impl PublicSubscriptionHost for SocketHost {
             .and_then(|s| s.get("markets"))
             .map_err(ex)?;
         markets
-            .array_values()
+            .array_values()?
             .unwrap_or_default()
             .iter()
             .map(|m| {
@@ -520,7 +520,7 @@ impl StreamValues for SocketHost {
         } else {
             message.get("data").map_err(ex)?
         };
-        Ok(data.array_values().map(|items| {
+        Ok(data.array_values()?.map(|items| {
             items
                 .into_iter()
                 .map(|v| Ok(Rc::new(v)))
@@ -564,7 +564,7 @@ fn call_each(
     handlers: &Js,
     mut build: impl FnMut() -> Result<Js, ExchangeError>,
 ) -> Result<(), ExchangeError> {
-    for callback in handlers.array_values().unwrap_or_default() {
+    for callback in handlers.array_values()?.unwrap_or_default() {
         callback.call(Js::Undefined, vec![build()?]).map_err(ex)?;
     }
     Ok(())
@@ -693,7 +693,7 @@ impl BookHost for SocketHost {
             .get("store")
             .and_then(|s| s.get("markets"))
             .map_err(ex)?;
-        for market in markets.array_values().unwrap_or_default() {
+        for market in markets.array_values()?.unwrap_or_default() {
             if market.get("symbol").map_err(ex)?.strict_equals(symbol) {
                 let size = market.get("contractSize").map_err(ex)?;
                 return Ok(Rc::new(if size.truthy() { size } else { Js::Number(1.0) }));
@@ -830,7 +830,7 @@ impl ListenerHost for SocketHost {
     fn append(&self, feed: Feed, key: &Key<Js>, callback: Rc<Js>) -> Result<(), ExchangeError> {
         let map = self.handlers_map(feed)?;
         let key = key_units(key)?;
-        let mut list = handler_list(&map, &key)?.array_values().unwrap_or_default();
+        let mut list = handler_list(&map, &key)?.array_values()?.unwrap_or_default();
         list.push((*callback).clone());
         map.set_key(&key, Js::array(list)).map_err(ex)
     }
@@ -838,7 +838,7 @@ impl ListenerHost for SocketHost {
         let map = self.handlers_map(feed)?;
         let key = key_units(key)?;
         let list: Vec<Js> = handler_list(&map, &key)?
-            .array_values()
+            .array_values()?
             .unwrap_or_default()
             .into_iter()
             .filter(|cb| !cb.same_reference(&callback))

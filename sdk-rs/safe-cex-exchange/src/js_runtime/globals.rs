@@ -23,7 +23,7 @@ impl Replacer {
         if replacer.is_callable() {
             return Ok(Replacer::Function(replacer));
         }
-        let Some(items) = replacer.array_items() else {
+        let Some(items) = replacer.array_items()? else {
             return Ok(Replacer::None);
         };
         let mut keys: Vec<Str> = vec![];
@@ -93,7 +93,7 @@ fn json_stringify(
         }
         Js::Array(items) => {
             // Capture length once, then read each live slot after earlier replacer calls.
-            let length = items.borrow().len();
+            let length = items.len();
             let mut out = vec![b'[' as u16];
             for i in 0..length {
                 if i > 0 {
@@ -568,21 +568,21 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                         "Cannot convert undefined or null to object",
                     ));
                 }
-                let key = arg(&args, 1).to_js_string()?;
-                target.own_property_descriptor(&key)
+                let key = arg(&args, 1);
+                target.own_property_descriptor_for(&key)
             }),
         ),
         (
             "defineProperty",
             Js::function("defineProperty", |_, a| {
                 let target = arg(&a, 0);
-                if !matches!(target, Js::Object(_) | Js::Function(_)) {
+                if !matches!(target, Js::Object(_) | Js::Function(_) | Js::Array(_)) {
                     return Err(Thrown::type_error(
                         "Object.defineProperty target must be an ordinary object or function",
                     ));
                 }
-                let key = arg(&a, 1).to_js_string()?;
-                target.define_property(&key, &arg(&a, 2))?;
+                let key = arg(&a, 1);
+                target.define_property_for(&key, &arg(&a, 2))?;
                 Ok(target)
             }),
         ),

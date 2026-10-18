@@ -996,8 +996,8 @@ fn orders_flattening_calls_the_live_owner_helper_after_its_type_guard() {
     assert_eq!(
         json!({
             "same":result.same_reference(&expected), "calls":*calls.borrow(),
-            "stringLength":string.array_values().unwrap().len(),
-            "functionLength":function.array_values().unwrap().len(),
+            "stringLength":string.array_values().expect("fixture array property reads").unwrap().len(),
+            "functionLength":function.array_values().expect("fixture array property reads").unwrap().len(),
         }),
         source["flattenOrdersDispatch"]
     );

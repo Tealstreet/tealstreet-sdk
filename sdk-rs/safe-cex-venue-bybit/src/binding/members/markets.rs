@@ -256,11 +256,11 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
             let mut rows = data
                 .get("result")?
                 .get("list")?
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| type_error("data.result.list is not iterable"))?;
             rows.extend(
                 prelaunch
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| type_error("preLaunchMarkets is not iterable"))?,
             );
             let fees = super::super::value::to_retained_input(&fees)?;

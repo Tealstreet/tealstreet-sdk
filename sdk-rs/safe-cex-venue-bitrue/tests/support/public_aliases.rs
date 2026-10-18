@@ -223,7 +223,7 @@ fn metadata_handle_alias_retains_real_cache_aliases_and_all_fields() {
         })
         .expect("actual metadata member settles")
         .unwrap()
-        .array_values()
+        .array_values().expect("fixture array property reads")
         .unwrap();
     assert_eq!(returned.len(), 2);
     assert!(

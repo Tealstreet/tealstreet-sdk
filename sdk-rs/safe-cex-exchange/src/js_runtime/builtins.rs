@@ -21,11 +21,6 @@ fn require_callback(callback: &Js) -> Result<(), Thrown> {
     Ok(())
 }
 
-fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
-    require_callback(callback)?;
-    callback.call(Js::Undefined, args)
-}
-
 pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
     let name = String::from_utf16_lossy(key);
     let this = receiver.clone();
@@ -320,249 +315,114 @@ fn string_position(value: f64, length: usize) -> usize {
     }
 }
 
-fn items(this: &Js) -> Vec<Option<Js>> {
-    this.array_items().unwrap_or_default()
+fn array_length(this: &Js) -> Result<usize,Thrown> { Ok(this.get("length")?.to_number()? as usize) }
+fn indexed(this:&Js,index:usize)->Result<Option<Js>,Thrown> {
+    let key=super::value::utf16(&index.to_string());
+    if this.has_property(&key) {Ok(Some(this.get_key(&key)?))} else {Ok(None)}
+}
+fn items(this: &Js) -> Result<Vec<Option<Js>>,Thrown> {
+    this.array_items()?.ok_or_else(|| Thrown::type_error("array receiver required"))
 }
 
-fn array_member(this: Js, name: &str) -> Option<Js> {
+pub(crate) fn array_member(this: Js, name: &str) -> Option<Js> {
     Some(match name {
         "push" => method(name, move |a| {
-            for v in a {
-                this.push(v)?;
-            }
-            Ok(Js::Number(items(&this).len() as f64))
+            let mut len=array_length(&this)?;
+            for value in a {this.set(&len.to_string(),value)?;len+=1;}
+            this.set("length",Js::Number(len as f64))?;
+            Ok(Js::Number(len as f64))
         }),
         "pop" => method(name, move |_| {
-            let Js::Array(cells) = &this else {
-                return Ok(Js::Undefined);
-            };
-            Ok(cells.borrow_mut().pop().flatten().unwrap_or(Js::Undefined))
+            let len=array_length(&this)?;
+            if len==0 {this.set("length",Js::Number(0.))?;return Ok(Js::Undefined);}
+            let key=(len-1).to_string();let value=this.get(&key)?;
+            this.delete(&super::value::utf16(&key))?;this.set("length",Js::Number((len-1) as f64))?;Ok(value)
         }),
-        // Holes stay holes at their mirrored index, as the spec's HasProperty swaps do.
         "reverse" => method(name, move |_| {
-            if let Js::Array(cells) = &this {
-                cells.borrow_mut().reverse();
+            let len=array_length(&this)?;
+            for lower in 0..len/2 {
+                let upper=len-lower-1;
+                let left=indexed(&this,lower)?;let right=indexed(&this,upper)?;
+                match (left,right) {
+                    (Some(l),Some(r))=>{this.set(&lower.to_string(),r)?;this.set(&upper.to_string(),l)?;},
+                    (None,Some(r))=>{this.set(&lower.to_string(),r)?;this.delete(&super::value::utf16(&upper.to_string()))?;},
+                    (Some(l),None)=>{this.delete(&super::value::utf16(&lower.to_string()))?;this.set(&upper.to_string(),l)?;},
+                    _=>{},
+                }
             }
             Ok(this.clone())
         }),
-        "includes" => method(name, move |a| {
-            let needle = arg(&a, 0);
-            Ok(Js::Bool(items(&this).iter().any(|v| {
-                v.clone().unwrap_or(Js::Undefined).same_value_zero(&needle)
-            })))
-        }),
-        "indexOf" => method(name, move |a| {
-            let needle = arg(&a, 0);
-            Ok(Js::Number(
-                items(&this)
-                    .iter()
-                    .position(|v| v.as_ref().is_some_and(|v| v.strict_equals(&needle)))
-                    .map_or(-1.0, |i| i as f64),
-            ))
-        }),
-        "join" => method(name, move |a| {
-            let sep = arg(&a, 0);
-            let sep = if sep.is_undefined() {
-                vec![b',' as u16].into()
-            } else {
-                sep.to_js_string()?
-            };
-            let mut units = vec![];
-            for (index, value) in items(&this).into_iter().enumerate() {
-                if index > 0 {
-                    units.extend_from_slice(&sep);
-                }
-                if let Some(value) = value
-                    && !value.is_nullish()
-                {
-                    units.extend_from_slice(&value.to_js_string()?);
-                }
+        "includes" | "indexOf" => {let includes=name=="includes";method(name,move |a|{
+            let len=array_length(&this)?;let needle=arg(&a,0);let start=arg(&a,1).to_number()?;
+            let start=if start.is_nan(){0.}else{start.trunc()};let start=if start<0.{(len as f64+start).max(0.)}else{start} as usize;
+            for i in start..len {
+                let value=if includes {Some(this.get(&i.to_string())?)}else{indexed(&this,i)?};
+                if value.is_some_and(|v| if includes{v.same_value_zero(&needle)}else{v.strict_equals(&needle)}) {return Ok(if includes{Js::Bool(true)}else{Js::Number(i as f64)});}
             }
+            Ok(if includes{Js::Bool(false)}else{Js::Number(-1.)})
+        })},
+        "join" => method(name,move |a|{
+            let len=array_length(&this)?;let separator=arg(&a,0);
+            let sep=if separator.is_undefined(){super::value::utf16(",")}else{separator.to_js_string()?};
+            let mut units=vec![];
+            for i in 0..len {if i>0{units.extend_from_slice(&sep);}let v=this.get(&i.to_string())?;if !v.is_nullish(){units.extend_from_slice(&v.to_js_string()?);}}
             Ok(Js::utf16(&units))
         }),
-        "slice" => method(name, move |a| {
-            let all = items(&this);
-            let len = all.len() as f64;
-            let norm = |v: Js, d: f64| -> Result<usize, Thrown> {
-                if v.is_undefined() {
-                    return Ok(d as usize);
-                }
-                let n = v.to_number()?.trunc();
-                let n = if n.is_nan() { 0.0 } else { n };
-                Ok(if n < 0.0 {
-                    (len + n).max(0.0)
-                } else {
-                    n.min(len)
-                } as usize)
-            };
-            let start = norm(arg(&a, 0), 0.0)?;
-            let end = norm(arg(&a, 1), len)?;
-            Ok(Js::holey_array(if start < end {
-                all[start..end].to_vec()
-            } else {
-                vec![]
-            }))
+        "slice" => method(name,move |a|{
+            let len=array_length(&this)?;
+            let norm=|v:Js,d:usize|->Result<usize,Thrown>{if v.is_undefined(){return Ok(d);}let n=v.to_number()?.trunc();let n=if n.is_nan(){0.}else{n};Ok(if n<0.{(len as f64+n).max(0.)}else{n.min(len as f64)} as usize)};
+            let start=norm(arg(&a,0),0)?;let end=norm(arg(&a,1),len)?;
+            let mut out=vec![];for i in start..end{out.push(indexed(&this,i)?);}Ok(Js::holey_array(out))
         }),
-        "concat" => method(name, move |a| {
-            let mut out = items(&this);
-            for v in a {
-                match v.array_items() {
-                    Some(more) => out.extend(more),
-                    None => out.push(Some(v)),
-                }
-            }
-            Ok(Js::holey_array(out))
+        "concat" => method(name,move |a|{
+            let mut out=items(&this)?;for v in a{if let Some(more)=v.array_items()?{out.extend(more);}else{out.push(Some(v));}}Ok(Js::holey_array(out))
         }),
-        "map" => method(name, move |a| {
-            let f = arg(&a, 0);
-            let all = items(&this);
-            let mut out = Vec::with_capacity(all.len());
-            for (i, v) in all.into_iter().enumerate() {
-                out.push(match v {
-                    Some(v) => Some(callback_call(
-                        &f,
-                        vec![v, Js::Number(i as f64), this.clone()],
-                    )?),
-                    None => None,
-                });
-            }
-            Ok(Js::holey_array(out))
-        }),
-        "forEach" => method(name, move |a| {
-            let f = arg(&a, 0);
-            let len = items(&this).len();
-            for i in 0..len {
-                if let Some(Some(v)) = items(&this).get(i).cloned() {
-                    callback_call(&f, vec![v, Js::Number(i as f64), this.clone()])?;
-                }
-            }
-            Ok(Js::Undefined)
-        }),
-        "filter" | "some" | "every" | "find" | "findIndex" => {
-            let kind = name.to_owned();
-            method(name, move |a| {
-                let f = arg(&a, 0);
-                let len = items(&this).len();
-                let mut out = vec![];
+        "map" | "forEach" | "filter" | "some" | "every" | "find" | "findIndex" | "flatMap" => {
+            let kind=name.to_owned();method(name,move |a|{
+                let len=array_length(&this)?;let f=arg(&a,0);require_callback(&f)?;let receiver=arg(&a,1);
+                let mut out=vec![];
                 for i in 0..len {
-                    let v = items(&this).get(i).cloned().flatten();
-                    let present = v.is_some();
-                    let v = v.unwrap_or(Js::Undefined);
-                    if !present && matches!(kind.as_str(), "filter" | "some" | "every") {
-                        continue;
-                    }
-                    let hit =
-                        callback_call(&f, vec![v.clone(), Js::Number(i as f64), this.clone()])?
-                            .truthy();
-                    match kind.as_str() {
-                        "filter" if hit => out.push(v),
-                        "some" if hit => return Ok(Js::Bool(true)),
-                        "every" if !hit => return Ok(Js::Bool(false)),
-                        "find" if hit => return Ok(v),
-                        "findIndex" if hit => return Ok(Js::Number(i as f64)),
-                        _ => {}
+                    let value=if matches!(kind.as_str(),"find"|"findIndex"){Some(this.get(&i.to_string())?)}else{indexed(&this,i)?};
+                    let Some(value)=value else {if kind=="map"{out.push(None);}continue;};
+                    let result=f.call(receiver.clone(),vec![value.clone(),Js::Number(i as f64),this.clone()])?;
+                    let hit=result.truthy();
+                    match kind.as_str(){
+                        "map"=>out.push(Some(result)),"filter" if hit=>out.push(Some(value)),
+                        "flatMap"=>{if result.is_array(){flatten_into(&result,0.,&mut out)?;}else{out.push(Some(result));}},
+                        "some" if hit=>return Ok(Js::Bool(true)),"every" if !hit=>return Ok(Js::Bool(false)),
+                        "find" if hit=>return Ok(value),"findIndex" if hit=>return Ok(Js::Number(i as f64)),_=>{},
                     }
                 }
-                Ok(match kind.as_str() {
-                    "filter" => Js::array(out),
-                    "some" => Js::Bool(false),
-                    "every" => Js::Bool(true),
-                    "find" => Js::Undefined,
-                    _ => Js::Number(-1.0),
-                })
+                Ok(match kind.as_str(){"map"|"filter"|"flatMap"=>Js::holey_array(out),"some"=>Js::Bool(false),"every"=>Js::Bool(true),"find"=>Js::Undefined,"findIndex"=>Js::Number(-1.),_=>Js::Undefined})
             })
-        }
-        "reduce" => method(name, move |a| {
-            let f = arg(&a, 0);
-            let all = items(&this);
-            let mut iter = all
-                .into_iter()
-                .enumerate()
-                .filter_map(|(i, v)| v.map(|v| (i, v)));
-            let mut acc = if a.len() > 1 {
-                a[1].clone()
-            } else {
-                match iter.next() {
-                    Some((_, v)) => v,
-                    None => {
-                        return Err(Thrown::type_error(
-                            "Reduce of empty array with no initial value",
-                        ));
-                    }
-                }
-            };
-            for (i, v) in iter {
-                acc = callback_call(&f, vec![acc, v, Js::Number(i as f64), this.clone()])?;
-            }
+        },
+        "reduce"=>method(name,move |a|{
+            let len=array_length(&this)?;let f=arg(&a,0);require_callback(&f)?;let mut at=0;
+            let mut acc=if a.len()>1{a[1].clone()}else{loop{if at>=len{return Err(Thrown::type_error("Reduce of empty array with no initial value"));}let next=indexed(&this,at)?;at+=1;if let Some(v)=next{break v;}}};
+            while at<len {let i=at;at+=1;if let Some(v)=indexed(&this,i)?{acc=f.call(Js::Undefined,vec![acc,v,Js::Number(i as f64),this.clone()])?;}}
             Ok(acc)
         }),
-        "flat" => method(name, move |a| {
-            let depth = arg(&a, 0);
-            let depth = if depth.is_undefined() {
-                1.0
-            } else {
-                let n = depth.to_number()?;
-                if n.is_nan() { 0.0 } else { n.trunc() }
-            };
-            let mut out = vec![];
-            flatten_into(&items(&this), depth, &mut out);
-            Ok(Js::array(out))
+        "flat"=>method(name,move |a|{
+            let depth=arg(&a,0);let depth=if depth.is_undefined(){1.}else{let n=depth.to_number()?;if n.is_nan(){0.}else{n.trunc()}};
+            let mut out=vec![];flatten_into(&this,depth,&mut out)?;Ok(Js::holey_array(out))
         }),
-        "flatMap" => method(name, move |a| {
-            let f = arg(&a, 0);
-            let mut out = vec![];
-            for (i, v) in items(&this).into_iter().enumerate() {
-                let Some(v) = v else { continue };
-                let mapped = callback_call(&f, vec![v, Js::Number(i as f64), this.clone()])?;
-                match mapped.array_items() {
-                    Some(inner) => out.extend(inner.into_iter().flatten()),
-                    None => out.push(mapped),
-                }
-            }
-            Ok(Js::array(out))
-        }),
-        "sort" => method(name, move |a| {
-            let f = arg(&a, 0);
-            let Js::Array(cells) = &this else {
-                return Ok(this.clone());
-            };
-            let mut values: Vec<Js> = cells.borrow().iter().flatten().cloned().collect();
-            let holes = cells.borrow().len() - values.len();
-            if !f.is_undefined() && !f.is_callable() {
-                return Err(Thrown::type_error(
-                    "The comparison function must be either a function or undefined",
-                ));
-            }
-            super::sorting::stable_sort(&mut values, |x, y| {
-                if x.is_undefined() || y.is_undefined() {
-                    return Ok(x.is_undefined().cmp(&y.is_undefined()));
-                }
-                if f.is_callable() {
-                    let n = f
-                        .call(Js::Undefined, vec![x.clone(), y.clone()])?
-                        .to_number()?;
-                    Ok(n.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal))
-                } else {
-                    Ok(x.to_js_string()?.cmp(&y.to_js_string()?))
-                }
+        "sort"=>method(name,move |a|{
+            let f=arg(&a,0);if !f.is_undefined()&&!f.is_callable(){return Err(Thrown::type_error("The comparison function must be either a function or undefined"));}
+            let len=array_length(&this)?;let mut values=vec![];for i in 0..len{if let Some(v)=indexed(&this,i)?{values.push(v);}}
+            super::sorting::stable_sort(&mut values,|x,y|{
+                if x.is_undefined()||y.is_undefined(){return Ok(x.is_undefined().cmp(&y.is_undefined()));}
+                if f.is_callable(){let n=f.call(Js::Undefined,vec![x.clone(),y.clone()])?.to_number()?;Ok(n.partial_cmp(&0.).unwrap_or(std::cmp::Ordering::Equal))}else{Ok(x.to_js_string()?.cmp(&y.to_js_string()?))}
             })?;
-            let mut sorted: Vec<Option<Js>> = values.into_iter().map(Some).collect();
-            sorted.extend(std::iter::repeat_n(None, holes));
-            *cells.borrow_mut() = sorted;
-            Ok(this.clone())
+            let count=values.len();for (i,value) in values.into_iter().enumerate(){this.set(&i.to_string(),value)?;}
+            for i in count..len{this.delete(&super::value::utf16(&i.to_string()))?;}Ok(this.clone())
         }),
-        _ => return None,
+        _=>return None,
     })
 }
-
-/// FlattenIntoArray: holes are skipped, arrays nest while `depth` stays positive.
-fn flatten_into(source: &[Option<Js>], depth: f64, out: &mut Vec<Js>) {
-    for value in source.iter().flatten() {
-        match value.array_items() {
-            Some(inner) if depth > 0.0 => flatten_into(&inner, depth - 1.0, out),
-            _ => out.push(value.clone()),
-        }
-    }
+fn flatten_into(source:&Js,depth:f64,out:&mut Vec<Option<Js>>)->Result<(),Thrown>{
+    let len=array_length(source)?;
+    for i in 0..len{if let Some(value)=indexed(source,i)?{if value.is_array()&&depth>0.{flatten_into(&value,depth-1.,out)?;}else{out.push(Some(value));}}}
+    Ok(())
 }
 
 fn map_entries(this: &Js) -> Rc<RefCell<super::collections::Collection<(Js, Js)>>> {

@@ -299,7 +299,7 @@ fn imported_values_match_the_constructed_spot_endpoint_tables() {
             rt.imported(import).unwrap(),
             Rc::new(rt.this.get(property).unwrap()),
         ] {
-            let rows = value.array_values().unwrap();
+            let rows = value.array_values().expect("fixture array property reads").unwrap();
             assert_eq!(rows.len(), expected.len());
             for (actual, expected) in rows.iter().zip(expected) {
                 assert_eq!(actual.to_display(), *expected);

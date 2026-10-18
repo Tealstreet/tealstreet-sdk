@@ -211,10 +211,7 @@ pub(crate) fn for_of(
 /// An own property of the value's runtime representation, by UTF-16 key.
 pub(crate) fn has_own_key(value: &Js, key: &[u16]) -> bool {
     match value {
-        Js::Array(items) => {
-            array_index(key).is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_))))
-                || key == utf16("length").as_ref()
-        }
+        Js::Array(_) => value.own_property_names().expect("array names").iter().any(|name| name.as_ref()==key),
         Js::String(units) => {
             array_index(key).is_some_and(|i| i < units.len()) || key == utf16("length").as_ref()
         }

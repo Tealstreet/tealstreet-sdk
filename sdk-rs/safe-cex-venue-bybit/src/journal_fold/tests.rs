@@ -13,7 +13,7 @@ fn observe(value: &Js) -> Value {
         Js::Number(n) => {
             json!({"number":if n.is_nan() { "nan".into() } else { format!("{:016x}",n.to_bits()) }})
         }
-        Js::Array(_) => Value::Array(value.array_values().unwrap().iter().map(observe).collect()),
+        Js::Array(_) => Value::Array(value.array_values().expect("fixture array property reads").unwrap().iter().map(observe).collect()),
         value if value.is_object() => Value::Object(
             value
                 .own_entries()

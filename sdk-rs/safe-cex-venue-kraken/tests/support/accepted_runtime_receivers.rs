@@ -33,7 +33,7 @@ fn iterable_uses_native_collection_protocol_and_retains_cells() {
         .unwrap();
     let entries = TradingHost::iterable(rt, &map, "txids").unwrap();
     assert_eq!(entries.len(), 1);
-    let pair = entries[0].array_values().unwrap();
+    let pair = entries[0].array_values().expect("fixture array property reads").unwrap();
     assert_eq!(pair[0].to_display(), "id");
     assert!(pair[1].strict_equals(&cell));
     let units = TradingHost::iterable(rt, &Js::utf16(&[0xd83d, 0xde00, 0xd800]), "txids").unwrap();

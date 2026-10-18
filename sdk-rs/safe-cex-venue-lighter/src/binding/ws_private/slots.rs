@@ -86,7 +86,7 @@ fn list(callee: &V, name: &str) -> SigningResult<Vec<Option<Js>>> {
             receiver.type_of()
         ))));
     }
-    receiver.array_items().ok_or_else(|| {
+    receiver.array_items().map_err(to_signing)?.ok_or_else(|| {
         to_signing(Thrown::type_error(&format!(
             "{name} over a non-array {} receiver is not bound",
             receiver.type_of()

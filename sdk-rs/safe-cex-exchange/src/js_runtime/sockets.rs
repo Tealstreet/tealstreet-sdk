@@ -153,7 +153,7 @@ fn create_websocket(core: &Rc<SocketCore>, args: &[Js]) -> Result<Js, Thrown> {
         Js::Undefined | Js::Null => vec![],
         Js::String(value) => vec![String::from_utf16_lossy(&value)],
         other => other
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("WebSocket protocols must be strings"))?
             .into_iter()
             .map(|value| value.to_display())

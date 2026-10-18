@@ -13,7 +13,7 @@ pub(crate) fn to_data(value: &Js) -> DataValue {
         Js::String(s) => DataValue::String(s.to_vec()),
         Js::Array(_) => DataValue::Array(Rc::new(RefCell::new(
             value
-                .array_items()
+                .array_items()?
                 .unwrap_or_default()
                 .iter()
                 .map(|item| item.as_ref().map_or(DataValue::Undefined, to_data))

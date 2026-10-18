@@ -43,7 +43,7 @@ pub(crate) fn bytes_of(v: &Js) -> Result<Vec<u8>, Thrown> {
     {
         return Ok(v
             .get("bytes")?
-            .array_values()
+            .array_values()?
             .unwrap_or_default()
             .iter()
             .map(|b| b.as_f64().unwrap_or(0.0) as u8)
@@ -155,7 +155,7 @@ fn qs_parse_form(value: &Js) -> Result<Js, Thrown> {
         let value = Js::str(&qs_decode(value));
         let value = if result.has_own(&lossy(&key)) {
             let previous = result.get_key(&key)?;
-            let mut values = previous.array_values().unwrap_or_else(|| vec![previous]);
+            let mut values = previous.array_values()?.unwrap_or_else(|| vec![previous]);
             values.push(value);
             Js::array(values)
         } else {
@@ -198,7 +198,7 @@ pub(crate) fn qs_stringify(value: &Js, sorted: bool, rfc1738: bool) -> Result<St
             Js::Undefined => {}
             Js::Null => out.push(format!("{}=", qs_encode(prefix, rfc1738))),
             Js::Array(_) => {
-                for v in value.array_values().unwrap_or_default() {
+                for v in value.array_values()?.unwrap_or_default() {
                     walk(prefix, &v, collator, rfc1738, out)?;
                 }
             }
@@ -365,7 +365,7 @@ impl ReadHost for Rt {
         Ok(value.call_method("includes", vec![Js::str(text)])?.truthy())
     }
     fn items(&self, value: &Js) -> ReadResult<Self, Vec<Handle<Self>>> {
-        match value.array_values() {
+        match value.array_values()? {
             Some(items) => Ok(items.into_iter().map(h).collect()),
             None => Err(Thrown::type_error(&format!(
                 "{} is not iterable",

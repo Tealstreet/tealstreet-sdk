@@ -244,7 +244,7 @@ fn to_fixture(value: &Js) -> Value {
         Js::Null => Value::Null,
         Js::Array(_) => Value::Array(
             value
-                .array_values()
+                .array_values().expect("fixture array property reads")
                 .unwrap()
                 .iter()
                 .map(to_fixture)

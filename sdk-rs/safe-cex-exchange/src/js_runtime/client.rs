@@ -288,7 +288,7 @@ fn normalized_header_value(value: Js) -> Result<Js, Thrown> {
     if value.is_nullish() || value.strict_equals(&Js::Bool(false)) {
         return Ok(value);
     }
-    if let Some(values) = value.array_values() {
+    if let Some(values) = value.array_values()? {
         return values
             .into_iter()
             .map(normalized_header_value)
@@ -543,7 +543,7 @@ fn transform_response(response: &Js, config: &Js) -> Result<(), Thrown> {
         return Ok(());
     }
     let transforms = transforms
-        .array_values()
+        .array_values()?
         .unwrap_or_else(|| vec![transforms]);
     let mut data = response.get("data")?;
     for transform in transforms {

@@ -25,10 +25,7 @@ use std::{
 };
 
 /// Native array iterator state: index into the live receiver, length re-read per step.
-pub(crate) struct JsIter {
-    value: Js,
-    index: usize,
-}
+pub(crate) struct JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
 
 fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
@@ -56,9 +53,9 @@ fn capture_member_of(value: &Js, name: &str) -> Result<Js, Thrown> {
     Ok(bind_owner(value.clone(), member, name))
 }
 
-fn array_cell(value: &Js, method: &str) -> Result<Rc<RefCell<Vec<Option<Js>>>>, Thrown> {
+fn array_cell(value: &Js, method: &str) -> Result<Js, Thrown> {
     match value {
-        Js::Array(items) => Ok(items.clone()),
+        Js::Array(_) => Ok(value.clone()),
         other if other.is_nullish() => Err(other
             .get(method)
             .err()
@@ -71,8 +68,8 @@ fn array_cell(value: &Js, method: &str) -> Result<Rc<RefCell<Vec<Option<Js>>>>, 
 }
 
 /// Element `i` if the live array still has it (HasProperty), skipping holes.
-fn live(items: &Rc<RefCell<Vec<Option<Js>>>>, i: usize) -> Option<Js> {
-    items.borrow().get(i).cloned().flatten()
+fn live(items:&Js,i:usize)->Result<Option<Js>,Thrown> {
+    if items.has_index(i) {Ok(Some(items.get(&i.to_string())?))}else{Ok(None)}
 }
 
 fn native_filter<F>(value: Js, mut f: F) -> Result<Js, Thrown>
@@ -80,10 +77,10 @@ where
     F: FnMut(Js, usize) -> Result<bool, Thrown>,
 {
     let items = array_cell(&value, "filter")?;
-    let len = items.borrow().len();
+    let len = items.get("length")?.to_number()? as usize;
     let mut out = vec![];
     for i in 0..len {
-        if let Some(item) = live(&items, i)
+        if let Some(item) = live(&items, i)?
             && f(item.clone(), i)?
         {
             out.push(item);
@@ -97,10 +94,10 @@ where
     F: FnMut(Js, usize) -> Result<Js, Thrown>,
 {
     let items = array_cell(&value, "map")?;
-    let len = items.borrow().len();
+    let len = items.get("length")?.to_number()? as usize;
     let mut out = vec![None; len];
     for (i, slot) in out.iter_mut().enumerate() {
-        if let Some(item) = live(&items, i) {
+        if let Some(item) = live(&items, i)? {
             *slot = Some(f(item, i)?);
         }
     }
@@ -112,12 +109,12 @@ where
     F: FnMut(Js, usize) -> Result<Js, Thrown>,
 {
     let items = array_cell(&value, "flatMap")?;
-    let len = items.borrow().len();
+    let len = items.get("length")?.to_number()? as usize;
     let mut out = vec![];
     for i in 0..len {
-        if let Some(item) = live(&items, i) {
+        if let Some(item) = live(&items, i)? {
             match f(item, i)? {
-                Js::Array(inner) => out.extend(inner.borrow().iter().flatten().cloned()),
+                inner @ Js::Array(_) => {let len=inner.get("length")?.to_number()? as usize;for index in 0..len{if let Some(v)=live(&inner,index)?{out.push(v);}}},
                 other => out.push(other),
             }
         }
@@ -130,68 +127,18 @@ where
     F: FnMut(Js, Js, usize) -> Result<Js, Thrown>,
 {
     let items = array_cell(&value, "reduce")?;
-    let len = items.borrow().len();
+    let len = items.get("length")?.to_number()? as usize;
     let mut acc = initial;
     for i in 0..len {
-        if let Some(item) = live(&items, i) {
+        if let Some(item) = live(&items, i)? {
             acc = f(acc, item, i)?;
         }
     }
     Ok(acc)
 }
 
-fn iterator_of(value: &Js) -> Result<JsIter, Thrown> {
-    match value {
-        Js::Array(_) | Js::String(_) | Js::Map(_) | Js::Set(_) => Ok(JsIter {
-            value: value.clone(),
-            index: 0,
-        }),
-        other => Err(Thrown::type_error(&format!(
-            "{} is not iterable",
-            other.to_display()
-        ))),
-    }
-}
-
-fn iterator_next(iter: &mut JsIter) -> Result<Option<Js>, Thrown> {
-    let i = iter.index;
-    let out = match &iter.value {
-        Js::Array(items) => {
-            let items = items.borrow();
-            if i >= items.len() {
-                return Ok(None);
-            }
-            iter.index += 1;
-            items[i].clone().unwrap_or(Js::Undefined)
-        }
-        Js::String(s) => {
-            let Some(&unit) = s.get(i) else {
-                return Ok(None);
-            };
-            let pair = (0xD800..0xDC00).contains(&unit)
-                && s.get(i + 1).is_some_and(|n| (0xDC00..0xE000).contains(n));
-            let width = if pair { 2 } else { 1 };
-            iter.index += width;
-            Js::utf16(&s[i..i + width])
-        }
-        Js::Map(m) => {
-            let Some((k, v)) = m.borrow().get(i).cloned() else {
-                return Ok(None);
-            };
-            iter.index += 1;
-            Js::array(vec![k, v])
-        }
-        Js::Set(s) => {
-            let Some(v) = s.borrow().get(i).cloned() else {
-                return Ok(None);
-            };
-            iter.index += 1;
-            v
-        }
-        _ => return Ok(None),
-    };
-    Ok(Some(out))
-}
+fn iterator_of(value:&Js)->Result<JsIter,Thrown>{Ok(JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?))}
+fn iterator_next(iter:&mut JsIter)->Result<Option<Js>,Thrown>{iter.0.step_value()}
 
 fn property_key(key: &Js) -> Result<Str, Thrown> {
     key.to_js_string()

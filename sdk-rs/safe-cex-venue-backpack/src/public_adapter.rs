@@ -469,14 +469,14 @@ impl listeners::Host for PublicFrame {
             let v = response.await?;
             let levels = |side: &str| -> Result<Vec<[JsString; 2]>, ExchangeError> {
                 let side = v.field(side)?.array()?;
-                side.borrow()
+                side.array_items()?.expect("array variant")
                     .iter()
                     .map(|row| {
                         let row = row
                             .as_ref()
                             .ok_or_else(|| ExchangeError::new("Undefined snapshot level"))?
                             .array()?;
-                        let row = row.borrow();
+                        let row = row.array_items()?.expect("array variant");
                         Ok([
                             row.first()
                                 .cloned()
@@ -817,9 +817,9 @@ impl socket_events::HandlerHost<Value> for PublicFrame {
                     }
                     let a = v.array()?;
                     let mut rows = vec![];
-                    for row in a.borrow().iter().flatten() {
+                    for row in a.array_items()?.expect("array variant").iter().flatten() {
                         let pair = row.array()?;
-                        let pair = pair.borrow();
+                        let pair = pair.array_items()?.expect("array variant");
                         rows.push([
                             pair.first()
                                 .cloned()
@@ -917,7 +917,7 @@ impl socket_events::TickerHost<Value> for PublicFrame {
             "a"
         })?;
         if v.truthy() {
-            Ok(v.array()?.borrow().len())
+            Ok(v.array()?.get("length")?.to_number()? as usize)
         } else {
             Ok(0)
         }
@@ -934,19 +934,9 @@ impl socket_events::TickerHost<Value> for PublicFrame {
                 "a"
             })?
             .array()?;
-        let row = a
-            .borrow()
-            .first()
-            .cloned()
-            .flatten()
-            .unwrap_or(Value::Undefined);
+        let row = a.get("0")?;
         let pair = row.array()?;
-        let value = pair
-            .borrow()
-            .first()
-            .cloned()
-            .flatten()
-            .unwrap_or(Value::Undefined);
+        let value = pair.get("0")?;
         value.string()
     }
     fn update_ticker(

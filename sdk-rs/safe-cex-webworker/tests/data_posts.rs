@@ -56,7 +56,7 @@ fn observe(value: &Js) -> Value {
         Js::Null => Value::Null,
         Js::Bool(v) => json!(v),
         Js::String(s) => json!(String::from_utf16(s).unwrap()),
-        Js::Array(_) => value.array_values().unwrap().iter().map(observe).collect(),
+        Js::Array(_) => value.array_values().expect("fixture array property reads").unwrap().iter().map(observe).collect(),
         Js::Object(_) => value
             .own_entries()
             .unwrap()
@@ -215,7 +215,7 @@ fn call_method_candles_keep_native_numbers_and_both_rows() {
     let messages = messages.borrow();
     let data = &messages[0].data;
     assert!(matches!(data.get("success").unwrap(), Js::Bool(true)));
-    let rows = data.get("result").unwrap().array_values().unwrap();
+    let rows = data.get("result").unwrap().array_values().expect("fixture array property reads").unwrap();
     assert_eq!(
         rows.len(),
         2,
@@ -260,7 +260,7 @@ fn call_method_orders_keep_own_undefined_and_native_numbers() {
         .data
         .get("result")
         .unwrap()
-        .array_values()
+        .array_values().expect("fixture array property reads")
         .unwrap()
         .remove(0);
     assert!(
