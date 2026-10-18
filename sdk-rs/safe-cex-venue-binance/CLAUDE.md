@@ -4,6 +4,20 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
 
+`scripts/public-dispatch-contracts.mjs` uses the maintained compiler driver with
+four exact owner filters for `public_dispatch::{Handlers,dispatch_binance_message}`
+and `ticker_capture::{Capture,lookup}`. The three raw-key/frame operations have
+direct native observations; `Capture::new` is a typed Store capability factory.
+Its classification does not claim decoder execution. Keep retained metadata,
+callback identity/order and inherited lookup observations before JSON projection.
+
+The constructed NativeImports socket witness compares twelve prototype/capture
+cases against the maintained TypeScript exchange classes. Capture assertions
+must inspect retained cells before rereading the dictionary, so a lazy refresh
+cannot conceal a broken Store subscription. `scripts/public-dispatch-controls.py`
+requires four independently compiled production faults to fail their named
+constructed socket tests, then restores each source file byte for byte.
+
 ## Source-owned tables
 
 `scripts/types.mjs` evaluates all three live TypeScript type modules, resolving
@@ -800,3 +814,9 @@ PM stale-snapshot warnings retain source template units through SnapshotCall int
 the canonical Base log_value path. The native private_rest_native repeated-error
 witness compares signed HTTP rejection/Store fallback, console arguments and log
 event units against both maintained PM fetchOrders and BaseExchange.log bodies.
+The standalone `delegated_methods` extraction layer has no production caller and
+is retired with its options alias and mock-only oracle. Keep the six TypeScript
+rows on the live ExchangeState listener/dispatch members. The native candle,
+depth and historical-position witnesses and compiled live history flag control
+are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
+to satisfy accepted-owner discovery.
