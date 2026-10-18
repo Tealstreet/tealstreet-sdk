@@ -2,7 +2,9 @@
 use crate::owned_tasks::{OwnedOperation, OwnedTasks};
 #[cfg(test)]
 use crate::runtime::ExchangeTask;
-use crate::runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, LogSeverity};
+use crate::runtime::{
+    ExchangeError, ExchangeFuture, ExchangeRuntime, LogSeverity, RuntimeTaskKind,
+};
 use safe_cex_store::Store;
 pub use safe_cex_transport::relay::{
     FreshHeadersProvider, UpgradeHeaders, WebSocketConnectionOptions,
@@ -1283,6 +1285,7 @@ impl BaseWebSocket {
             }),
             false,
             true,
+            RuntimeTaskKind::Finite,
         );
     }
     pub async fn create_websocket(
@@ -1406,53 +1409,58 @@ impl BaseWebSocket {
                 state.relay_open = false;
             }
             let weak = Rc::downgrade(self);
-            self.spawn_owned(Box::pin(async move {
-                loop {
-                    let event = socket.next_event().await;
-                    let Some(owner) = weak.upgrade() else {
-                        socket.terminate();
-                        socket.close();
-                        break;
-                    };
-                    if owner.is_disposed() || owner.state.borrow().generation != generation {
-                        socket.terminate();
-                        socket.close();
-                        break;
-                    }
-                    match event {
-                        Ok(WsEvent::Open) => {
-                            owner.dispatch_open(generation).await;
+            self.spawn_owned_kind(
+                Box::pin(async move {
+                    loop {
+                        let event = socket.next_event().await;
+                        let Some(owner) = weak.upgrade() else {
+                            socket.terminate();
+                            socket.close();
+                            break;
+                        };
+                        if owner.is_disposed() || owner.state.borrow().generation != generation {
+                            socket.terminate();
+                            socket.close();
+                            break;
                         }
-                        Ok(WsEvent::Message(frame)) => {
-                            owner.direct_fallback.borrow_mut().on_message();
-                            if let Err(error) = owner.on_message(&frame) {
-                                owner.report_callback_result(
-                                    owner.handle_web_socket_error(&error.to_string()),
-                                );
+                        match event {
+                            Ok(WsEvent::Open) => {
+                                owner.dispatch_open(generation).await;
                             }
-                        }
-                        Ok(WsEvent::Error(error)) => {
-                            owner.report_callback_result(owner.handle_web_socket_error(&error))
-                        }
-                        Ok(WsEvent::Close { code, reason }) => {
-                            owner.report_callback_result(
-                                owner.received_transport_close(code, &reason),
-                            );
-                            if !socket.is_reconnecting() {
+                            Ok(WsEvent::Message(frame)) => {
+                                owner.direct_fallback.borrow_mut().on_message();
+                                if let Err(error) = owner.on_message(&frame) {
+                                    owner.report_callback_result(
+                                        owner.handle_web_socket_error(&error.to_string()),
+                                    );
+                                }
+                            }
+                            Ok(WsEvent::Error(error)) => {
+                                owner.report_callback_result(owner.handle_web_socket_error(&error))
+                            }
+                            Ok(WsEvent::Close { code, reason }) => {
+                                owner.report_callback_result(
+                                    owner.received_transport_close(code, &reason),
+                                );
+                                if !socket.is_reconnecting() {
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                owner.report_callback_result(
+                                    owner
+                                        .handle_web_socket_error(&error.to_string())
+                                        .and_then(|()| owner.transport_close(Some(1006), "")),
+                                );
                                 break;
                             }
                         }
-                        Err(error) => {
-                            owner.report_callback_result(
-                                owner
-                                    .handle_web_socket_error(&error.to_string())
-                                    .and_then(|()| owner.transport_close(Some(1006), "")),
-                            );
-                            break;
-                        }
                     }
-                }
-            }));
+                }),
+                false,
+                false,
+                RuntimeTaskKind::SocketReader,
+            );
         }
         Ok(())
     }
@@ -1645,6 +1653,7 @@ impl BaseWebSocket {
             }),
             true,
             false,
+            RuntimeTaskKind::Finite,
         );
         Ok(())
     }
@@ -2470,13 +2479,14 @@ impl BaseWebSocket {
     // Task handles are socket-owned: closing host I/O need not wake a pending
     // receive or auth future. Never call cancellation/drop while holding state.
     fn spawn_owned(self: &Rc<Self>, future: Pin<Box<dyn Future<Output = ()>>>) -> OwnedOperation {
-        self.spawn_owned_kind(future, false, false)
+        self.spawn_owned_kind(future, false, false, RuntimeTaskKind::Finite)
     }
     fn spawn_owned_kind(
         self: &Rc<Self>,
         future: Pin<Box<dyn Future<Output = ()>>>,
         relay: bool,
         eager: bool,
+        kind: RuntimeTaskKind,
     ) -> OwnedOperation {
         let (key, generation) = {
             let mut state = self.state.borrow_mut();
@@ -2502,7 +2512,8 @@ impl BaseWebSocket {
             let runtime: Rc<dyn ExchangeRuntime> = self.runtime.clone();
             self.owned_tasks.start_eager(&runtime, build, |_| {})
         } else {
-            self.owned_tasks.start(self.runtime.as_ref(), build, |_| {})
+            self.owned_tasks
+                .start_classified(self.runtime.as_ref(), kind, build, |_| {})
         };
         let operation = task.clone();
         // A host may poll inline, including invoking dispose before returning

@@ -7670,6 +7670,18 @@ rs = "safe-cex-exchange/src/native.rs::replay_pending_jobs"
 reason = "Native replay diagnostic observation of unfinished source Promise jobs, excluding future timer jobs. Nonzero pending work prevents a processing-drain claim; no exchange-source semantics are replaced."
 
 [[exempt]]
+rs = "safe-cex-exchange/src/native.rs::replay_raw_tasks"
+reason = "Native replay diagnostic receipt for raw ExchangeRuntime tasks. Unknown, finite and awakened work blocks; only reviewed socket/timer pending leaves and the separately counted Promise driver may wait. Real native socket, timer, cancellation and wake-before-repoll tests validate this host observation, not TS business behavior."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::RuntimeTaskKind"
+reason = "Explicit host diagnostic classification of finite work, future timers, socket readers and the canonical Promise queue driver. This metadata changes neither scheduling nor cancellation and has no maintained TS declaration. Unknown spawn_local calls remain blocking; native raw_task_receipts tests enforce the distinctions."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::spawn_classified"
+reason = "Optional host diagnostic spawn annotation; its default delegates to the existing spawn_local operation. Native replay hosts alone observe pending leaves and wakeups. Ordinary native accounts and other runtime implementations keep the original task scheduling and ownership; no exchange method parity is claimed."
+
+[[exempt]]
 rs = "safe-cex-exchange/src/replay_clock.rs::ReplayClock"
 reason = "Native-only diagnostic host clock state for isolated deterministic replay. Production native accounts never select this host implicitly. The Rust replay_clock regression compares actual runtime timer callbacks and VirtualClock host readings."
 

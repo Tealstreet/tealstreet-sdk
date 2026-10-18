@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { verifyDrain, verifyTransportDrain, streamKey } from './stream-relay.mjs';
+import { verifyDrain, verifyRawTaskDrain, verifyTransportDrain, streamKey } from './stream-relay.mjs';
 
 test('replay clock controls Date, performance, timer ordering and cancellation in two fresh processes', () => {
   const code = `
@@ -43,6 +43,18 @@ test('drain refuses queued, missing, duplicate, extra socket and unread control 
   };
   const expected = new Map([[`${key}#0`, 1]]);
   const receipt = {
+    pendingJobs: 0,
+    rawTasks: {
+      version: 1,
+      scope: 'exchange-runtime',
+      unknown: 0,
+      finite: 0,
+      ready: 0,
+      waitingTimers: 2,
+      waitingSockets: 1,
+      promiseDrivers: 1,
+      blocking: 0,
+    },
     sockets: [{ url, consumed: 1, processed: 1 }],
     transport: [{ url, counts: { message: 1, ping: 1, pong: 0, close: 0 } }],
   };
@@ -65,6 +77,36 @@ test('drain refuses queued, missing, duplicate, extra socket and unread control 
     }),
     false,
   );
+});
+
+test('native raw-task drain rejects legacy, unknown, finite, awake and malformed receipts', () => {
+  const tasks = {
+    version: 1,
+    scope: 'exchange-runtime',
+    unknown: 0,
+    finite: 0,
+    ready: 0,
+    waitingTimers: 2,
+    waitingSockets: 1,
+    promiseDrivers: 1,
+    blocking: 0,
+  };
+  assert.equal(verifyRawTaskDrain(tasks), true);
+  for (const invalid of [
+    undefined,
+    {},
+    { ...tasks, version: 2 },
+    { ...tasks, scope: 'all' },
+    { ...tasks, unknown: 1, blocking: 1 },
+    { ...tasks, finite: 1, blocking: 1 },
+    { ...tasks, ready: 1, blocking: 1 },
+    { ...tasks, unknown: 1 },
+    { ...tasks, finite: -1 },
+    { ...tasks, ready: NaN },
+    { ...tasks, waitingTimers: 0.5 },
+  ]) {
+    assert.equal(verifyRawTaskDrain(invalid), false);
+  }
 });
 
 test(
@@ -141,6 +183,18 @@ test(
         now = at;
       },
       receipt: async () => ({
+        pendingJobs: 0,
+        rawTasks: {
+          version: 1,
+          scope: 'exchange-runtime',
+          unknown: 0,
+          finite: 0,
+          ready: 0,
+          waitingTimers: 0,
+          waitingSockets: 1,
+          promiseDrivers: 0,
+          blocking: 0,
+        },
         sockets: [structuredClone(received)],
         transport: [{ url, counts: structuredClone(counts) }],
       }),

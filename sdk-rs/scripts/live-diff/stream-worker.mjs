@@ -119,7 +119,13 @@ process.on('message', async (message) => {
             implementation === 'rust'
               ? (await native.nativeAccountReplay(id, { op: 'receipt' })).pendingJobs
               : pendingHttp() + receipts.pendingJobs();
-          if (!pending) break;
+          if (!Number.isSafeInteger(pending)) throw new Error('Missing pending-job receipt');
+          if (!pending) {
+            if (implementation !== 'rust') break;
+            const receipt = await native.nativeAccountReplay(id, { op: 'receipt' });
+            if (!receipt.rawTasks || receipt.rawTasks.version !== 1) throw new Error('Addon lacks raw-task receipts');
+            if (receipt.rawTasks.blocking === 0) break;
+          }
           await new Promise((resolve) => realTimeout(resolve, 1));
         }
       }

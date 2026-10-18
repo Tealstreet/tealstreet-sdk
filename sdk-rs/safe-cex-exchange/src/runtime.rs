@@ -399,6 +399,14 @@ pub type ListenerCleanup = Box<dyn FnOnce() -> Result<(), ExchangeError>>;
 pub trait ExchangeTask {
     fn cancel(&self);
 }
+/// Host diagnostics only: classification never changes task scheduling or ownership.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeTaskKind {
+    Finite,
+    Timer,
+    SocketReader,
+    PromiseDriver,
+}
 pub trait ExchangeRuntime {
     /// Elapsed milliseconds from a stable origin, on the same clock as sleep.
     /// Wall-clock adjustments must not affect this value.
@@ -407,6 +415,15 @@ pub trait ExchangeRuntime {
     /// Schedule on the monotonic clock; even zero delay yields a scheduler turn.
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()>;
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask>;
+    /// Unclassified spawn_local calls remain unknown to diagnostic drain receipts.
+    /// Hosts without receipts retain their ordinary scheduling implementation.
+    fn spawn_classified(
+        &self,
+        _kind: RuntimeTaskKind,
+        future: Pin<Box<dyn Future<Output = ()>>>,
+    ) -> Box<dyn ExchangeTask> {
+        self.spawn_local(future)
+    }
     /// Original console arguments, including native Error references. Hosts must
     /// observe these values before choosing a terminal or telemetry representation.
     fn console_values(&self, severity: &str, values: &[Js]);

@@ -1973,3 +1973,16 @@ leaves, and waiter drop leaves the continuation alive. Positive infinity disable
 all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
+
+Native replay receipts include raw ExchangeRuntime tasks as well as canonical
+Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
+awakened tasks block drain. Reviewed timer/socket reader tasks qualify as waiting
+only at their actual pending sleep/receive leaves; pending handler HTTP/auth work
+still blocks. Waking invalidates the waiting observation before repoll. The sole
+Promise driver delegates to the separately counted canonical queue (including
+checkpoint callbacks). Completion and cancellation release records without
+retaining account/task bodies. This instrumentation runs only on explicit replay
+hosts; it does not cover arbitrary external Tokio tasks or transport internals.
+The public probe requires the versioned raw receipt and refuses older addons.
+Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
+the private wake-race witness checks the pre-repoll fence.
