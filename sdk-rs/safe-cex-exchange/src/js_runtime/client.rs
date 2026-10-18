@@ -765,10 +765,25 @@ impl RestAdapter for JsRestAdapter {
                                             {
                                                 continue;
                                             }
-                                            config.push((
-                                                name.to_vec(),
-                                                OwnedJsValue::from_js(&cell)?,
-                                            ));
+                                            let captured = if ["paramsSerializer", "axios-retry"]
+                                                .iter()
+                                                .any(|key| name.iter().copied().eq(key.encode_utf16()))
+                                                && cell.is_object()
+                                            {
+                                                let mut options = vec![];
+                                                for (key, value) in cell.own_entries()? {
+                                                    if !value.is_callable() {
+                                                        options.push((
+                                                            key.to_vec(),
+                                                            OwnedJsValue::from_js(&value)?,
+                                                        ));
+                                                    }
+                                                }
+                                                OwnedJsValue::Object(options)
+                                            } else {
+                                                OwnedJsValue::from_js(&cell)?
+                                            };
+                                            config.push((name.to_vec(), captured));
                                         }
                                         OwnedJsValue::Object(config)
                                     } else {

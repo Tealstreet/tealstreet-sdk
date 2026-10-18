@@ -28,6 +28,11 @@ impl JsHttpHost for Host {
     }
     fn send(&self, config: Js) -> JsFuture<'static> {
         if self.original.is_object() {
+            config
+                .get("paramsSerializer")
+                .unwrap()
+                .set("indexes", Js::Bool(false))
+                .unwrap();
             self.original.define("config", config.clone()).unwrap();
         }
         self.requests.borrow_mut().push(config);
@@ -211,6 +216,30 @@ fn constructed_woo_client_keeps_error_fields_through_typed_rest_adapter() {
             .to_display(),
         "get"
     );
+    let serializer = snapshot
+        .get("config")
+        .unwrap()
+        .get("paramsSerializer")
+        .unwrap();
+    assert!(
+        serializer
+            .get("indexes")
+            .unwrap()
+            .strict_equals(&Js::Bool(false))
+    );
+    assert!(
+        !serializer.has_own("serialize"),
+        "executable config callback is not owned data"
+    );
+    for field in ["config", "extra"] {
+        assert!(
+            snapshot
+                .get(field)
+                .unwrap()
+                .strict_equals(&error.value.get(field).unwrap()),
+            "owned original Error snapshot shares its captured {field} data"
+        );
+    }
     let extra = snapshot.get("extra").unwrap();
     assert_eq!(
         extra.get("number").unwrap().to_number().unwrap(),

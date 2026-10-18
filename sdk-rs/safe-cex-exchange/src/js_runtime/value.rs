@@ -295,6 +295,11 @@ impl From<ExchangeError> for Thrown {
                         {
                             continue;
                         }
+                        if !value.own_keys().contains(&key) {
+                            value
+                                .define_key(&key, cell.clone())
+                                .expect("fresh error snapshot data");
+                        }
                         original
                             .define_key(&key, cell)
                             .expect("fresh original error snapshot");
