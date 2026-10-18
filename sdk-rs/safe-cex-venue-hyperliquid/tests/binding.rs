@@ -606,7 +606,7 @@ fn cloid_audit_exported_placement_produces_boolean_record_inputs() {
     for reduce_only in [false, true] {
         for side in ["buy", "sell"] {
             for kind in ["limit", "stop_market"] {
-                let opts = serde_json::from_value(json!({
+                let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
                     "symbol":"BTC-PERP", "type":kind, "side":side,
                     "amount":0.01, "price":60000, "reduceOnly":reduce_only,
                 }))
