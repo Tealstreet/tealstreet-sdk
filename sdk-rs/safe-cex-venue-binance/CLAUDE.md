@@ -816,3 +816,9 @@ rows on the live ExchangeState listener/dispatch members. The native candle,
 depth and historical-position witnesses and compiled live history flag control
 are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
 to satisfy accepted-owner discovery.
+
+The five `order_operations` function contracts distinguish two typed command/table
+roles from three executed native collection/property outputs. Keep their alias
+records separate. `ORDER_OPERATION_CONTRACT_REVIEW.md` documents the real signed
+cancel/amendment witnesses, five isolated compiled controls and canonical scoped
+measurement; classification receipts alone do not execute those effects.
