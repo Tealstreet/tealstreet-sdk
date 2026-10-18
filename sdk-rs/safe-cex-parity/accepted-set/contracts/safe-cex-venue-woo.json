@@ -55046,5 +55046,1329 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_woo::legacy_metadata::Rows": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_woo::legacy_metadata::Metadata",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_woo::legacy_metadata::Metadata",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Live alias in legacy_metadata::Host and binding/hosts/metadata.rs; individually reviewed against actual compiler target and production caller.",
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "Typed shared mutable metadata/cache handle over Rc<Metadata>. Metadata has no raw decoder; this alias holds computed records and preserves retained parent/child Rc identities across live cache hits. Native trait probes must continue to refuse Deserialize and raw conversion traits. The constructed WooExchange cache witness separately executes its production consumer."
+  },
+  "safe_cex_venue_woo::legacy_metadata::Fields": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_woo::legacy_metadata::Field",
+                        "args": null
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_woo::legacy_metadata::Field",
+                        "args": null
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Live alias in legacy_metadata::Host and binding/hosts/metadata.rs; individually reviewed against actual compiler target and production caller.",
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "Ordered outbound request-field vector with static field names and the typed Field Text/Number enum, which has no Deserialize. It carries values already chosen by configured metadata/leverage operations, rather than interpreting raw input. Native trait probes must continue to refuse decoding; the separate constructed WooExchange witness observes actual GET/POST fields through the real signer."
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3Decimal": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::string::String",
+        "args": null
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::string::String",
+        "args": null
+      }
+    },
+    "evidence": "Public wire String alias used by retained V3 declaration records. This is an unrestricted UTF8 String decoder, not a decimal parser or a closed literal enum. Original spelling, empty string and paired Unicode remain exact; raw lone UTF16 is explicitly refused at the existing String boundary. No V3 route is enabled.",
+    "entrypoints": [
+      {
+        "trait": "FromStr",
+        "reason": "Actual blanket/inherent String conversion preserves complete supplied UTF8 string; adapter rejects non-string carrier inputs. Each declared path has direct native unit/byte observations.",
+        "positive": [
+          "",
+          "paired-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          17,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "paired-\ud83d\ude42",
+            "output": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            }
+          }
+        ]
+      },
+      {
+        "trait": "From<String>",
+        "reason": "Actual blanket/inherent String conversion preserves complete supplied UTF8 string; adapter rejects non-string carrier inputs. Each declared path has direct native unit/byte observations.",
+        "positive": [
+          "",
+          "paired-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          17,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "paired-\ud83d\ude42",
+            "output": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            }
+          }
+        ]
+      },
+      {
+        "trait": "From<&str>",
+        "reason": "Actual blanket/inherent String conversion preserves complete supplied UTF8 string; adapter rejects non-string carrier inputs. Each declared path has direct native unit/byte observations.",
+        "positive": [
+          "",
+          "paired-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          17,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "paired-\ud83d\ude42",
+            "output": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            }
+          }
+        ]
+      },
+      {
+        "trait": "TryFrom<String>",
+        "reason": "Actual blanket/inherent String conversion preserves complete supplied UTF8 string; adapter rejects non-string carrier inputs. Each declared path has direct native unit/byte observations.",
+        "positive": [
+          "",
+          "paired-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          17,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "paired-\ud83d\ude42",
+            "output": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            }
+          }
+        ]
+      },
+      {
+        "trait": "TryFrom<&str>",
+        "reason": "Actual blanket/inherent String conversion preserves complete supplied UTF8 string; adapter rejects non-string carrier inputs. Each declared path has direct native unit/byte observations.",
+        "positive": [
+          "",
+          "paired-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          17,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "paired-\ud83d\ude42",
+            "output": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            }
+          }
+        ]
+      }
+    ],
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      "",
+      "00.10",
+      "1e309",
+      "paired-\ud83d\ude42"
+    ],
+    "negative": [
+      null,
+      false,
+      17,
+      [],
+      {}
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let input=$value; let view=|result: Result<$type,serde_json::Error>| result.ok().map(|decoded|serde_json::json!({\"units\":decoded.encode_utf16().collect::<Vec<_>>(),\"utf8Bytes\":decoded.len()})); if let Some(raw)=input.get(\"rawText\").and_then(serde_json::Value::as_str) { serde_json::json!({\"raw\":view(serde_json::from_str::<$type>(raw))}) } else { let raw=input.to_string(); serde_json::json!({\"owned\":view(serde_json::from_value::<$type>(input.clone())),\"borrowed\":view(<$type as serde::Deserialize>::deserialize(input)),\"qualified\":view($type::deserialize(input.clone())),\"raw\":view(serde_json::from_str::<$type>(&raw))}) } }",
+      "cases": [
+        {
+          "input": "",
+          "output": {
+            "owned": {
+              "units": [],
+              "utf8Bytes": 0
+            },
+            "borrowed": {
+              "units": [],
+              "utf8Bytes": 0
+            },
+            "qualified": {
+              "units": [],
+              "utf8Bytes": 0
+            },
+            "raw": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          }
+        },
+        {
+          "input": "00.10",
+          "output": {
+            "owned": {
+              "units": [
+                48,
+                48,
+                46,
+                49,
+                48
+              ],
+              "utf8Bytes": 5
+            },
+            "borrowed": {
+              "units": [
+                48,
+                48,
+                46,
+                49,
+                48
+              ],
+              "utf8Bytes": 5
+            },
+            "qualified": {
+              "units": [
+                48,
+                48,
+                46,
+                49,
+                48
+              ],
+              "utf8Bytes": 5
+            },
+            "raw": {
+              "units": [
+                48,
+                48,
+                46,
+                49,
+                48
+              ],
+              "utf8Bytes": 5
+            }
+          }
+        },
+        {
+          "input": "1e309",
+          "output": {
+            "owned": {
+              "units": [
+                49,
+                101,
+                51,
+                48,
+                57
+              ],
+              "utf8Bytes": 5
+            },
+            "borrowed": {
+              "units": [
+                49,
+                101,
+                51,
+                48,
+                57
+              ],
+              "utf8Bytes": 5
+            },
+            "qualified": {
+              "units": [
+                49,
+                101,
+                51,
+                48,
+                57
+              ],
+              "utf8Bytes": 5
+            },
+            "raw": {
+              "units": [
+                49,
+                101,
+                51,
+                48,
+                57
+              ],
+              "utf8Bytes": 5
+            }
+          }
+        },
+        {
+          "input": "paired-\ud83d\ude42",
+          "output": {
+            "owned": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            },
+            "borrowed": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            },
+            "qualified": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            },
+            "raw": {
+              "units": [
+                112,
+                97,
+                105,
+                114,
+                101,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 11
+            }
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 17,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "rawText": "\"\\ud800\""
+          },
+          "output": {
+            "raw": null
+          }
+        }
+      ]
+    },
+    "nativeProjection": "serde_json::json!({\"units\":$decoded.encode_utf16().collect::<Vec<_>>(),\"utf8Bytes\":$decoded.len()})"
+  },
+  "safe_cex_venue_woo::legacy_metadata::JsString": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "primitive": "u16"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "primitive": "u16"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Live UTF16-unit vector alias used by actual metadata and market-read host methods. Decode exact u16 arrays including lone surrogate units; observe every unit and length without turning them into UTF8. Refuse nonarrays, negative/overflow/fractional units. The constructed WooExchange builder/cache/signing witness separately observes the alias in its live consumer.",
+    "entrypoints": [],
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        0,
+        65,
+        55296,
+        56320,
+        56320,
+        65535
+      ],
+      [
+        17
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      17,
+      "text",
+      {},
+      [
+        -1
+      ],
+      [
+        65536
+      ],
+      [
+        1.5
+      ]
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let input=$value; let view=|result: Result<$type,serde_json::Error>| result.ok().map(|decoded|serde_json::json!({\"units\":decoded.iter().copied().collect::<Vec<_>>(),\"length\":decoded.len()})); if let Some(raw)=input.get(\"rawText\").and_then(serde_json::Value::as_str) { serde_json::json!({\"raw\":view(serde_json::from_str::<$type>(raw))}) } else { let raw=input.to_string(); serde_json::json!({\"owned\":view(serde_json::from_value::<$type>(input.clone())),\"borrowed\":view(<$type as serde::Deserialize>::deserialize(input)),\"qualified\":view($type::deserialize(input.clone())),\"raw\":view(serde_json::from_str::<$type>(&raw))}) } }",
+      "cases": [
+        {
+          "input": [],
+          "output": {
+            "owned": {
+              "units": [],
+              "length": 0
+            },
+            "borrowed": {
+              "units": [],
+              "length": 0
+            },
+            "qualified": {
+              "units": [],
+              "length": 0
+            },
+            "raw": {
+              "units": [],
+              "length": 0
+            }
+          }
+        },
+        {
+          "input": [
+            0,
+            65,
+            55296,
+            56320,
+            56320,
+            65535
+          ],
+          "output": {
+            "owned": {
+              "units": [
+                0,
+                65,
+                55296,
+                56320,
+                56320,
+                65535
+              ],
+              "length": 6
+            },
+            "borrowed": {
+              "units": [
+                0,
+                65,
+                55296,
+                56320,
+                56320,
+                65535
+              ],
+              "length": 6
+            },
+            "qualified": {
+              "units": [
+                0,
+                65,
+                55296,
+                56320,
+                56320,
+                65535
+              ],
+              "length": 6
+            },
+            "raw": {
+              "units": [
+                0,
+                65,
+                55296,
+                56320,
+                56320,
+                65535
+              ],
+              "length": 6
+            }
+          }
+        },
+        {
+          "input": [
+            17
+          ],
+          "output": {
+            "owned": {
+              "units": [
+                17
+              ],
+              "length": 1
+            },
+            "borrowed": {
+              "units": [
+                17
+              ],
+              "length": 1
+            },
+            "qualified": {
+              "units": [
+                17
+              ],
+              "length": 1
+            },
+            "raw": {
+              "units": [
+                17
+              ],
+              "length": 1
+            }
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 17,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "text",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            -1
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            65536
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            1.5
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_ws_public::WooV3WsBookLevel": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "array": {
+        "type": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "len": "2"
+      }
+    },
+    "target": {
+      "array": {
+        "type": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "len": "2"
+      }
+    },
+    "evidence": "Public concrete protocol array alias reached by V3 book record decoders. Exactly two ordered String slots, with no number coercion, reordering or extra member admission. Observe every decoded unit/byte count through actual qualified aliases before encoding observations. The current V3 declaration path is inert; this is decoder evidence, not native websocket migration enablement.",
+    "entrypoints": [],
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [
+        "00.10",
+        "2e309"
+      ],
+      [
+        "paired-\ud83d\ude42",
+        "-0"
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      17,
+      "text",
+      {},
+      [],
+      [
+        "one"
+      ],
+      [
+        "a",
+        "b",
+        "c"
+      ],
+      [
+        17,
+        "b"
+      ],
+      [
+        "a",
+        false
+      ]
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let input=$value; let view=|result: Result<$type,serde_json::Error>| result.ok().map(|decoded|serde_json::json!(decoded.iter().map(|s|serde_json::json!({\"units\":s.encode_utf16().collect::<Vec<_>>(),\"utf8Bytes\":s.len()})).collect::<Vec<_>>())); if let Some(raw)=input.get(\"rawText\").and_then(serde_json::Value::as_str) { serde_json::json!({\"raw\":view(serde_json::from_str::<$type>(raw))}) } else { let raw=input.to_string(); serde_json::json!({\"owned\":view(serde_json::from_value::<$type>(input.clone())),\"borrowed\":view(<$type as serde::Deserialize>::deserialize(input)),\"qualified\":view($type::deserialize(input.clone())),\"raw\":view(serde_json::from_str::<$type>(&raw))}) } }",
+      "cases": [
+        {
+          "input": [
+            "00.10",
+            "2e309"
+          ],
+          "output": {
+            "owned": [
+              {
+                "units": [
+                  48,
+                  48,
+                  46,
+                  49,
+                  48
+                ],
+                "utf8Bytes": 5
+              },
+              {
+                "units": [
+                  50,
+                  101,
+                  51,
+                  48,
+                  57
+                ],
+                "utf8Bytes": 5
+              }
+            ],
+            "borrowed": [
+              {
+                "units": [
+                  48,
+                  48,
+                  46,
+                  49,
+                  48
+                ],
+                "utf8Bytes": 5
+              },
+              {
+                "units": [
+                  50,
+                  101,
+                  51,
+                  48,
+                  57
+                ],
+                "utf8Bytes": 5
+              }
+            ],
+            "qualified": [
+              {
+                "units": [
+                  48,
+                  48,
+                  46,
+                  49,
+                  48
+                ],
+                "utf8Bytes": 5
+              },
+              {
+                "units": [
+                  50,
+                  101,
+                  51,
+                  48,
+                  57
+                ],
+                "utf8Bytes": 5
+              }
+            ],
+            "raw": [
+              {
+                "units": [
+                  48,
+                  48,
+                  46,
+                  49,
+                  48
+                ],
+                "utf8Bytes": 5
+              },
+              {
+                "units": [
+                  50,
+                  101,
+                  51,
+                  48,
+                  57
+                ],
+                "utf8Bytes": 5
+              }
+            ]
+          }
+        },
+        {
+          "input": [
+            "paired-\ud83d\ude42",
+            "-0"
+          ],
+          "output": {
+            "owned": [
+              {
+                "units": [
+                  112,
+                  97,
+                  105,
+                  114,
+                  101,
+                  100,
+                  45,
+                  55357,
+                  56898
+                ],
+                "utf8Bytes": 11
+              },
+              {
+                "units": [
+                  45,
+                  48
+                ],
+                "utf8Bytes": 2
+              }
+            ],
+            "borrowed": [
+              {
+                "units": [
+                  112,
+                  97,
+                  105,
+                  114,
+                  101,
+                  100,
+                  45,
+                  55357,
+                  56898
+                ],
+                "utf8Bytes": 11
+              },
+              {
+                "units": [
+                  45,
+                  48
+                ],
+                "utf8Bytes": 2
+              }
+            ],
+            "qualified": [
+              {
+                "units": [
+                  112,
+                  97,
+                  105,
+                  114,
+                  101,
+                  100,
+                  45,
+                  55357,
+                  56898
+                ],
+                "utf8Bytes": 11
+              },
+              {
+                "units": [
+                  45,
+                  48
+                ],
+                "utf8Bytes": 2
+              }
+            ],
+            "raw": [
+              {
+                "units": [
+                  112,
+                  97,
+                  105,
+                  114,
+                  101,
+                  100,
+                  45,
+                  55357,
+                  56898
+                ],
+                "utf8Bytes": 11
+              },
+              {
+                "units": [
+                  45,
+                  48
+                ],
+                "utf8Bytes": 2
+              }
+            ]
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 17,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "text",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "one"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "a",
+            "b",
+            "c"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            17,
+            "b"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "a",
+            false
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "rawText": "[\"\\ud800\",\"b\"]"
+          },
+          "output": {
+            "raw": null
+          }
+        }
+      ]
+    }
   }
 }

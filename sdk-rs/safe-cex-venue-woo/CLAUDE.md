@@ -525,3 +525,9 @@ behavior, requiring a compiled native failure and exact restored pass.
 Guard/algorithm/position-mode native corpora admit canonical retained UTF-16 inputs
 and inspect their units before strict String/DTO projection. Original typed field,
 enum, source-case, numeric-bit and effect assertions remain unchanged.
+
+The five structural aliases have individually reviewed native trait/output records.
+`STRUCTURAL_ALIAS_REVIEW.md` separates actual decoders from typed metadata handles,
+records the exact two-slot array registration and documents the constructed class
+cache/signing witness plus independent compiled production controls. Unknown
+array/tuple identities remain refused; no V3 migration route is enabled.
