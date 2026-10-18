@@ -1,5 +1,4 @@
 //! Bybit's explicit-status and proxy-envelope normalization.
-use safe_cex_num::JsCoercionError;
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde::{Deserialize, Serialize};
 
@@ -8,21 +7,21 @@ pub struct BybitResponseMeta {
     pub is_success: bool,
     pub has_explicit_status: bool,
     pub ret_code: Option<f64>,
-    pub ret_msg: Option<String>,
+    pub ret_msg: Option<Vec<u16>>,
     pub raw_response: Option<Input>,
 }
 
-fn normalize_message(value: &Input) -> Result<Option<String>, JsCoercionError> {
-    let Some(units) = value.as_text() else {
-        return Ok(None);
+fn normalize_message(value: &Input) -> Option<Vec<u16>> {
+    let units = value.as_text()?;
+    let whitespace = |unit: &u16| {
+        char::from_u32(u32::from(*unit)).is_some_and(|character| {
+            let mut text = [0; 4];
+            safe_cex_num::js_trim(character.encode_utf8(&mut text)).is_empty()
+        })
     };
-    let text = String::from_utf16(units).map_err(|_| JsCoercionError {
-        name: "TypeError",
-        message: "Bybit ret_msg cannot be represented as a Rust string",
-    })?;
-    Ok(Some(safe_cex_num::js_trim(&text))
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned))
+    let start = units.iter().position(|unit| !whitespace(unit))?;
+    let end = units.iter().rposition(|unit| !whitespace(unit)).unwrap() + 1;
+    Some(units[start..end].to_vec())
 }
 pub(crate) fn normalize_code(value: &Input) -> Option<f64> {
     if let Some(number) = value.as_f64() {
@@ -46,17 +45,15 @@ fn parse_raw_response(value: &Input) -> Option<Input> {
 fn first_defined_code<'a>(values: impl IntoIterator<Item = &'a Input>) -> Option<f64> {
     values.into_iter().find_map(normalize_code)
 }
-fn first_defined_message<'a>(
-    values: impl IntoIterator<Item = &'a Input>,
-) -> Result<Option<String>, JsCoercionError> {
+fn first_defined_message<'a>(values: impl IntoIterator<Item = &'a Input>) -> Option<Vec<u16>> {
     for value in values {
-        if let Some(message) = normalize_message(value)? {
-            return Ok(Some(message));
+        if let Some(message) = normalize_message(value) {
+            return Some(message);
         }
     }
-    Ok(None)
+    None
 }
-pub fn get_bybit_response_meta(payload: &Input) -> Result<BybitResponseMeta, JsCoercionError> {
+pub fn get_bybit_response_meta(payload: &Input) -> BybitResponseMeta {
     let raw = payload
         .get("raw_response")
         .filter(|v| !v.is_nullish())
@@ -68,14 +65,14 @@ pub fn get_bybit_response_meta(payload: &Input) -> Result<BybitResponseMeta, JsC
     }));
     let ret_msg = first_defined_message(envelopes.iter().flat_map(|e| {
         ["retMsg", "ret_msg", "message", "msg"].map(|key| e.get(key).unwrap_or(&Input::Undefined))
-    }))?;
-    Ok(BybitResponseMeta {
-        is_success: ret_code.map_or(ret_msg.as_deref() == Some("OK"), |code| code == 0.0),
+    }));
+    BybitResponseMeta {
+        is_success: ret_code.map_or(ret_msg.as_deref() == Some(&[79, 75]), |code| code == 0.0),
         has_explicit_status: ret_code.is_some() || ret_msg.is_some(),
         ret_code,
         ret_msg,
         raw_response,
-    })
+    }
 }
 
 // Private remote companion: the public path requires a map before serde can
@@ -94,10 +91,11 @@ struct BybitResponseMetaWire {
     ret_code: Option<f64>,
     #[serde(
         default,
-        deserialize_with = "present_meta",
+        deserialize_with = "present_message",
+        serialize_with = "serialize_message",
         skip_serializing_if = "Option::is_none"
     )]
-    ret_msg: Option<String>,
+    ret_msg: Option<Vec<u16>>,
     #[serde(
         default,
         deserialize_with = "present_raw_response",
@@ -124,6 +122,22 @@ fn present_meta<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
 ) -> Result<Option<T>, D::Error> {
     T::deserialize(d).map(Some)
+}
+fn present_message<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Vec<u16>>, D::Error> {
+    let value = Input::deserialize(d)?;
+    value
+        .as_text()
+        .map(|units| Some(units.to_vec()))
+        .ok_or_else(|| serde::de::Error::custom("retMsg must be a string"))
+}
+fn serialize_message<S: serde::Serializer>(
+    value: &Option<Vec<u16>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    value
+        .as_ref()
+        .map(|units| Input::Text(units.clone()))
+        .serialize(serializer)
 }
 fn present_raw_response<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Input>, D::Error> {
     let value = Input::deserialize(d)?;

@@ -6,7 +6,7 @@
 //! are outside this decoded-data boundary. Bound helper throws retain their Rc.
 use crate::{
     binance_types as f, binancepm_types as p, binancespot_types as s,
-    private_event_value::*,
+    private_event_value::{EventOps, EventValue, fallback, nullish, number, record, string},
     request_weight::{Failure, type_error},
 };
 use std::{future::Future, pin::Pin, rc::Rc};

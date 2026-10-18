@@ -341,7 +341,7 @@ impl crate::runtime_actions::RuntimeHost for Host {
                 if let Err(error) = callback.invoke(error) {
                     runtime.report_exception(
                         &error.to_exchange_error(),
-                        &serde_json::json!({"source":"Orderly leverage catch"}),
+                        &serde_json::json!({"source":"Orderly leverage catch"}).into(),
                     );
                 }
             }
@@ -361,7 +361,7 @@ impl crate::runtime_actions::RuntimeHost for Host {
             if let Ok(rt) = self.rt() {
                 rt.shared.runtime.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source":"Orderly loop"}),
+                    &serde_json::json!({"source":"Orderly loop"}).into(),
                 );
             }
         }
@@ -556,7 +556,7 @@ impl crate::public_feeds::FeedHost for Host {
                 if let Err(error) = future.await {
                     runtime.report_exception(
                         &error.to_exchange_error(),
-                        &serde_json::json!({"source":"Orderly public feed"}),
+                        &serde_json::json!({"source":"Orderly public feed"}).into(),
                     );
                 }
                 Ok(Js::Undefined)

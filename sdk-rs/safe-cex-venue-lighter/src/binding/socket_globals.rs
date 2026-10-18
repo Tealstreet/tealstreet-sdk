@@ -149,7 +149,7 @@ fn install_intervals(globals: &Js, weak: &Weak<Shared>) -> Result<(), Thrown> {
                         if let Err(error) = callback.call(Js::Undefined, vec![]) {
                             runtime.report_exception(
                                 &error.to_exchange_error(),
-                                &serde_json::json!({"source": "setInterval"}),
+                                &serde_json::json!({"source": "setInterval"}).into(),
                             );
                         }
                         if stop.get() {

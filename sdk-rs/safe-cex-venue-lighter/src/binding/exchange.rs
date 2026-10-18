@@ -463,11 +463,16 @@ mod tests {
         fn random(&self) -> f64 {
             panic!("runtime used while installing globals")
         }
-        fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
+        fn report_exception(
+            &self,
+            _: &ExchangeError,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
+        ) {
+        }
         fn report_raw_exception(
             &self,
             _: &safe_cex_exchange::js_runtime::value::Js,
-            _: &serde_json::Value,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
         ) {
         }
         fn execute_worker_request(

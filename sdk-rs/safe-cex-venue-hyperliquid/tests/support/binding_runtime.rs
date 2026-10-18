@@ -294,12 +294,22 @@ impl ExchangeRuntime for Host {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
-        self.reports
-            .borrow_mut()
-            .push(format!("{} {context}", error.message));
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+        self.reports.borrow_mut().push(format!(
+            "{} {}",
+            error.message,
+            serde_json::to_string(context).expect("fixture context serialization")
+        ));
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports
             .borrow_mut()
             .push(safe_cex_exchange::runtime::exception_text(error));

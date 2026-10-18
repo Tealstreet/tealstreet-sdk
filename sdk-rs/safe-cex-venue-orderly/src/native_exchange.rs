@@ -105,10 +105,10 @@ impl Drop for OrderlyExchange {
     fn drop(&mut self) {
         if !self.rt.base().is_disposed() {
             if let Err(e) = self.dispose() {
-                self.rt
-                    .shared
-                    .runtime
-                    .report_exception(&e, &serde_json::json!({"source":"OrderlyExchange.drop"}));
+                self.rt.shared.runtime.report_exception(
+                    &e,
+                    &serde_json::json!({"source":"OrderlyExchange.drop"}).into(),
+                );
             }
         }
         for (_, task) in self.rt.shared.timers.borrow_mut().drain(..) {

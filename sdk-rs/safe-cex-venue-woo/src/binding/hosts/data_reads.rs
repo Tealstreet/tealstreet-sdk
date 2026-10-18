@@ -160,7 +160,7 @@ pub(crate) fn schedule(
     let task = runtime.clone().spawn_local(Box::pin(async move {
         loop {
             if let Err(e) = runtime.sleep(ms).await {
-                runtime.report_exception(&e, &serde_json::json!({ "source": source }));
+                runtime.report_exception(&e, &serde_json::json!({ "source": source }).into());
                 return;
             }
             match callback() {
@@ -174,7 +174,7 @@ pub(crate) fn schedule(
                             if let Err(e) = task.await {
                                 reporter.report_exception(
                                     &e.to_exchange_error(),
-                                    &serde_json::json!({ "source": source }),
+                                    &serde_json::json!({ "source": source }).into(),
                                 );
                             }
                             Ok(Js::Undefined)
@@ -183,7 +183,7 @@ pub(crate) fn schedule(
                 }
                 Err(e) => runtime.report_exception(
                     &e.to_exchange_error(),
-                    &serde_json::json!({ "source": source }),
+                    &serde_json::json!({ "source": source }).into(),
                 ),
             }
             if !repeat {

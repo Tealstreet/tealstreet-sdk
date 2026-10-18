@@ -243,7 +243,9 @@ impl Core {
         let handler = Js::function("", move |_, a| {
             match to_typed::<T>(&arg(&a, 0)) {
                 Ok(v) => callback(v),
-                Err(e) => runtime.report_exception(&err(e), &serde_json::json!({"source": member})),
+                Err(e) => {
+                    runtime.report_exception(&err(e), &serde_json::json!({"source": member}).into())
+                }
             }
             Ok(Js::Undefined)
         });

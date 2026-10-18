@@ -297,7 +297,7 @@ pub fn create(
                 let extra = if extra.is_undefined() {
                     None
                 } else {
-                    Some(to_json(&extra)?)
+                    Some(crate::js_runtime::value::to_retained_input(&extra)?)
                 };
                 base.emit_and_log_error(input, msg.as_deref(), extra.as_ref())?;
                 Ok(Js::Undefined)
@@ -584,7 +584,7 @@ pub fn create(
                     read().unwrap_or_else(|error| {
                         context.runtime.report_exception(
                             &error.to_exchange_error(),
-                            &serde_json::json!({"operation":"getAllSockets", "slot":name}),
+                            &serde_json::json!({"operation":"getAllSockets", "slot":name}).into(),
                         );
                         None
                     })
@@ -808,7 +808,7 @@ fn external_provider_object(
         if let Err(error) = delivered {
             runtime.report_exception(
                 &error.to_exchange_error(),
-                &serde_json::json!({ "source": source }),
+                &serde_json::json!({ "source": source }).into(),
             );
         }
     }
@@ -877,7 +877,7 @@ fn market_overlay(
             Err(error) => {
                 reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source": "accountMarketOverlay"}),
+                    &serde_json::json!({"source": "accountMarketOverlay"}).into(),
                 );
                 markets
             }
