@@ -712,7 +712,12 @@ impl AuthHost for Rt {
         c.1.call(c.0, a)
     }
     fn capture_constructor(&self, n: &'static str) -> Result<Js, Thrown> {
-        self.global(n)
+        let mut parts = n.split('.');
+        let mut constructor = self.global(parts.next().unwrap_or_default())?;
+        for member in parts {
+            constructor = constructor.get(member)?;
+        }
+        Ok(constructor)
     }
     fn construct(&self, c: Js, a: Vec<Js>) -> Result<Js, Thrown> {
         c.construct(a, None)
