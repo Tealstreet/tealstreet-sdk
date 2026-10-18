@@ -368,3 +368,7 @@ mod iterable_binding_tests;
 #[cfg(test)]
 #[path = "../../tests/support/structural_aliases.rs"]
 mod structural_alias_tests;
+
+#[cfg(test)]
+#[path = "../../tests/support/divergence_binding.rs"]
+mod divergence_audit_tests;
