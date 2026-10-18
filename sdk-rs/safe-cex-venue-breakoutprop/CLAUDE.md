@@ -340,3 +340,8 @@ unused symbol/type/candleType declarations do not validate live responses.
 Declared CandleResponse codecs remain declaration-only. Actual binding and
 maintained-source witnesses retain two candles with an ignored surrogate symbol,
 all six numeric fields, limit=1, the original request and zero error events.
+
+The production loop adapter invokes the shared eager helper before queuing its
+error observer, using the owning runtime and retaining the original ExchangeError.
+The source scheduling witness advances virtual time before the first host poll
+and pins the deadline to invocation, including fallback and disabled intervals.
