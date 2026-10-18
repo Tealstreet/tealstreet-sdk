@@ -1,5 +1,6 @@
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::JsNumberInput;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_bingx::account_reads::{fetch_primary_balance_data, get_account};
 use serde_json::{Value, json};
 use std::{
@@ -67,7 +68,7 @@ fn account_reads_match_actual_typescript() {
             }
             "getAccount" => {
                 counts[1] += 1;
-                ready(get_account(callback))
+                ready(get_account(callback)).map(Input::from)
             }
             _ => panic!("unknown method"),
         };
@@ -112,7 +113,8 @@ fn account_reads_match_actual_typescript() {
                     "BINGX-READ success outcome {index}"
                 );
                 assert_eq!(
-                    value, case["expected"]["ok"],
+                    value,
+                    Input::from(case["expected"]["ok"].clone()),
                     "BINGX-READ native value {index}"
                 );
             }
@@ -167,7 +169,7 @@ fn account_reads_match_actual_typescript() {
             }
             "getAccount" => {
                 numeric_counts[1] += 1;
-                ready(get_account(request)).unwrap()
+                Input::from(ready(get_account(request)).unwrap())
             }
             _ => panic!("unknown numeric method"),
         };
@@ -192,13 +194,16 @@ fn account_reads_match_actual_typescript() {
                 9,
                 "BINGX-READ numeric native fields"
             );
-            let number = safe_cex_num::numeric_ingress::js_value_as_f64(&native["userId"]).unwrap();
+            let number = native.get("userId").and_then(Input::as_f64).unwrap();
             assert_eq!(
                 format!("{:016x}", number.to_bits()),
                 case["bits"].as_str().unwrap(),
                 "BINGX-READ numeric native bits {index}"
             );
-            native.as_object_mut().unwrap().remove("userId");
+            native
+                .as_object_mut()
+                .unwrap()
+                .retain(|(key, _)| key != &"userId".encode_utf16().collect::<Vec<_>>());
             expected.as_object_mut().unwrap().remove("userId");
         } else {
             assert_eq!(
@@ -207,7 +212,11 @@ fn account_reads_match_actual_typescript() {
                 "BINGX-READ numeric account fields"
             );
         }
-        assert_eq!(native, expected, "BINGX-READ numeric native value {index}");
+        assert_eq!(
+            native,
+            Input::from(expected),
+            "BINGX-READ numeric native value {index}"
+        );
     }
     assert_eq!(numeric_counts, [5, 5], "BINGX-READ numeric comparisons");
     let boundary = corpus["boundary"].as_array().unwrap();

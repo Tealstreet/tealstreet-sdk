@@ -240,7 +240,9 @@ fn normalize_starbase_order_live_typescript_contract() {
                     .unwrap()
                     .get("lastUpdateTimestampMs")
                     .unwrap()
-                    .is_null()
+                    .as_f64()
+                    .unwrap()
+                    .is_nan()
             );
             numeric_bits_checked = true;
         }

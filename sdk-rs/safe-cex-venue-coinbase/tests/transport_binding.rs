@@ -410,3 +410,7 @@ fn create_order_wire_places_leverage_before_configuration() {
         );
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "support/retained_info_native.rs"]
+mod retained_info_native;

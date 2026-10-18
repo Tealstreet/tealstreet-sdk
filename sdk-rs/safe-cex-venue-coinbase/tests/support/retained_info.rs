@@ -24,6 +24,10 @@ pub fn assert_info(actual: Option<&Input>, expected: &Value, label: &str) {
                 "{label}: native number {number:?} vs {expected:?}"
             );
         }
+        Input::Text(units) if expected.get("$utf16").is_some() => {
+            let expected: Vec<u16> = serde_json::from_value(expected["$utf16"].clone()).unwrap();
+            assert_eq!(units, &expected, "{label}: native UTF16");
+        }
         Input::Array(values) => {
             let expected = expected.as_array().unwrap();
             assert_eq!(values.len(), expected.len(), "{label}: array count");

@@ -4,7 +4,7 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
+use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_num::{JsPrimitive, js_string, js_truthy, parse_float};
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::RestRequest;
@@ -84,11 +84,11 @@ fn alias<'a>(value: &'a Input, key: &str) -> Result<Option<&'a Input>, ExchangeE
         .map(Some)
         .ok_or_else(|| type_error("typed read field refuses inherited callable"))
 }
-fn describe(value: &Input) -> String {
+fn describe(value: Option<&Input>) -> Result<String, ExchangeError> {
     value
-        .json_stringify()
-        .expect("closed retained report data")
-        .unwrap_or_else(|| "undefined".into())
+        .map_or(Ok(None), Input::json_stringify)
+        .map(|value| value.unwrap_or_else(|| "undefined".into()))
+        .map_err(|error| type_error(error.message))
 }
 fn strict_string(value: Option<&Input>, field: &str) -> Result<String, ExchangeError> {
     value
@@ -323,12 +323,9 @@ impl BingxDataReads {
                     .into_iter()
                     .filter(|(_, value)| value.and_then(Input::as_text).and_then(|v| String::from_utf16(v).ok()).as_deref().is_none())
                     .map(|(field, value)| {
-                        format!(
-                            "{field}={}",
-                            value.map_or_else(|| "undefined".into(), describe)
-                        )
+                        Ok(format!("{field}={}", describe(value)?))
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>, ExchangeError>>()?;
                 if !invalid.is_empty() {
                     refusals.push(format!(
                         "Refused BingX market row {index} symbol={}: {}: expected string",
@@ -343,7 +340,7 @@ impl BingxDataReads {
                     market.limits.leverage.max = match strict_number(leverage.as_ref(), "max leverage") {
                         Ok(value) => value,
                         Err(cause) => {
-                            let value = leverage.as_ref().map_or_else(|| "undefined".into(), describe);
+                            let value = describe(leverage.as_ref())?;
                             refusals.push(format!("Refused BingX market row {index} symbol={}: limits.leverage.max={value}: {}", market.id, cause.message));
                             continue;
                         }
@@ -383,8 +380,8 @@ impl BingxDataReads {
             Err(error) => {
                 self.report(error_message(&error)?, None)?;
                 Ok(RawTickers {
-                    dailys: Some(json!([])),
-                    prices: Some(json!([])),
+                    dailys: Some(Input::Array(vec![])),
+                    prices: Some(Input::Array(vec![])),
                 })
             }
         }
@@ -647,7 +644,7 @@ impl BingxDataReads {
                 let contracts = float(alias(row, "positionAmt")?)?;
                 let upnl = float(alias(row, "unrealizedProfit")?)?;
                 let raw_side = text(alias(row, "positionSide")?)?;
-                let margin_type = if js_truthy(alias(row, "isolated")?) {
+                let margin_type = if alias(row, "isolated")?.is_some_and(Input::is_truthy) {
                     MarginType::Isolated
                 } else {
                     MarginType::Cross

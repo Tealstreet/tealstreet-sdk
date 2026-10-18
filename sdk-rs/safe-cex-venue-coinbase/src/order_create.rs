@@ -58,7 +58,7 @@ impl CoinbaseOrderResponse {
             )),
         }
     }
-    pub fn from_retained(fields: Vec<(Vec<u16>, Input)>) -> Self {
+    pub(crate) fn from_retained(fields: Vec<(Vec<u16>, Input)>) -> Self {
         Self {
             fields: Rc::new(RefCell::new(
                 fields

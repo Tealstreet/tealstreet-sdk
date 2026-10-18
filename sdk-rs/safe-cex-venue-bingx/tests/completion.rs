@@ -1,5 +1,7 @@
 #[path = "support/oracle_clock.rs"]
 mod oracle_clock;
+#[path = "support/retained_observe.rs"]
+mod retained_observe;
 
 use safe_cex_exchange::{
     exchange::BaseExchange,
@@ -536,7 +538,10 @@ impl PrivateEventHost for Host {
     fn spawn(&self, f: ExchangeFuture<'static, ()>) -> Result<(), ExchangeError> {
         ready(f)
     }
-    fn emit_fill(&self, v: Value) -> Result<(), ExchangeError> {
+    fn emit_fill(
+        &self,
+        v: safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), ExchangeError> {
         self.call(json!({"op":"fill","payload":v}));
         Ok(())
     }
@@ -766,14 +771,8 @@ fn run(case: &Value) {
             "BINGX-C direct native reduce-only"
         );
         assert_eq!(
-            native
-                .info
-                .as_ref()
-                .map(|v| observe(&v.clone().into_value().unwrap())),
-            expected
-                .info
-                .as_ref()
-                .map(|v| observe(&v.clone().into_value().unwrap())),
+            native.info.as_ref().map(|v| retained_observe::observe(v)),
+            expected.info.as_ref().map(|v| retained_observe::observe(v)),
             "BINGX-C direct native retained info"
         );
     }

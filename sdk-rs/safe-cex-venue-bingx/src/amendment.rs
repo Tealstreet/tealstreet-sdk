@@ -196,7 +196,7 @@ impl BingxAmendment {
     pub async fn update_order(
         &self,
         request: &UpdateOrderOpts,
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         let order = &request.order;
         let (amount, price) = match &request.update {
             UpdateOrderOptsUpdate::Variant0(u) => (Some(u.amount), u.price),
@@ -366,7 +366,7 @@ impl BingxAmendment {
                     order.id
                 )));
             }
-            Ok(vec![Some(json!(order.id))])
+            Ok(vec![Some(Input::from(json!(order.id)))])
         }
         .await;
         self.caught(result)
@@ -375,7 +375,7 @@ impl BingxAmendment {
         &self,
         order: &Order,
         next_price: f64,
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         if order.status != OrderStatus::Open
             || !matches!(
                 order.r#type,
@@ -469,7 +469,7 @@ impl BingxAmendment {
         &self,
         order: &Order,
         next_price: f64,
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         if order.status != OrderStatus::Open || order.r#type != OrderType::Limit {
             return self
                 .reject("BingX cancel-replace supports only exactly reconciled open LIMIT orders");
@@ -715,7 +715,7 @@ impl BingxAmendment {
                     .add_or_update_order(replacement)
                     .map_err(ExchangeError::from)?;
             }
-            Ok(vec![Some(json!(id))])
+            Ok(vec![Some(Input::from(json!(id)))])
         }
         .await;
         self.caught(result)

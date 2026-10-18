@@ -4,7 +4,7 @@ The production private write-check timeout emits warning arguments as
 `(reason, {forceToast: true})`; retain the second emitter argument and the
 once-only latch until a received user frame resets it. Portfolio selection
 projects only `uuid` and `type` into mutable `PortfolioState`, retaining unused
-metadata as JSON. The declaration DTO remains strict; missing or malformed
+metadata as RetainedJsonInput. The declaration DTO remains strict; missing or malformed
 `name`/`deleted` cannot reject runtime selection or balance reads. Production
 regressions are in `tests/private_binding_frames.rs` and `tests/exchange_binding.rs`;
 `scripts/health-portfolio-binding-controls.py` compiles each boundary reversion,
@@ -70,7 +70,7 @@ central; do not invent TransportError network retryability locally.
 
 `orders.rs` preserves REST configuration precedence and uses the central
 `number_from_string` for Number coercion, plus safe-cex-num arithmetic. It keeps
-raw JSON under Order.info, including unknown fields and their insertion order.
+raw RetainedJsonInput under Order.info, including unknown fields and their insertion order.
 The mapper's manifest documents inherited-status rejection and the core Order
 serializer's extra-last field layout. Root-order inputs otherwise follow the
 declared LIST_ORDERS_RESPONSE shape; malformed whole-frame validation belongs
@@ -134,9 +134,9 @@ shared Order for ready inputs. Its CHOSEN row records that TypeScript `info`
 and blocked gateway retain source insertion order and runtime-only own fields;
 ready `info` aliases the exact gateway object, so later gateway mutation updates
 `info` while mapped Order fields stay snapshots. The Rust typed gateway DTO and
-copied JSON map retain declared fields, lose alias identity, and sort keys.
-`serde_json::Value` also maps non-finite numbers in `info` to null; the Order's
-direct f64 field retains the value. The live oracle bit-checks each direct
+copied retained map preserve declared fields and numeric bits while losing alias
+identity and caller-only fields. Native `info` numbers retain NaN, infinities and
+negative zero. The live oracle bit-checks each direct
 float output and every present numeric `info` field before JSON erases -0; both
 take-market `take_profit` and stop-market `stop_loss` trigger branches are
 covered by tagged negative-zero witnesses.
@@ -277,3 +277,9 @@ three-row batches preserve all ticker numeric bits and produce one visible
 unsupported-channel report per frame. The shared control runner changes the
 actual dispatcher diagnostic and requires a compiled native assertion failure
 followed by exact-restored success. This does not invent ticker WS support.
+
+Coinbase runtime HTTP response data and raw read/order roots use RetainedJsonInput
+through mapping and DefaultStore. The native loopback regression in
+`tests/transport_binding.rs` compares real reqwest ingress with maintained source,
+including overflow, negative zero, lone UTF-16 and native own undefined/NaN.
+String fields actually consumed by typed models keep their existing UTF-8 boundary.
