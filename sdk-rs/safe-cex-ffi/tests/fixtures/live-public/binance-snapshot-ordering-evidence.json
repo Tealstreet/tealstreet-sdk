@@ -120,5 +120,14 @@
     "logSha256": "c4ba2a910951bbdeaa0c0ec6b62adecf5ce4ccc0c3e6470c90c8e5aa932aff7a",
     "scope": "two DefaultStore instances; does not invoke the Binance snapshot listener",
     "disposition": "root authorized separate Store-owner repair; assertions retained"
+  },
+  "inheritedConnectFixtureFailure": {
+    "master": "597fc53f6c",
+    "reviewedMergeHead": "8887c0fa9b97aa772a90e2a46ab7497fe6235a60",
+    "target": "safe-cex-venue-binance/tests/public_connect.rs",
+    "case": "public_connect_disposal_cancels_unpolled_and_pending_dial",
+    "assertion": "line414: expected lazy-prefix trace length0 for inline=false, got1",
+    "inheritedChange": "80fb485eed: eagerly start registered Core socket dials (#1130)",
+    "disposition": "root authorized separate fixture-owner repair; assertions retained"
   }
 }
