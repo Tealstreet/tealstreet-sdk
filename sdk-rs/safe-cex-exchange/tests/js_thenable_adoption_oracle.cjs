@@ -61,15 +61,21 @@
     }
   }
   output.iterators = [];
-  for (const method of ['all', 'allSettled']) for (const abrupt of [false, true]) {
+  for (const method of ['all', 'allSettled']) for (const abrupt of ['none', 'next', 'done', 'value', 'then']) {
     const trace = [], token = {unit:'\ud800'};
     let index = 0;
     const iterable = { [Symbol.iterator]() { trace.push('iterator'); return {
       next() {
         const i = index++; trace.push(`next:${i}`);
-        if (i === 1 && abrupt) throw token;
+        if (i === 1 && abrupt === 'next') throw token;
         if (i === 2) return {done:true};
-        return {done:false, value:{get then() {trace.push(`get:${i}`); return resolve => {trace.push(`call:${i}`);resolve(i);};}}};
+        return {
+          get done() { if (i === 1 && abrupt === 'done') {trace.push('done:throw');throw token;} return false; },
+          get value() {
+            if (i === 1 && abrupt === 'value') {trace.push('value:throw');throw token;}
+            return {get then() {trace.push(`get:${i}`); if (i === 0 && abrupt === 'then') throw token; return resolve => {trace.push(`call:${i}`);resolve(i);};}};
+          }
+        };
       }, return() {trace.push('return');return {};}
     };}};
     const promise = Promise[method](iterable); trace.push('returned');

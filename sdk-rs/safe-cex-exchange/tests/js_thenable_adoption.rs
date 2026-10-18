@@ -298,7 +298,7 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
     run(|scope| async move {
         let mut rows = vec![];
         for method in ["all", "allSettled"] {
-            for abrupt in [false, true] {
+            for abrupt in ["none", "next", "done", "value", "then"] {
                 let trace = Trace::default();
                 let token = Js::object(vec![]);
                 let index = Rc::new(Cell::new(0));
@@ -310,7 +310,7 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                         Js::function("next", move |_, _| {
                             let i = index.replace(index.get() + 1);
                             seen.borrow_mut().push(format!("next:{i}"));
-                            if i == 1 && abrupt {
+                            if i == 1 && abrupt == "next" {
                                 return Err(Thrown::new(error.clone()));
                             }
                             if i == 2 {
@@ -318,10 +318,14 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                             }
                             let value = Js::object(vec![]);
                             let calls = seen.clone();
+                            let thrown = error.clone();
                             value.define_accessor(
                                 "then",
                                 Some(Rc::new(move |_| {
                                     calls.borrow_mut().push(format!("get:{i}"));
+                                    if i == 0 && abrupt == "then" {
+                                        return Err(Thrown::new(thrown.clone()));
+                                    }
                                     let calls = calls.clone();
                                     Ok(Js::function("then", move |_, args| {
                                         calls.borrow_mut().push(format!("call:{i}"));
@@ -332,10 +336,20 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                                 })),
                                 None,
                             );
-                            Ok(Js::object(vec![
-                                ("done", Js::Bool(false)),
-                                ("value", value),
-                            ]))
+                            let row = Js::object(vec![("done", Js::Bool(false)), ("value", value)]);
+                            if i == 1 && matches!(abrupt, "done" | "value") {
+                                let seen = seen.clone();
+                                let error = error.clone();
+                                row.define_accessor(
+                                    abrupt,
+                                    Some(Rc::new(move |_| {
+                                        seen.borrow_mut().push(format!("{abrupt}:throw"));
+                                        Err(Thrown::new(error.clone()))
+                                    })),
+                                    None,
+                                );
+                            }
+                            Ok(row)
                         }),
                     ),
                     ("return", {
