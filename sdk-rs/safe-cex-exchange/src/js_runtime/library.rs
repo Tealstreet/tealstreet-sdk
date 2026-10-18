@@ -55,7 +55,7 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
     Ok(out)
 }
 
-pub(crate) fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
+pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
     if !obj.is_object() {
         let rhs = if matches!(obj, Js::SymbolIterator) {
             "Symbol(Symbol.iterator)".to_owned()
