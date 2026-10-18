@@ -128,8 +128,7 @@ pub fn normalize_address(value: &str, field: &str) -> Result<String, ApprovalFai
     }
     Ok(address)
 }
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct CheckParams {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
@@ -140,6 +139,25 @@ pub struct CheckParams {
     pub signer_private_key: String,
     pub testnet: Option<bool>,
     pub user_address: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(remote = "CheckParams", rename_all = "camelCase")]
+struct CheckParamsWire {
+    api_key: Option<String>,
+    base_url: Option<String>,
+    builder_config: Option<AsterBuilderFeeConfig>,
+    builder_address: Option<String>,
+    required_fee_rate: Option<String>,
+    signer_address: String,
+    signer_private_key: String,
+    testnet: Option<bool>,
+    user_address: String,
+}
+impl<'de> serde::Deserialize<'de> for CheckParams {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        CheckParamsWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
 }
 fn check_result(
     address: String,
@@ -335,8 +353,7 @@ pub async fn check_aster_builder_approved(
         )
     }))
 }
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct ApproveParams {
     pub base_url: Option<String>,
     pub builder_address: String,
@@ -344,6 +361,22 @@ pub struct ApproveParams {
     pub max_fee_rate: String,
     pub testnet: Option<bool>,
     pub user_address: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(remote = "ApproveParams", rename_all = "camelCase")]
+struct ApproveParamsWire {
+    base_url: Option<String>,
+    builder_address: String,
+    builder_name: Option<String>,
+    max_fee_rate: String,
+    testnet: Option<bool>,
+    user_address: String,
+}
+impl<'de> serde::Deserialize<'de> for ApproveParams {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        ApproveParamsWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
 }
 fn form_component(s: &str) -> String {
     let mut output = String::new();

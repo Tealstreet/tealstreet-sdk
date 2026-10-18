@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-const environmentKeys = ['NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL', 'NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL', 'NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL'];
+const environmentKeys = ['NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL', 'NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL', 'NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL', 'NEXT_PUBLIC_HYROTRADER_PROD_REST_URL', 'NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL', 'NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL'];
 const configured = Object.fromEntries(environmentKeys.map(key => [key, process.env[key] ?? '']));
 const cache = new Map();
 function load(file) {
@@ -40,7 +40,7 @@ const helpers = origins.map(origin => {
 });
 const expected = JSON.parse(JSON.stringify({ linear, spot, rate_limits, helpers }));
 assert.equal(origins.length,63495,'DATA-CARDINALITY source origins');
-const run = spawnSync(process.env.CARGO ?? 'cargo', ['run', '--quiet', '--locked', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-bybit', '--example', 'data'], {
+const run = spawnSync(process.env.CARGO ?? 'cargo', ['run', '--quiet', '--locked', '--jobs', '1', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-bybit', '--example', 'data'], {
   cwd: root, env: { ...process.env, ...configured }, encoding: 'utf8', input: JSON.stringify(origins), maxBuffer: 32 * 1024 * 1024,
 });
 assert.equal(run.status, 0, run.error?.message ?? run.stderr);

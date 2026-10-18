@@ -57,7 +57,7 @@ async function scenario(spec){
  }};
  const handler=new context.UiStateHandler('a','bybit',exchange,{}, {},{fetchLeverageOnMarginSymbolChange:enabled});
  try{handler.handleActiveMarginSymbolChange(symbol===null?{}:{activeMarginSymbol:symbol});if(pending)await pending;}catch(error){thrown={name:error.name,message:error.message,code:error.code};}
- return {spec,symbol,enabled,calls,notifications,events,state:view(),thrown};
+ return {spec,symbol,enabled,calls,notifications,events,state:view(),thrown,codeJson:thrown ? JSON.stringify(thrown.code) : null};
 }
 for(const spec of scenarios)rows.push(await scenario(spec));
 const numeric=await scenario({symbol:42,positions:false});

@@ -1,4 +1,5 @@
 //! Bybit V5 data and request machinery; variants remain inside this crate.
+mod hyro_configuration;
 pub mod rate_limits;
 pub mod spot_types;
 pub mod types;
