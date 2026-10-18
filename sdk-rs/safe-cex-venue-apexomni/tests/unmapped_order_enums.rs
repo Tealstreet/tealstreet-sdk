@@ -162,7 +162,7 @@ fn unmapped_order_side_keeps_rest_and_private_batches() {
 
 fn malformed_reduce_only_case(private_frame: bool) {
     for (bad, displayed) in [
-        (json!(17), "Number(17.0)"),
+        (json!(17), "Float(17.0)"),
         (json!("true"), "String(\"true\")"),
         (json!({}), "Object([])"),
         (json!([]), "Array([])"),
