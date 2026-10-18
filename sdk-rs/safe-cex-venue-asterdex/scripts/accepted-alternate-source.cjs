@@ -22,6 +22,7 @@ async function main() {
     }
   }
   assert.equal(count, 435);
+  require('./accepted-alternate-runtime-source.cjs')(contracts);
   console.log(`Aster alternate DTO source: 8 owners / ${count} field and shape expectations pass.`);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

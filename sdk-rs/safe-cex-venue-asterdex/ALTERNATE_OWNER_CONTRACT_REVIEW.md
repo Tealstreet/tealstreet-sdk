@@ -22,6 +22,11 @@ union cases explicitly expose optional null and full positional-sequence
 acceptance, rather than misclassifying them as strict map-only JS input guards.
 Their actual fields and Clone are observed through all four Deserialize routes.
 
+Twenty-two additional source cases execute the maintained public/private socket
+classes, real TypeScript DefaultStore and native Map operations against the same
+fixed expectations. They cover ticker/mark/trade/depth/kline mutations, private
+order/balance/account updates and insertion/deletion ordering.
+
 The fourteen raw owners execute actual SDK methods through the constructed
 native Aster binding. Shared fixture code supplies only scripted HTTP/socket
 primitives, a deterministic scheduler and a real Store. HTTP config, callbacks,
