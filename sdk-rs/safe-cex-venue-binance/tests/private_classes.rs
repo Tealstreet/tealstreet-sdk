@@ -5005,3 +5005,7 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
         owner.base.dispose().unwrap();
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/snapshot_aliases.rs"]
+mod snapshot_aliases;
