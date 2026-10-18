@@ -1929,6 +1929,8 @@ measure the same recorded probe with the production allocator. The test binary
 has a counting allocator and must not supply production CPU ratios. Report CPU
 medians and spread from at least three interleaved control/candidate runs;
 input restoration and complete output observations stay outside timed phases.
+The bootstrap parse/decode budget is 250 ms process CPU per recorded venue;
+TS ratios remain diagnostic. Per-frame WebSocket timing is a separate budget.
 Native observation files encode UTF-16, own undefined and f64 bits explicitly so
 before/after byte comparisons do not hide lossy JSON projections.
 
