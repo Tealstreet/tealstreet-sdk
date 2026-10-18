@@ -1,6 +1,4 @@
-#[allow(dead_code)]
-#[path = "binding_harness.rs"]
-mod harness;
+use super::binding_harness as harness;
 use harness::*;
 use safe_cex_exchange::js_runtime::value::{Js, from_json};
 use safe_cex_store::{Store, StoreUpdate};
