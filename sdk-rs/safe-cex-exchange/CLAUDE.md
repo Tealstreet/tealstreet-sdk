@@ -963,7 +963,9 @@ property key, then the replacer receives the live holder, key and value, includi
 the root and array holes. Traversal captures keys/array length before reading
 individual values, so earlier callbacks can change later siblings. Unreplaced
 BigInt and circular structures throw; replacers can convert or omit them.
-Array replacer lists and indentation remain outside this runtime surface.
+An array replacer becomes the spec PropertyList (string/number items, first
+occurrence kept) and selects object keys even when non-enumerable; indentation
+remains outside this runtime surface.
 
 The JS HTTP client's retry loop resubmits the failed response's effective config,
 including interceptor changes and retry-predicate stamps. Rebuilding from the
@@ -1229,6 +1231,19 @@ surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
 snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
 real private-frame witnesses cover the production caller and final fill ordering.
 
+Shared builtins for source callers: `Array#pop`/`reverse` (holes mirror),
+`Object.getOwnPropertyNames` (own keys incl. non-enumerable; functions and
+intrinsics refuse) and `console.log` (runtime console, severity `log`). The Dayjs
+facade models dayjs 1.11 `plugin/utc` in the runtime's UTC zone: non-enumerable
+`$d`/`$offset`/`$u`/`$localOffset` fields drive `valueOf`, `utcOffset(input, keep)`
+and `startOf(unit, start)`, and `dayjs(instance)` clones them. Offset strings use
+the installed plugin parser; non-string arguments retain JS coercion and offset
+identity. Falsy start flags select the last millisecond of the unit. Native
+Date wall values use shared TimeClip.
+`tests/js_builtins.rs` compares 16 array, 420 dayjs-chain, 5 key-order and 7
+property-list cases against Node with installed dayjs (TZ=UTC), plus the
+Lighter, Orderly, Bitrue and Phemex production paths that call them.
+
 `JsProtocol::resyncs_private_state_on_reopen` reads the receiver's
 `resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
 OKX's business socket defines it, so a business-only re-open runs the private
@@ -1362,6 +1377,13 @@ truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+The receive loop polls the open callback's synchronous prefix before dispatching
+a buffered first message, for direct and relay transports. A pending callback
+continues in the existing socket-owned task registry; the receive loop does not
+wait for its authentication or other asynchronous completion. The native TCP
+`js_socket_open_order` witness coalesces the upgrade and first frame and compares
+synchronous and asynchronous listener traces with Node.
 
 The shared JS facade's async snapshot/order/position methods return rejected
 Promises for preparation errors, including errors before their first await.

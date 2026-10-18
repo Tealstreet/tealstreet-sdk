@@ -24,6 +24,50 @@ const KLINE_HISTORY: &str = "https://api-pub.woox.io/v1/hist/kline";
 const PUBLIC_URL: &str = "wss://wss.woox.io/ws/stream/fixture-app";
 const PRIVATE_URL: &str = "wss://wss.woox.io/v2/ws/private/stream/fixture-app";
 
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let corpus = ticker_coercion::source("woo");
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 72);
+    ticker_coercion::assert_case_counts(cases, 72, 54);
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    for case in cases {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("woo")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        h.runtime.reports.borrow_mut().clear();
+        for frame in case["frames"].as_array().unwrap() {
+            public
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+        let reports = h.runtime.reports.borrow().join("\n");
+        ticker_coercion::assert_refusals(&reports, case);
+        assert_eq!(
+            reports.matches("Refused WOO ticker row").count(),
+            case["refusals"].as_array().unwrap().len(),
+            "native ticker {case}: {reports}"
+        );
+    }
+    h.venue().dispose().unwrap();
+}
+
 fn with(extra: Value) -> ExchangeOptions {
     let mut base = serde_json::to_value(options()).unwrap();
     for (k, v) in extra.as_object().unwrap() {

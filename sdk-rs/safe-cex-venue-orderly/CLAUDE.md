@@ -233,3 +233,13 @@ retain precedence. This intentionally differs from TS retaining malformed values
 `exchange_trait` mixed-row regressions run each topic through all six real account
 classes and sockets. The source-only stream oracle retains its raw-value Store;
 it does not substitute for these native typed-boundary witnesses.
+
+
+The constructed ticker census in `tests/exchange_trait.rs::production_ticker_coercion_matches_constructed_typescript`
+uses the maintained TS exchange and DefaultStore via `parity/scripts/ticker-strict-source.cjs`.
+120 packed three-row frames run through all six account constructors. Every copied ticker/BBO/mark field has strict row-refusal cases; funding rate/time use actual camel/snake alias parsing.
+The corpus includes null, strings, NaN-producing inputs, objects, booleans, missing
+fields, raw numeric overflow and signed zero. It compares all eleven native number
+fields before JSON; approved decision-3 refusal preserves the entire bad row.
+`parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
+behavior, requiring a compiled native failure and exact restored pass.
