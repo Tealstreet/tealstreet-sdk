@@ -171,3 +171,77 @@ fn native_closed_positions_provenance_independence_and_one_fetch() {
         "venue rejected"
     );
 }
+
+#[cfg(feature = "native")]
+mod loop_timing {
+    use super::*;
+    use safe_cex_exchange::native::native_runtime;
+    use serde_json::{Value, json};
+
+    fn source() -> Value {
+        let output = std::process::Command::new("node")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/loop_timing_source.cjs"))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+
+    fn host(trace: &Rc<RefCell<Vec<String>>>, queued: &Rc<RefCell<Vec<Rc<dyn Fn()>>>>) -> LoopHost {
+        let sleeping = trace.clone();
+        let scheduling = trace.clone();
+        let callbacks = queued.clone();
+        let warning = trace.clone();
+        LoopHost {
+            sleep: Rc::new(move |delay| {
+                sleeping.borrow_mut().push(format!("sleep:{delay}"));
+                Box::pin(async { tokio::task::yield_now().await; Ok(()) })
+            }),
+            document_visible: Rc::new(|| false),
+            request_animation_frame: Rc::new(|_| panic!("hidden document")),
+            set_timeout_zero: Rc::new(move |callback| {
+                scheduling.borrow_mut().push("timeout:0".into());
+                callbacks.borrow_mut().push(callback);
+                Ok(())
+            }),
+            warn: Rc::new(move |_| warning.borrow_mut().push("warn".into())),
+        }
+    }
+
+    #[test]
+    fn real_loop_starts_sleep_before_poll_and_retains_dropped_continuation() {
+        let expected = source();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        tokio::task::LocalSet::new().block_on(&rt, async {
+            let _runtime = native_runtime();
+            let trace = Rc::new(RefCell::new(Vec::new()));
+            let queued = Rc::new(RefCell::new(Vec::new()));
+            let host = host(&trace, &queued);
+            let called = trace.clone();
+            let callback: Rc<dyn Fn()> = Rc::new(move || called.borrow_mut().push("callback".into()));
+            let waiter = loop_once(callback, &[], Some(100.0), &host);
+            assert_eq!(json!(*trace.borrow()), expected["pending"]["before"], "LOOP_EAGER sleep starts at invocation");
+            drop(waiter);
+            for _ in 0..16 { tokio::task::yield_now().await; }
+            assert_eq!(json!(*trace.borrow()), expected["pending"]["after"], "LOOP_EAGER dropped waiter retains scheduler continuation");
+            assert_eq!(queued.borrow().len(), 1);
+            queued.borrow_mut().remove(0)();
+            assert_eq!(json!(*trace.borrow()), expected["pending"]["complete"]);
+        });
+    }
+
+    #[test]
+    fn real_loop_infinity_suppresses_all_host_effects() {
+        let expected = source();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        tokio::task::LocalSet::new().block_on(&rt, async {
+            let _runtime = native_runtime();
+            let trace = Rc::new(RefCell::new(Vec::new()));
+            let queued = Rc::new(RefCell::new(Vec::new()));
+            let host = host(&trace, &queued);
+            loop_once(Rc::new(|| panic!("disabled loop")), &[], Some(f64::INFINITY), &host).await.unwrap();
+            assert_eq!(json!(*trace.borrow()), expected["disabled"]["complete"], "LOOP_DISABLED infinity never sleeps or schedules");
+            assert!(queued.borrow().is_empty());
+        });
+    }
+}
