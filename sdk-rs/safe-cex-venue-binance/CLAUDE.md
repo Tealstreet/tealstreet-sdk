@@ -594,6 +594,13 @@ Futures/PM overlay witness checks signed bracket requests, Store publication and
 unchanged market fields. `scripts/account-leverage-alias-contracts.mjs` measures
 their actual native traits with the maintained authenticated compiler context.
 
+The two `margin_mode` free functions are typed asynchronous commands, with exact
+compiler API classifications rather than decoder-admission claims. Their separate
+production-function witnesses in `margin_mode` and `margin_dispose` compare 64
+maintained source cases and poll both futures margin modes across a pending POST.
+Run the canonical accepted-set `--measure --module=margin_mode` for classification
+receipts; those receipts do not execute the commands or cover arbitrary JS inputs.
+
 ### Position snapshot callback alias receipts
 
 `position_snapshots::{Emit,Log}` are executable capabilities captured from the

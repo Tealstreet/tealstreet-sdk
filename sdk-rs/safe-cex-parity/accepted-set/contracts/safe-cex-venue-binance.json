@@ -15222,5 +15222,505 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::margin_mode::change_binance_margin_type": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "change_binance_margin_type",
+      "signature": {
+        "inputs": [
+          [
+            "isolated",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "post",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::margin_mode::BinanceMarginTypeRequest",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "emit_error",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, BinanceMarginTypeRequest) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_binance::margin_mode::BinanceMarginTypeRequest",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(serde_json::Value) -> Result<(), ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "tuple": []
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "reason": "Typed asynchronous command over a Boolean isolation flag, optional UTF-8 symbol and configured POST/error-emitter capabilities. Constructs a typed margin request and returns only unit or ExchangeError; it does not admit a raw representation into a decoded owner.",
+    "evidence": "Reviewed src/margin_mode.rs and its live ExchangeState::change_margin caller in src/exchange_classes.rs, corresponding to BinanceExchange.changeMarginType. tests/margin_dispose.rs::futures_margin_type_matches_source executes this production function against 44 maintained TypeScript cases: typed POST path/body, missing-symbol guard, success/rejection, message selection, emitter/coercion failures and original error precedence. margin_waits_for_post_before_emission separately polls the actual command through both margin modes and observes pending POST before rejection emission. Canonical --measure --module=margin_mode receipts classify this exact compiler API; classification receipts are not claimed as command execution or arbitrary JavaScript-input coverage."
+  },
+  "safe_cex_venue_binance::margin_mode::change_binance_pm_margin_type": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "change_binance_pm_margin_type",
+      "signature": {
+        "inputs": [
+          [
+            "emit_and_log_error",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(&str) -> Result<(), ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Typed asynchronous unsupported-operation command over a configured fallible error emitter. Emits the fixed portfolio-margin rejection and returns only unit or ExchangeError; no representation is decoded or constructed as an admitted owner.",
+    "evidence": "Reviewed src/margin_mode.rs and its live ExchangeState::change_margin caller in src/exchange_classes.rs, corresponding to BinancePMExchange.changeMarginType. tests/margin_mode.rs::pm_margin_mode_rejection_matches_source executes this production function against 20 maintained TypeScript cases and checks one emission before rejection, reporter-failure precedence and native error name/code/response retention. Canonical --measure --module=margin_mode receipts classify this exact compiler API; classification receipts are not claimed as command execution or arbitrary JavaScript-input coverage."
   }
 }
