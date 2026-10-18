@@ -962,3 +962,9 @@ Protective-side inference preserves the get-key primitive TypeError without
 embedding the class name in its message. The 242-case maintained-source test
 checks both the constructed native receiver and the typed helper; primitive
 diagnostics are compared directly rather than normalized to a custom string.
+
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.

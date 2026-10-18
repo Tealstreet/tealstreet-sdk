@@ -351,19 +351,12 @@ pub(crate) fn native(value: serde_json::Value) -> EventValue {
     EventValue::from_json(value)
 }
 pub(crate) fn parse_data(data: EventValue) -> EventValue {
-    data.text()
-        .ok()
-        .and_then(|s| {
-            use serde::Deserialize;
-            let mut d = serde_json::Deserializer::from_str(&s);
-            d.disable_recursion_limit();
-            let value = serde_json::Value::deserialize(&mut d).ok()?;
-            d.end().ok()?;
-            Some(value)
-        })
-        .map(native)
+    data.to_js_string().ok()
+        .and_then(|text| safe_cex_types::retained_json::RetainedJsonInput::parse_json(&text).ok())
+        .map(safe_cex_exchange::js_runtime::value::from_retained_input)
         .unwrap_or(EventValue::Null)
 }
+
 fn optional(v: EventValue, k: &str) -> Result<EventValue, Failure> {
     if v.nullish() {
         Ok(EventValue::Undefined)

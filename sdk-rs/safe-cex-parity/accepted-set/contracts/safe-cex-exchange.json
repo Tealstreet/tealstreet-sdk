@@ -8767,7 +8767,7 @@
   "safe_cex_exchange::websocket::MessageHandler": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/websocket.rs::MessageHandler; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
-    "reason": "Rc-owned message callback over borrowed Value; wire-message parsers and actual callback invocation are separate owner probes.",
+    "reason": "Rc-owned message callback over the borrowed canonical retained Js graph; actual per-frame aliasing and callback invocation are separate real-binding probes.",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -8790,7 +8790,7 @@
                                     "is_mutable": false,
                                     "type": {
                                       "resolved_path": {
-                                        "path": "serde_json::value::Value",
+                                        "path": "safe_cex_exchange::js_runtime::value::Js",
                                         "args": null
                                       }
                                     }
@@ -8886,7 +8886,7 @@
                                                                         "is_mutable": false,
                                                                         "type": {
                                                                           "resolved_path": {
-                                                                            "path": "serde_json::value::Value",
+                                                                            "path": "safe_cex_exchange::js_runtime::value::Js",
                                                                             "args": null
                                                                           }
                                                                         }
@@ -9051,7 +9051,7 @@
                                                                                     "is_mutable": false,
                                                                                     "type": {
                                                                                       "resolved_path": {
-                                                                                        "path": "serde_json::value::Value",
+                                                                                        "path": "safe_cex_exchange::js_runtime::value::Js",
                                                                                         "args": null
                                                                                       }
                                                                                     }

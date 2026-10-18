@@ -236,12 +236,14 @@ impl PublicStreamParent for Parent {
     fn emit_ticker(
         &self,
         kind: &str,
-        symbol: &Value,
+        symbol: &safe_cex_exchange::js_runtime::value::Js,
         ticker: &Ticker,
     ) -> Result<(), ExchangeError> {
-        self.events
-            .borrow_mut()
-            .push(Event::Ticker(kind.into(), symbol.clone(), ticker.clone()));
+        self.events.borrow_mut().push(Event::Ticker(
+            kind.into(),
+            safe_cex_exchange::js_runtime::value::to_json(symbol)?,
+            ticker.clone(),
+        ));
         Ok(())
     }
     fn emit_trade(&self, trade: &PublicStreamTradeEvent) -> Result<(), ExchangeError> {
@@ -456,7 +458,10 @@ fn compare(family: &str) {
         }
         let s = PublicStream::new(1, parent.clone(), runtime.clone());
         parent.stream.replace(Rc::downgrade(&s));
-        let methods: [fn(&PublicStream, &Value) -> Result<(), ExchangeError>; 5] = [
+        let methods: [fn(
+            &PublicStream,
+            &safe_cex_exchange::js_runtime::value::Js,
+        ) -> Result<(), ExchangeError>; 5] = [
             PublicStream::handle_ticker_update,
             PublicStream::handle_mark_price_update,
             PublicStream::handle_trade_update,
@@ -469,8 +474,8 @@ fn compare(family: &str) {
             "independent public null error floor"
         );
         for (i, method) in methods.iter().enumerate() {
-            let error =
-                method(&s, &Value::Null).expect_err("native public null payload must throw");
+            let error = method(&s, &safe_cex_exchange::js_runtime::value::Js::Null)
+                .expect_err("native public null payload must throw");
             assert_eq!(
                 error.name,
                 c["nullErrors"][i]["name"].as_str().unwrap(),

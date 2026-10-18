@@ -201,20 +201,38 @@ fn native_private_position_frame_commits_store_and_emits_one_positions_array() {
 
 #[cfg(test)]
 mod retained_handler_support {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../safe-cex-exchange/tests/support/retained_handlers.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
 }
 #[test]
 fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
     run(|venue, _| {
         for (slot, source_slot) in [
-            (safe_cex_exchange::socket_lifecycle::SocketSlot::Public, "publicWebsocket"),
-            (safe_cex_exchange::socket_lifecycle::SocketSlot::Private, "privateWebsocket"),
+            (
+                safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
+                "publicWebsocket",
+            ),
+            (
+                safe_cex_exchange::socket_lifecycle::SocketSlot::Private,
+                "privateWebsocket",
+            ),
         ] {
             let socket = venue.base().get_socket(slot).unwrap();
             let cases = retained_handler_support::source_frames("asterdex", source_slot);
             let (handlers, calls) = retained_handler_support::pair(&cases, false);
-            socket.message_handlers.borrow_mut().insert("retainedProbe".into(), handlers);
-            for case in cases { socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(case["frame"].as_str().unwrap().into())).unwrap(); }
+            socket
+                .message_handlers
+                .borrow_mut()
+                .insert("retainedProbe".into(), handlers);
+            for case in cases {
+                socket
+                    .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+                        case["frame"].as_str().unwrap().into(),
+                    ))
+                    .unwrap();
+            }
             assert_eq!(calls.get(), 8, "{source_slot} native callback observations");
         }
     });

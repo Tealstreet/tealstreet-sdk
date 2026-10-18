@@ -1,5 +1,6 @@
 //! Pure private-stream account parsers. Socket lifecycle is owned by BaseWebSocket.
-use safe_cex_num::{JsCoercionError, js_number, js_string, js_trim, js_truthy, parse_float};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_num::{JsCoercionError, js_string, js_truthy, parse_float};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -57,8 +58,16 @@ pub fn handle_execution_report(
             safe_cex_num::TableHit::Mapped(safe_cex_types::OrderStatus::Open)
         }
     };
-    let filled = parse_order_number(data, "z")?;
-    let amount = parse_order_number(data, "q")?;
+    let parse = |key: &str| -> Result<f64, JsCoercionError> {
+        let value = data.get(key);
+        if js_truthy(value) {
+            Ok(parse_float(&js_string(value)?))
+        } else {
+            Ok(0.)
+        }
+    };
+    let filled = parse("z")?;
+    let amount = parse("q")?;
     Ok(Some((
         order_id,
         ExecutionReportUpdate {
@@ -80,30 +89,22 @@ pub struct CumulativeOrderFill {
 
 // ts: AsterDEXPrivateWebsocket#mirrorCumulativeOrderFill
 pub fn mirror_cumulative_order_fill(
-    order_data: &Value,
+    order_data: &Js,
     current_time_ms: impl FnOnce() -> f64,
-) -> Result<Option<CumulativeOrderFill>, JsCoercionError> {
-    if order_data.is_null() {
-        return Err(JsCoercionError {
-            name: "TypeError",
-            message: "Cannot read properties of null (reading 'i')",
-        });
-    }
-    let id = order_data.get("i");
-    if id.is_some_and(|value| {
-        value
-            .as_object()
-            .is_some_and(|object| object.contains_key("toString"))
-    }) {
-        return Err(JsCoercionError {
-            name: "TypeError",
-            message: "orderData.i?.toString is not a function",
-        });
-    }
-    let order_id = if id.is_none_or(Value::is_null) {
+) -> Result<Option<CumulativeOrderFill>, Thrown> {
+    let id = order_data.get("i")?;
+    let order_id = if id.is_nullish() {
         None
     } else {
-        Some(js_string(id)?)
+        let method = id.get("toString")?;
+        if !method.is_callable() {
+            return Err(Thrown::type_error(
+                "orderData.i?.toString is not a function",
+            ));
+        }
+        Some(String::from_utf16_lossy(
+            &method.call(id, vec![])?.to_js_string()?,
+        ))
     };
     let filled = parse_order_number(order_data, "z")?;
     let amount = parse_order_number(order_data, "q")?;
@@ -116,56 +117,45 @@ pub fn mirror_cumulative_order_fill(
     let last_update = get_order_update_time(order_data, current_time_ms)?;
     Ok(Some(CumulativeOrderFill {
         order_id,
-        status: if order_data.get("X").and_then(Value::as_str) == Some("FILLED") {
+        status: if order_data.get("X")?.strict_equals(&Js::str("FILLED")) {
             safe_cex_types::OrderStatus::Closed
         } else {
             safe_cex_types::OrderStatus::Open
         },
         filled,
-        remaining: (amount - filled).max(0.0),
+        remaining: (amount - filled).max(0.),
         last_update,
     }))
 }
-
-fn parse_order_number(order_data: &Value, field: &str) -> Result<f64, JsCoercionError> {
-    let value = order_data.get(field);
-    if js_truthy(value) {
-        Ok(parse_float(&js_string(value)?))
+fn parse_order_number(data: &Js, key: &str) -> Result<f64, Thrown> {
+    let value = data.get(key)?;
+    if value.truthy() {
+        value.parse_float()
     } else {
-        Ok(0.0)
+        Ok(0.)
     }
 }
-
 // ts: AsterDEXPrivateWebsocket.parseFiniteNumber
-pub fn parse_finite_number(value: Option<&Value>) -> Option<f64> {
+pub fn parse_finite_number(value: &Js) -> Option<f64> {
     match value {
-        Some(Value::Number(_)) => {}
-        Some(Value::String(s)) if !js_trim(s).is_empty() => {}
+        Js::Number(_) => {}
+        Js::String(units)
+            if !safe_cex_num::js_trim(&String::from_utf16_lossy(units)).is_empty() => {}
         _ => return None,
     }
-    let value = js_number(value).ok()?;
-    value.is_finite().then_some(value)
+    let number = value.to_number().ok()?;
+    number.is_finite().then_some(number)
 }
-
 // ts: AsterDEXPrivateWebsocket.getOrderUpdateTime
 pub fn get_order_update_time(
-    order_data: &Value,
+    data: &Js,
     current_time_ms: impl FnOnce() -> f64,
-) -> Result<f64, JsCoercionError> {
-    if order_data.is_null() {
-        return Err(JsCoercionError {
-            name: "TypeError",
-            message: "Cannot read properties of null (reading 'T')",
-        });
-    }
-    let time = order_data.get("T");
-    let event_time = js_number(if js_truthy(time) {
+) -> Result<f64, Thrown> {
+    let time = data.get("T")?;
+    let time = if time.truthy() { time } else { data.get("E")? };
+    let time = time.to_number()?;
+    Ok(if time.is_finite() && time > 0. {
         time
-    } else {
-        order_data.get("E")
-    })?;
-    Ok(if event_time.is_finite() && event_time > 0.0 {
-        event_time
     } else {
         current_time_ms()
     })
@@ -198,7 +188,14 @@ pub fn handle_account_update(
     }
     let mut effects = Vec::new();
     if js_truthy(data.get("B"))
-        && let Some(balances) = parse_asset_balance_updates(data.get("B"), None, "f", Some("l"))
+        && let Some(balances) = parse_asset_balance_updates(
+            &safe_cex_exchange::js_runtime::value::from_json(data.get("B").unwrap_or(&Value::Null)),
+            None,
+            "f",
+            Some("l"),
+        )
+        .ok()
+        .flatten()
     {
         effects.push(AccountUpdateEffect::ApplyBalances(balances));
     }
@@ -208,63 +205,79 @@ pub fn handle_account_update(
 
 // ts: AsterDEXPrivateWebsocket.parseAssetBalanceUpdates
 pub fn parse_asset_balance_updates(
-    balances: Option<&Value>,
+    balances: &Js,
     total_field: Option<&str>,
     free_field: &str,
     used_field: Option<&str>,
-) -> Option<Vec<AssetBalanceUpdate>> {
-    let balances = balances?.as_array()?;
-    let mut updates = Vec::with_capacity(balances.len());
-    for balance in balances {
-        let asset = balance
-            .get("a")
-            .and_then(Value::as_str)
-            .map(js_trim)
-            .unwrap_or("");
-        let free = parse_finite_number(balance.get(free_field));
-        let used = used_field
-            .filter(|s| !s.is_empty())
-            .and_then(|field| parse_finite_number(balance.get(field)));
-        let total = if let Some(field) = total_field.filter(|s| !s.is_empty()) {
-            parse_finite_number(balance.get(field))
+) -> Result<Option<Vec<AssetBalanceUpdate>>, Thrown> {
+    let Js::Array(items) = balances else {
+        return Ok(None);
+    };
+    let mut updates = Vec::with_capacity(items.borrow().len());
+    let iterator = balances.iterator()?;
+    loop {
+        let step = iterator.call_method("next", vec![])?;
+        if step.get("done")?.truthy() {
+            break;
+        }
+        let balance = step.get("value")?;
+        let get = |key: &str| {
+            if balance.is_nullish() {
+                Ok(Js::Undefined)
+            } else {
+                balance.get(key)
+            }
+        };
+        let asset = match get("a")? {
+            Js::String(_) => String::from_utf16_lossy(
+                &balance
+                    .get("a")?
+                    .call_method("trim", vec![])?
+                    .to_js_string()?,
+            ),
+            _ => String::new(),
+        };
+        let free = parse_finite_number(&get(free_field)?);
+        let used = if let Some(field) = used_field.filter(|field| !field.is_empty()) {
+            parse_finite_number(&get(field)?)
+        } else {
+            None
+        };
+        let total = if let Some(field) = total_field.filter(|field| !field.is_empty()) {
+            parse_finite_number(&get(field)?)
         } else {
             free.zip(used).map(|(a, b)| a + b)
         };
-        let derived_used = used.or_else(|| total.zip(free).map(|(a, b)| a - b));
+        let used = used.or_else(|| total.zip(free).map(|(a, b)| a - b));
         if asset.is_empty() {
-            return None;
+            return Ok(None);
         }
-        let (total, free, used) = (total?, free?, derived_used?);
-        if used < 0.0 {
-            return None;
+        let (Some(total), Some(free), Some(used)) = (total, free, used) else {
+            return Ok(None);
+        };
+        if used < 0. {
+            return Ok(None);
         }
-        // TS validates inputs, but intentionally does not recheck overflowed sums/differences.
         updates.push(AssetBalanceUpdate {
-            asset: asset.into(),
+            asset,
             total,
             free,
             used,
         });
     }
-    Some(updates)
+    Ok(Some(updates))
 }
 
 // ts: AsterDEXPrivateWebsocket.getPositionSide
 pub fn get_position_side(
-    position: &Value,
-    position_amount: f64,
-) -> Result<safe_cex_types::PositionSide, JsCoercionError> {
-    if position.is_null() {
-        return Err(JsCoercionError {
-            name: "TypeError",
-            message: "Cannot read properties of null (reading 'ps')",
-        });
-    }
-    let side = position.get("ps").and_then(Value::as_str);
-    let long = if side == Some("BOTH") {
-        position_amount > 0.0
+    position: &Js,
+    amount: f64,
+) -> Result<safe_cex_types::PositionSide, Thrown> {
+    let side = position.get("ps")?;
+    let long = if side.strict_equals(&Js::str("BOTH")) {
+        amount > 0.
     } else {
-        side == Some("LONG")
+        position.get("ps")?.strict_equals(&Js::str("LONG"))
     };
     Ok(if long {
         safe_cex_types::PositionSide::Long
@@ -278,31 +291,53 @@ pub fn get_position_side(
 // Currency keys must retain insertion order before JS own-key enumeration; do not
 // sort them. The shared Balance.currencies JsObjectMap now provides those keys.
 pub fn get_account_update_upnl_deltas(
-    positions: Option<&Value>,
+    positions: &Js,
     existing_positions: &[safe_cex_types::Position],
     currency_keys: &[String],
-) -> Option<Vec<(String, f64)>> {
+) -> Result<Option<Vec<(String, f64)>>, Thrown> {
     let mut deltas: Vec<(String, f64)> = Vec::new();
-    let Some(positions) = positions else {
-        return Some(deltas);
+    if matches!(positions, Js::Undefined) {
+        return Ok(Some(deltas));
+    }
+    let Js::Array(_) = positions else {
+        return Ok(None);
     };
-    let positions = positions.as_array()?;
+    let iterator = positions.iterator()?;
     let currency_keys = safe_cex_num::js_own_keys(currency_keys.iter().map(String::as_str));
-    for position in positions {
-        let symbol = position.get("s").and_then(Value::as_str).unwrap_or("");
-        let amount = parse_finite_number(position.get("pa"))?;
-        let upnl = parse_finite_number(position.get("up"))?;
+    loop {
+        let step = iterator.call_method("next", vec![])?;
+        if step.get("done")?.truthy() {
+            break;
+        }
+        let position = step.get("value")?;
+        let get = |key: &str| {
+            if position.is_nullish() {
+                Ok(Js::Undefined)
+            } else {
+                position.get(key)
+            }
+        };
+        let symbol = match get("s")? {
+            Js::String(_) => String::from_utf16_lossy(&position.get("s")?.to_js_string()?),
+            _ => String::new(),
+        };
+        let Some(amount) = parse_finite_number(&get("pa")?) else {
+            return Ok(None);
+        };
+        let Some(upnl) = parse_finite_number(&get("up")?) else {
+            return Ok(None);
+        };
         if symbol.is_empty() {
-            return None;
+            return Ok(None);
         }
         // A valid symbol/amount/upnl guarantees position is an object here.
-        let side = get_position_side(position, amount).ok()?;
+        let side = get_position_side(&position, amount)?;
         let previous = existing_positions
             .iter()
             .find(|p| p.symbol == symbol && p.side == side)
             .map_or(0.0, |p| p.unrealized_pnl);
         if !previous.is_finite() {
-            return None;
+            return Ok(None);
         }
         let asset = currency_keys
             .iter()
@@ -324,5 +359,5 @@ pub fn get_account_update_upnl_deltas(
             }
         }
     }
-    Some(deltas)
+    Ok(Some(deltas))
 }

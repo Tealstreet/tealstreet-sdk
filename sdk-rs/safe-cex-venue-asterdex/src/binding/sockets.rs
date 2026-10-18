@@ -81,16 +81,11 @@ impl crate::public_stream::PublicStreamParent for Parent {
     fn owner(&self) -> Rc<BaseExchange> {
         self.rt().expect("live socket parent").base().clone()
     }
-    fn emit_ticker(
-        &self,
-        event: &str,
-        symbol: &Value,
-        ticker: &Ticker,
-    ) -> Result<(), ExchangeError> {
+    fn emit_ticker(&self, event: &str, symbol: &Js, ticker: &Ticker) -> Result<(), ExchangeError> {
         self.rt()?.base().emit_args(
             event,
             &[
-                safe_cex_exchange::js_runtime::value::from_json(symbol),
+                symbol.clone(),
                 safe_cex_exchange::js_runtime::value::from_typed(ticker)?,
             ],
         )
@@ -265,11 +260,8 @@ impl crate::private_stream::PrivateStreamParent for Parent {
             safe_cex_exchange::js_runtime::value::from_typed(positions)?,
         )
     }
-    fn emit_account(&self, data: &Value) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit(
-            "account",
-            safe_cex_exchange::js_runtime::value::from_json(data),
-        )
+    fn emit_account(&self, data: &Js) -> Result<(), ExchangeError> {
+        self.rt()?.base().emit("account", data.clone())
     }
 }
 

@@ -133,3 +133,12 @@ and wakes its shared driver for cleanup. See the Bitget EAGER_DIAL_AUDIT.md for
 real Bitget/Backpack prefix probes and independent production controls. A native
 held handshake still needs a CONNECTING handle; that separate finding remains
 open and is not implied fixed by eager startup.
+
+MessageHandler borrows the canonical native `Js` carrier. A venue restores its
+retained parser input once for each delivered frame and shares that same graph
+across its existing handler lists. Earlier callbacks can mutate properties seen
+by later callbacks; own undefined, UTF-16 keys/strings, signed zero and nonfinite
+numbers do not pass through a JSON projection. There is one handler ABI and one
+registry. Typed projection occurs only at a reached output field. Binance retains
+its callback identity bridges, with original callback failures carried through
+the existing opaque error origin only on the error path.

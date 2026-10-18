@@ -322,7 +322,7 @@ fn dispatch_and_subscription_match_live_source() {
                 callbacks.borrow_mut().push(Rc::new(move |value| {
                     output
                         .borrow_mut()
-                        .push(json!({"handler":label,"value":value}));
+                        .push(json!({"handler":label,"value":safe_cex_exchange::js_runtime::value::to_json(value)?}));
                     Ok(())
                 }));
             }
@@ -509,9 +509,15 @@ fn dispatch_retains_captured_lists_but_observes_array_mutations() {
 #[test]
 fn frame_numbers_round_once_and_retain_negative_zero() {
     let frame = parse_frame(r#"{"n":-0,"nested":[9007199254740993,1e21]}"#).unwrap();
-    assert!(frame["n"].as_f64().unwrap().is_sign_negative());
-    assert_eq!(frame["nested"][0].as_f64(), Some(9007199254740992.));
-    assert_eq!(frame["nested"][1].as_f64(), Some(1e21));
+    assert!(
+        matches!(frame.get("n").unwrap(), Js::Number(value) if value.to_bits() == 0x8000_0000_0000_0000)
+    );
+    assert!(
+        matches!(frame.get("nested").unwrap().get("0").unwrap(), Js::Number(value) if value == 9007199254740992.)
+    );
+    assert!(
+        matches!(frame.get("nested").unwrap().get("1").unwrap(), Js::Number(value) if value == 1e21)
+    );
 }
 
 #[test]
@@ -933,30 +939,44 @@ fn retained_handler_frames_cross_the_production_core_registry() {
         seen.set(seen.get() + 1);
         Ok(())
     });
-    socket.message_handlers.borrow_mut().insert(
-        "tickers".into(),
-        Rc::new(RefCell::new(vec![callback])),
-    );
+    socket
+        .message_handlers
+        .borrow_mut()
+        .insert("tickers".into(), Rc::new(RefCell::new(vec![callback])));
     for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
-        let frame = format!(r#"{{"topic":"tickers.BTCUSDT","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#);
+        let frame = format!(
+            r#"{{"topic":"tickers.BTCUSDT","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#
+        );
         on_message(&socket, &frame).unwrap();
     }
     on_message(&socket, r#"{"topic":"tickers.BTCUSDT","neighbor":true}"#).unwrap();
-    assert_eq!(calls.get(), 4, "source-valid native graphs reach the shared registry");
+    assert_eq!(
+        calls.get(),
+        4,
+        "source-valid native graphs reach the shared registry"
+    );
     socket.dispose();
 }
 
 #[cfg(test)]
 mod retained_handler_support {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../safe-cex-exchange/tests/support/retained_handlers.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
 }
 #[test]
 fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
     let (socket, _, _) = fixture();
     let cases = retained_handler_support::source_frames("bybit", "publicWebsocket");
     let (handlers, calls) = retained_handler_support::pair(&cases, false);
-    socket.message_handlers.borrow_mut().insert("retainedProbe".into(), handlers);
-    for case in cases { on_message(&socket, case["frame"].as_str().unwrap()).unwrap(); }
+    socket
+        .message_handlers
+        .borrow_mut()
+        .insert("retainedProbe".into(), handlers);
+    for case in cases {
+        on_message(&socket, case["frame"].as_str().unwrap()).unwrap();
+    }
     assert_eq!(calls.get(), 8);
     socket.dispose();
 }

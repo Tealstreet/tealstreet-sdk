@@ -183,7 +183,10 @@ fn run(case: &Value) -> Trace {
                 .unwrap(),
             "book-data" => {
                 let data = &step["data"];
-                let book = ws_helpers::public_depth_snapshot(data).unwrap();
+                let book = ws_helpers::public_depth_snapshot(
+                    &safe_cex_exchange::js_runtime::value::from_json(&data),
+                )
+                .unwrap();
                 f.subscriptions
                     .deliver_book(
                         &format!(
@@ -197,8 +200,11 @@ fn run(case: &Value) -> Trace {
             "kline-data" => {
                 let keys = f.subscriptions.state().klines;
                 let streams: Vec<_> = keys.iter().map(String::as_str).collect();
-                if let Some(update) =
-                    ws_helpers::public_kline_update(&step["data"], &streams).unwrap()
+                if let Some(update) = ws_helpers::public_kline_update(
+                    &safe_cex_exchange::js_runtime::value::from_json(&step["data"]),
+                    &streams,
+                )
+                .unwrap()
                 {
                     f.subscriptions
                         .deliver_kline(&update.stream, update.candle)

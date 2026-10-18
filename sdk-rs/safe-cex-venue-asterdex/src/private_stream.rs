@@ -7,12 +7,13 @@ use crate::{
     private_repairs::{PrivateRepairs, RepairParent},
     ws_helpers,
 };
+use safe_cex_exchange::js_runtime::value::{Js, from_retained_input, to_typed};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, LogSeverity},
     websocket::{BaseWebSocket, WsParent, WsProtocol, WsRuntime},
 };
-use safe_cex_num::{TableHit, js_string, js_truthy, parse_float};
+use safe_cex_num::TableHit;
 use safe_cex_store::{StoreUpdate, model_patch::ModelPatch};
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::{Balance, Order, OrderSide, OrderStatus, Position, PositionSide};
@@ -34,7 +35,7 @@ pub trait PrivateStreamParent: WsParent + RepairParent {
     fn emit_order(&self, order: &Order) -> Result<(), ExchangeError>;
     fn emit_fill(&self, fill: &PrivateFill) -> Result<(), ExchangeError>;
     fn emit_positions(&self, positions: &[Position]) -> Result<(), ExchangeError>;
-    fn emit_account(&self, data: &Value) -> Result<(), ExchangeError>;
+    fn emit_account(&self, data: &Js) -> Result<(), ExchangeError>;
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrivateFill {
@@ -125,32 +126,37 @@ fn coercion(error: safe_cex_num::JsCoercionError) -> ExchangeError {
     e.name = error.name.into();
     e
 }
-fn text(value: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(value).map_err(coercion)
+fn text(value: &Js) -> Result<String, ExchangeError> {
+    Ok(String::from_utf16_lossy(&value.to_js_string()?))
 }
-fn optional_id(value: Option<&Value>) -> Result<Option<String>, ExchangeError> {
-    if value.is_none_or(Value::is_null) {
-        return Ok(None);
+fn utf8(value: Js) -> Option<String> {
+    if let Js::String(units) = value {
+        Some(String::from_utf16_lossy(&units))
+    } else {
+        None
     }
-    // JSON values have only the standard callable toString unless an own key shadows it.
-    if value.is_some_and(|v| v.get("toString").is_some()) {
-        return Err(ExchangeError::new("data.i?.toString is not a function"));
+}
+fn optional_id(value: &Js) -> Result<Option<String>, ExchangeError> {
+    if value.is_nullish() {
+        Ok(None)
+    } else {
+        let method = value.get("toString")?;
+        if !method.is_callable() {
+            return Err(ExchangeError::new("data.i?.toString is not a function"));
+        }
+        Ok(Some(text(&method.call(value.clone(), vec![])?)?))
     }
-    Ok(Some(text(value)?))
 }
-fn parsed(value: Option<&Value>) -> Result<f64, ExchangeError> {
-    Ok(parse_float(&text(
-        value
-            .filter(|v| js_truthy(Some(*v)))
-            .or(Some(&Value::String("0".into()))),
-    )?))
+fn parsed(value: &Js) -> Result<f64, ExchangeError> {
+    Ok(if value.truthy() {
+        value.parse_float()?
+    } else {
+        0.
+    })
 }
-fn stringify(value: &Value) -> Result<String, ExchangeError> {
-    Ok(
-        safe_cex_num::js_json_stringify(&safe_cex_num::JsJsonValue::from(value.clone()))
-            .map_err(coercion)?
-            .expect("JSON input is defined"),
-    )
+fn stringify(value: &Js) -> Result<String, ExchangeError> {
+    let units = safe_cex_exchange::js_runtime::globals::stringify_json(value)?.unwrap_or_default();
+    Ok(String::from_utf16_lossy(&units))
 }
 fn or_zero(value: f64) -> f64 {
     if value == 0.0 || value.is_nan() {
@@ -159,7 +165,7 @@ fn or_zero(value: f64) -> f64 {
         value
     }
 }
-fn status(value: Option<&Value>) -> Result<OrderStatus, ExchangeError> {
+fn status(value: &Js) -> Result<OrderStatus, ExchangeError> {
     match crate::exchange_helpers::reverse_map_order_status(&text(value)?) {
         TableHit::Mapped(status) => Ok(status),
         TableHit::Inherited(_) => Err(ExchangeError::new(
@@ -213,7 +219,7 @@ impl PrivateStream {
             let weak = Rc::downgrade(&stream);
             stream.socket.message_handlers.borrow_mut().insert(
                 key.into(),
-                Rc::new(RefCell::new(vec![Rc::new(move |data: &Value| {
+                Rc::new(RefCell::new(vec![Rc::new(move |data: &Js| {
                     let Some(s) = weak.upgrade() else {
                         return Ok(());
                     };
@@ -297,6 +303,7 @@ impl PrivateStream {
         if self.parent.is_disposed() {
             return Ok(());
         }
+        let _realm = self.socket.prototype_realm.bind();
         self.socket.track_last_received()?;
         let raw = match frame {
             SocketFrame::Text(s) => s.clone(),
@@ -304,21 +311,22 @@ impl PrivateStream {
             SocketFrame::Close { .. } => return Ok(()),
         };
         let result = (|| {
-            let Ok(mut data) = serde_json::from_str::<Value>(&raw) else {
+            let captured = safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                &raw.encode_utf16().collect::<Vec<_>>(),
+            );
+            let Ok(captured) = captured else {
                 return Ok(());
             };
-            if data.is_object() || data.is_array() {
-                data = safe_cex_transport::signing::try_parse_params_json(Value::String(raw));
-            }
-            if !js_truthy(Some(&data)) {
+            let data = from_retained_input(captured);
+            if !data.truthy() {
                 return Ok(());
             }
-            if data.get("id").and_then(Value::as_f64) == Some(42.0) {
+            if data.get("id")?.strict_equals(&Js::Number(42.)) {
                 return self.socket.handle_pong_event(5_000);
             }
-            let event = data.get("e");
-            let key = text(event)?;
-            if js_truthy(event) && self.socket.message_handlers.borrow().contains_key(&key) {
+            let event = data.get("e")?;
+            let key = text(&event)?;
+            if event.truthy() && self.socket.message_handlers.borrow().contains_key(&key) {
                 self.socket.record_message_handler_stats(&key)?;
                 let callbacks = self
                     .socket
@@ -336,7 +344,7 @@ impl PrivateStream {
                         callback(&data)?;
                     }
                 }
-            } else if js_truthy(event)
+            } else if event.truthy()
                 && matches!(
                     safe_cex_num::js_table_lookup::<&str, ()>(&[], &key),
                     TableHit::Inherited(_)
@@ -351,7 +359,7 @@ impl PrivateStream {
                 // surrogate because its String cannot contain one (manifest FORCED).
                 let units: Vec<u16> = stringify(&data)?.encode_utf16().take(200).collect();
                 let summary = String::from_utf16_lossy(&units);
-                if js_truthy(event) {
+                if event.truthy() {
                     self.parent.log(
                         &format!("Unhandled private event type: {key}, data: {summary}"),
                         LogSeverity::Warning,
@@ -412,14 +420,14 @@ impl PrivateStream {
         }
         Ok(())
     }
-    fn handle_execution_report(&self, data: &Value) -> Result<(), ExchangeError> {
+    fn handle_execution_report(&self, data: &Js) -> Result<(), ExchangeError> {
         self.repairs.schedule_order_reconcile()?;
-        if let Some(order) = self.order(optional_id(data.get("i"))?.as_deref())? {
+        if let Some(order) = self.order(optional_id(&data.get("i")?)?.as_deref())? {
             self.update_order(
                 order,
-                status(data.get("X"))?,
-                Some(parsed(data.get("z"))?),
-                Some(parsed(data.get("q"))? - parsed(data.get("z"))?),
+                status(&data.get("X")?)?,
+                Some(parsed(&data.get("z")?)?),
+                Some(parsed(&data.get("q")?)? - parsed(&data.get("z")?)?),
                 None,
                 true,
             )?;
@@ -427,15 +435,17 @@ impl PrivateStream {
         Ok(())
     }
     // ts: AsterDEXPrivateWebsocket#handleOrderTradeUpdate
-    pub fn handle_order_trade_update(&self, data: &Value) -> Result<(), ExchangeError> {
-        let Some(d) = data.get("o").filter(|v| js_truthy(Some(*v))) else {
+    pub fn handle_order_trade_update(&self, data: &Js) -> Result<(), ExchangeError> {
+        let d = data.get("o")?;
+        if !d.truthy() {
             return Ok(());
         };
         self.repairs.schedule_order_reconcile()?;
-        let id = optional_id(d.get("i"))?;
-        let state = d.get("X").and_then(Value::as_str);
+        let id = optional_id(&d.get("i")?)?;
+        let state = utf8(d.get("X")?);
+        let state = state.as_deref();
         if state == Some("NEW") {
-            let kind = match crate::exchange_helpers::reverse_map_order_type(&text(d.get("o"))?) {
+            let kind = match crate::exchange_helpers::reverse_map_order_type(&text(&d.get("o")?)?) {
                 TableHit::Mapped(k) => k,
                 _ => {
                     return Err(ExchangeError::new(
@@ -446,9 +456,9 @@ impl PrivateStream {
             let kind = serde_json::from_value(Value::String(kind)).map_err(|_| {
                 ExchangeError::new("Unknown order type cannot enter native OrderType")
             })?;
-            let price = parsed(d.get("p"))?;
-            let amount = parsed(d.get("q"))?;
-            let filled = parsed(d.get("z"))?;
+            let price = parsed(&d.get("p")?)?;
+            let amount = parsed(&d.get("q")?)?;
+            let filled = parsed(&d.get("z")?)?;
             let order = Order {
                 client_order_id: (None).into(),
                 id: id.ok_or_else(|| {
@@ -456,28 +466,26 @@ impl PrivateStream {
                 })?,
                 parent_id: (None).into(),
                 status: safe_cex_types::ModelField::Value(OrderStatus::Open),
-                symbol: d
-                    .get("s")
-                    .and_then(Value::as_str)
+                symbol: utf8(d.get("s")?)
                     .ok_or_else(|| ExchangeError::new("Missing private order symbol"))?
                     .into(),
                 r#type: kind,
-                side: if d.get("S").and_then(Value::as_str) == Some("BUY") {
+                side: if d.get("S")?.strict_equals(&Js::str("BUY")) {
                     safe_cex_types::ModelField::Value(OrderSide::Buy)
                 } else {
                     safe_cex_types::ModelField::Value(OrderSide::Sell)
                 },
                 price: if price == 0.0 || price.is_nan() {
-                    (parsed(d.get("sp"))?).into()
+                    (parsed(&d.get("sp")?)?).into()
                 } else {
                     (price).into()
                 },
                 amount,
                 filled,
                 remaining: amount - filled,
-                reduce_only: (js_truthy(d.get("R")) || js_truthy(d.get("cp"))).into(),
+                reduce_only: (d.get("R")?.truthy() || d.get("cp")?.truthy()).into(),
                 last_update: self.parent.virtual_time_ms(),
-                info: (Some(d.clone().into())).into(),
+                info: (Some(to_typed(&d)?)).into(),
                 close: (None).into(),
                 time_in_force: (None).into(),
                 trigger_type: (None).into(),
@@ -491,25 +499,25 @@ impl PrivateStream {
             self.parent.log(
                 &format!(
                     "Order added to store: {} {} {} {}",
-                    text(d.get("i"))?,
-                    text(d.get("s"))?,
-                    text(d.get("o"))?,
-                    text(d.get("S"))?
+                    text(&d.get("i")?)?,
+                    text(&d.get("s")?)?,
+                    text(&d.get("o")?)?,
+                    text(&d.get("S")?)?
                 ),
                 LogSeverity::Info,
             )?;
             return Ok(());
         }
         if matches!(state, Some("PARTIALLY_FILLED" | "FILLED")) {
-            self.mirror_cumulative_order_fill(d)?;
-            let amount = parsed(d.get("l"))?;
-            let price = parsed(d.get("L"))?;
+            self.mirror_cumulative_order_fill(&d)?;
+            let amount = parsed(&d.get("l")?)?;
+            let price = parsed(&d.get("L")?)?;
             if amount > 0.0 {
                 self.parent.emit_fill(&PrivateFill {
                     id: id.clone(),
                     order_id: id.clone(),
-                    symbol: d.get("s").and_then(Value::as_str).map(str::to_owned),
-                    side: if d.get("S").and_then(Value::as_str) == Some("BUY") {
+                    symbol: utf8(d.get("s")?),
+                    side: if d.get("S")?.strict_equals(&Js::str("BUY")) {
                         OrderSide::Buy
                     } else {
                         OrderSide::Sell
@@ -517,7 +525,7 @@ impl PrivateStream {
                     price: if price > 0.0 {
                         price
                     } else {
-                        parsed(d.get("ap"))?
+                        parsed(&d.get("ap")?)?
                     },
                     amount,
                 })?;
@@ -526,13 +534,12 @@ impl PrivateStream {
         let Some(order) = self.order(id.as_deref())? else {
             return Ok(());
         };
-        let time = account::get_order_update_time(d, || self.parent.virtual_time_ms())
-            .map_err(coercion)?;
+        let time = account::get_order_update_time(&d, || self.parent.virtual_time_ms())?;
         match state {
             Some("FILLED") => self.update_order(
                 order,
                 OrderStatus::Closed,
-                Some(parsed(d.get("z"))?),
+                Some(parsed(&d.get("z")?)?),
                 Some(0.0),
                 Some(time),
                 true,
@@ -542,19 +549,18 @@ impl PrivateStream {
             }
             _ => self.update_order(
                 order,
-                status(d.get("X"))?,
-                Some(parsed(d.get("z"))?),
-                Some(parsed(d.get("q"))? - parsed(d.get("z"))?),
+                status(&d.get("X")?)?,
+                Some(parsed(&d.get("z")?)?),
+                Some(parsed(&d.get("q")?)? - parsed(&d.get("z")?)?),
                 Some(time),
                 true,
             ),
         }
     }
     // ts: AsterDEXPrivateWebsocket#mirrorCumulativeOrderFill
-    fn mirror_cumulative_order_fill(&self, d: &Value) -> Result<(), ExchangeError> {
+    fn mirror_cumulative_order_fill(&self, d: &Js) -> Result<(), ExchangeError> {
         if let Some(fill) =
-            account::mirror_cumulative_order_fill(d, || self.parent.virtual_time_ms())
-                .map_err(coercion)?
+            account::mirror_cumulative_order_fill(d, || self.parent.virtual_time_ms())?
         {
             let mut patch = ModelPatch::default();
             patch.set_json("status", serde_json::to_value(fill.status).unwrap());
@@ -651,16 +657,16 @@ impl PrivateStream {
         }
         Ok(reconcile)
     }
-    pub fn handle_account_update(&self, data: &Value) -> Result<(), ExchangeError> {
-        if data.is_null() {
+    pub fn handle_account_update(&self, data: &Js) -> Result<(), ExchangeError> {
+        if matches!(data, Js::Null) {
             return Err(coercion(safe_cex_num::JsCoercionError {
                 name: "TypeError",
                 message: "Cannot read properties of null (reading 'B')",
             }));
         }
-        if js_truthy(data.get("B")) {
+        if data.get("B")?.truthy() {
             if let Some(balances) =
-                account::parse_asset_balance_updates(data.get("B"), None, "f", Some("l"))
+                account::parse_asset_balance_updates(&data.get("B")?, None, "f", Some("l"))?
             {
                 self.apply_balance_updates(&balances, &[])?;
             }
@@ -668,9 +674,15 @@ impl PrivateStream {
         self.parent.emit_account(data)
     }
     // ts: AsterDEXPrivateWebsocket#handleAccountPositionUpdate
-    pub fn handle_account_position_update(&self, data: &Value) -> Result<(), ExchangeError> {
-        let Some(time) = data.get("E").and_then(Value::as_f64).filter(|v| {
-            v.is_finite() && v.fract() == 0.0 && *v > 0.0 && *v <= 9_007_199_254_740_991.0
+    pub fn handle_account_position_update(&self, data: &Js) -> Result<(), ExchangeError> {
+        let time = data.get("E")?;
+        let time = if let Js::Number(value) = time {
+            Some(value)
+        } else {
+            None
+        };
+        let Some(time) = time.filter(|v| {
+            v.is_finite() && v.fract() == 0. && *v > 0. && *v <= 9_007_199_254_740_991.
         }) else {
             return self.parent.log(
                 "Ignoring ACCOUNT_UPDATE without a valid numeric event time E",
@@ -683,7 +695,8 @@ impl PrivateStream {
                 LogSeverity::Debug,
             );
         }
-        let Some(a) = data.get("a").filter(|a| a.is_object() || a.is_array()) else {
+        let a = data.get("a")?;
+        if !matches!(a, Js::Object(_) | Js::Array(_)) {
             return self.parent.log(
                 "Ignoring malformed ACCOUNT_UPDATE payload",
                 LogSeverity::Warning,
@@ -697,11 +710,12 @@ impl PrivateStream {
             .as_ref()
             .map(|c| c.keys().cloned().collect())
             .unwrap_or_default();
-        let deltas = account::get_account_update_upnl_deltas(a.get("P"), &positions, &currencies);
-        let balances = if a.get("B").is_none() {
+        let deltas =
+            account::get_account_update_upnl_deltas(&a.get("P")?, &positions, &currencies)?;
+        let balances = if matches!(a.get("B")?, Js::Undefined) {
             Some(vec![])
         } else {
-            account::parse_asset_balance_updates(a.get("B"), Some("wb"), "cw", None)
+            account::parse_asset_balance_updates(&a.get("B")?, Some("wb"), "cw", None)?
         };
         let (Some(deltas), Some(balances)) = (deltas, balances) else {
             return self.parent.log(
@@ -711,21 +725,29 @@ impl PrivateStream {
         };
         self.last_account_event_time.set(time);
         let version = self.parent.mark_balance_state_updated();
-        if let Some(p) = a.get("P").filter(|p| js_truthy(Some(*p))) {
+        let p = a.get("P")?;
+        if p.truthy() {
             self.parent.mark_position_state_updated();
-            let positions = p.as_array().expect("validated positions");
+            let Js::Array(positions) = &p else {
+                unreachable!("validated positions")
+            };
             self.parent.log(
                 &format!(
                     "ACCOUNT_UPDATE received with {} position(s): {}",
-                    positions.len(),
-                    stringify(p)?
+                    positions.borrow().len(),
+                    stringify(&p)?
                 ),
                 LogSeverity::Info,
             )?;
-            for pos in positions {
-                let amount = parsed(pos.get("pa"))?;
-                let side = account::get_position_side(pos, amount).map_err(coercion)?;
-                let symbol = pos.get("s").and_then(Value::as_str).unwrap_or("");
+            let length = positions.borrow().len();
+            for index in 0..length {
+                let pos = positions.borrow().get(index).cloned().flatten();
+                let Some(pos) = pos else {
+                    continue;
+                };
+                let amount = parsed(&pos.get("pa")?)?;
+                let side = account::get_position_side(&pos, amount)?;
+                let symbol = utf8(pos.get("s")?).unwrap_or_default();
                 let existing: Vec<Position> = store.positions()?.to_vec();
                 if amount != 0.0 {
                     if let Some(current) = existing
@@ -742,16 +764,16 @@ impl PrivateStream {
                         )?;
                         let mut patch = ModelPatch::default();
                         patch.set_number("contracts", amount.abs());
-                        let entry = parsed(pos.get("ep"))?;
+                        let entry = parsed(&pos.get("ep")?)?;
                         patch.set_number("entryPrice", entry);
                         patch.set_number("notional", amount.abs() * entry);
-                        patch.set_number("unrealizedPnl", parsed(pos.get("up"))?);
-                        patch.set_number("realizedPnl", parsed(pos.get("cr"))?);
+                        patch.set_number("unrealizedPnl", parsed(&pos.get("up")?)?);
+                        patch.set_number("realizedPnl", parsed(&pos.get("cr")?)?);
                         store.update_position(&current.id, &patch)?;
                     } else {
                         let side_str = serde_json::to_value(side).unwrap();
                         self.parent.log(&format!("Position not found in store: {symbol} {}, will be created by fetchPositions()",side_str.as_str().unwrap()),LogSeverity::Info)?;
-                        if pos.get("ps").and_then(Value::as_str) == Some("BOTH") {
+                        if pos.get("ps")?.strict_equals(&Js::str("BOTH")) {
                             let opposite = if side == PositionSide::Long {
                                 PositionSide::Short
                             } else {

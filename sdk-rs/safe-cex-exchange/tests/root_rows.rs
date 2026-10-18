@@ -131,11 +131,21 @@ fn root_handler_aliases_native_presence_bits_and_callback_identity() {
         vec!["other", "42"],
         "ROOT handlers native insertion order"
     );
+    let message = safe_cex_exchange::js_runtime::value::from_json(&json!({"price":17}));
     for cb in map["other"].borrow().iter() {
-        cb(&json!({"price":17})).unwrap();
+        cb(&message).unwrap();
     }
+    assert!(
+        seen.borrow()
+            .iter()
+            .all(|value| value.strict_equals(&message)),
+        "ROOT handlers share original native input"
+    );
     assert_eq!(
-        *seen.borrow(),
+        seen.borrow()
+            .iter()
+            .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+            .collect::<Vec<_>>(),
         vec![json!({"price":17}), json!({"price":17})]
     );
     let source = oracle("types");

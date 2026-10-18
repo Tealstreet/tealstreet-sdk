@@ -639,8 +639,12 @@ fn public_classes_preserve_foreign_core_callback_on_listener_registration() {
     let count = calls.clone();
     let original: MessageHandler = Rc::new(move |events| {
         assert_eq!(
-            events[0]["k"]["s"].as_str(),
-            Some("BTC"),
+            events
+                .get("0")?
+                .get("k")?
+                .get("s")?
+                .strict_equals(&EventValue::str("BTC")),
+            true,
             "native foreign callback receives parsed envelope"
         );
         count.set(count.get() + 1);
@@ -681,16 +685,13 @@ fn public_classes_preserve_foreign_core_callback_on_listener_registration() {
         1,
         "native unsubscribe preserves foreign callback"
     );
-    let unsupported = owner
+    owner
         .on_message(r#"{"e":"kline","s":"BTC","k":{"s":"BTC","i":"1m"},"native":1e400}"#)
-        .unwrap_err();
+        .unwrap();
     assert_eq!(
-        unsupported.name, "TypeError",
-        "native explicit immutable core carrier limit"
-    );
-    assert_eq!(
-        unsupported.message,
-        "core JSON callback cannot represent nonfinite native number"
+        calls.get(),
+        2,
+        "nonfinite unrelated data retains the foreign callback frame"
     );
 }
 
@@ -813,7 +814,7 @@ fn saved_core_bridge_decodes_numeric_lexeme_without_frame() {
     );
     let callback = owner.base().message_handlers.borrow()["saved"].borrow()[0].clone();
     let data: Value = serde_json::from_str(r#"[{"native":1e400}]"#).unwrap();
-    callback(&data).unwrap();
+    callback(&safe_cex_exchange::js_runtime::value::from_json(&data)).unwrap();
 }
 
 #[test]
@@ -1091,23 +1092,42 @@ fn retained_handler_frames_cross_the_production_core_registry() {
         Rc::new(RefCell::new(vec![callback])),
     );
     for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
-        let frame = format!(r#"{{"e":"retainedProbe","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#);
-        owner.on_message(&frame).expect("source-valid native graph reaches core callbacks");
+        let frame = format!(
+            r#"{{"e":"retainedProbe","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#
+        );
+        owner
+            .on_message(&frame)
+            .expect("source-valid native graph reaches core callbacks");
     }
-    owner.on_message(r#"{"e":"retainedProbe","neighbor":true}"#).unwrap();
-    assert_eq!(calls.get(), 4, "every source-valid frame reaches the real class/core registry");
+    owner
+        .on_message(r#"{"e":"retainedProbe","neighbor":true}"#)
+        .unwrap();
+    assert_eq!(
+        calls.get(),
+        4,
+        "every source-valid frame reaches the real class/core registry"
+    );
 }
 
 #[cfg(test)]
 mod retained_handler_support {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../safe-cex-exchange/tests/support/retained_handlers.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
 }
 #[test]
 fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
     let (owner, _, _) = fixture(PublicKind::FuturesMarket);
     let cases = retained_handler_support::source_frames("binance", "publicWebsocket");
     let (handlers, calls) = retained_handler_support::pair(&cases, true);
-    owner.base().message_handlers.borrow_mut().insert("retainedProbe".into(), handlers);
-    for case in cases { owner.on_message(case["frame"].as_str().unwrap()).unwrap(); }
+    owner
+        .base()
+        .message_handlers
+        .borrow_mut()
+        .insert("retainedProbe".into(), handlers);
+    for case in cases {
+        owner.on_message(case["frame"].as_str().unwrap()).unwrap();
+    }
     assert_eq!(calls.get(), 8);
 }
