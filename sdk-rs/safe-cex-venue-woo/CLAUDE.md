@@ -540,3 +540,7 @@ The configured-class/source regression also pins falsy fallback and empty result
 History page parsing uses shared get-key admission before object mapping: null
 and stock arrays without a symbol are skipped; primitives retain the source lookup
 failure. The signed class regression preserves valid sibling fills and error text.
+
+The inactive V3 sequence function/result and their orphan literal codecs are retired.
+Only audit facades called them; constructed-class/import-graph and native receiver
+probes plus real legacy orderbook coverage remain. See WS_STATE_GATES.md and ledger row 46.
