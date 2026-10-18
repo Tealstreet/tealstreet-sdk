@@ -194,18 +194,20 @@ fn descriptor_admission_observes_getter_validation_before_setter() {
         "set",
     ] {
         let events = reads.clone();
-        description.define_accessor(
-            key,
-            Some(Rc::new(move |_| {
-                events.borrow_mut().push(key);
-                Ok(if key == "get" {
-                    Js::Number(7.0)
-                } else {
-                    Js::Undefined
-                })
-            })),
-            None,
-        );
+        description
+            .define_accessor(
+                key,
+                Some(Rc::new(move |_| {
+                    events.borrow_mut().push(key);
+                    Ok(if key == "get" {
+                        Js::Number(7.0)
+                    } else {
+                        Js::Undefined
+                    })
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
     }
     let target = Js::object(vec![]);
     let failure = define(&object, &target, "x", description).unwrap_err();
@@ -217,11 +219,13 @@ fn descriptor_admission_observes_getter_validation_before_setter() {
     let token = Js::object(vec![]);
     let original = token.clone();
     let description = Js::object(vec![]);
-    description.define_accessor(
-        "get",
-        Some(Rc::new(move |_| Err(Thrown::new(original.clone())))),
-        None,
-    );
+    description
+        .define_accessor(
+            "get",
+            Some(Rc::new(move |_| Err(Thrown::new(original.clone())))),
+            None,
+        )
+        .expect("test accessor target permits definition");
     assert!(
         define(&object, &target, "x", description)
             .unwrap_err()

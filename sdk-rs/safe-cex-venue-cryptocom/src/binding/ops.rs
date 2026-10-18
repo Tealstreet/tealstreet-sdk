@@ -355,7 +355,11 @@ fn super_construct(weak: &Weak<Shared>, base: Js, target: Js, args: Vec<Js>) -> 
     for class in classes.iter().rev() {
         for (name, getter) in class.getters.borrow().iter() {
             let getter = getter.clone();
-            instance.define_accessor(name, Some(Rc::new(move |this| getter(this.clone()))), None);
+            instance.define_accessor(
+                name,
+                Some(Rc::new(move |this| getter(this.clone()))),
+                None,
+            )?;
         }
     }
     Ok(instance)

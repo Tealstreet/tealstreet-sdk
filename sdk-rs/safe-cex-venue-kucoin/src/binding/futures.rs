@@ -289,7 +289,7 @@ fn prototype_member(weak: &W, class: &Js, key: &str) -> Result<(), Thrown> {
                     )))
                 })),
                 None,
-            );
+            )?;
             Ok(())
         }
         "getOrFetchPositionMode" | "getOrFetchMarginType" => {

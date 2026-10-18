@@ -76,15 +76,17 @@ impl Host {
             ("store", safe_cex_exchange::js_runtime::store::facade(store)),
         ]);
         let weak = Rc::downgrade(&scope);
-        parent.define_accessor(
-            "isDisposed",
-            Some(Rc::new(move |_| {
-                Ok(Js::Bool(weak.upgrade().is_none_or(|s| {
-                    s.base.get().is_some_and(|b| b.is_disposed())
-                })))
-            })),
-            None,
-        );
+        parent
+            .define_accessor(
+                "isDisposed",
+                Some(Rc::new(move |_| {
+                    Ok(Js::Bool(weak.upgrade().is_none_or(|s| {
+                        s.base.get().is_some_and(|b| b.is_disposed())
+                    })))
+                })),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         let public = sockets::base_websocket(&scope.sockets, parent.clone());
         let private = sockets::base_websocket(&scope.sockets, parent);
         Rc::new(Self {

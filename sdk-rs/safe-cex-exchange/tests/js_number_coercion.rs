@@ -71,7 +71,7 @@ console.log(JSON.stringify(rows));
         let marker = Js::object(vec![("id",Js::str("getter failure"))]);
         let thrown = marker.clone();
         let obj = Js::object(vec![]);
-        obj.define_accessor("valueOf",Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),None);
+        obj.define_accessor("valueOf",Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),None).expect("test accessor target permits definition");
         obj.define("toString",Js::function("must not run",|_,_|panic!("numeric getter error must propagate"))).unwrap();
         let error=number.call(Js::Undefined,vec![obj]).unwrap_err();
         assert!(error.value.strict_equals(&marker));
@@ -80,7 +80,7 @@ console.log(JSON.stringify(rows));
         obj.define_accessor("valueOf",Some(Rc::new(move |this| {
             this.define("toString",Js::function("late string",|_,_|Ok(Js::str("12"))))?;
             Ok(Js::function("object result",|_,_|Ok(Js::object(vec![]))))
-        })),None);
+        })),None).expect("test accessor target permits definition");
         assert_eq!(number.call(Js::Undefined,vec![obj]).unwrap().as_f64(),Some(12.));
         let inherited = Js::object(vec![("marker", Js::Number(17.))]);
         let proto = Js::object(vec![("valueOf", Js::function("inherited", |this, _| this.get("marker")))]);

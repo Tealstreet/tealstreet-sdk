@@ -201,7 +201,7 @@ impl crate::exchange::ExchangeHost for Rt {
                             k,
                             Some(Rc::new(move |recv| f.call(recv.clone(), vec![]))),
                             None,
-                        );
+                        )?;
                     } else {
                         r.define(k, v.clone())?;
                     }

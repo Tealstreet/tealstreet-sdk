@@ -272,11 +272,13 @@ const rows=Object.entries(cases).map(([label,input])=>{
             }
             "getter-throw" => {
                 let marker = marker.clone();
-                payload.define_accessor(
-                    "data",
-                    Some(Rc::new(move |_| Err(Thrown::new(marker.clone())))),
-                    None,
-                );
+                payload
+                    .define_accessor(
+                        "data",
+                        Some(Rc::new(move |_| Err(Thrown::new(marker.clone())))),
+                        None,
+                    )
+                    .expect("fresh test accessor target");
                 Js::Undefined
             }
             "cycle" => {
@@ -294,39 +296,48 @@ const rows=Object.entries(cases).map(([label,input])=>{
                         Ok(Js::Null)
                     })),
                     None,
-                );
+                )
+                .expect("fresh test accessor target");
                 let seen = trace.clone();
-                payload.define_accessor(
-                    "data",
-                    Some(Rc::new(move |_| {
-                        seen.borrow_mut().push("data".into());
-                        Ok(data.clone())
-                    })),
-                    None,
-                );
+                payload
+                    .define_accessor(
+                        "data",
+                        Some(Rc::new(move |_| {
+                            seen.borrow_mut().push("data".into());
+                            Ok(data.clone())
+                        })),
+                        None,
+                    )
+                    .expect("fresh test accessor target");
                 let seen = trace.clone();
-                payload.define_accessor(
-                    "account",
-                    Some(Rc::new(move |_| {
-                        seen.borrow_mut().push("account".into());
-                        Ok(Js::Null)
-                    })),
-                    None,
-                );
+                payload
+                    .define_accessor(
+                        "account",
+                        Some(Rc::new(move |_| {
+                            seen.borrow_mut().push("account".into());
+                            Ok(Js::Null)
+                        })),
+                        None,
+                    )
+                    .expect("fresh test accessor target");
                 let seen = trace.clone();
-                payload.define_accessor(
-                    "user_tier_name",
-                    Some(Rc::new(move |_| {
-                        seen.borrow_mut().push("alias".into());
-                        Ok(Js::Number(f64::NAN))
-                    })),
-                    None,
-                );
-                payload.define_accessor(
-                    "user_tier",
-                    Some(Rc::new(|_| panic!("later alias must not run"))),
-                    None,
-                );
+                payload
+                    .define_accessor(
+                        "user_tier_name",
+                        Some(Rc::new(move |_| {
+                            seen.borrow_mut().push("alias".into());
+                            Ok(Js::Number(f64::NAN))
+                        })),
+                        None,
+                    )
+                    .expect("fresh test accessor target");
+                payload
+                    .define_accessor(
+                        "user_tier",
+                        Some(Rc::new(|_| panic!("later alias must not run"))),
+                        None,
+                    )
+                    .expect("fresh test accessor target");
                 Js::Undefined
             }
             label => panic!("unknown source case {label}"),
