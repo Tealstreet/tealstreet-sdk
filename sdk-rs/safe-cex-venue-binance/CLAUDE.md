@@ -821,3 +821,10 @@ rows on the live ExchangeState listener/dispatch members. The native candle,
 depth and historical-position witnesses and compiled live history flag control
 are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
 to satisfy accepted-owner discovery.
+
+The ten `signing` accepted-set owners are outbound codecs and request-signing
+transformations, with individual non-decoder role records and exact compiler APIs.
+Their classification receipts do not execute signing or establish arbitrary-JS
+parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
+signer against the actual TS signer with installed Axios, qs and create-hmac.
+Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
