@@ -18,6 +18,10 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+// Public deterministic key from tests/fixtures/signing-preimages.json.
+const TEST_SECRET: &str =
+    "01000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
 #[derive(Default)]
 struct Runtime {
     now: Cell<f64>,
@@ -149,7 +153,10 @@ impl World {
             sent: RefCell::default(),
             replies: RefCell::default(),
         });
-        let options = serde_json::from_value(json!({"key":"", "secret":"01000000000000000000000000000000000000000000000000000000000000000000000000000000", "apiKeyIndex":"3", "applicationId":"42"})).unwrap();
+        let options = serde_json::from_value(
+            json!({"key":"", "secret":TEST_SECRET, "apiKeyIndex":"3", "applicationId":"42"}),
+        )
+        .unwrap();
         let venue = LighterNativeExchange::new(
             ExchangeName::Lighter,
             options,
@@ -360,14 +367,21 @@ fn structural_alias_transaction_promises_build_two_orders_with_one_native_nonce_
         .call(Js::Undefined, vec![])
         .unwrap();
     let big = |n: i64| Js::BigInt(Rc::new(BigInt::from(n)));
-    let client = realm.global("TransactionClient").unwrap().construct(vec![Js::object(vec![
-        ("httpClient", world.member("lighterApiClient")),
-        ("crypto", crypto),
-        ("chainId", Js::Number(304.0)),
-        ("privateKey", Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
-        ("accountIndex", big(42)),
-        ("apiKeyIndex", Js::Number(3.0)),
-    ])], None).unwrap();
+    let client = realm
+        .global("TransactionClient")
+        .unwrap()
+        .construct(
+            vec![Js::object(vec![
+                ("httpClient", world.member("lighterApiClient")),
+                ("crypto", crypto),
+                ("chainId", Js::Number(304.0)),
+                ("privateKey", Js::str(TEST_SECRET)),
+                ("accountIndex", big(42)),
+                ("apiKeyIndex", Js::Number(3.0)),
+            ])],
+            None,
+        )
+        .unwrap();
     world.http.replies.borrow_mut().push_back(Js::object(vec![
         ("code", Js::Number(200.0)),
         ("nonce", Js::Number(17.0)),

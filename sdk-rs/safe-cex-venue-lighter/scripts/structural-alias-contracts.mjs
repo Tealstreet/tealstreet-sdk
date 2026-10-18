@@ -8,7 +8,17 @@ import { runProbes } from '../../safe-cex-parity/scripts/accepted-probes.mjs';
 import { loadContracts } from '../../safe-cex-parity/scripts/accepted-contract-files.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const names = ['safe_cex_venue_lighter::transaction_signing::SigningResult', 'safe_cex_venue_lighter::transaction_signing::CryptoCallResult', 'safe_cex_venue_lighter::transaction_promise::Shared', 'safe_cex_venue_lighter::transaction_promise::ObjectPromise', 'safe_cex_venue_lighter::transaction_promise::ObjectResolver', 'safe_cex_venue_lighter::transaction_promise::PromiseResult', 'safe_cex_venue_lighter::http_models::Utf16Record', 'safe_cex_venue_lighter::sdk_validation::ValidationResult', 'safe_cex_venue_lighter::ws_private_warnings::ReadonlyWarningTimes'];
+const names = [
+  'safe_cex_venue_lighter::transaction_signing::SigningResult',
+  'safe_cex_venue_lighter::transaction_signing::CryptoCallResult',
+  'safe_cex_venue_lighter::transaction_promise::Shared',
+  'safe_cex_venue_lighter::transaction_promise::ObjectPromise',
+  'safe_cex_venue_lighter::transaction_promise::ObjectResolver',
+  'safe_cex_venue_lighter::transaction_promise::PromiseResult',
+  'safe_cex_venue_lighter::http_models::Utf16Record',
+  'safe_cex_venue_lighter::sdk_validation::ValidationResult',
+  'safe_cex_venue_lighter::ws_private_warnings::ReadonlyWarningTimes',
+];
 const args = process.argv.slice(2);
 assert.ok(args.length <= 1 && args.every(arg => arg === '--expect-unclassified'));
 const { metadata, pkg, target, found, aliases, macroOrigins } = acceptedAliasContext({
@@ -37,5 +47,5 @@ if (args.includes('--expect-unclassified')) {
   console.log('The actual Lighter structural aliases fails missing classification by name.');
 } else {
   for (const result of results) assert.deepEqual(result.failures, [], result.name);
-  console.log('The actual Lighter structural aliases passes native compiler trait probes.');
+  console.log('The actual Lighter structural aliases pass native compiler trait probes.');
 }
