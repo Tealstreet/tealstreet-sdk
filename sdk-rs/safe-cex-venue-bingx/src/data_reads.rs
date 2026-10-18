@@ -290,16 +290,19 @@ impl BingxDataReads {
                     let leverage = alias(row, "maxLongLeverage")?.cloned();
                     Ok((
                         Market {
+                            runtime: Default::default(),
                             symbol: id.replace('-', ""),
                             id,
                             base: String::new(),
                             quote: String::new(),
                             active: row.get("status").and_then(Input::as_f64) == Some(1.0),
-                            precision: MarketPrecision { amount, price },
+                            precision: MarketPrecision { base: None,
+ quote: None, amount, price },
                             limits: MarketLimits {
+                                cost: None,
                                 amount: MarketLimitsAmount {
                                     min,
-                                    max: f64::INFINITY,
+                                    max: (f64::INFINITY).into(),
                                 },
                                 leverage: MarketLimitsLeverage {
                                     min: 1.0,

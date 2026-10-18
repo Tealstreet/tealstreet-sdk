@@ -73,13 +73,16 @@ pub(crate) fn map_market(
         }
     }
     let precision = MarketPrecision {
+        base: None,
+        quote: None,
         amount: nested("lotSizeFilter", "qtyStep")?,
         price: nested("priceFilter", "tickSize")?,
     };
     let limits = MarketLimits {
+        cost: None,
         amount: MarketLimitsAmount {
             min: nested("lotSizeFilter", "minOrderQty")?,
-            max: nested("lotSizeFilter", "maxOrderQty")?,
+            max: (nested("lotSizeFilter", "maxOrderQty")?).into(),
         },
         leverage: MarketLimitsLeverage {
             min: if spot {
@@ -160,6 +163,7 @@ pub(crate) fn map_market(
     };
     // Preserve raw instrument metadata independently of typed asset admission.
     Ok(Ok(Market {
+        runtime: Default::default(),
         id: id.clone(),
         symbol: id,
         base,

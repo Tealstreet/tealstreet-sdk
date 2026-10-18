@@ -249,7 +249,8 @@ fn audit_messagepack_source_depth_limit_is_enforced_before_signing() {
     let error = action_hash(&rejected, None, &json!(1))
         .expect_err("AUDIT native MessagePack value at depth101 must refuse signing");
     assert_eq!(
-        error, "Too deep objects in depth 101",
+        error.to_string(),
+        "Too deep objects in depth 101",
         "AUDIT native MessagePack source depth error"
     );
 }

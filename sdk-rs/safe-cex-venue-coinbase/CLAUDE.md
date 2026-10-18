@@ -365,3 +365,10 @@ numbers and the production typed-field frame adapter. The projection control
 changes that actual venue adapter, requires its compiled bit assertion to fail
 and restores exact bytes. This finite cohort does not replace underlying model
 contracts or claim every read method or arbitrary input-object identity.
+
+The shared retained/numeric typed decoder now replaces isolated UTF-16 units
+with U+FFFD in materialized String fields instead of rejecting the entire record.
+`tests/string_boundaries.rs` retains the live source corpus and exact unit/path
+pins, measures that accepted typed-view cost, and checks that ignored strings
+leave declared fields intact. Standalone serde_json::Value parsing and the
+separate bounded recursion behavior retain their own explicit checks.

@@ -1,3 +1,6 @@
+#[path = "support/query_observer.rs"]
+mod query_observer;
+
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
@@ -28,7 +31,7 @@ impl RestAdapter for Script {
             let ordinal = self.attempts.borrow()[slot];
             self.attempts.borrow_mut()[slot] += 1;
             self.calls.borrow_mut().push(
-                json!({"phase":phase,"ordinal":ordinal,"url":request.url,"params":request.params}),
+                json!({"phase":phase,"ordinal":ordinal,"url":request.url,"params":query_observer::params(&request)}),
             );
             let error = ordinal == 0
                 && match self.scenario.as_str() {
@@ -209,8 +212,8 @@ fn primary_parameter_presence_and_native_numbers() {
             assert!(!params.contains_key("page"), "HISTORY primary omits page");
         } else {
             assert_eq!(
-                safe_cex_num::js_number(params.get("page")).unwrap(),
-                5.0,
+                params["page"]["bits"].as_str().unwrap(),
+                format!("{:016x}", 5.0f64.to_bits()),
                 "HISTORY legacy retains page"
             );
         }
@@ -231,25 +234,15 @@ fn primary_parameter_presence_and_native_numbers() {
                 attempts: RefCell::new([0, 0]),
             };
             let result = ready(fetch_transaction_history_rows(&adapter, &input));
-            if number.is_nan() {
-                assert!(result.is_err(), "HISTORY NaN refusal");
-                assert!(
-                    adapter.calls.borrow().is_empty(),
-                    "HISTORY NaN never transmits"
-                );
-            } else {
-                assert!(result.unwrap().is_empty());
-                let calls = adapter.calls.borrow();
-                assert_eq!(calls.len(), 1, "HISTORY numeric direct request count");
-                let key = ["limit", "startTime", "endTime"][field];
-                assert_eq!(
-                    safe_cex_num::js_number(Some(&calls[0]["params"][key]))
-                        .unwrap()
-                        .to_bits(),
-                    number.to_bits(),
-                    "HISTORY primary numeric bits {key}"
-                );
-            }
+            assert!(result.unwrap().is_empty());
+            let calls = adapter.calls.borrow();
+            assert_eq!(calls.len(), 1, "HISTORY numeric direct request count");
+            let key = ["limit", "startTime", "endTime"][field];
+            assert_eq!(
+                calls[0]["params"][key]["bits"].as_str().unwrap(),
+                format!("{:016x}", number.to_bits()),
+                "HISTORY primary numeric bits {key}"
+            );
             observations += 1;
         }
     }

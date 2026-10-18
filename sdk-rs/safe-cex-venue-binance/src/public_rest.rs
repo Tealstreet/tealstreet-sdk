@@ -278,12 +278,14 @@ fn derivative_market(
         active: prop(Some(m), "status")?.and_then(Value::as_str) == Some("TRADING"),
         is_spot: None,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: vf(amt, "stepSize")?,
             price: vf(p, "tickSize")?,
         },
         amount: MarketLimitsAmount {
             min: max(vf(amt, "minQty")?, vf(m_amt, "minQty")?),
-            max: min(vf(amt, "maxQty")?, vf(m_amt, "maxQty")?),
+            max: (min(vf(amt, "maxQty")?, vf(m_amt, "maxQty")?)).into(),
         },
         leverage_min: 1.0,
         leverage_max: keyed(first, "initialLeverage")?
@@ -317,6 +319,8 @@ fn spot_market(m: &Value) -> Result<RestMarket, Failure> {
         active: prop(Some(m), "status")?.and_then(Value::as_str) == Some("TRADING"),
         is_spot: Some(true),
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: if amount_step > 0.0 {
                 amount_step
             } else {
@@ -330,7 +334,7 @@ fn spot_market(m: &Value) -> Result<RestMarket, Failure> {
         },
         amount: MarketLimitsAmount {
             min: float_or(lot.and_then(|v| v.get("minQty")), 0.0)?,
-            max: float_or(lot.and_then(|v| v.get("maxQty")), 999_999_999.0)?,
+            max: (float_or(lot.and_then(|v| v.get("maxQty")), 999_999_999.0)?).into(),
         },
         leverage_min: 1.0,
         leverage_max: json!(1),

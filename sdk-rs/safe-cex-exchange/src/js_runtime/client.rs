@@ -26,6 +26,10 @@ pub trait JsHttpHost {
     fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
         None
     }
+    /// Native implementation of the source options.payloadSigner callback.
+    fn payload_signer(&self) -> Option<Rc<dyn safe_cex_crypto::PayloadSigner>> {
+        None
+    }
 }
 
 type Host = Rc<dyn JsHttpHost>;
@@ -613,6 +617,24 @@ pub struct JsRestAdapter {
     rejection: RefCell<Option<Thrown>>,
 }
 
+fn native_query(value: &safe_cex_types::QueryValue) -> Js {
+    use safe_cex_types::QueryValue;
+    match value {
+        QueryValue::Undefined => Js::Undefined,
+        QueryValue::Null => Js::Null,
+        QueryValue::Bool(value) => Js::Bool(*value),
+        QueryValue::Number(value) => Js::Number(*value),
+        QueryValue::String(value) => Js::str(value),
+        QueryValue::Array(values) => Js::array(values.iter().map(native_query).collect()),
+        QueryValue::Object(values) => Js::object(
+            values
+                .iter()
+                .map(|(key, value)| (key.as_str(), native_query(value)))
+                .collect(),
+        ),
+    }
+}
+
 impl JsRestAdapter {
     pub fn new(runtime: Rc<dyn ExchangeRuntime>, xhr: Js) -> Self {
         Self {
@@ -622,13 +644,24 @@ impl JsRestAdapter {
         }
     }
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
+        let params = match (&request.query_params, &request.params) {
+            (Some(_), Some(_)) => {
+                return Err(Thrown::error(
+                    "TypeError",
+                    "Cannot combine legacy and native query parameters",
+                ));
+            }
+            (Some(params), None) => Some(native_query(params)),
+            (None, Some(params)) => Some(from_json(params)),
+            (None, None) => None,
+        };
         let config = Js::object(vec![]);
         for (name, value) in &request.config_extensions {
             config.define(name, from_retained_input(value.clone()))?;
         }
         // Typed parameters remain authoritative over an extension of that name.
-        if let Some(params) = &request.params {
-            config.define("params", from_json(params))?;
+        if let Some(params) = params {
+            config.define("params", params)?;
         }
         let url = Js::str(&request.url);
         // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
@@ -728,6 +761,7 @@ struct RestHttpHost {
     runtime: Rc<dyn ExchangeRuntime>,
     adapter: std::sync::Arc<dyn RestAdapter>,
     remote: Option<super::base_exchange::HostedSigner>,
+    payload: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
     exchange: RefCell<Option<safe_cex_types::ExchangeName>>,
 }
 
@@ -745,10 +779,21 @@ pub fn rest_http_host_signed(
     adapter: std::sync::Arc<dyn RestAdapter>,
     remote: Option<super::base_exchange::HostedSigner>,
 ) -> Rc<dyn JsHttpHost> {
+    rest_http_host_with_signers(runtime, adapter, remote, None)
+}
+
+/// Native signer capabilities remain executable handles outside serialized options.
+pub fn rest_http_host_with_signers(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: Option<super::base_exchange::HostedSigner>,
+    payload: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
+) -> Rc<dyn JsHttpHost> {
     Rc::new(RestHttpHost {
         runtime,
         adapter,
         remote,
+        payload,
         exchange: RefCell::new(None),
     })
 }
@@ -1046,6 +1091,9 @@ impl JsHttpHost for RestHttpHost {
     }
     fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
         self.remote.clone()
+    }
+    fn payload_signer(&self) -> Option<Rc<dyn safe_cex_crypto::PayloadSigner>> {
+        self.payload.clone()
     }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.runtime.clone()

@@ -172,7 +172,7 @@ impl JsNumberOutput for safe_cex_types::MarginType {
 
 impl JsNumberOutput for safe_cex_types::MarketLimits {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { amount, leverage, price });
+        crate::js_number_output!(self, struct { amount, leverage, price, cost });
     }
 }
 
@@ -190,7 +190,7 @@ impl JsNumberOutput for safe_cex_types::MarketLimitsLeverage {
 
 impl JsNumberOutput for safe_cex_types::MarketLimitsPrice {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { min });
+        crate::js_number_output!(self, struct { min, max });
     }
 }
 
@@ -232,7 +232,7 @@ impl JsNumberOutput for safe_cex_types::PositionOption {
 
 impl JsNumberOutput for safe_cex_types::MarketPrecision {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { amount, price });
+        crate::js_number_output!(self, struct { amount, price, base, quote });
     }
 }
 
@@ -385,7 +385,7 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptions {
 
 impl JsNumberOutput for safe_cex_types::Market {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { id, symbol, pretty_symbol, base, quote, active, precision, limits, option, contract_size, is_expiring, is_inverse, is_spot, is_perpetual, is_read_only, taker_fee, maker_fee } passthrough { info });
+        crate::js_number_output!(self, struct { id, symbol, pretty_symbol, base, quote, active, precision, limits, option, contract_size, is_expiring, is_inverse, is_spot, is_perpetual, is_read_only, taker_fee, maker_fee, runtime } passthrough { info });
     }
 }
 
@@ -440,5 +440,17 @@ impl JsNumberOutput for safe_cex_types::PreparedOrderOpts {
 impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtraHyrotraderMode {
     fn check_number_output(&self) {
         crate::js_number_output!(self, enum { Demo, Production });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::NumericValue {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Number(value), Text(value) });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::MarketRuntime {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { kind, spot, swap, future, contract, linear, inverse });
     }
 }

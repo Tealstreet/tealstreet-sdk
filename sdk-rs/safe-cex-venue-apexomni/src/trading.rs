@@ -149,7 +149,7 @@ impl ApexOmniExchange {
             .get(&opts.symbol)
             .cloned()
             .ok_or_else(|| failure(format!("Market {} not found", opts.symbol)))?;
-        let max_size = market.limits.amount.max;
+        let max_size = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         let p_price = market.precision.price;
         let p_amount = market.precision.amount;
         let amount = adjust(opts.amount, p_amount);

@@ -47,6 +47,15 @@ pub fn action(o: PlaceOrderOpts) -> actions::Options {
 }
 pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
     Ok(Market {
+        runtime: MarketRuntime {
+            kind: Some(m.kind.into()),
+            spot: Some(m.spot),
+            swap: Some(m.swap),
+            future: Some(m.future),
+            contract: Some(m.contract),
+            linear: Some(m.linear),
+            inverse: Some(m.inverse),
+        },
         id: text(&m.id)?,
         symbol: text(&m.symbol)?,
         base: text(&m.base)?,
@@ -59,19 +68,26 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
         pretty_symbol: None,
         active: m.active,
         precision: MarketPrecision {
+            base: Some(m.precision[2]),
+            quote: Some(m.precision[3]),
             amount: m.precision[0],
             price: m.precision[1],
         },
         limits: MarketLimits {
+            cost: Some(MarketLimitsLeverage {
+                min: m.limits[2][0],
+                max: m.limits[2][1],
+            }),
             amount: MarketLimitsAmount {
                 min: m.limits[0][0],
-                max: m.limits[0][1],
+                max: (m.limits[0][1]).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: m.limits[3][0],
                 max: m.limits[3][1],
             },
             price: Some(MarketLimitsPrice {
+                max: Some(m.limits[1][1]),
                 min: m.limits[1][0],
             }),
         },

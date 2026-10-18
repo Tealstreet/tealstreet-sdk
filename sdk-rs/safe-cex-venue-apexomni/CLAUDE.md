@@ -538,3 +538,11 @@ not a wire decoder. Its accepted alias row checks the actual compiler type and
 raw trait admission; the production NativeSigner tests separately inspect every
 Contract field, pointer/lifetime retention and foreign-handle refusal. Keep those
 native observations distinct from JSON output or mock-host signing assertions.
+
+
+The native SDK-initialization scheduling row is accepted for the constructed
+binding: NativeSigner uses compiled cryptography and its init future has no
+module-loading side effects. DIVERGENCE_REVIEW.md records the scope. The binding
+probe validates twice and signs two orders while only pumping jobs, without
+clock advancement. scripts/initialization-controls.py must compile a pending
+initializer fault, observe the named binding refusal and restore exact bytes.

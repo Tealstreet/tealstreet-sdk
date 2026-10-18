@@ -269,7 +269,10 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     assert_eq!(markets.len(), 1, "only OPEN USDT markets");
     assert_eq!(markets[0].id, "BTC/USDT");
     assert_eq!(markets[0].precision.amount.to_bits(), 0.001f64.to_bits());
-    assert_eq!(markets[0].limits.amount.max.to_bits(), 500f64.to_bits());
+    assert_eq!(
+        safe_cex_num::numeric_value_to_number(&markets[0].limits.amount.max).to_bits(),
+        500f64.to_bits()
+    );
     assert!(sent(&calls(&wire), "GET", MARKETS).is_some());
 
     // 2 fetch_tickers

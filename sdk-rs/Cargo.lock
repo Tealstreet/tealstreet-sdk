@@ -4302,6 +4302,7 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4425,6 +4426,7 @@ dependencies = [
  "serde_json",
  "starknet-core",
  "starknet-crypto",
+ "tokio",
 ]
 
 [[package]]

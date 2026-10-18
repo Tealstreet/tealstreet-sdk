@@ -437,6 +437,7 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                 return Err(format!("{path}.baseIMR must not exceed 1"));
             }
             Ok(Market {
+                runtime: Default::default(),
                 id: format!("{}/{}:{}", row.base_asset, row.quote_asset, row.quote_asset),
                 symbol: format!("{}{}", row.base_asset, row.quote_asset),
                 base: row.base_asset.clone(),
@@ -446,6 +447,8 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                     .as_deref()
                     .is_none_or(|status| status == "TRADING"),
                 precision: MarketPrecision {
+                    base: None,
+                    quote: None,
                     amount: {
                         let value = match &row.base_tick {
                             WooV3InstrumentBaseTick::Number(value) => *value,
@@ -478,9 +481,10 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                     },
                 },
                 limits: MarketLimits {
+                    cost: None,
                     amount: MarketLimitsAmount {
                         min: amount_min,
-                        max: amount_max,
+                        max: (amount_max).into(),
                     },
                     leverage: MarketLimitsLeverage {
                         min: 1.0,

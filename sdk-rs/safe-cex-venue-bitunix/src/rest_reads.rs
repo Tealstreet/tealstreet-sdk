@@ -122,25 +122,33 @@ where
                 refusals.push(format!("Refused Bitunix market row {index}: symbol={value}: expected string"));
                 continue;
             };
-            let max_amount = match js_number(key(row, "maxLimitOrderVolume")) {
-                Ok(value) => value,
-                Err(cause) => {
-                    let value = key(row, "maxLimitOrderVolume").map_or_else(|| "undefined".into(), Value::to_string);
-                    refusals.push(format!("Refused Bitunix market row {index} symbol={symbol:?}: limits.amount.max={value}: {}", cause.message));
-                    continue;
+            let max_amount = if let Some(Value::String(value)) = key(row, "maxLimitOrderVolume") {
+                safe_cex_types::NumericValue::Text(value.clone())
+            } else {
+                match js_number(key(row, "maxLimitOrderVolume")) {
+                    Ok(value) => safe_cex_types::NumericValue::Number(value),
+                    Err(cause) => {
+                        let value = key(row, "maxLimitOrderVolume").map_or_else(|| "undefined".into(), Value::to_string);
+                        refusals.push(format!("Refused Bitunix market row {index} symbol={symbol:?}: limits.amount.max={value}: {}", cause.message));
+                        continue;
+                    }
                 }
             };
             markets.push(Market {
+                runtime: Default::default(),
                 id,
                 symbol: symbol.into(),
                 base: base.into(),
                 quote: "USDT".into(),
                 active: true,
                 precision: MarketPrecision {
+                    base: None,
+                    quote: None,
                     amount: amount_precision,
                     price: price_precision,
                 },
                 limits: MarketLimits {
+                    cost: None,
                     amount: MarketLimitsAmount {
                         min: 0.0,
                         max: max_amount,

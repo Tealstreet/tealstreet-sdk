@@ -72,6 +72,7 @@ pub fn map_bybit_option_instrument(raw: &Input) -> Result<Option<Market>, String
             .map(|value| value.unwrap_or_default())
     };
     Ok(Some(Market {
+        runtime: Default::default(),
         id: symbol.clone(),
         symbol,
         pretty_symbol: None,
@@ -79,16 +80,20 @@ pub fn map_bybit_option_instrument(raw: &Input) -> Result<Option<Market>, String
         quote: text("quoteCoin")?,
         active: true,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: num(nested(raw, "lotSizeFilter", "qtyStep"))?,
             price: num(nested(raw, "priceFilter", "tickSize"))?,
         },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount {
                 min: num(nested(raw, "lotSizeFilter", "minOrderQty"))?,
-                max: num(nested(raw, "lotSizeFilter", "maxOrderQty"))?,
+                max: (num(nested(raw, "lotSizeFilter", "maxOrderQty"))?).into(),
             },
             leverage: MarketLimitsLeverage { min: 1., max: 1. },
             price: Some(MarketLimitsPrice {
+                max: None,
                 min: num(nested(raw, "priceFilter", "minPrice"))?,
             }),
         },

@@ -68,6 +68,7 @@ where
                 )?;
                 let symbol: String = to_typed(&raw_symbol)?;
                 markets.push(Market {
+                    runtime: Default::default(),
                     id: symbol.clone(),
                     symbol,
                     pretty_symbol: None,
@@ -77,13 +78,17 @@ where
                         .get("tradingStatus")?
                         .strict_equals(&Js::str("FULL")),
                     precision: MarketPrecision {
+                        base: None,
+                        quote: None,
                         amount: market_property(&details, "minOrderSizeIncrement")?,
                         price: market_property(&instrument, "priceIncrement")?,
                     },
                     limits: MarketLimits {
+                        cost: None,
                         amount: MarketLimitsAmount {
                             min: market_property(&details, "minOrderSize")?,
-                            max: market_property(&details.get("maxOrderSize")?, "value")?,
+                            max: (market_property::<f64>(&details.get("maxOrderSize")?, "value")?)
+                                .into(),
                         },
                         leverage: MarketLimitsLeverage {
                             min: 1.0,

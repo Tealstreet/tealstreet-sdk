@@ -73,6 +73,7 @@ pub fn position(id: &str, marker: f64) -> safe_cex_types::Position {
 pub fn market(base: &str) -> safe_cex_types::Market {
     use safe_cex_types::*;
     Market {
+        runtime: Default::default(),
         id: format!("{base}USDT"),
         symbol: format!("{base}USDT"),
         pretty_symbol: None,
@@ -80,13 +81,16 @@ pub fn market(base: &str) -> safe_cex_types::Market {
         quote: "USDT".into(),
         active: true,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: 0.001,
             price: 0.1,
         },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount {
                 min: 0.001,
-                max: 50.0,
+                max: (50.0).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: 1.0,
