@@ -11,27 +11,6 @@
       "isReconnectPauseActive": null
     }
   },
-  "safe_cex_store::store::DefaultStore": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
-    "entrypoints": [
-      {
-        "api": {
-          "kind": "inherent",
-          "name": "new",
-          "signature": {
-            "inputs": [],
-            "output": {
-              "generic": "Self"
-            },
-            "is_c_variadic": false
-          }
-        },
-        "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
-      }
-    ]
-  },
   "safe_cex_store::instrument_class::classify_market": {
     "api": {
       "kind": "function",
@@ -904,11 +883,11 @@
         "output": "Infinity"
       },
       {
-        "input": "﻿12.5tail",
+        "input": "\ufeff12.5tail",
         "output": "12.5"
       },
       {
-        "input": "12.5",
+        "input": "\u008512.5",
         "output": "NaN"
       }
     ]
@@ -989,12 +968,12 @@
         "output": null
       },
       {
-        "input": " ﻿x\n",
+        "input": " \ufeffx\n",
         "output": "x"
       },
       {
-        "input": "",
-        "output": ""
+        "input": "\u0085",
+        "output": "\u0085"
       },
       {
         "input": 12,

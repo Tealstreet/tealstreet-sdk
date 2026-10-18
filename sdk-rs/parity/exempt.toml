@@ -6797,20 +6797,20 @@ rs = "safe-cex-venue-hyperliquid/src/private_class.rs::CorePrivateClassHost::def
 reason = "C3: explicit same-realm value/error alias, prototype-call discriminator/capture or native class/function/property allocation binding for the mapped private class. No additional source business algorithm or concrete JavaScript VM implementation is supplied by this plumbing."
 
 [[exempt]]
-rs = "safe-cex-store/src/ticker_lookup.rs::TickerSymbolLookup"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+rs = "safe-cex-store/src/ticker_lookup.rs::TickerLookup"
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
-rs = "safe-cex-store/src/ticker_lookup.rs::TickerSymbolLookup::is_truthy"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+rs = "safe-cex-store/src/ticker_lookup.rs::TickerLookup::is_truthy"
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
-rs = "safe-cex-store/src/ticker_lookup.rs::TickerSymbolLookup::update_id"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+rs = "safe-cex-store/src/ticker_lookup.rs::TickerLookup::update_id"
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
 rs = "safe-cex-store/src/contract.rs::Store::lookup_ticker_by_symbol"
-reason = "Native property-observation result and Stock/DefaultStore operation plumbing for the separately mapped ticker-symbol getter and venue caller; no complete dynamic Store heap claimed."
+reason = "Fallible deferred observation of the same captured canonical ticker lookup value. Truthiness and reached id access preserve native reference/throw behavior; no second Store representation."
 
 [[exempt]]
 rs = "safe-cex-store/src/model_patch.rs::StorePatchError::is_type_error"
@@ -7588,3 +7588,75 @@ reason = "Native stepping of the source for-in language operation, using canonic
 [[exempt]]
 rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::own_properties"
 reason = "Stock intrinsic descriptor-name/enumerability metadata in the existing retained PrototypeRealm, consumed by canonical for-in enumeration without reading values or allocating another heap. Native/Node property-set and flag witnesses cover six actual intrinsic roles; there is no named TypeScript SDK method and public intrinsic descriptor reflection remains refused."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle"
+reason = "Rust-only captured-reference capability passed between typed Store consumers; it retains the original native balance without a cached Balance or Store back-reference. The native Store balance alias/generation/getter/drop witness exercises it."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle::new"
+reason = "Installs the existing captured referent capability; construction performs no property read or decoding and defines no TypeScript operation."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle::native_value"
+reason = "Downcasts and forwards the same captured native referent before any typed projection; required by native balance adapters, with no new JS-visible field."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceHandle::read"
+reason = "Explicit fallible typed projection of a captured balance referent. Native adapters bypass this view; alias, old-generation, throwing-getter and owner-drop cases are covered by canonical_native_store."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceReference"
+reason = "Object-safe lower-layer capability for one retained native balance; separates native forwarding from explicit typed reading without depending on exchange-core."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceReference::native_value"
+reason = "Opaque native capability method; returns the captured value identity, not a serialized view or independently materialized state."
+
+[[exempt]]
+rs = "safe-cex-store/src/balance_handle.rs::BalanceReference::read"
+reason = "Fallible native-reference projection protocol; original Store read causes remain opaque and recoverable, without a TypeScript decoder method."
+
+[[exempt]]
+rs = "safe-cex-store/src/contract.rs::Store::native_owner"
+reason = "Required opaque capability for the sole material Js graph. Native facades visibly refuse unsupported implementations rather than creating StoreData copies; no independent source operation."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::PatchModel"
+reason = "Typed patch admission protocol for the existing strict model boundary. Raw native Store mutations use the canonical property algorithms directly."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::PatchModel::patch_field"
+reason = "Per-field typed patch admission used before publishing a typed model patch; no standalone TypeScript declaration or raw native property replacement."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::StorePatchError::invalid_index"
+reason = "Typed adapter error construction for an inadmissible indexed patch; it does not define source collection behavior or normalize a native property failure."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError"
+reason = "Rust typed-read error envelope carrying property/projection phase and the opaque original native cause. Native escape recovers the original Thrown before diagnostics; no replacement JS error object is claimed."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError::new"
+reason = "Constructs the lower-layer typed-read envelope without reading or formatting native cause properties; the canonical Store getter witness checks exact original cause identity."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError::native_cause"
+reason = "Recovers the retained opaque native cause for the exchange adapter; no JSON projection, getter evaluation or independent source operation."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadError::phase"
+reason = "Rust diagnostic observation of whether a typed read failed at property access or projection; source native throw identity remains separately retained."
+
+[[exempt]]
+rs = "safe-cex-types/src/store_access.rs::StoreReadPhase"
+reason = "Closed Rust-only read-boundary diagnostic tag, not an enum substituted for a JavaScript value or source error code."
+
+[[exempt]]
+rs = "safe-cex-venue-blofin/src/reads.rs::MappingError"
+reason = "Rust typed mapper completion distinguishing existing coercion/input refusals from a fallible Store read; conversion retains the original Store cause instead of treating it as a mapping message."
+
+[[exempt]]
+rs = "safe-cex-venue-bybit/src/inverse_position.rs::PositionMappingError"
+reason = "Rust completion envelope separating the existing typed Position refusal from a Store access failure; native error propagation retains the Store origin."

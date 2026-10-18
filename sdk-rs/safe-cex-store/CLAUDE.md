@@ -12,7 +12,11 @@ it has no dependency on exchange-core. Graph-backed reads and `serialize` return
 owned `Result` projections using the preserving-undefined codec. `native_owner`
 is required: a native facade refuses an unsupported owner rather than creating
 an independent material copy. `BalanceHandle` captures one native referent and
-projects only when its fallible `read` is requested.
+projects only when its fallible `read` is requested. The lower protocol exposes only an opaque
+owner capability: it cannot construct a second graph. `StoreReadError` carries
+the property/projection phase and original native cause; its diagnostics never
+read cause properties. Typed patch admission remains separate from raw native
+property mutations, so its error adapters do not replace source throw values.
 
 Default oracle comparisons are frozen snapshots. The ignored `live_snapshots`
 gate executes every generator with `--check`; CI runs all targets with
