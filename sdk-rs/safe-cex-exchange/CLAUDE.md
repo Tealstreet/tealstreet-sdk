@@ -188,8 +188,8 @@ impl ExchangeRuntime for RecordingRuntime {
     fn unique_id(&self) -> String { "fixture-id".into() }
     fn is_worker(&self) -> bool { false }
     fn random(&self) -> f64 { 0.5 }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) { eprintln!("{}: {}", error.name, error.message); }
-    fn report_raw_exception(&self, _: &Js, _: &Value) { panic!("unexpected raw exception report") }
+    fn report_exception(&self, error: &ExchangeError, _: &safe_cex_types::retained_json::RetainedJsonInput) { eprintln!("{}: {}", error.name, error.message); }
+    fn report_raw_exception(&self, _: &Js, _: &safe_cex_types::retained_json::RetainedJsonInput) { panic!("unexpected raw exception report") }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker request")
     }
@@ -1617,7 +1617,7 @@ NaN, both infinities, signed zero, clones and arithmetic results.
 Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
 shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
 The reporter retains lazy reads, native formatted messages and worker error identity.
-Optional message/extra-data retain their stated UTF-8/JSON profiles; console and
+Optional message retains its stated UTF-8 profile; extra data uses retained input; console and
 main-thread raw exception hosts receive original local Js references; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
 
 Worker/native delivery services live in exchange-core so constructor hosts never
