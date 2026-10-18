@@ -192,6 +192,14 @@ emitter. It emits exactly once, then returns the unsupported-margin Error; an
 emitter failure takes precedence and retains its metadata. Unused isolated and
 symbol inputs are omitted; concrete class/emitter composition remains pending.
 
+The three `leverage` function contracts pin typed command APIs, including the
+shared setter reached by both live exchange classes. Their classification receipts
+do not execute the commands or admit raw records. The separate `leverage` test
+target compares 138 maintained source cases and four inherited-market guards,
+observes native finite/signed-zero bits and nonfinite classes before projection,
+and checks both families cannot write Store state while POST remains pending.
+Use canonical accepted-set `--measure --module=leverage` for the scoped receipts.
+
 Generated wire records capture shared JsNumberInput at their public Deserialize
 entry, then call the private remote companion through strict_decode::object. Keep
 all field/default/presence attributes on that schema and keep the explicit
