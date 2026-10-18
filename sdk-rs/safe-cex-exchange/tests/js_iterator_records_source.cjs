@@ -20,7 +20,24 @@ for (const fault of ['next','done','value','body']) {
   catch (error) { trace.push(error === token ? 'original' : 'other'); }
   cases.push({fault,trace});
 }
-if (process.argv[2] !== 'normal') console.log(JSON.stringify(cases));
+if (process.argv[2] === 'contract') {
+  const inputs = [[],[7,'😀',null],'A😀',7,null];
+  const record = inputs.map(input => {
+    try {
+      const iterator = input[Symbol.iterator]();
+      const values = [];
+      for (const value of iterator) {
+        if (typeof value === 'number') { const bytes=Buffer.alloc(8);bytes.writeDoubleBE(value);values.push({bits:bytes.toString('hex')}); }
+        else if (typeof value === 'string') values.push({units:Array.from({length:value.length},(_,i)=>value.charCodeAt(i))});
+        else if (value === null) values.push({null:true});
+        else throw new Error('unreviewed fixture value');
+      }
+      return {input,output:{values,exhausted:iterator.next().done,closed:iterator.return === undefined}};
+    } catch(error) { return {input,output:{error:error.name}}; }
+  });
+  console.log(JSON.stringify({record}));
+}
+else if (process.argv[2] !== 'normal') console.log(JSON.stringify(cases));
 else {
   const results = [];
   for (const mode of ['object','primitive','throw','getThrow','undefined','number','class']) {
