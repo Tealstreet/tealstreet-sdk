@@ -13,7 +13,7 @@ const {setTelemetrySink}=load(path.join(root,'packages/safe-cex/src/telemetry.ts
    store.update({positions:['BTCUSDT','ETHUSDT'].map(symbol=>({id:symbol,symbol,side:'long',contracts:0,entryPrice:0,notional:0,leverage:1,unrealizedPnl:0,liquidationPrice:0,marginSize:0,marginType:'cross',positionMode:'oneway'}))});
    const subject=new Subject(stem,{key:'native-key',secret:'native-secret',testnet:variant,tuning:{consoleLogging:false}},store);
    const requests=[],events=[],reports=[];const symbol=variant?'ETHUSDT':'BTCUSDT';
-   subject.on('error',v=>events.push(v));setTelemetrySink({captureException:v=>reports.push(v)});
+   subject.on('error',(v,metadata)=>{events.push(v);assert.deepEqual(Object.keys(metadata),['enhancedContext','suppressConsoleLog']);assert.equal(metadata.enhancedContext,undefined);assert.equal(metadata.suppressConsoleLog,false);});setTelemetrySink({captureException:v=>reports.push(v)});
    for(const client of new Set([subject.xhr,subject.papiXhr,subject._primaryXhr,subject._secondaryXhr,subject.publicXhr,subject.unlimitedXHR,subject.fapiXhr].filter(Boolean))){
     client.defaults.adapter=async config=>{
      const u=new URL(config.url,config.baseURL);const query=new URLSearchParams(config.params||{});
@@ -23,12 +23,14 @@ const {setTelemetrySink}=load(path.join(root,'packages/safe-cex/src/telemetry.ts
     };
    }
    if(method==='fetchPositions'&&stem!=='binancespot')store.setSetting('isHedged',variant);
+   const listenerFailure=new Error('listener rejection');
+   if(stem==='binancepm'&&method==='changeMarginType'&&variant)subject.on('error',()=>{throw listenerFailure});
    const args={fetchPositions:[[symbol]],fetchOrders:[[symbol]],cancelSymbolOrders:[symbol],setLeverage:[symbol,variant?23:17],changePositionMode:[variant,symbol],changeMarginType:[variant,symbol]}[method];
    try{
     let result,error;try{result=await subject[method](...args)}catch(e){error=e}
     const inherited=stem==='binancespot'&&['setLeverage','changePositionMode','changeMarginType'].includes(method);
     if(inherited){assert.equal(error?.message,'Not implemented');assert.equal(requests.length,0);assert.equal(events.length,0);}
-    else if(stem==='binancepm'&&method==='changeMarginType'){assert.equal(error?.message,'Portfolio margin is not supported');assert.equal(requests.length,0);assert.deepEqual(events,['Exchange Error: Portfolio margin is not supported']);}
+    else if(stem==='binancepm'&&method==='changeMarginType'){assert.equal(error?.message,variant?'listener rejection':'Portfolio margin is not supported');if(variant)assert.equal(error,listenerFailure);assert.equal(requests.length,0);assert.deepEqual(events,['Exchange Error: Portfolio margin is not supported']);}
     else {assert.equal(error,undefined,`${stem}.${method}`);assert.ok(requests.length>0,`${stem}.${method}: actual HTTP`);assert.equal(events.length,0);}
     if(method==='fetchOrders'){if(stem==='binancepm'&&variant){assert.equal(result.length,1);assert.equal(result[0].id,'case-B');assert.equal(result[0].amount,2.5);}else assert.deepEqual(result,[]);}
     if(method==='fetchPositions'&&stem==='binancespot')assert.deepEqual(result,[]);

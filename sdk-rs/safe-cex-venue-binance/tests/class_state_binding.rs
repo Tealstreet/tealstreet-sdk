@@ -116,4 +116,43 @@ fn maintained_class_state_profiles_remain_current() {
     );
     let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(rows.len(), 36, "maintained full-constructor case floor");
+    let contracts: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../safe-cex-parity/accepted-set/contracts/safe-cex-venue-binance.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    for row in rows {
+        let class = match row["stem"].as_str().unwrap() {
+            "binance" => "BinanceExchange",
+            "binancepm" => "BinancePMExchange",
+            "binancespot" => "BinanceSpotExchange",
+            _ => panic!("unreviewed source class"),
+        };
+        let method = match row["method"].as_str().unwrap() {
+            "fetchPositions" => "fetch_positions",
+            "fetchOrders" => "fetch_orders",
+            "cancelSymbolOrders" => "cancel_symbol_orders",
+            "setLeverage" => "set_leverage",
+            "changePositionMode" => "change_position_mode",
+            "changeMarginType" => "change_margin_type",
+            _ => panic!("unreviewed source method"),
+        };
+        let entries =
+            contracts[format!("safe_cex_venue_binance::exchange_classes::{class}")]["entrypoints"]
+                .as_array()
+                .unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry["api"]["name"] == method)
+            .unwrap();
+        let case = &entry["cases"][usize::from(row["variant"].as_bool().unwrap())];
+        let expected = case["output"].get("wire").cloned().unwrap_or(json!([]));
+        assert_eq!(
+            row["requests"], expected,
+            "source/native authored wire expectation {class}.{method}"
+        );
+    }
 }

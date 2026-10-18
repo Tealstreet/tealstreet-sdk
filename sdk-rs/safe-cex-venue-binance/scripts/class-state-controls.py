@@ -46,7 +46,7 @@ for owner, before, after in [
     ("BinanceExchange", "ExchangeOwner::new(Venue::Futures, name, options, store, deps)", "ExchangeOwner::new(Venue::Spot, name, options, store, deps)"),
     ("BinancePMExchange", "ExchangeOwner::new(Venue::PM, name, options, store, deps)", "ExchangeOwner::new(Venue::Futures, name, options, store, deps)"),
     ("BinanceSpotExchange", "ExchangeOwner::new(Venue::Spot, name, options, store, deps)", "ExchangeOwner::new(Venue::Futures, name, options, store, deps)"),
-    ("ExchangeState", "crate::spot_valuation::get_asset_usd_price(asset, |symbol|", 'crate::spot_valuation::get_asset_usd_price("USD", |symbol|'),
+    ("ExchangeState", "crate::spot_valuation::get_asset_usd_price(asset, |symbol|", 'crate::spot_valuation::get_asset_usd_price({let _ = asset; "USD"}, |symbol|'),
 ]:
     text = original.decode()
     start = 0 if owner == "ExchangeState" else text.index("impl " + owner + " {")

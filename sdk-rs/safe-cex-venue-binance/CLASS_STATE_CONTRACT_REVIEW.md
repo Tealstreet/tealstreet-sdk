@@ -58,3 +58,13 @@ native discovery/measurement, `--default` to verify feature delegation, and
 restoration. Required full index, cancellation, formatting and strict native/Wasm
 all-target Clippy must pass before READY. Validation receipts are appended after
 execution; preparation alone is not a completion claim.
+
+First canonical positive: native4 / 92 authored cases, zero classification-only
+receipts and zero failed owners after all200 dependency Deserialize owners were
+discovered. The fresh compiler APIs cover53 entries; all16 State entries execute
+observations. All219 original Binance records retain their exact contract/number
+lexemes. Binance inherited policy guard3 and maintained whole-class source36 pass.
+The reused bridge witness retains its no-response assertion through the current
+retained_response_input accessor after the old response field was removed; this
+is test API drift, with no production behavior change. Body controls and final
+normal-merge gates remain required before READY.

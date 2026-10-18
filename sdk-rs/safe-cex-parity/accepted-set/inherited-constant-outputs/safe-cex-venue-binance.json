@@ -102,7 +102,7 @@
         "sha256": "372f1f808352469344da86d905795803b76209d71fac04d1d3b4d8e202b98cfe"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(&subject,w::symbol(input)));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(&subject,w::symbol(input)));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -239,7 +239,7 @@
         "sha256": "d7c0a70f5721c23a628e25e6b031fa44f79f5191144270f6da333f9bf0a7cdb8"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(&subject,w::symbol(input)));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(&subject,w::symbol(input)));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -413,7 +413,7 @@
         "sha256": "d7c0a70f5721c23a628e25e6b031fa44f79f5191144270f6da333f9bf0a7cdb8"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_public_trades(&subject,w::symbol(input),Some(if w::flag(input){2.}else{1.})));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_public_trades(&subject,w::symbol(input),Some(if w::flag(input){2.}else{1.})));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -550,7 +550,7 @@
         "sha256": "94430f200cc27c5d592f06509f47bc9074cb7fe957854ded8a1678997ea19908"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(&subject,w::symbol(input)));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(&subject,w::symbol(input)));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -724,7 +724,7 @@
         "sha256": "94430f200cc27c5d592f06509f47bc9074cb7fe957854ded8a1678997ea19908"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_public_trades(&subject,w::symbol(input),Some(if w::flag(input){2.}else{1.})));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::fetch_public_trades(&subject,w::symbol(input),Some(if w::flag(input){2.}else{1.})));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -890,7 +890,7 @@
         "sha256": "94430f200cc27c5d592f06509f47bc9074cb7fe957854ded8a1678997ea19908"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::set_leverage(&subject,w::symbol(input),if w::flag(input){23.}else{17.},None));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::set_leverage(&subject,w::symbol(input),if w::flag(input){23.}else{17.},None));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -1047,7 +1047,7 @@
         "sha256": "94430f200cc27c5d592f06509f47bc9074cb7fe957854ded8a1678997ea19908"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::change_position_mode(&subject,w::flag(input),Some(w::symbol(input))));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::change_position_mode(&subject,w::flag(input),Some(w::symbol(input))));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -1204,7 +1204,7 @@
         "sha256": "94430f200cc27c5d592f06509f47bc9074cb7fe957854ded8a1678997ea19908"
       }
     },
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { use safe_cex_store::Store as _; #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::change_margin_type(&subject,w::flag(input),Some(w::symbol(input))));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod w { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/class-state-observers.rs\")); } let input=$value; let mut p=w::parts(input);let (_,name)=w::native::family(input);let subject=$type::new(name,p.options.clone(),p.store.clone(),p.deps.take().unwrap()).unwrap();let owner=subject.0.clone();let events=w::events(&owner);  let value={ let result=w::native::drive(&p.runtime,<$type as safe_cex_exchange::exchange::Exchange>::change_margin_type(&subject,w::flag(input),Some(w::symbol(input))));w::inherited(input,result,&p,&events) };{ owner.base.dispose().unwrap(); value } })).unwrap_or_else(|_|serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
