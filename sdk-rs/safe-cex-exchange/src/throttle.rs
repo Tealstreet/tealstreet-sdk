@@ -164,7 +164,7 @@ pub fn symbol_metadata_throttler(exchange: Rc<dyn Exchange>) -> Rc<ThrottleManag
                     venue
                         .base()
                         .runtime
-                        .report_exception(&error, &json!({"method":"updateSymbolMetadata"}));
+                        .report_exception(&error, &json!({"method":"updateSymbolMetadata"}).into());
                 }
             }));
         },

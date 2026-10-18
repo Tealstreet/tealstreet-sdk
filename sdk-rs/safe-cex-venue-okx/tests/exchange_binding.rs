@@ -23,6 +23,38 @@ const SET_MODE: &str = "/api/v5/account/set-position-mode";
 const FILLS: &str = "/api/v5/trade/fills";
 const FILLS_HISTORY: &str = "/api/v5/trade/fills-history";
 
+#[test]
+fn constructed_family_installs_distinct_sockets_with_the_original_store() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use std::rc::Rc;
+
+    for name in [
+        ExchangeName::Okx,
+        ExchangeName::Okxdemo,
+        ExchangeName::Okxeu,
+        ExchangeName::Okxeudemo,
+    ] {
+        let h = harness(name.clone(), options(), |_| {});
+        let base = h.venue().base();
+        assert_eq!(base.name, name);
+        let sockets = [
+            SocketSlot::Public,
+            SocketSlot::Private,
+            SocketSlot::Business,
+        ]
+        .map(|slot| base.get_socket(slot).expect("constructed OKX socket"));
+        let store: Rc<dyn Store> = h.store.clone();
+        for (index, socket) in sockets.iter().enumerate() {
+            assert!(Rc::ptr_eq(&socket.store(), &store), "original Store owner");
+            for other in &sockets[..index] {
+                assert!(!Rc::ptr_eq(socket, other), "distinct socket owners");
+            }
+        }
+        assert!(h.http.requests.borrow().is_empty());
+        h.venue().dispose().unwrap();
+    }
+}
+
 fn instrument() -> Value {
     json!({
         "instId": "BTC-USDT-SWAP", "instType": "SWAP", "ctType": "linear", "ctVal": "0.01",

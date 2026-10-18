@@ -68,7 +68,7 @@ impl BackpackExchange {
                 if let Err(e) = task.await {
                     report.report_exception(
                         &e,
-                        &serde_json::json!({"operation":"Backpack exchange"}),
+                        &serde_json::json!({"operation":"Backpack exchange"}).into(),
                     );
                 }
             })));

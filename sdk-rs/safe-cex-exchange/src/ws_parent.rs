@@ -7,7 +7,6 @@ use crate::{
 };
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::ExchangeOptions;
-use serde_json::Value;
 use std::rc::{Rc, Weak};
 
 pub struct WsExchangeParent {
@@ -116,7 +115,7 @@ impl WsParent for WsExchangeParent {
         &self,
         error: &str,
         message: Option<&str>,
-        extra: Option<&Value>,
+        extra: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         if let Some(venue) = self.venue.upgrade() {
             venue.base().emit_and_log_error(

@@ -34,10 +34,18 @@ impl ExchangeRuntime for SnapshotRuntime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, error: &EventValue, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &EventValue,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports.borrow_mut().push(error.clone());
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.inner.report_exception(error, context);
     }
     fn execute_worker_request(&self, value: Value) -> ExchangeFuture<'static, Value> {

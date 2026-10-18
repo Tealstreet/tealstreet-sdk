@@ -297,13 +297,21 @@ pub trait ExchangeRuntime {
     fn unique_id(&self) -> String;
     fn is_worker(&self) -> bool;
     fn random(&self) -> f64;
-    /// Must visibly report on every host (console, telemetry or an error event).
-    /// Production hosts must not swallow this callback: owned asynchronous work
-    /// uses it for unawaited failures independently of transport diagnostics.
-    fn report_exception(&self, error: &ExchangeError, context: &serde_json::Value);
+    /// Must visibly report on every host; unawaited failures use this callback.
+    /// Retained context preserves UTF-16, own undefined and native number bits.
+    /// Context stays native until the reporting sink chooses its presentation.
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    );
     /// Original exception, retaining native Error name/message and reference identity.
     /// A JSON projection here loses non-enumerable Error properties and identity.
-    fn report_raw_exception(&self, error: &Js, context: &serde_json::Value);
+    fn report_raw_exception(
+        &self,
+        error: &Js,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    );
     fn execute_worker_request(
         &self,
         request: serde_json::Value,

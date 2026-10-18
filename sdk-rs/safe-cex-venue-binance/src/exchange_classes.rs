@@ -6,7 +6,8 @@ use crate::{
         PrivateBase, PrivateDependencies, PrivateParent, PrivateSocket, PrivateTimers,
     },
     private_event_value::{
-        EventArray, EventOps, EventValue, in_current_realm, native_json, number, record, string,
+        EventArray, EventOps, EventValue, array_values, in_current_realm, native_json, number,
+        record, string,
     },
     private_rest::{SnapshotClient, SnapshotRequestFuture},
     private_session::Venue,
@@ -2237,7 +2238,7 @@ impl WsParent for ExchangeState {
         &self,
         message: &str,
         formatted: Option<&str>,
-        context: Option<&Value>,
+        context: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         self.base.emit_and_log_error(
             safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(message.into()),
@@ -2631,7 +2632,7 @@ impl ExchangeState {
                 let runtime = self.runtime.clone();
                 let callback = Rc::new(move |book: safe_cex_types::OrderBook| {
                     if let Err(error) = callback(Rc::new(RefCell::new(book))) {
-                        runtime.report_exception(&error, &Value::Null)
+                        runtime.report_exception(&error, &Value::Null.into())
                     }
                 });
                 let cleanup = provider
@@ -2674,7 +2675,7 @@ impl crate::rest_history::CandleBindings for Context {
                     typed(&opts)?,
                     Rc::new(move |candle| {
                         if let Err(error) = decoded(candle).and_then(|candle| callback(candle)) {
-                            runtime.report_exception(&error, &Value::Null)
+                            runtime.report_exception(&error, &Value::Null.into())
                         }
                     }),
                 )
