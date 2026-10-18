@@ -113,27 +113,31 @@ mod accepted_control_flow {
         let enumeration = token();
         let child = token();
         let (expected, v, t) = (enumeration.clone(), child.clone(), events.clone());
-        enumeration.define_accessor(
-            "Ω.Key",
-            Some(Rc::new(move |this| {
-                assert!(
-                    this.same_reference(&expected),
-                    "imported native enum receiver"
-                );
-                t.borrow_mut().push("field");
-                Ok(v.clone())
-            })),
-            None,
-        );
+        enumeration
+            .define_accessor(
+                "Ω.Key",
+                Some(Rc::new(move |this| {
+                    assert!(
+                        this.same_reference(&expected),
+                        "imported native enum receiver"
+                    );
+                    t.borrow_mut().push("field");
+                    Ok(v.clone())
+                })),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         let (v, t) = (enumeration, events.clone());
-        globals.define_accessor(
-            "Enum",
-            Some(Rc::new(move |_| {
-                t.borrow_mut().push("global");
-                Ok(v.clone())
-            })),
-            None,
-        );
+        globals
+            .define_accessor(
+                "Enum",
+                Some(Rc::new(move |_| {
+                    t.borrow_mut().push("global");
+                    Ok(v.clone())
+                })),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         let h = BoundHost {
             ops: Rc::new(crate::accepted_test_support::binding(globals)),
             receiver: token(),
@@ -161,32 +165,38 @@ mod accepted_control_flow {
             let (e, t) = (error.clone(), Rc::new(RefCell::new(vec![])));
             let events = t.clone();
             if stage == 0 {
-                globals.define_accessor(
-                    "Enum",
-                    Some(Rc::new(move |_| {
-                        t.borrow_mut().push("global");
-                        Err(Thrown::new(e.clone()))
-                    })),
-                    None,
-                )
+                globals
+                    .define_accessor(
+                        "Enum",
+                        Some(Rc::new(move |_| {
+                            t.borrow_mut().push("global");
+                            Err(Thrown::new(e.clone()))
+                        })),
+                        None,
+                    )
+                    .expect("fresh extensible accessor target")
             } else {
-                enumeration.define_accessor(
-                    "Key",
-                    Some(Rc::new(move |_| {
-                        t.borrow_mut().push("field");
-                        Err(Thrown::new(e.clone()))
-                    })),
-                    None,
-                );
+                enumeration
+                    .define_accessor(
+                        "Key",
+                        Some(Rc::new(move |_| {
+                            t.borrow_mut().push("field");
+                            Err(Thrown::new(e.clone()))
+                        })),
+                        None,
+                    )
+                    .expect("fresh extensible accessor target");
                 let t = events.clone();
-                globals.define_accessor(
-                    "Enum",
-                    Some(Rc::new(move |_| {
-                        t.borrow_mut().push("global");
-                        Ok(enumeration.clone())
-                    })),
-                    None,
-                )
+                globals
+                    .define_accessor(
+                        "Enum",
+                        Some(Rc::new(move |_| {
+                            t.borrow_mut().push("global");
+                            Ok(enumeration.clone())
+                        })),
+                        None,
+                    )
+                    .expect("fresh extensible accessor target")
             }
             let h = BoundHost {
                 ops: Rc::new(crate::accepted_test_support::binding(globals)),

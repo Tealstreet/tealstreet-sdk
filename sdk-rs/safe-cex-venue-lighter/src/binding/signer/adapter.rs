@@ -284,18 +284,20 @@ mod tests {
                     let value = Js::object(vec![]);
                     for name in ["code", "message"] {
                         let (trace, sentinel) = (trace.clone(), sentinel.clone());
-                        value.define_accessor(
-                            name,
-                            Some(Rc::new(move |_| {
-                                trace.borrow_mut().push(name);
-                                if name == "code" {
-                                    Ok(Js::Number(21104.))
-                                } else {
-                                    Err(Thrown::new(sentinel.clone()))
-                                }
-                            })),
-                            None,
-                        );
+                        value
+                            .define_accessor(
+                                name,
+                                Some(Rc::new(move |_| {
+                                    trace.borrow_mut().push(name);
+                                    if name == "code" {
+                                        Ok(Js::Number(21104.))
+                                    } else {
+                                        Err(Thrown::new(sentinel.clone()))
+                                    }
+                                })),
+                                None,
+                            )
+                            .expect("fresh test accessor target");
                     }
                     value
                 }

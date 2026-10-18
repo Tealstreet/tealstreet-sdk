@@ -55,7 +55,7 @@ impl CompositionHost for Host {
     fn base_socket(&self, parent: Js) -> JsResult<Js> {
         Ok(sockets::base_websocket(&self.0.shared.sockets, parent))
     }
-    fn attach_fields(&self, instance: &Js, fields: Fields<Js>) {
+    fn attach_fields(&self, instance: &Js, fields: Fields<Js>) -> JsResult<Js, ()> {
         let exchange = instance.has_own("options");
         let keys: Vec<&'static str> = if exchange {
             let mut keys = vec![
@@ -109,7 +109,7 @@ impl CompositionHost for Host {
         for key in keys {
             let get = fields.clone();
             let set = fields.clone();
-            instance.define_accessor(
+            value(instance.define_accessor(
                 key,
                 Some(Rc::new(move |_| {
                     let current = get.borrow().get(key).cloned().unwrap_or(Js::Undefined);
@@ -122,8 +122,9 @@ impl CompositionHost for Host {
                     }
                     Ok(())
                 })),
-            );
+            ))?;
         }
+        Ok(())
     }
     fn rule_value(&self, rule: Rc<ClientOrderIdRule>) -> Js {
         Js::object(vec![
