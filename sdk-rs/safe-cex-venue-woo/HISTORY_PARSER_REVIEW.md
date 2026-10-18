@@ -40,3 +40,11 @@ This batch fixes raw response/row admission. It does not claim closure of the
 remaining strict historical String/output and dynamic-option boundary review;
 FIX_AUDIT_LEDGER rows 19 and 20 remain open for that reconciliation. Class row 60
 is separate. No source TypeScript behavior, shared model or fallback path changes.
+
+The master HTTP-host refresh also exposed a stale falsy-message oracle: it threw
+a plain Error through a stub xhr and bypassed the actual factory enhancer. The
+same test fails with unchanged WOO master bodies. Its source observer now uses
+maintained safeCexAxiosCreate, real Axios adapter rejection, maintained signing and
+history/report bodies. The enhanced fallback equals native output; all original
+26 message profiles, UTF16 units, emitted count and signed-call assertions remain.
+No shared error producer change is made for that observer correction.
