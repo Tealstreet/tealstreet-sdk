@@ -273,7 +273,8 @@ impl CoinbaseApiHost for Host {
         let data = config.get("data").map_err(from_thrown)?;
         if !data.is_undefined() {
             request.body = Some(safe_cex_transport::RestBody::Untransformed(
-                to_json(&data).map_err(from_thrown)?,
+                safe_cex_exchange::js_runtime::value::to_retained_input(&data)
+                    .map_err(from_thrown)?,
             ));
         }
         let timeout = config.get("timeout").map_err(from_thrown)?;

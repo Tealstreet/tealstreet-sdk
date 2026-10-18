@@ -915,7 +915,6 @@ fn business_socket_reopen_alone_resyncs_the_private_snapshot() {
 #[test]
 fn eu_order_reads_start_both_instruments_before_first_reply() {
     use std::{
-        cell::Cell,
         rc::Rc,
         task::{Context, Poll, Waker},
     };
@@ -943,7 +942,7 @@ fn eu_order_reads_start_both_instruments_before_first_reply() {
         });
         loaded(&h);
         h.http.requests.borrow_mut().clear();
-        let gate = Rc::new(Cell::new(false));
+        let gate = Rc::new(harness::release::Release::default());
         *h.http.held_instrument.borrow_mut() = Some((path.into(), "SWAP".into(), gate.clone()));
         let mut future = h.venue().fetch_orders(None);
         assert!(matches!(
@@ -1267,4 +1266,73 @@ fn production_retry_excludes_cancel_dns_and_certificate_errors() {
         failures.is_empty(),
         "production retry/source differences: {failures:?}"
     );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("okx");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 88);
+    for name in [
+        ExchangeName::Okx,
+        ExchangeName::Okxdemo,
+        ExchangeName::Okxeu,
+        ExchangeName::Okxeudemo,
+    ] {
+        let h = harness(name, options(), |_| {});
+        let seed = ticker_coercion::seed("okx");
+        let markets = seed
+            .iter()
+            .map(|t| {
+                serde_json::from_value(json!({
+            "id":t.id,"symbol":t.symbol,"base":"fixture","quote":"USDT","active":true,
+            "info":{"uly":t.id.trim_end_matches("-SWAP")},"precision":{"amount":0.01,"price":0.25},
+            "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+        })).unwrap()
+            })
+            .collect();
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+        socket.connect_and_subscribe(false).unwrap();
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        assert!(socket.is_connected(), "production OKX ticker socket opens");
+        for case in source["cases"].as_array().unwrap() {
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(seed.clone()),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                    .unwrap();
+                h.runtime.pump();
+            }
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+        }
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
+    }
 }

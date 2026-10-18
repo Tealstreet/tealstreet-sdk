@@ -294,8 +294,11 @@ impl BreakoutRuntime {
                         url: "accounts/{accountCode}/orders".into(),
                         params: Some(json!({"accountCode":account})),
                         body: Some(RestBody::Untransformed(
-                            serde_json::to_value(payload)
-                                .map_err(|e| ExchangeError::new(e.to_string()))?,
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                serde_json::to_value(payload)
+                                    .map_err(|e| ExchangeError::new(e.to_string()))?,
+                            )
+                            .map_err(|e| ExchangeError::new(e.to_string()))?,
                         )),
                         ..Default::default()
                     })

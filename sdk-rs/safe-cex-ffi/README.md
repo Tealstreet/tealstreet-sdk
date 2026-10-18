@@ -39,9 +39,18 @@ The matching scoped Rust suite is
 With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 `nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
 owned-value account host. Events and worker Store payloads are forwarded to JS; signing
-and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
+and proxy tokens remain host callbacks. `nativeAccountSignerAvailable(id, available)`
+returns a Promise that resolves after the host applies the availability change.
+Await it before the next operation; released handles reject with `AccountClosedError`
+and never-issued handles with the existing missing-account error. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
-Calls and repeated closes against a removed account reject.
+Repeating close on an issued handle resolves as a no-op without retaining the
+account. Calls on released handles reject with `name: "AccountClosedError"`,
+`code: "ACCOUNT_CLOSED"` and a message identifying the closed handle. Never-issued
+handles retain the missing-account error. Calling the `dispose` method keeps
+the handle available, matching the exchange API's disposal semantics.
+`tests/native-account-lifecycle.test.mjs` exercises these contracts through the
+compiled addon.
 Rejections are JavaScript Error objects with the source `name`, plain `message`
 and optional `code`. An absent source code stays absent; callers do not parse
 error messages as JSON. `tests/native-account-errors.test.mjs` checks this
@@ -56,7 +65,8 @@ The owned tree supports structured data, arrays and BigInts; cycles and function
 reject visibly. Native builds require Node-API 6 or later.
 Emitter payloads and error codes retain the shared core’s JS values through owned
 capture. Hosted signer throws and rejected promises preserve name, message and
-code, including own undefined and nonfinite or structured code values.
+code, including lone UTF-16 surrogates in name/message and own undefined,
+nonfinite or structured code values.
 `tests/native-account-values.test.mjs` and the Rust `native_account_values`
 target exercise actual signed Binance reads containing nonfinite prices.
 The signer-rejection Node and Rust targets drive failed signing through actual
@@ -120,6 +130,22 @@ the native registry path. Both use loopback HTTP.
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
+
+Native `start` follows the worker startup result: `true` after the forced full
+Store post and `false` after cancellation or failure. Disposal, close and
+deactivation cancel pending startup. Errors and the 30-second deadline use the
+existing worker logger with `worker_error_phase: "startup"`; disposed failures
+follow the source console warning path. A lost startup race leaves the actual
+venue operation running, while its invalidated delivery token suppresses a late
+full snapshot. `tests/native-account-startup.test.mjs` exercises real gateway
+startup, cancellation, signer rejection and the actual deadline.
+
+`updateSymbolMetadata` reuses the worker's keyed 500ms leading/trailing throttle.
+It acknowledges immediately with null while the venue request runs separately;
+late failures follow the existing runtime exception reporting. Close and
+venue deactivation clear pending trailing metadata calls. The Rust
+`native_account_metadata` and Node `native-account-metadata.test.mjs` targets
+observe real Bitrue leverage-bracket HTTP requests and disposal.
 
 The parity manifest records native Store delivery as worker split members:
 construction reuses `_throttledStoreUpdate`, subscribed updates follow

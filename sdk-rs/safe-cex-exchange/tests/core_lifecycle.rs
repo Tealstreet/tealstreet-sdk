@@ -67,7 +67,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("no task expected")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         self.next.set(self.next.get() + 1);
         self.next.get().to_string()
@@ -78,7 +78,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -476,7 +480,10 @@ fn http_signing_capture_parses_json_per_request_and_missing_client_refuses() {
             url: url.into(),
             base_url: "https://venue".into(),
             params: Some(serde_json::json!("{\"x\":1}")),
-            data: Some(json!("[1,2]")),
+            data: Some(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!("[1,2]"))
+                    .unwrap(),
+            ),
             ..Default::default()
         },
     };
@@ -492,7 +499,15 @@ fn http_signing_capture_parses_json_per_request_and_missing_client_refuses() {
         assert_eq!(response.id, id);
         let config = response.config.unwrap();
         assert_eq!(config.params, Some(serde_json::json!({"x":1})));
-        assert_eq!(config.data, Some(json!([1, 2])));
+        assert_eq!(
+            config.data,
+            Some(safe_cex_types::retained_json::RetainedJsonInput::Array(
+                vec![
+                    safe_cex_types::retained_json::RetainedJsonInput::Float(1.0),
+                    safe_cex_types::retained_json::RetainedJsonInput::Float(2.0)
+                ]
+            ))
+        );
         assert_eq!(config.headers.get("signed").map(String::as_str), Some(url));
     }
     assert_eq!(client.requests.borrow().len(), 2);

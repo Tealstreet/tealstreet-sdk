@@ -88,7 +88,9 @@ impl ExchangeRuntime for Host {
         self.tasks.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         if severity == "error" {
             self.logs
                 .borrow_mut()
@@ -104,7 +106,11 @@ impl ExchangeRuntime for Host {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -137,7 +143,7 @@ struct Transport {
 impl ReadTransport for Transport {
     fn send(&self, r: safe_cex_transport::RestRequest) -> ExchangeFuture<'_, JsNumberInput> {
         let body = r.body.as_ref().map(|b| match b {
-            safe_cex_transport::RestBody::Untransformed(v) => v.clone(),
+            safe_cex_transport::RestBody::Untransformed(v) => v.clone().into_value().unwrap(),
             _ => panic!("unexpected transformed request"),
         });
         let mut call = json!({"method":r.method,"url":r.url});

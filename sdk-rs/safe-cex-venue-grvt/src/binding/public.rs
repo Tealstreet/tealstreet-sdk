@@ -635,7 +635,12 @@ impl PublicFeedHost for Public {
         }
         self.parent()
             .and_then(|p| p.get("store"))
-            .and_then(|v| v.call_method("updateTicker", vec![id.clone(), patch]))
+            .and_then(|v| {
+                v.call_method(
+                    "updateTicker",
+                    vec![Js::object(vec![("id", id.clone())]), patch],
+                )
+            })
             .map(|_| ())
             .map_err(err)
     }
