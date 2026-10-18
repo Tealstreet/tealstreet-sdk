@@ -387,7 +387,7 @@ console.log(JSON.stringify(results));
                         let a = arg(&args, 0).to_number()? as usize;
                         let b = arg(&args, 1).to_number()? as usize;
                         sink.borrow_mut().push([a, b]);
-                        Ok(Js::Number(if (a + b) % 5 == 0 {
+                        Ok(Js::Number(if (a + b).is_multiple_of(5) {
                             f64::NAN
                         } else {
                             (b % 11) as f64 - (a % 11) as f64
