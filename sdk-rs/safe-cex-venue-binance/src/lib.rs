@@ -24,7 +24,6 @@ pub mod account_validation;
 pub mod cancel_symbol_orders;
 pub mod closed_pnl;
 pub mod closed_position_reader;
-pub mod delegated_methods;
 pub mod exchange_dispose;
 pub mod exchange_error;
 pub mod futures_orders;

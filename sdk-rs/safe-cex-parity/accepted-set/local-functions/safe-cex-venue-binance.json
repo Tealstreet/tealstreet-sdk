@@ -11,12 +11,12 @@
   },
   "safe-cex-venue-binance/src/private_rest.rs::LOCAL_FUNCTION:digits": {
     "category": "non-decoder",
-    "reason": "Inside subtract: selects arithmetic decimal precision from an existing EventValue using its toString behavior and after_decimal. Its numeric result controls arithmetic; it constructs no typed wire/domain owner. Reviewed the explicit-import-only file change; this nested helper body and decoder classification are unchanged.",
-    "sourceSha256": "f75240063c13beee4ef3cde9af2a09f0adc589ba59fa31fbdfd5eee1b3ffaeaa"
+    "reason": "Inside subtract: selects arithmetic decimal precision from an existing EventValue using its toString behavior and after_decimal. Its numeric result controls arithmetic; it constructs no typed wire/domain owner. Reviewed native property/shape/stringify cutover; this nested body is byte-identical to master and its role is unchanged. Reviewed retained error-message selection through canonical Thrown metadata; this nested body is unchanged and keeps its individually reviewed role.",
+    "sourceSha256": "c828f375338e2cd1147cdb2913ae99cca441b35261e2737871927d56ad69761b"
   },
   "safe-cex-venue-binance/src/private_rest.rs::LOCAL_FUNCTION:values": {
     "category": "non-decoder",
-    "reason": "Inside concat: implements spread-style iteration of an existing native array or string into runtime EventValues, with a TypeError for non-iterables. This is collection/runtime coercion, not response schema admission. Reviewed the explicit-import-only file change; this nested helper body and decoder classification are unchanged.",
-    "sourceSha256": "f75240063c13beee4ef3cde9af2a09f0adc589ba59fa31fbdfd5eee1b3ffaeaa"
+    "reason": "Inside concat: implements spread-style iteration of an existing native array or string into runtime EventValues, with a TypeError for non-iterables. This is collection/runtime coercion, not response schema admission. Reviewed native property/shape/stringify cutover; this nested body is byte-identical to master and its role is unchanged. Reviewed retained error-message selection through canonical Thrown metadata; this nested body is unchanged and keeps its individually reviewed role.",
+    "sourceSha256": "c828f375338e2cd1147cdb2913ae99cca441b35261e2737871927d56ad69761b"
   }
 }

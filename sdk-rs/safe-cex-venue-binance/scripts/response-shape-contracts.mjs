@@ -18,7 +18,7 @@ function cargo(args, env = {}) {
   assert.equal(result.status, 0, `${args.join(' ')} failed\n${result.error ?? ''}\n${result.stderr}`);
   return result.stdout;
 }
-const selected = ['safe_cex_venue_binance::response_shape::BinanceResponseError', 'safe_cex_venue_binance::response_shape::describe', 'safe_cex_venue_binance::response_shape::describe_binance_pm_response_shape', 'safe_cex_venue_binance::response_shape::describe_binance_response_shape', 'safe_cex_venue_binance::response_shape::malformed', 'safe_cex_venue_binance::response_shape::require_binance_array_response', 'safe_cex_venue_binance::response_shape::require_binance_pm_array_response'];
+const selected = ['safe_cex_venue_binance::response_shape::BinanceResponseError', 'safe_cex_venue_binance::response_shape::describe', 'safe_cex_venue_binance::response_shape::describe_binance_pm_response_shape', 'safe_cex_venue_binance::response_shape::describe_binance_response_shape', 'safe_cex_venue_binance::response_shape::native_malformed', 'safe_cex_venue_binance::response_shape::require_binance_array_response', 'safe_cex_venue_binance::response_shape::require_binance_pm_array_response'];
 const prefix = '--expect-output-failure=';
 assert.ok(process.argv.length === 2 || (process.argv.length === 3 && process.argv[2].startsWith(prefix)), 'unsupported arguments');
 const control = process.argv[2]?.slice(prefix.length);
