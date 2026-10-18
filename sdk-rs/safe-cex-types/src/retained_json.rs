@@ -7,8 +7,10 @@ use std::fmt;
 mod codec;
 mod native;
 mod parser;
+mod payload;
 mod writer;
 pub use codec::{RETAINED_NATIVE, deserialize_native_payload};
+const UTF16_UNITS: &str = "$safe_cex::Utf16Units";
 const RAW_TOKEN: &str = "$serde_json::private::RawValue";
 #[derive(Debug, Clone, PartialEq)]
 pub enum RetainedJsonInput {

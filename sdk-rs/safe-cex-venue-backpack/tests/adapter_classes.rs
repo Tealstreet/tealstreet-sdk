@@ -86,7 +86,11 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
     .unwrap();
     let tickers = ready(&runtime, Exchange::fetch_tickers(owner.as_ref())).unwrap();
     assert_eq!(
-        (tickers[0].mark, tickers[0].index, tickers[0].percentage),
+        (
+            tickers[0].mark,
+            tickers[0].index.unwrap(),
+            tickers[0].percentage
+        ),
         (101.0, 102.0, 5.0)
     );
     Store::update(

@@ -39,7 +39,7 @@ fn ticker(v: &Value) -> Ticker {
         ask: number(&v["ask"]),
         last: number(&v["last"]),
         mark: number(&v["mark"]),
-        index: number(&v["index"]),
+        index: (!v["index"].is_null()).then(|| number(&v["index"])),
         percentage: number(&v["percentage"]),
         open_interest: number(&v["openInterest"]),
         funding_rate: number(&v["fundingRate"]),
@@ -93,7 +93,7 @@ fn snapshot_bookkeeping_matches_live_versions_and_ticker_transitions() {
         );
     }
     let scenarios = data["scenarios"].as_array().unwrap();
-    assert_eq!(scenarios.len(), 70, "TICKER-CARDINALITY scenario total");
+    assert_eq!(scenarios.len(), 71, "TICKER-CARDINALITY scenario total");
     let mut comparisons = 0;
     for (i, s) in scenarios.iter().enumerate() {
         let mut baseline = TickerBaseline::default();
@@ -102,6 +102,7 @@ fn snapshot_bookkeeping_matches_live_versions_and_ticker_transitions() {
             66 | 67 => 8,
             68 => 2,
             69 => 6,
+            70 => 4,
             _ => unreachable!("TICKER-CARDINALITY unexpected scenario"),
         };
         let actions = s["actions"].as_array().unwrap();
@@ -165,5 +166,5 @@ fn snapshot_bookkeeping_matches_live_versions_and_ticker_transitions() {
             comparisons += 1;
         }
     }
-    assert_eq!(comparisons, 354, "TICKER-CARDINALITY native comparisons");
+    assert_eq!(comparisons, 358, "TICKER-CARDINALITY native comparisons");
 }

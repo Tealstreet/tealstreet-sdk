@@ -461,3 +461,98 @@ fn real_client_id_rule_matches_source_safe_integer_limits() {
     }
     h.exchange.dispose().unwrap();
 }
+
+#[test]
+fn constructed_order_tables_keep_source_own_entries_and_inherited_referents() {
+    let h = setup(|_| {});
+    let source: Value = serde_json::from_str(include_str!("../fixtures/constants.json")).unwrap();
+    let names = ["ORDER_TYPE", "ORDER_SIDE", "ORDER_TRIGGER_TYPE"];
+    let tables = names.map(|name| h.exchange.rt.global(name).unwrap());
+    for (name, table) in names.iter().zip(&tables) {
+        let entries = source["ordered"][name].as_array().unwrap();
+        let keys = table
+            .own_keys()
+            .iter()
+            .map(|key| String::from_utf16(key.as_ref()).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            entries
+                .iter()
+                .map(|entry| entry[0].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            "constructed {name}: source own-entry order"
+        );
+        for entry in entries {
+            let key = entry[0].as_str().unwrap();
+            assert!(table.has_own(key));
+            observe(&table.get(key).unwrap(), &entry[1], name);
+        }
+        assert!(table.get("unknown").unwrap().is_undefined());
+    }
+    for key in [
+        "constructor",
+        "toString",
+        "toLocaleString",
+        "valueOf",
+        "hasOwnProperty",
+        "isPrototypeOf",
+        "propertyIsEnumerable",
+        "__proto__",
+        "__defineGetter__",
+        "__defineSetter__",
+        "__lookupGetter__",
+        "__lookupSetter__",
+    ] {
+        let original = tables[0].get(key).unwrap();
+        if key == "__proto__" {
+            assert!(original.is_object() && !original.is_callable());
+        } else {
+            assert!(original.is_callable(), "constructed inherited {key}");
+        }
+        for table in &tables {
+            assert!(!table.has_own(key), "inherited {key} must not become own");
+            assert!(
+                table.get(key).unwrap().strict_equals(&original),
+                "constructed tables share original {key} referent"
+            );
+        }
+        let input = from_json(&json!({
+            "order_id":1,"symbol":"PERP_BTC_USDT","type":key,"side":key,
+            "quantity":2,"executed":1,"price":10,"status":"NEW"
+        }));
+        let limit = map(&h, "mapLimitOrder", input.clone()).unwrap();
+        for field in ["type", "side"] {
+            assert!(limit.get(field).unwrap().strict_equals(&original));
+        }
+        assert!(limit.get("info").unwrap().strict_equals(&input));
+        input.set("afterMapping", Js::Number(-0.0)).unwrap();
+        assert_eq!(
+            limit
+                .get("info")
+                .unwrap()
+                .get("afterMapping")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            (-0.0_f64).to_bits(),
+            "limit info remains a live alias"
+        );
+        let algo = from_json(&json!({
+            "algoOrderId":2,"symbol":"PERP_BTC_USDT","algoType":key,
+            "side":key,"triggerPriceType":key,"triggerPrice":10,
+            "quantity":2,"totalExecutedQuantity":1
+        }));
+        let row = map(&h, "mapAlgoOrder", algo)
+            .unwrap()
+            .array_values()
+            .unwrap()
+            .remove(0);
+        for field in ["type", "side", "tpTriggerType"] {
+            assert!(row.get(field).unwrap().strict_equals(&original));
+        }
+    }
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.exchange.dispose().unwrap();
+}

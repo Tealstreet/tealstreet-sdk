@@ -6,6 +6,9 @@ mod accepted_additional_receivers;
 #[path = "../../tests/support/accepted_api_receivers.rs"]
 mod accepted_api_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_boundary_observers.rs"]
+mod accepted_boundary_observers;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_client_id_alias.rs"]
 mod accepted_client_id_alias;
 #[cfg(test)]
@@ -35,6 +38,12 @@ mod accepted_read_receivers;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_runtime_receivers.rs"]
 mod accepted_runtime_receivers;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_stream_tail.rs"]
+mod accepted_stream_tail;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_topic_alias.rs"]
+mod accepted_topic_alias;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_trading_error_receivers.rs"]
 mod accepted_trading_error_receivers;

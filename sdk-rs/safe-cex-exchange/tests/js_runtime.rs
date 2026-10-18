@@ -768,7 +768,12 @@ fn operators_follow_ecmascript_and_refuse_bigint_mixing() {
 fn set_refuses_writes_it_cannot_store_instead_of_dropping_them() {
     let array = Js::array(vec![]);
     array.set("0", Js::Number(1.0)).unwrap();
-    assert!(array.set("extra", Js::Number(1.0)).is_err());
+    array.set("extra", Js::Number(-0.0)).unwrap();
+    assert_eq!(array.get("length").unwrap().as_f64(), Some(1.0));
+    assert_eq!(
+        array.get("extra").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
     assert_eq!(
         Js::str("abc")
             .set("x", Js::Number(1.0))

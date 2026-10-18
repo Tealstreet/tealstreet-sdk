@@ -1512,8 +1512,9 @@ fn native_failed_upgrade_delivers_error_then_close_without_open() {
         });
         let runtime = native_runtime();
         let socket = runtime.dial(url, vec![], Default::default(), false).await.unwrap();
-        assert_eq!(socket.ready_state(), 3);
+        assert_eq!(socket.ready_state(), 0);
         assert!(matches!(socket.next_event().await.unwrap(), WsEvent::Error(message) if message.contains("400")));
+        assert_eq!(socket.ready_state(), 3);
         assert!(matches!(socket.next_event().await.unwrap(), WsEvent::Close { code: Some(1006), reason } if reason.is_empty()));
         assert!(socket.next_event().as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
         let error = match runtime.dial("invalid".into(), vec![], Default::default(), false).await {

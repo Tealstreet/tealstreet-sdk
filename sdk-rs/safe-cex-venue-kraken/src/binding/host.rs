@@ -499,29 +499,121 @@ impl ReadHost for Rt {
             .call_method("emitAndLogError", vec![(*message).clone()])?;
         Ok(())
     }
-    // ts: kraken.fills mapKrakenFills(rows, resolveSymbol) over the live market index.
+    // ts: mapKrakenFills/mapKrakenFill over the retained runtime graph.
+    // Read only source-reached fields; JSON or whole-row DTO capture can reject
+    // an unrelated native value before the source mapper ever reads it.
     fn map_fills(&self, rows: Handle<Self>) -> ReadResult<Self, Vec<Handle<Self>>> {
-        let input = safe_cex_num::numeric_ingress::js_from_value(super::value::to_json(&rows)?)
-            .map_err(|e| Thrown::type_error(&e.to_string()))?;
-        let markets = self.this.get("store")?.get("marketsBySymbol")?;
-        let mut resolve = |symbol: &str| -> Result<Option<String>, Box<dyn std::error::Error>> {
-            let found = markets
-                .get(&symbol.to_uppercase())
-                .map_err(|e| e.message())?;
-            let symbol = if found.is_nullish() {
+        let rt = self.clone();
+        let mapper = Js::function("mapKrakenFill", move |_, args| {
+            let row = arg(&args, 0);
+            let field = |key| {
+                if row.is_nullish() {
+                    Ok(Js::Undefined)
+                } else {
+                    row.get(key)
+                }
+            };
+            let text = |key| -> Result<Js, Thrown> {
+                let value = field(key)?;
+                rt.global("String")?.call(
+                    Js::Undefined,
+                    vec![if value.is_nullish() {
+                        Js::str("")
+                    } else {
+                        value
+                    }],
+                )
+            };
+            let number = |key| -> Result<Js, Thrown> {
+                let value = rt
+                    .global("Number")?
+                    .call(Js::Undefined, vec![field(key)?])?
+                    .to_number()?;
+                Ok(Js::Number(if value.is_finite() { value } else { 0.0 }))
+            };
+            let id = text("fill_id")?;
+            let venue_symbol = text("symbol")?;
+            let milliseconds =
+                safe_cex_num::js_date_parse_utf16(&text("fillTime")?.to_js_string()?, |n| n);
+            let timestamp = if milliseconds.is_finite() {
+                (milliseconds / 1000.0).floor()
+            } else {
+                0.0
+            };
+            if !id.truthy() || !venue_symbol.truthy() || timestamp == 0.0 {
+                return Ok(Js::Null);
+            }
+            let side = text("side")?.call_method("toLowerCase", vec![])?;
+            if !side.strict_equals(&Js::str("buy")) && !side.strict_equals(&Js::str("sell")) {
+                return Ok(Js::Null);
+            }
+            let key = venue_symbol
+                .call_method("toUpperCase", vec![])?
+                .to_js_string()?;
+            let market = rt
+                .this
+                .get("store")?
+                .get("marketsBySymbol")?
+                .get_key(&key)?;
+            let symbol = if market.is_nullish() {
                 Js::Undefined
             } else {
-                found.get("symbol").map_err(|e| e.message())?
+                market.get("symbol")?
             };
-            Ok(if symbol.is_nullish() {
-                None
+            let symbol = if symbol.is_nullish() {
+                venue_symbol
             } else {
-                Some(symbol.to_display())
-            })
-        };
-        let fills = crate::fills::map_kraken_fills(input, &mut resolve, &mut |n| n)
-            .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-        fills.iter().map(|f| Ok(h(from_typed(f)?))).collect()
+                symbol
+            };
+            let order_id = if field("order_id")?.truthy() {
+                rt.global("String")?
+                    .call(Js::Undefined, vec![field("order_id")?])?
+            } else {
+                Js::Undefined
+            };
+            let price = number("price")?;
+            let qty = number("size")?;
+            let maker = text("fillType")?
+                .call_method("toLowerCase", vec![])?
+                .strict_equals(&Js::str("maker"));
+            let pnl = field("realized_pnl")?;
+            let realized_pnl = if pnl.is_nullish() || pnl.strict_equals(&Js::str("")) {
+                Js::Undefined
+            } else {
+                let value = rt
+                    .global("Number")?
+                    .call(Js::Undefined, vec![pnl])?
+                    .to_number()?;
+                if value.is_finite() {
+                    Js::Number(value)
+                } else {
+                    Js::Undefined
+                }
+            };
+            Ok(Js::object(vec![
+                ("id", id),
+                ("timestamp", Js::Number(timestamp)),
+                ("symbol", symbol),
+                ("orderId", order_id),
+                ("price", price),
+                ("qty", qty),
+                ("side", side),
+                ("maker", Js::Bool(maker)),
+                ("realizedPnl", realized_pnl),
+            ]))
+        });
+        let mapped = rows.call_method("map", vec![mapper])?;
+        let present = Js::function("isExecution", |_, args| {
+            Ok(Js::Bool(!arg(&args, 0).strict_equals(&Js::Null)))
+        });
+        let filtered = mapped.call_method("filter", vec![present])?;
+        // The source for-of still uses the shared iterator, including overrides.
+        let iterator = safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&filtered)?;
+        let mut fills = Vec::new();
+        while let Some(fill) = iterator.step_value()? {
+            fills.push(h(fill));
+        }
+        Ok(fills)
     }
     fn iso(&self, milliseconds: f64) -> ReadResult<Self, Vec<u16>> {
         Ok(units(&iso(milliseconds)?))

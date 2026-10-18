@@ -1,9 +1,10 @@
 //! Source stream/report bodies over original runtime values, mappers and stores.
 use crate::ws_controls::{Result, Value, WsHost};
 pub trait ReportHost: WsHost {
-    fn ticker_patch_refusal(
+    fn ticker_row_refusal(
         &self,
-        error: &Self::Error,
+        store: &Value<Self>,
+        ticker: &Value<Self>,
         symbol: &[u16],
         fields: &[(&str, Value<Self>)],
     ) -> Result<Self, Option<String>>;
@@ -109,13 +110,11 @@ fn public_stream<H: ReportHost>(
                 ],
             };
             let patch = h.object(fields.clone())?;
-            if let Err(error) = h.call(function, Some(store), vec![ticker, patch]) {
-                if let Some(message) = h.ticker_patch_refusal(&error, &symbol, &fields)? {
-                    refusals.push(message);
-                } else {
-                    return Err(error);
-                }
+            if let Some(message) = h.ticker_row_refusal(&store, &ticker, &symbol, &fields)? {
+                refusals.push(message);
+                return Ok(());
             }
+            h.call(function, Some(store), vec![ticker, patch])?;
         }
         Ok(())
     })?;

@@ -598,41 +598,29 @@ impl crate::public_feeds::FeedHost for Host {
     }
 }
 impl crate::stream_reports::ReportHost for Host {
-    fn ticker_patch_refusal(
+    fn ticker_row_refusal(
         &self,
-        error: &Thrown,
+        store: &V,
+        ticker: &V,
         symbol: &[u16],
         fields: &[(&str, V)],
     ) -> R<Option<String>> {
-        let Some(native) = error.native.as_ref() else {
-            return Ok(None);
-        };
-        if !native.store_subscriber_ids.is_empty() {
-            return Ok(None);
-        }
-        let Some(safe_cex_store::StoreMutationError::Patch(patch)) =
-            native.origin.as_ref().and_then(|origin| {
-                origin
-                    .error()
-                    .downcast_ref::<safe_cex_store::StoreMutationError>()
-            })
+        let Some((field, value)) = fields
+            .iter()
+            .find(|(_, value)| !matches!(&**value, Js::Number(_)))
         else {
             return Ok(None);
         };
-        if patch.is_type_error() || !fields.iter().any(|(field, _)| *field == patch.field()) {
+        let id = ticker.get("id")?.to_js_string()?;
+        if !store.get("tickersById")?.get_key(&id)?.truthy() {
             return Ok(None);
         }
-        for (field, value) in fields {
-            if !matches!(&**value, Js::Number(_)) {
-                let rendered = self.global("JSON.stringify", vec![value.clone()])?;
-                return Ok(Some(format!(
-                    "Orderly ticker {} typed field {field} requires a number; received {}",
-                    String::from_utf16_lossy(symbol),
-                    text(&rendered)?
-                )));
-            }
-        }
-        Ok(None)
+        let rendered = self.global("JSON.stringify", vec![value.clone()])?;
+        Ok(Some(format!(
+            "Orderly ticker {} typed field {field} requires a number; received {}",
+            String::from_utf16_lossy(symbol),
+            text(&rendered)?
+        )))
     }
     fn ticker_refusal_error(&self, messages: Vec<String>) -> Thrown {
         Thrown::error("Error", &messages.join("; "))

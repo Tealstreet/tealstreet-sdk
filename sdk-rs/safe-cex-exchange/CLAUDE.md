@@ -1,5 +1,15 @@
 # Exchange core contract
 
+The native Axios factory enhances rejections before venue interceptors, using
+the maintained helper's field order and live message getter. Its originalError
+Error snapshot excludes the self-reference under decision 2; existing owned
+metadata preserves diagnostics, extra/config data and nearest-response authority.
+Executable config capabilities retain the owned-data boundary. Constructed Aster
+and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+The typed REST host recovers owned callback errors through the canonical
+ExchangeError-to-Thrown conversion and attaches the effective request config.
+The Bitget owned-transport regression pins retry eligibility after that boundary.
+
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
@@ -12,6 +22,9 @@ granular writes mutate existing rows, while full replacement and reset publish
 new generations. Retained values have no back-reference to the Store owner.
 Native mutations use the shared property/iterator algorithms and notify the live
 ordered listener registry. Typed subscribers project only at their reached slot.
+Notification transport retains the complete typed boundary in the existing opaque
+error origin before recovery, preserving nested subscriber IDs and the original
+cause without rebuilding the thrown value or replaying getters.
 Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
@@ -109,6 +122,15 @@ Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
+Opt-in replay hosts register the canonical per-dial parser counters when a
+BaseWebSocket is constructed. The host retains only those counters, never the
+socket/parent owner. Diagnostic enumeration therefore includes nested sockets and
+disposed dial histories independently of exchange health/watchdog groups. Do not
+register nested business sockets as top-level slots to expose replay receipts.
+The recorded Binance addon regression checks both TLS/parser paths while keeping
+source-correct public grouping; the per-dial unit test checks counter identity
+and owner release with retained history. Ordinary hosts do not register histories.
+
 Synchronous venue `WsProtocol::connect_and_subscribe` implementations call
 `socket.start_websocket(url, protocols, options)`. The core owns the dial task,
 its cancellation and error diagnostics; the venue never retains its handle and
@@ -1900,6 +1922,18 @@ UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
+`js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
+and the Vec<Market> info boundary. `tests/large_payload_source.mjs` captures
+maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Use `cargo run --release -p safe-cex-exchange --features native --example
+large_payload_decode` with LARGE_PAYLOAD_MANIFEST and LARGE_PAYLOAD_OUTPUT to
+measure the same recorded probe with the production allocator. The test binary
+has a counting allocator and must not supply production CPU ratios. Report CPU
+medians and spread from at least three interleaved control/candidate runs;
+input restoration and complete output observations stay outside timed phases.
+Native observation files encode UTF-16, own undefined and f64 bits explicitly so
+before/after byte comparisons do not hide lossy JSON projections.
+
 ## Retained error responses
 
 Local `Thrown` conversions retain the original JS value in the existing opaque
@@ -1934,39 +1968,7 @@ boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
 
-## Canonical array storage
-
-`Js::Array` now holds sparse `ArrayData`, with no mutable Vec/Deref or parallel
-property map. Array snapshots return Result so getter failures propagate. Native
-consumer loops retain the original Js owner and use checked Get/Has/Set/Delete.
-See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomic
-consumer boundaries and independent native/Node/compiled controls. The browser
-DATA bridge caches identity before walking enumerable indexed and named fields.
-
-Internal update listeners subscribe to the canonical Store's native state referent.
-They do not project StoreData or visit unrelated getters before emitter fanout.
-Typed subscribers remain explicit projection boundaries at their reached slots;
-native and typed slots share live order, unsubscription and first-error behavior.
-StoreUpdateThrottle accepts a retained argument type while its existing StoreFrame
-constructor remains available. Native account delivery retains the Js argument
-through bursts and projects only when leading/trailing delivery actually runs.
-See [the delivery review](NATIVE_STORE_DELIVERY_REVIEW.md) for compiled controls,
-receipt-qualified replay results, and the separate Bybit options decode timeout.
-
-`native_final_drop(base, venue_cleanup)` is the single native final-handle teardown
-entrypoint. It marks disposed before venue cleanup and always performs shared
-cleanup afterward, silencing Result errors at destruction. The callback must
-finish cancelling venue-owned tasks/state even if an earlier cleanup returns an
-error. Stored timer callbacks must use weak venue ownership so they cannot keep
-the final external handle alive; held venues must still service them normally.
-This accepted lifetime policy has one core override classification and no source
-super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
-`tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
-cleanup, while Backpack/BingX binding probes cover actual sockets/timers.
-
-`REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
-`JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
-materialization follows that source chain and the canonical retained response.
-Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
-signed requests before JSON. Original JS object identity remains an owned-tree residual.
-
+Store payload ticker baselines retain nullable index prices. The maintained worker
+advances its baseline for number-to-null transitions but omits non-number deltas;
+null-to-number emits the new number. Preserve this source behavior. The live
+store_payload oracle pins both transitions and unchanged-null packed arrays.

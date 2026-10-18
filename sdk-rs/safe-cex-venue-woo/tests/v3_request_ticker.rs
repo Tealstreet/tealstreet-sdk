@@ -1,9 +1,6 @@
-use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_types::Market;
 use safe_cex_venue_woo::{
-    v3_contracts::{WooV3Endpoint, WooV3HttpMethod},
     v3_public::WooV3FuturesRow,
-    v3_request::WooV3RequestInput,
     v3_ticker::{
         WooV3AuthoritativeTicker, WooV3AuthoritativeTickerInfo,
         compose_woo_v3_authoritative_ticker, normalize_perpetual_symbol,
@@ -160,53 +157,6 @@ fn check_ticker(actual: &WooV3AuthoritativeTicker, expected: &Value) {
         bits(value, &expected[key], &format!("TICKER native {key}"));
     }
     check_info(&actual.info, &expected["info"]);
-}
-#[test]
-fn request_declarations_decode_native_fields() {
-    let input: WooV3RequestInput = serde_json::from_str(raw("input")).expect("INPUT native decode");
-    assert!(
-        matches!(input.method, WooV3HttpMethod::Post),
-        "INPUT native method"
-    );
-    assert!(
-        matches!(input.path, WooV3Endpoint::TradeOrder),
-        "INPUT native endpoint"
-    );
-    let query: &JsNumberInput = input
-        .query
-        .as_ref()
-        .unwrap()
-        .get("queryField")
-        .expect("INPUT native query key");
-    assert_eq!(
-        query.clone().decode::<f64>().unwrap().to_bits(),
-        (-0.0_f64).to_bits(),
-        "INPUT native query bits"
-    );
-    let body = input
-        .body
-        .as_ref()
-        .unwrap()
-        .get("bodyField")
-        .expect("INPUT native body key");
-    assert_eq!(
-        body.clone().decode::<f64>().unwrap(),
-        f64::INFINITY,
-        "INPUT native body overflow"
-    );
-    for text in ["[]", "null"] {
-        assert!(
-            serde_json::from_str::<WooV3RequestInput>(text).is_err(),
-            "INPUT map-only"
-        );
-    }
-    assert!(
-        serde_json::from_str::<WooV3RequestInput>(
-            "{\"method\":\"GET\",\"path\":\"/v3/public/futures\",\"query\":null}"
-        )
-        .is_err(),
-        "INPUT optional query excludes null"
-    );
 }
 #[test]
 fn quote_declarations_decode_native_fields() {

@@ -4,8 +4,8 @@
 use super::{Host, NativeSlots, codec};
 use crate::{
     binding::{
-        ops::{has_property, spread, to_string},
-        value::to_signing,
+        ops::{JsIterator, has_property, to_string},
+        value::{to_signing, to_thrown},
     },
     http_transactions::L2CreateOrderTxInfo,
     transaction_client::{
@@ -18,7 +18,10 @@ use crate::{
     },
 };
 use num_bigint::BigInt;
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
+use safe_cex_exchange::js_runtime::{
+    promise::{Promise, await_js},
+    value::{Js, Thrown, arg},
+};
 use std::{cell::RefCell, rc::Rc};
 
 /// `this.httpClient.<member>(...args)`, awaited.
@@ -186,7 +189,7 @@ fn config_field<T>(
 }
 
 // ts: TransactionClient.constructor
-fn construct(host: &Host, config: &Js) -> Result<Rc<TransactionClient>, Thrown> {
+fn construct(host: &Host, config: &Js) -> Result<(Rc<TransactionClient>, Js), Thrown> {
     let http_client = config.get("httpClient")?;
     let crypto = config.get("crypto")?;
     let chain_id = config_field(config, "chainId", |v| v.as_f64())?;
@@ -196,10 +199,10 @@ fn construct(host: &Host, config: &Js) -> Result<Rc<TransactionClient>, Thrown> 
         _ => None,
     })?;
     let api_key_index = config_field(config, "apiKeyIndex", |v| v.as_f64())?;
-    Ok(TransactionClient::new(TransactionClientConfig {
+    let client = TransactionClient::new(TransactionClientConfig {
         http_client: Rc::new(JsTransactionApi {
             host: host.clone(),
-            client: http_client,
+            client: http_client.clone(),
         }),
         crypto: Rc::new(JsCrypto::new(crypto)),
         runtime: host.microtasks.clone(),
@@ -207,117 +210,146 @@ fn construct(host: &Host, config: &Js) -> Result<Rc<TransactionClient>, Thrown> 
         private_key,
         account_index,
         api_key_index,
-    }))
+    });
+    Ok((client, http_client))
 }
 
 type Method = fn(&Host, &Rc<TransactionClient>, Js) -> Js;
 
-/// A decode failure surfaces where the source first reads the params: after
-/// awaiting its nonce, so the allocation still happens.
-fn after_nonce(host: &Host, client: &Rc<TransactionClient>, error: Thrown) -> Js {
+// Parameter reads happen in the nonce continuation, never at invocation.
+fn after_nonce(
+    host: &Host,
+    client: &Rc<TransactionClient>,
+    params: Js,
+    build: impl FnOnce(&TransactionClient, Js, BigInt) -> Result<Js, Thrown> + 'static,
+) -> Js {
     let nonce = client.get_next_nonce(false);
-    host.promise(nonce, move |_| Err(error))
+    let client = client.clone();
+    host.promise(nonce, move |nonce| build(&client, params, nonce.clone()))
 }
 
-/// `for (const p of params)`: nonces and builds for the decodable prefix, then
-/// the nonce the failing element awaits before its params are read.
+fn build_order(client: &TransactionClient, params: &Js, nonce: BigInt) -> Result<Js, Thrown> {
+    let (params, flags) = codec::create_order(params)?;
+    let tx = client.create_order(&params, &nonce).map_err(to_thrown)?;
+    Ok(codec::create_order_tx(&tx, &flags))
+}
+
 fn create_orders(host: &Host, client: &Rc<TransactionClient>, params: Js) -> Js {
-    let items = match spread(&params) {
-        Ok(items) => items,
+    let iterator = match JsIterator::open(&params) {
+        Ok(iterator) => Rc::new(iterator),
         Err(error) => return host.rejected(error),
     };
-    let mut decoded = vec![];
-    let mut flags = vec![];
-    for item in &items {
-        match codec::create_order(item) {
-            Ok((order, raw)) => {
-                decoded.push(order);
-                flags.push(raw);
-            }
-            Err(error) => {
-                let (promise, resolver) = NativePromise::pending(host.microtasks.clone());
-                let next = client.clone();
-                client.get_create_order_transactions(decoded).subscribe(
-                    move |prefix| match prefix {
-                        Err(e) => resolver.settle(Err(e)),
-                        Ok(_) => next.get_next_nonce(false).subscribe(move |nonce| {
-                            resolver.settle(nonce.and(Err(to_signing(error))))
-                        }),
-                    },
-                );
-                return host.promise(promise, |_: &()| Ok(Js::Undefined));
-            }
-        }
-    }
-    host.promise(client.get_create_order_transactions(decoded), move |txs| {
-        Ok(codec::create_order_txs(&txs.borrow(), &flags))
-    })
+    let result = Promise::pending(&host.runtime);
+    create_order_step(client.clone(), iterator, vec![], result.clone());
+    Js::Promise(result)
 }
 
-const METHODS: [(&str, Method); 8] = [
+fn create_order_step(
+    client: Rc<TransactionClient>,
+    iterator: Rc<JsIterator>,
+    mut transactions: Vec<Js>,
+    result: Promise,
+) {
+    let params = match iterator.step() {
+        Ok(Some(params)) => params,
+        Ok(None) => {
+            result.settle(Ok(Js::array(transactions)));
+            return;
+        }
+        Err(error) => {
+            result.settle(Err(error));
+            return;
+        }
+    };
+    client.get_next_nonce(false).subscribe(move |nonce| {
+        let built = nonce
+            .map_err(to_thrown)
+            .and_then(|nonce| build_order(&client, &params, (*nonce).clone()));
+        match built {
+            Ok(transaction) => {
+                transactions.push(transaction);
+                create_order_step(client, iterator, transactions, result);
+            }
+            Err(error) => {
+                // IteratorClose preserves the original abrupt body completion.
+                let closed = iterator.close();
+                drop(closed);
+                result.settle(Err(error));
+            }
+        }
+    });
+}
+
+const METHODS: [(&str, Method); 9] = [
     // ts: TransactionClient.getCreateOrderTransaction
-    (
-        "getCreateOrderTransaction",
-        |host, client, params| match codec::create_order(&params) {
-            Ok((p, flags)) => host.promise(client.get_create_order_transaction(p), move |tx| {
-                Ok(codec::create_order_tx(&tx.borrow(), &flags))
-            }),
-            Err(error) => after_nonce(host, client, error),
-        },
-    ),
+    ("getCreateOrderTransaction", |host, client, params| {
+        after_nonce(host, client, params, |client, params, nonce| {
+            build_order(client, &params, nonce)
+        })
+    }),
     // ts: TransactionClient.getCreateOrderTransactions
     ("getCreateOrderTransactions", create_orders),
     // ts: TransactionClient.getCreateGroupedOrdersTransaction
     (
         "getCreateGroupedOrdersTransaction",
-        |host, client, params| match codec::create_grouped_orders(&params) {
-            Ok((p, flags)) => {
+        |host, client, params| {
+            after_nonce(host, client, params, |client, params, nonce| {
+                let (params, flags) = codec::create_grouped_orders(&params)?;
                 let flags = Rc::new(flags);
                 let compare = flags.clone();
-                let promise = client.get_create_grouped_orders_with_side_comparison(
-                    p,
-                    Rc::new(move |a, b| compare[a].is_buy.strict_equals(&compare[b].is_buy)),
-                );
-                host.promise(promise, move |tx| {
-                    Ok(codec::create_grouped_orders_tx(&tx.borrow(), &flags))
-                })
-            }
-            Err(error) => after_nonce(host, client, error),
+                let tx = client
+                    .grouped_orders(
+                        params,
+                        nonce,
+                        Rc::new(move |a, b| compare[a].is_buy.strict_equals(&compare[b].is_buy)),
+                    )
+                    .map_err(to_thrown)?;
+                Ok(codec::create_grouped_orders_tx(&tx, &flags))
+            })
         },
     ),
     // ts: TransactionClient.getCancelOrderTransaction
-    (
-        "getCancelOrderTransaction",
-        |host, client, params| match codec::cancel_order(&params) {
-            Ok(p) => host.promise(client.get_cancel_order_transaction(p), |tx| {
-                Ok(codec::cancel_order_tx(&tx.borrow()))
-            }),
-            Err(error) => after_nonce(host, client, error),
-        },
-    ),
+    ("getCancelOrderTransaction", |host, client, params| {
+        after_nonce(host, client, params, |client, params, nonce| {
+            let tx = client
+                .cancel_order(codec::cancel_order(&params)?, nonce)
+                .map_err(to_thrown)?;
+            Ok(codec::cancel_order_tx(&tx))
+        })
+    }),
+    // ts: TransactionClient.getTransferTransaction
+    ("getTransferTransaction", |host, client, params| {
+        after_nonce(host, client, params, |client, params, nonce| {
+            let tx = client
+                .transfer(codec::transfer(&params)?, nonce)
+                .map_err(to_thrown)?;
+            Ok(codec::transfer_tx(&tx))
+        })
+    }),
     // ts: TransactionClient.getUpdateLeverageTransaction
-    (
-        "getUpdateLeverageTransaction",
-        |host, client, params| match codec::update_leverage(&params) {
-            Ok(p) => host.promise(client.get_update_leverage_transaction(p), |tx| {
-                Ok(codec::update_leverage_tx(&tx.borrow()))
-            }),
-            Err(error) => after_nonce(host, client, error),
-        },
-    ),
+    ("getUpdateLeverageTransaction", |host, client, params| {
+        after_nonce(host, client, params, |client, params, nonce| {
+            let tx = client
+                .update_leverage(codec::update_leverage(&params)?, nonce)
+                .map_err(to_thrown)?;
+            Ok(codec::update_leverage_tx(&tx))
+        })
+    }),
     // ts: TransactionClient.getApproveIntegratorTransaction
     ("getApproveIntegratorTransaction", |host, client, params| {
-        let nonce = match codec::approve_nonce(&params) {
-            Ok(nonce) => nonce,
-            Err(error) => return host.rejected(error),
+        let build = |client: &TransactionClient, params: Js, nonce: BigInt| {
+            let (params, l1_signature) = codec::approve_integrator(&params, Some(nonce.clone()))?;
+            let tx = client
+                .approve_integrator(params, nonce)
+                .map_err(to_thrown)?;
+            Ok(codec::approve_integrator_tx(&tx, &l1_signature))
         };
-        let allocates = nonce.is_none();
-        match codec::approve_integrator(&params, nonce) {
-            Ok((p, l1_signature)) => host
-                .promise(client.get_approve_integrator_transaction(p), move |tx| {
-                    Ok(codec::approve_integrator_tx(&tx.borrow(), &l1_signature))
-                }),
-            Err(error) if allocates => after_nonce(host, client, error),
+        match codec::approve_nonce(&params) {
+            Ok(Some(nonce)) => match build(client, params, nonce) {
+                Ok(tx) => Js::Promise(Promise::settled(&host.runtime, Ok(tx))),
+                Err(error) => host.rejected(error),
+            },
+            Ok(None) => after_nonce(host, client, params, build),
             Err(error) => host.rejected(error),
         }
     }),
@@ -338,6 +370,46 @@ const METHODS: [(&str, Method); 8] = [
     }),
 ];
 
+const SUBMITS: [(&str, &str); 7] = [
+    ("submitCreateOrder", "getCreateOrderTransaction"),
+    ("submitCreateOrders", "getCreateOrderTransactions"),
+    (
+        "submitCreateGroupedOrders",
+        "getCreateGroupedOrdersTransaction",
+    ),
+    ("submitCancelOrder", "getCancelOrderTransaction"),
+    ("submitTransfer", "getTransferTransaction"),
+    ("submitUpdateLeverage", "getUpdateLeverageTransaction"),
+    ("submitApproveIntegrator", "getApproveIntegratorTransaction"),
+];
+
+fn submit(host: &Host, this: Js, params: Js, getter: &str) -> Js {
+    let built = match this.call_method(getter, vec![params]) {
+        Ok(value) => value,
+        Err(error) => return host.rejected(error),
+    };
+    let runtime = host.runtime.clone();
+    let batch = getter == "getCreateOrderTransactions";
+    let pending = await_js(&runtime, built);
+    Js::Promise(Promise::spawn(
+        &host.runtime,
+        Box::pin(async move {
+            let transaction = pending.await?;
+            let api = this.get("httpClient")?;
+            let sent = api.call_method(
+                if batch { "sendRawTxBatch" } else { "sendRawTx" },
+                vec![transaction],
+            )?;
+            let response = await_js(&runtime, sent).await?;
+            if batch {
+                response.get("txHashes")
+            } else {
+                Ok(response)
+            }
+        }),
+    ))
+}
+
 pub(super) fn install(host: &Host) -> Result<(), Thrown> {
     let slots: Rc<NativeSlots<TransactionClient>> = Rc::default();
     let prototype = Js::object(vec![]);
@@ -350,10 +422,20 @@ pub(super) fn install(host: &Host) -> Result<(), Thrown> {
         });
         prototype.define(name, method)?;
     }
+    for (name, getter) in SUBMITS {
+        let host = host.clone();
+        prototype.define(
+            name,
+            Js::function(name, move |this, args| {
+                Ok(submit(&host, this, arg(&args, 0), getter))
+            }),
+        )?;
+    }
     let ctor_host = host.clone();
     let class = Js::constructor("TransactionClient", None, move |target, a| {
         let instance = target.allocate_instance()?;
-        let client = construct(&ctor_host, &arg(&a, 0))?;
+        let (client, http_client) = construct(&ctor_host, &arg(&a, 0))?;
+        instance.define("httpClient", http_client)?;
         slots.bind(&instance, client)?;
         Ok(instance)
     });

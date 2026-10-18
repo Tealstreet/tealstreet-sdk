@@ -100,7 +100,7 @@ fn fetch_tickers_reads_the_rest_snapshot_for_known_markets() {
     assert_eq!(tickers.len(), 1);
     assert_eq!(tickers[0].symbol, SYMBOL);
     assert_eq!(tickers[0].mark, 30000.25);
-    assert_eq!(tickers[0].index, 30000.1);
+    assert_eq!(tickers[0].index, Some(30000.1));
 }
 
 #[test]
@@ -1163,6 +1163,103 @@ fn spot_private_order_frame() -> Value {
 }
 
 #[test]
+fn constructed_private_ingress_keeps_surrogate_frames_neighbors_and_raw_info() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-ingress-source.cjs"
+        ))
+        .output()
+        .expect("maintained Kraken onMessage oracle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        cases.len(),
+        12,
+        "four real source socket classes, three unit profiles"
+    );
+    let expected: Vec<_> = [
+        "kraken.ws-public",
+        "kraken.ws-private",
+        "krakenspot.ws-public",
+        "krakenspot.ws-private",
+    ]
+    .into_iter()
+    .flat_map(|family| {
+        ["high", "low", "pair"]
+            .into_iter()
+            .map(move |id| (family, id))
+    })
+    .collect();
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| (
+                case["family"].as_str().unwrap(),
+                case["id"].as_str().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let futures = private_frame_fixture();
+    let spot = spot_private_fixture();
+    let mut comparisons = 0;
+    for case in cases {
+        let h = match case["family"].as_str().unwrap() {
+            "kraken.ws-private" => &futures,
+            "krakenspot.ws-private" => &spot,
+            _ => continue,
+        };
+        let units = match case["id"].as_str().unwrap() {
+            "high" => vec![0xd800],
+            "low" => vec![0xdc00],
+            "pair" => vec![0xd83d, 0xde80],
+            _ => unreachable!(),
+        };
+        assert_eq!(case["units"], serde_json::to_value(&units).unwrap());
+        let socket = h.runtime.sockets.borrow()[1].1.clone();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                safe_cex_transport::socket::SocketFrame::Text(case["raw"].as_str().unwrap().into()),
+            ));
+        h.runtime.pump();
+        let orders = h.store.orders().unwrap();
+        assert_eq!(
+            orders
+                .iter()
+                .map(|order| order.id.as_str())
+                .collect::<Vec<_>>(),
+            ["retained-order", "neighbor"],
+            "constructed private socket must keep the complete surrogate-bearing frame: {} {}",
+            case["family"],
+            case["id"]
+        );
+        let info = orders[0].info.as_ref().expect("source order info");
+        assert!(
+            matches!(info.get("marker"), Some(Input::Text(actual)) if *actual == units),
+            "raw info units must remain lossless: {info:?}"
+        );
+        assert_eq!(
+            orders[1].info.as_ref().unwrap().get("marker"),
+            Some(&Input::Text("ordinary".encode_utf16().collect()))
+        );
+        assert_eq!(orders[0].amount, 3.0);
+        comparisons += 1;
+    }
+    assert_eq!(
+        comparisons, 6,
+        "both actual private socket bindings and all profiles"
+    );
+}
+
+#[test]
 fn constructed_spot_private_orders_frame_updates_real_store() {
     let h = spot_private_fixture();
     private_frame(&h, spot_private_order_frame());
@@ -1383,10 +1480,14 @@ fn constructed_public_book_frames_keep_source_string_iterables() {
                 json!({"channel":"book","type":if snapshot {"snapshot"} else {"update"},
                     "data":[{"symbol":symbol,"bids":bids,"asks":asks,"checksum":123}]})
             };
+            // A valid unknown string must not make either public binding drop
+            // the book frame. The maintained onMessage oracle independently
+            // observes lone-unit parsing before dispatch.
+            let text = raw.to_string().replacen('{', r#"{"ignored":"\ud800","#, 1);
             socket
                 .events
                 .borrow_mut()
-                .push_back(WsEvent::Message(SocketFrame::Text(raw.to_string())));
+                .push_back(WsEvent::Message(SocketFrame::Text(text)));
             h.runtime.pump();
         };
         let source_snapshot = source["books"]
@@ -1857,4 +1958,136 @@ fn eager_wrapper_live_source_prefix_and_detached_continuation() {
     assert_eq!(receipt["synchronousHttpPrefixes"], 3);
     assert_eq!(receipt["detachedContinuation"], true);
     assert_eq!(receipt["rejectionPrefix"], true);
+}
+
+#[test]
+fn historical_fill_ingress_keeps_valid_rows_with_unread_native_data() {
+    use safe_cex_exchange::js_runtime::value::from_retained_input;
+    use safe_cex_types::retained_json::RetainedJsonInput;
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fill-ingress-source.cjs"
+        ))
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let corpus: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(corpus["caseCount"], 12);
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 12);
+    let string = |value: &Value| {
+        String::from_utf16_lossy(
+            &value["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_u64().unwrap() as u16)
+                .collect::<Vec<_>>(),
+        )
+    };
+    for case in cases {
+        let raw = case["raw"].as_str().unwrap();
+        let retained =
+            RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
+        let body = from_retained_input(retained);
+        let h = futures(|http| {
+            http.route_native("GET", "/v3/fills", 200.0, body);
+            http.ok("GET", "/v3/fills", json!({"result":"success","fills":[]}));
+        });
+        loaded(&h);
+        let actual = h
+            .drive(
+                h.venue().fetch_historical_fills(
+                    serde_json::from_value(
+                        json!({"from":1_699_999_998_000_f64,"to":1_700_000_000_000_f64}),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let expected = case["output"].as_array().unwrap();
+        assert_eq!(expected.len(), 2, "independent source row count");
+        assert_eq!(
+            actual.len(),
+            2,
+            "retained fill page {}: {:?}",
+            case["label"],
+            h.runtime.console.borrow()
+        );
+        for (fill, expected) in actual.iter().zip(expected) {
+            assert_eq!(
+                fill.id.as_deref(),
+                Some(string(&expected["id"]).as_str()),
+                "{}",
+                case["label"]
+            );
+            assert_eq!(fill.symbol, string(&expected["symbol"]));
+            if expected["orderId"]["undefined"] == true {
+                assert!(fill.order_id.is_none());
+            } else {
+                assert_eq!(
+                    fill.order_id.as_deref(),
+                    Some(string(&expected["orderId"]).as_str())
+                );
+            }
+            for (field, number) in [
+                ("timestamp", fill.timestamp),
+                ("price", fill.price),
+                ("qty", fill.qty),
+            ] {
+                assert_eq!(
+                    format!("{:016x}", number.to_bits()),
+                    expected[field]["bits"].as_str().unwrap(),
+                    "{} {field}",
+                    case["label"]
+                );
+            }
+            if expected["realizedPnl"]["undefined"] == true {
+                assert!(fill.realized_pnl.is_none());
+            } else {
+                assert_eq!(
+                    format!("{:016x}", fill.realized_pnl.unwrap().to_bits()),
+                    expected["realizedPnl"]["bits"].as_str().unwrap()
+                );
+            }
+            assert_eq!(
+                fill.side,
+                if string(&expected["side"]) == "buy" {
+                    OrderSide::Buy
+                } else {
+                    OrderSide::Sell
+                }
+            );
+            assert_eq!(fill.maker, expected["maker"].as_bool());
+            assert!(
+                fill.commission.is_none()
+                    && fill.commission_asset.is_none()
+                    && fill.position_side.is_none()
+            );
+        }
+        let requests = h.http.calls("/v3/fills");
+        assert_eq!(
+            requests.len(),
+            2,
+            "first complete page followed by empty terminator"
+        );
+        assert_eq!(
+            requests[0].params,
+            json!({}),
+            "unwindowed newest page retains PnL"
+        );
+        assert_eq!(
+            requests[1].url,
+            "/v3/fills?lastFillTime=2023-11-14T22%3A13%3A19.001Z"
+        );
+        assert!(h.runtime.reports.borrow().is_empty());
+        h.venue().dispose().unwrap();
+    }
 }

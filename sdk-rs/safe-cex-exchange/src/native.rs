@@ -4,8 +4,12 @@
 use crate::{
     exchange::Exchange,
     http::{HttpFuture, HttpHost},
+    owned_tasks::OwnedTasks,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
-    websocket::{UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
+    waiters::Waiters,
+    websocket::{
+        FrameDrainReceipt, UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket,
+    },
 };
 use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
@@ -13,7 +17,7 @@ use safe_cex_transport::{
     TransportProvider,
     how::{HowRestAdapter, big_int_as_string_json_parse},
     how_config::{CreateAxiosHttpOverWebsocketAdapterOptions, HOWRegion},
-    native::{NativeSocket, NativeTunnelHost, connect_websocket, spawn_local_task, wall_clock_ms},
+    native::{NativeSocket, NativeTunnelHost, prepare_websocket, spawn_local_task, wall_clock_ms},
     provider::RestAdapterRegion,
     socket::{
         SocketCapabilities, SocketFrame, TunnelDialOptions, TunnelHost, TunnelSocket, TunnelTask,
@@ -89,6 +93,7 @@ impl Future for HostTask {
 /// `ExchangeRuntime` + `WsRuntime` on the current tokio `LocalSet`.
 pub struct NativeRuntime {
     pub replay_clock: Option<Rc<crate::replay_clock::ReplayClock>>,
+    parser_receipts: RefCell<Vec<Rc<RefCell<Vec<FrameDrainReceipt>>>>>,
     frame_counts: Rc<
         RefCell<
             Vec<(
@@ -134,6 +139,15 @@ pub fn native_frame_receipts(runtime: &NativeRuntime) -> Vec<Value> {
         .map(|(url, counts)| serde_json::json!({"url": url, "counts": counts.borrow().clone()}))
         .collect()
 }
+/// Parser histories from every diagnostic socket, including nested/disposed owners.
+pub fn native_parser_receipts(runtime: &NativeRuntime) -> Vec<FrameDrainReceipt> {
+    runtime
+        .parser_receipts
+        .borrow()
+        .iter()
+        .flat_map(|receipts| receipts.borrow().clone())
+        .collect()
+}
 /// The account's proxy token (ts: the accessToken facade; exchange-server's per-account provider).
 pub type ProxyTokenSource = Rc<dyn Fn() -> TransportFuture<'static, String>>;
 /// ts: registerTealstreetTransport for a native host. `tealstreetTunnel` REST goes over
@@ -164,6 +178,7 @@ fn runtime_over(
     let random = random_unit();
     Rc::new_cyclic(|owner| NativeRuntime {
         replay_clock,
+        parser_receipts: RefCell::default(),
         frame_counts: Rc::default(),
         origin: Instant::now(),
         owner: owner.clone(),
@@ -365,6 +380,11 @@ impl WsRuntime for NativeRuntime {
     fn frame_receipts_enabled(&self) -> bool {
         self.replay_clock.is_some()
     }
+    fn register_frame_receipts(&self, receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>) {
+        if self.replay_clock.is_some() {
+            self.parser_receipts.borrow_mut().push(receipts);
+        }
+    }
     fn transport(&self) -> Arc<dyn TransportProvider> {
         self.transport.clone()
     }
@@ -380,6 +400,7 @@ impl WsRuntime for NativeRuntime {
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
         let frame_counts = self.frame_counts.clone();
         let replay = self.replay_clock.is_some();
+        let runtime: Rc<dyn ExchangeRuntime> = self.owner.upgrade().expect("live native runtime");
         Box::pin(async move {
             // Header-capable source sockets select the wrapper branch even
             // when the native core owns reconnects. Dial that authenticated
@@ -395,23 +416,21 @@ impl WsRuntime for NativeRuntime {
                 Some(UpgradeHeaders::Static(map)) => map.clone().into_iter().collect(),
                 Some(UpgradeHeaders::Fresh(provider)) => provider().into_iter().collect(),
             };
-            let socket = match connect_websocket(&url, &protocols, &headers).await {
-                Ok(socket) => {
-                    if replay {
-                        frame_counts
-                            .borrow_mut()
-                            .push((url, socket.frame_counts.clone()));
-                    }
-                    Ok(socket)
+            let prepared = prepare_websocket(&url, &protocols, &headers).map_err(|cause| {
+                let mut error = ExchangeError::new(cause.to_string());
+                error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(cause));
+                error
+            })?;
+            let connecting = Box::pin(async move {
+                let socket = prepared.await?;
+                if replay {
+                    frame_counts
+                        .borrow_mut()
+                        .push((url, socket.frame_counts.clone()));
                 }
-                Err(error @ safe_cex_transport::TransportError::Network(_)) => Err(error),
-                Err(cause) => {
-                    let mut error = ExchangeError::new(cause.to_string());
-                    error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(cause));
-                    return Err(error);
-                }
-            };
-            Ok(Rc::new(native_ws_socket(socket)) as Rc<dyn WsSocket>)
+                Ok(socket)
+            });
+            Ok(native_ws_socket(&runtime, connecting) as Rc<dyn WsSocket>)
         })
     }
     fn headers_capable(&self) -> bool {
@@ -434,56 +453,120 @@ impl WsRuntime for NativeRuntime {
     }
 }
 
-/// A plain socket delivers Open or the failed attempt's Error/Close pair.
-/// After Close or termination, event delivery stays pending.
+/// One host handle exists from constructor admission through handshake completion.
+/// The socket owns cancellation; its pending event waiter does not own the dial.
+#[derive(Clone)]
+enum NativeSocketState {
+    Connecting,
+    Connected(Rc<NativeSocket>),
+    Failed(String),
+    Terminated,
+}
 struct NativeWsSocket {
-    inner: Result<Rc<NativeSocket>, String>,
+    inner: Rc<RefCell<NativeSocketState>>,
     opened: Rc<Cell<bool>>,
     ended: Rc<Cell<bool>>,
+    closing: Cell<bool>,
+    opening: Rc<OwnedTasks>,
+    waiters: Waiters,
 }
 fn native_ws_socket(
-    inner: Result<NativeSocket, safe_cex_transport::TransportError>,
-) -> NativeWsSocket {
-    NativeWsSocket {
-        inner: inner.map(Rc::new).map_err(|error| error.to_string()),
+    runtime: &Rc<dyn ExchangeRuntime>,
+    connecting: TransportFuture<'static, NativeSocket>,
+) -> Rc<NativeWsSocket> {
+    let socket = Rc::new(NativeWsSocket {
+        inner: Rc::new(RefCell::new(NativeSocketState::Connecting)),
         opened: Rc::new(Cell::new(false)),
         ended: Rc::new(Cell::new(false)),
-    }
+        closing: Cell::new(false),
+        opening: Rc::new(OwnedTasks::default()),
+        waiters: Waiters::default(),
+    });
+    let inner = Rc::downgrade(&socket.inner);
+    let waiters = socket.waiters.clone();
+    socket.opening.start_eager(
+        runtime,
+        move |_| {
+            Box::pin(async move {
+                let result = connecting.await;
+                if let Some(inner) = inner.upgrade() {
+                    *inner.borrow_mut() = match result {
+                        Ok(socket) => NativeSocketState::Connected(Rc::new(socket)),
+                        Err(error) => NativeSocketState::Failed(error.to_string()),
+                    };
+                    waiters.wake_all();
+                }
+            })
+        },
+        |_| {},
+    );
+    socket
 }
 impl WsSocket for NativeWsSocket {
     fn ready_state(&self) -> u8 {
-        self.inner
-            .as_ref()
-            .map_or(3, |inner| inner.ready_state() as u8)
+        if self.closing.get() {
+            return 2;
+        }
+        match &*self.inner.borrow() {
+            NativeSocketState::Connecting => 0,
+            NativeSocketState::Connected(inner) => inner.ready_state() as u8,
+            NativeSocketState::Failed(_) | NativeSocketState::Terminated => 3,
+        }
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
-        let inner = match &self.inner {
-            Ok(inner) => inner.clone(),
-            Err(message) => {
-                if self.ended.get() {
-                    return Box::pin(std::future::pending());
-                }
-                let event = if !self.opened.replace(true) {
-                    WsEvent::Error(message.clone())
-                } else {
-                    self.ended.set(true);
-                    WsEvent::Close {
-                        code: Some(1006),
-                        reason: String::new(),
-                    }
-                };
-                return Box::pin(std::future::ready(Ok(event)));
-            }
-        };
-        if !self.opened.replace(true) {
-            return Box::pin(async { Ok(WsEvent::Open) });
-        }
+        let state = self.inner.clone();
+        let opened = self.opened.clone();
         let ended = self.ended.clone();
+        let registration = self.waiters.register();
         Box::pin(async move {
-            if ended.get() {
-                return std::future::pending().await;
+            let inner = std::future::poll_fn(|cx| {
+                if ended.get() {
+                    return std::task::Poll::Pending;
+                }
+                let current = state.borrow().clone();
+                match current {
+                    NativeSocketState::Connecting => {
+                        registration.update(cx.waker());
+                        std::task::Poll::Pending
+                    }
+                    NativeSocketState::Terminated => std::task::Poll::Pending,
+                    inner => std::task::Poll::Ready(inner),
+                }
+            })
+            .await;
+            let inner = match inner {
+                NativeSocketState::Connected(inner) => inner,
+                NativeSocketState::Failed(message) => {
+                    return Ok(if !opened.replace(true) {
+                        WsEvent::Error(message)
+                    } else {
+                        ended.set(true);
+                        WsEvent::Close {
+                            code: Some(1006),
+                            reason: String::new(),
+                        }
+                    });
+                }
+                NativeSocketState::Connecting | NativeSocketState::Terminated => unreachable!(),
+            };
+            if !opened.replace(true) {
+                return Ok(WsEvent::Open);
             }
-            match inner.receive().await {
+            let mut receiving = inner.receive();
+            let frame = std::future::poll_fn(|cx| {
+                if ended.get() {
+                    return std::task::Poll::Ready(None);
+                }
+                registration.update(cx.waker());
+                receiving.as_mut().poll(cx).map(Some)
+            })
+            .await;
+            drop(receiving);
+            drop(inner);
+            let Some(frame) = frame else {
+                return std::future::pending().await;
+            };
+            match frame {
                 Ok(SocketFrame::Close { code, reason, .. }) => {
                     ended.set(true);
                     Ok(WsEvent::Close {
@@ -501,27 +584,54 @@ impl WsSocket for NativeWsSocket {
         })
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
-        self.inner
-            .as_ref()
-            .map_err(|message| ExchangeError::new(message.clone()))?
-            .send(SocketFrame::Text(message.to_owned()))
-            .map_err(|e| ExchangeError::new(e.to_string()))
+        match &*self.inner.borrow() {
+            NativeSocketState::Connecting => {
+                let mut error = ExchangeError::new("Sent before connected.");
+                error.name = "InvalidStateError".into();
+                Err(error)
+            }
+            NativeSocketState::Connected(inner) => inner
+                .send(SocketFrame::Text(message.to_owned()))
+                .map_err(|error| ExchangeError::new(error.to_string())),
+            NativeSocketState::Failed(_) | NativeSocketState::Terminated => Ok(()),
+        }
     }
     fn close(&self) {
-        if let Ok(inner) = &self.inner {
-            let _ = inner.close(Some(1000), "");
+        let inner = self.inner.borrow().clone();
+        match inner {
+            NativeSocketState::Connecting => {
+                self.closing.set(true);
+                // WsEvent::Error carries the source's normalized error message:
+                // Event.message is empty, so BaseWebSocket falls back to type.
+                *self.inner.borrow_mut() = NativeSocketState::Failed("error".into());
+                self.opening.close();
+                self.waiters.wake_all();
+            }
+            NativeSocketState::Connected(inner) => {
+                let _ = inner.close(Some(1000), "");
+            }
+            NativeSocketState::Failed(_) | NativeSocketState::Terminated => {}
         }
     }
     fn terminate(&self) {
         self.ended.set(true);
-        self.close();
+        self.opening.close();
+        let inner = self.inner.replace(NativeSocketState::Terminated);
+        if let NativeSocketState::Connected(inner) = inner {
+            let _ = inner.close(Some(1000), "");
+        }
+        self.waiters.wake_all();
     }
     fn reconnect(&self) {
-        // The core reconnects only host-managed wrappers; a plain socket just closes.
         self.close();
     }
     fn is_reconnecting(&self) -> bool {
         false
+    }
+}
+impl Drop for NativeWsSocket {
+    fn drop(&mut self) {
+        self.terminate();
     }
 }
 
@@ -575,3 +685,7 @@ impl HttpHost for NativeHttpHost {
         false
     }
 }
+
+#[cfg(test)]
+#[path = "native_connecting_tests.rs"]
+mod connecting_tests;

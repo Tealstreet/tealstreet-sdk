@@ -251,3 +251,101 @@ fn error_message_retains_truthy_values_and_uses_fallback_for_falsy_values() {
         "fallback"
     );
 }
+
+#[test]
+fn fill_mapping_keeps_native_units_without_reading_unrelated_properties() {
+    use safe_cex_exchange::js_runtime::value::from_retained_input;
+    use safe_cex_types::retained_json::RetainedJsonInput;
+    use std::cell::Cell;
+    let h = harness(ExchangeName::Kraken, options(), |_| {});
+    let input = RetainedJsonInput::parse_json(&r#"{"fill_id":"\ud800","symbol":"PF_XBTUSD","fillTime":"2023-11-14T22:13:19Z","side":"BUY","order_id":"\udc00","price":-0,"size":2.5,"fillType":"MAKER","realized_pnl":-0}"#.encode_utf16().collect::<Vec<_>>()).unwrap();
+    let row = from_retained_input(input);
+    let reads = Rc::new(Cell::new(0));
+    let seen = reads.clone();
+    row.define_accessor(
+        "ignored",
+        Some(Rc::new(move |_| {
+            seen.set(seen.get() + 1);
+            Err(Thrown::error("Error", "unread data must not execute"))
+        })),
+        None,
+    )
+    .unwrap();
+    let mapped = h
+        .exchange
+        .rt
+        .map_fills(Rc::new(Js::array(vec![row.clone()])))
+        .unwrap();
+    assert_eq!(mapped.len(), 1);
+    assert_eq!(
+        mapped[0]
+            .get("id")
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        &[0xd800]
+    );
+    assert_eq!(
+        mapped[0]
+            .get("orderId")
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        &[0xdc00]
+    );
+    assert_eq!(
+        mapped[0].get("price").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert_eq!(
+        mapped[0]
+            .get("realizedPnl")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert!(!mapped[0].has_own("commission"));
+    assert_eq!(reads.get(), 0);
+    // Number(BigInt) and String(Symbol) use the shared source builtins rather
+    // than the stricter abstract ToNumber/ToString operations.
+    let bigint = |text| {
+        h.exchange
+            .rt
+            .global("BigInt")
+            .unwrap()
+            .call(Js::Undefined, vec![Js::str(text)])
+            .unwrap()
+    };
+    row.set("price", bigint("9007199254740993")).unwrap();
+    row.set("size", bigint("0")).unwrap();
+    row.set("realized_pnl", bigint("-2")).unwrap();
+    row.set("order_id", Js::SymbolIterator).unwrap();
+    let mapped = h
+        .exchange
+        .rt
+        .map_fills(Rc::new(Js::array(vec![row])))
+        .unwrap();
+    assert_eq!(
+        mapped[0].get("price").unwrap().as_f64(),
+        Some(9007199254740992.0)
+    );
+    assert_eq!(mapped[0].get("qty").unwrap().as_f64(), Some(0.0));
+    assert_eq!(mapped[0].get("realizedPnl").unwrap().as_f64(), Some(-2.0));
+    assert_eq!(
+        mapped[0]
+            .get("orderId")
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        "Symbol(Symbol.iterator)"
+            .encode_utf16()
+            .collect::<Vec<_>>()
+            .as_slice()
+    );
+    assert_eq!(reads.get(), 0);
+}
