@@ -56,6 +56,15 @@ fn actual_typescript_order_state() {
     let mut counts = [0; 3];
     for (i, row) in rows.iter().enumerate() {
         let f: Value = serde_json::from_str(row["fixture"].as_str().unwrap()).unwrap();
+        let mut expected = row["result"].clone();
+        if let Some(kind) = expected
+            .get_mut("ok")
+            .and_then(|value| value.get_mut("orderType"))
+        {
+            if let Some(text) = kind.as_str() {
+                *kind = json!({"units":text.encode_utf16().collect::<Vec<_>>()});
+            }
+        }
         let actual = match row["key"].as_str().unwrap() {
             "snapshot" => {
                 counts[0] += 1;
@@ -75,7 +84,7 @@ fn actual_typescript_order_state() {
                     &orders,
                 ) {
                     Ok(s) => {
-                        json!({"ok":s.map_or(json!({"undefined":true}),|s|json!({"price":number(s.price),"qty":number(s.qty),"stopType":s.stop_type,"orderType":s.order_type,"orderPrice":number(s.order_price)}))})
+                        json!({"ok":s.map_or(json!({"undefined":true}),|s|json!({"price":number(s.price),"qty":number(s.qty),"stopType":s.stop_type,"orderType":{"units":s.order_type.as_text().unwrap()},"orderPrice":number(s.order_price)}))})
                     }
                     Err(e) => json!({"error":e.name,"message":e.message}),
                 }
@@ -190,7 +199,7 @@ fn actual_typescript_order_state() {
             _ => panic!(),
         };
         assert_eq!(
-            actual, row["result"],
+            actual, expected,
             "ORDER STATE decoded native {} case {i}",
             row["key"]
         );

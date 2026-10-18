@@ -191,7 +191,12 @@ impl BitunixVenue {
             match crate::adapter::from_input::<Order>(value.clone()) {
                 Ok(order) => orders.push(order),
                 Err(e) => self.log(
-                    &format!("Bitunix order row cannot be represented ({e}): {value:?}"),
+                    &format!(
+                        "Bitunix order row cannot be represented ({e}): {}",
+                        safe_cex_num::js_retained_json_stringify(&value)
+                            .map_err(coercion)?
+                            .unwrap_or("undefined".into())
+                    ),
                     "warning",
                 )?,
             }

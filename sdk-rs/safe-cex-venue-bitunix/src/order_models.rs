@@ -1028,13 +1028,13 @@ fn append_leg<H: OrderModelHost>(
     put(
         payload,
         &format!("{leg}OrderType"),
-        s(if snapshot.order_type == "LIMIT" {
+        s(if snapshot.order_type.text_equals("LIMIT") {
             "LIMIT"
         } else {
             "MARKET"
         }),
     );
-    if snapshot.order_type == "LIMIT" {
+    if snapshot.order_type.text_equals("LIMIT") {
         let price = adjust(snapshot.order_price, precision(pstep(market, "price"))?);
         if !price.is_finite() || price <= 0.0 {
             return reject(

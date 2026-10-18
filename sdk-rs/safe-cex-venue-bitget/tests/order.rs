@@ -623,7 +623,7 @@ fn check(oracle: Value, field_identity: bool) {
         .enumerate()
     {
         let mut position: Position=serde_json::from_value(json!({"id":"p","symbol":"BTCUSDT","side":"long","contracts":1,"entryPrice":1,"notional":1,"leverage":1,"unrealizedPnl":0,"liquidationPrice":0})).unwrap();
-        position.info = (c.get("info").map(decode)).into();
+        position.info = c.get("info").map(|value| decode(value).into()).into();
         let result = get_position_payload_update_time(&position)
             .map(encoded)
             .unwrap_or_else(|| json!({"$undefined":true}));

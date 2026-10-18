@@ -311,3 +311,106 @@ fn private_position_frame_preserves_retained_store_info() {
         "native metadata patch precedes debounce"
     );
 }
+
+#[test]
+fn private_order_update_retains_utf16_info_client_id_when_cache_misses() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/event-composition-oracle.cjs"
+        ))
+        .arg("retained-client")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let rows = source.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    let expected = rows[0]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event[0] == "add")
+        .unwrap()[1][0]
+        .clone();
+    let s = Scene::new();
+    s.frame("order", order("CREATE", "NEW", "0"));
+    let mut orders = s.store.orders().to_vec();
+    orders[0].reduce_only = true.into();
+    orders[0].info = Some(Input::Object(vec![
+        (
+            "clientId".encode_utf16().collect(),
+            Input::Text(vec![0xD800]),
+        ),
+        ("unreadNaN".encode_utf16().collect(), Input::Float(f64::NAN)),
+        ("ownUndefined".encode_utf16().collect(), Input::Undefined),
+    ]))
+    .into();
+    Store::update(
+        s.store.as_ref(),
+        StoreUpdate {
+            orders: Some(orders),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    s.frame("order", rows[0]["fixture"]["json"]["data"].clone());
+    let orders = s.store.orders();
+    for (field, value) in [
+        ("price", orders[0].price.to_number()),
+        ("amount", orders[0].amount),
+        ("filled", orders[0].filled),
+        ("remaining", orders[0].remaining),
+    ] {
+        assert_eq!(
+            format!("{:016x}", value.to_bits()),
+            expected[field]["bits"].as_str().unwrap(),
+            "native retained info cache miss: {field}"
+        );
+    }
+    assert_eq!(
+        orders[0].reduce_only.into_value(),
+        expected["reduceOnly"].as_bool()
+    );
+    let info = orders[0].info.as_ref().unwrap();
+    assert_eq!(info.get("clientId").unwrap().as_text().unwrap(), &[0xD800]);
+    assert!(info.get("unreadNaN").unwrap().as_f64().unwrap().is_nan());
+    assert!(matches!(info.get("ownUndefined"), Some(Input::Undefined)));
+}
+
+#[test]
+fn private_malformed_json_keeps_source_null_parse_behavior() {
+    let s = Scene::new();
+    let console = s.runtime.console.borrow().clone();
+    let errors = s.runtime.errors.borrow().clone();
+    s.socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text("invalid JSON".into())));
+    for _ in 0..32 {
+        s.runtime.pump();
+    }
+    assert_eq!(
+        *s.runtime.console.borrow(),
+        console,
+        "source jsonParse returns null for malformed text"
+    );
+    assert_eq!(
+        *s.runtime.errors.borrow(),
+        errors,
+        "null parse has no source exception"
+    );
+    s.frame("order", order("CREATE", "NEW", "0"));
+    assert_eq!(
+        s.store.orders()[0].id,
+        "native-frame-order",
+        "later valid frames still arrive"
+    );
+}

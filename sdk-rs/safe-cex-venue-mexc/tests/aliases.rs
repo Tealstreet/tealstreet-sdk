@@ -91,8 +91,8 @@ fn mexc_mapper_owned_snapshot_vs_live_alias() {
             case["afterInput"]["outputNested"], 2,
             "{name}: source nested alias"
         );
-        info.get("probe").unwrap() = json!(3);
-        info.get("nested").unwrap().get("probe").unwrap() = json!(3);
+        *info.get_mut("probe").unwrap() = json!(3).into();
+        *info.get_mut("nested").unwrap().get_mut("probe").unwrap() = json!(3).into();
         assert_eq!(
             raw["probe"], 2,
             "{name}: output mutation must leave owned input unchanged"

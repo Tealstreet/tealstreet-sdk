@@ -569,8 +569,15 @@ fn market_strings_and_info_are_native_before_whole_record_refusal() {
             assert_eq!(native.symbol, word, "WEEX native market symbol");
             assert_eq!(native.id, word, "WEEX native market id");
             assert_eq!(
-                native.info.as_ref().unwrap().get("extra").unwrap(),
-                word,
+                native
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("extra")
+                    .unwrap()
+                    .as_text()
+                    .unwrap(),
+                word.encode_utf16().collect::<Vec<_>>(),
                 "WEEX native market retained info"
             );
             compared += 1;
