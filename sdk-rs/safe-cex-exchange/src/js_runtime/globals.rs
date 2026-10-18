@@ -3,35 +3,23 @@
 use super::{
     promise,
     scope::{ScopeShared, scope_of},
-    value::{Js, Thrown, arg, error_object, from_json},
+    value::{Js, Thrown, arg, error_constructor},
 };
-use std::rc::{Rc, Weak};
+use std::{
+    cell::Cell,
+    rc::{Rc, Weak},
+};
 
-fn json_quote(text: &[u16], out: &mut Vec<u16>) {
-    out.push(b'"' as u16);
-    for (i, &c) in text.iter().enumerate() {
-        let lone = match c {
-            0xD800..=0xDBFF => !matches!(text.get(i + 1), Some(0xDC00..=0xDFFF)),
-            0xDC00..=0xDFFF => i == 0 || !matches!(text[i - 1], 0xD800..=0xDBFF),
-            _ => false,
-        };
-        let escaped = match c {
-            0x22 => "\\\"".to_owned(),
-            0x5C => "\\\\".to_owned(),
-            0x08 => "\\b".to_owned(),
-            0x0C => "\\f".to_owned(),
-            0x0A => "\\n".to_owned(),
-            0x0D => "\\r".to_owned(),
-            0x09 => "\\t".to_owned(),
-            c if c < 0x20 || lone => format!("\\u{c:04x}"),
-            c => {
-                out.push(c);
-                continue;
-            }
-        };
-        out.extend(escaped.encode_utf16());
-    }
-    out.push(b'"' as u16);
+use safe_cex_types::js_coercion::json_quote_utf16 as json_quote;
+
+/// The shared JSON.stringify operation for native data without a replacer.
+pub fn stringify_json(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
+    json_stringify(
+        &Js::object(vec![("", value.clone())]),
+        &[],
+        None,
+        &mut Vec::new(),
+    )
 }
 
 /// SerializeJSONProperty with an optional callable replacer; `None` is undefined.
@@ -64,7 +52,7 @@ fn json_stringify(
     }
     let lit = |t: &str| Ok(Some(t.encode_utf16().collect()));
     let result = match &value {
-        Js::Undefined | Js::Function(_) => Ok(None),
+        Js::Undefined | Js::SymbolIterator | Js::Function(_) => Ok(None),
         Js::Null => lit("null"),
         Js::Bool(b) => lit(if *b { "true" } else { "false" }),
         Js::Number(n) if n.is_finite() => lit(&safe_cex_num::js_number_string(*n)),
@@ -92,7 +80,8 @@ fn json_stringify(
             out.push(b']' as u16);
             Ok(Some(out))
         }
-        Js::Object(_) => {
+        Js::Builtin(reference) if reference.is_callable() => Ok(None),
+        Js::Object(_) | Js::Builtin(_) => {
             let mut out = vec![b'{' as u16];
             let mut first = true;
             // Key enumeration precedes traversal; getters/replacers can alter later values.
@@ -119,31 +108,49 @@ fn json_stringify(
     result
 }
 
-/// GetIterator's values over the iterables the runtime models; `None` has no @@iterator.
-fn iterate(value: &Js) -> Option<Vec<Js>> {
-    match value {
-        Js::Array(_) => value.array_values(),
-        Js::Map(entries) => Some(
-            entries
-                .borrow()
-                .iter()
-                .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-                .collect(),
-        ),
-        Js::Set(values) => Some(values.borrow().clone()),
-        Js::String(units) => {
-            let mut out = vec![];
-            let mut i = 0;
-            while i < units.len() {
-                let pair = (0xD800..=0xDBFF).contains(&units[i])
-                    && matches!(units.get(i + 1), Some(0xDC00..=0xDFFF));
-                let width = if pair { 2 } else { 1 };
-                out.push(Js::utf16(&units[i..i + width]));
-                i += width;
-            }
-            Some(out)
+/// GetIterator once, preserving live iteration and abrupt completion.
+fn iterate(value: &Js) -> Result<Option<Js>, Thrown> {
+    if value.is_nullish() {
+        return Ok(None);
+    }
+    let method = value.get_property(&Js::SymbolIterator)?;
+    if method.is_nullish() {
+        return Ok(None);
+    }
+    let iterator = method.call(value.clone(), vec![])?;
+    if !iterator.is_object() {
+        return Err(Thrown::type_error("Iterator result is not an object"));
+    }
+    Ok(Some(iterator))
+}
+
+fn consume_iterator(
+    iterator: Js,
+    mut visit: impl FnMut(Js, usize) -> Result<(), Thrown>,
+) -> Result<(), Thrown> {
+    let next = iterator.get("next")?;
+    let mut index = 0;
+    loop {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
         }
-        _ => None,
+        if step.get("done")?.truthy() {
+            return Ok(());
+        }
+        let result = step.get("value").and_then(|value| visit(value, index));
+        if let Err(error) = result {
+            // IteratorClose with a throwing completion preserves that error.
+            let _ = iterator.get("return").and_then(|method| {
+                if method.is_nullish() {
+                    Ok(Js::Undefined)
+                } else {
+                    method.call(iterator.clone(), vec![])
+                }
+            });
+            return Err(error);
+        }
+        index += 1;
     }
 }
 
@@ -160,10 +167,14 @@ fn v8_operand(value: &Js) -> String {
     }
 }
 
-fn not_iterable(value: &Js) -> Thrown {
-    Thrown::type_error(&format!(
-        "{} is not iterable (cannot read property Symbol(Symbol.iterator))",
+pub(super) fn not_iterable(value: &Js) -> Thrown {
+    let operand = if matches!(value, Js::BigInt(_)) {
+        value.type_of().to_owned()
+    } else {
         v8_operand(value)
+    };
+    Thrown::type_error(&format!(
+        "{operand} is not iterable (cannot read property Symbol(Symbol.iterator))"
     ))
 }
 
@@ -173,30 +184,20 @@ fn map_from_entries(iterable: &Js) -> Result<Js, Thrown> {
     if iterable.is_nullish() {
         return Ok(map);
     }
-    let entries = iterate(iterable).ok_or_else(|| not_iterable(iterable))?;
-    if let Js::Map(slots) = &map {
-        for entry in entries {
-            if !entry.is_object() {
-                return Err(Thrown::type_error(&format!(
-                    "Iterator value {} is not an entry object",
-                    entry.to_display()
-                )));
-            }
-            // Map.prototype.set stores a -0 key as +0.
-            let key = entry.get("0")?;
-            let key = if key.as_f64() == Some(0.0) {
-                Js::Number(0.0)
-            } else {
-                key
-            };
-            let value = entry.get("1")?;
-            let mut slots = slots.borrow_mut();
-            match slots.iter_mut().find(|(k, _)| k.same_value_zero(&key)) {
-                Some(slot) => slot.1 = value,
-                None => slots.push((key, value)),
-            }
+    let iterator = iterate(iterable)?.ok_or_else(|| not_iterable(iterable))?;
+    let set = map.get("set")?;
+    consume_iterator(iterator, |entry, _| {
+        if !entry.is_object() {
+            return Err(Thrown::type_error(&format!(
+                "Iterator value {} is not an entry object",
+                entry.to_display()
+            )));
         }
-    }
+        let key = entry.get("0")?;
+        let value = entry.get("1")?;
+        set.call(map.clone(), vec![key, value])?;
+        Ok(())
+    })?;
     Ok(map)
 }
 
@@ -211,31 +212,34 @@ fn array_from(a: &[Js]) -> Result<Js, Thrown> {
             v8_operand(&map_fn)
         )));
     }
-    let values = match iterate(&items) {
-        Some(values) => values,
-        None if items.is_nullish() => return Err(not_iterable(&items)),
-        None => {
-            let length = items.get("length")?.to_number()?;
-            let length = if length.is_nan() || length <= 0.0 {
-                0.0
-            } else {
-                length.trunc().min(9_007_199_254_740_991.0)
-            };
-            if length > f64::from(u32::MAX) {
-                return Err(Thrown::error("RangeError", "Invalid array length"));
-            }
-            (0..length as usize)
-                .map(|k| items.get(&k.to_string()))
-                .collect::<Result<_, _>>()?
-        }
-    };
-    if !mapping {
-        return Ok(Js::array(values));
-    }
     let this = arg(a, 2);
-    let mut out = Vec::with_capacity(values.len());
-    for (k, value) in values.into_iter().enumerate() {
-        out.push(map_fn.call(this.clone(), vec![value, Js::Number(k as f64)])?);
+    let mut out = vec![];
+    let mut visit = |value: Js, index: usize| {
+        out.push(if mapping {
+            map_fn.call(this.clone(), vec![value, Js::Number(index as f64)])?
+        } else {
+            value
+        });
+        Ok(())
+    };
+    if let Some(iterator) = iterate(&items)? {
+        consume_iterator(iterator, &mut visit)?;
+    } else {
+        if items.is_nullish() {
+            return Err(not_iterable(&items));
+        }
+        let length = items.get("length")?.to_number()?;
+        let length = if length.is_nan() || length <= 0.0 {
+            0.0
+        } else {
+            length.trunc().min(9_007_199_254_740_991.0)
+        };
+        if length > f64::from(u32::MAX) {
+            return Err(Thrown::error("RangeError", "Invalid array length"));
+        }
+        for index in 0..length as usize {
+            visit(items.get(&index.to_string())?, index)?;
+        }
     }
     Ok(Js::array(out))
 }
@@ -330,6 +334,88 @@ pub fn install_enums(g: &Js) {
     );
 }
 
+// CreateResolvingFunctions shares one lock for resolve/reject, including while
+// resolving to a still-pending promise or thenable.
+fn promise_resolvers(promise: promise::Promise) -> (Js, Js, Rc<Cell<bool>>) {
+    let called = Rc::new(Cell::new(false));
+    let resolved = called.clone();
+    let rejected = called.clone();
+    let target = promise.clone();
+    let resolve = Js::function("", move |_, args| {
+        if !resolved.replace(true) {
+            resolve_promise(target.clone(), arg(&args, 0));
+        }
+        Ok(Js::Undefined)
+    });
+    let reject = Js::function("", move |_, args| {
+        if !rejected.replace(true) {
+            promise.settle(Err(Thrown::new(arg(&args, 0))));
+        }
+        Ok(Js::Undefined)
+    });
+    (resolve, reject, called)
+}
+fn resolve_promise(promise: promise::Promise, value: Js) {
+    if let Js::Promise(other) = &value {
+        if promise.ptr_eq(other) {
+            promise.settle(Err(Thrown::type_error(
+                "Chaining cycle detected for promise",
+            )));
+            return;
+        }
+    }
+    if !matches!(
+        &value,
+        Js::Array(_)
+            | Js::Object(_)
+            | Js::Function(_)
+            | Js::Promise(_)
+            | Js::Map(_)
+            | Js::Set(_)
+            | Js::Builtin(_)
+    ) {
+        promise.settle(Ok(value));
+        return;
+    }
+    // Get then synchronously, but invoke it as a promise job after this stack.
+    let then = match value.get("then") {
+        Ok(then) if then.is_callable() => then,
+        Ok(_) => {
+            promise.settle(Ok(value));
+            return;
+        }
+        Err(error) => {
+            promise.settle(Err(error));
+            return;
+        }
+    };
+    let runtime = promise.runtime();
+    super::jobs::for_runtime(&runtime).spawn(Box::pin(async move {
+        let (resolve, reject, called) = promise_resolvers(promise.clone());
+        if let Err(error) = then.call(value, vec![resolve, reject]) {
+            if !called.replace(true) {
+                promise.settle(Err(error));
+            }
+        }
+    }));
+}
+fn construct_promise(
+    runtime: &Rc<dyn crate::runtime::ExchangeRuntime>,
+    executor: Js,
+) -> Result<Js, Thrown> {
+    if !executor.is_callable() {
+        return Err(Thrown::type_error("Promise resolver is not a function"));
+    }
+    let promise = promise::Promise::pending(runtime);
+    let (resolve, reject, called) = promise_resolvers(promise.clone());
+    if let Err(error) = executor.call(Js::Undefined, vec![resolve, reject]) {
+        if !called.replace(true) {
+            promise.settle(Err(error));
+        }
+    }
+    Ok(Js::Promise(promise))
+}
+
 /// The JS builtins venue bodies resolve by name. `rt` is weak: the globals
 /// object lives inside the shared scope state.
 pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
@@ -354,11 +440,25 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             Ok(Js::Number(safe_cex_num::parse_int(&text, radix)))
         }),
     );
+    let symbol = Js::function("Symbol", |_, _| {
+        Err(Thrown::type_error(
+            "Creating arbitrary Symbols is not supported",
+        ))
+    });
+    symbol
+        .define_property(
+            &"iterator".encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![("value", Js::SymbolIterator)]),
+        )
+        .expect("well-known iterator symbol data descriptor");
+    def("Symbol", symbol);
     def(
         "String",
         Js::function("String", |_, a| {
             Ok(if a.is_empty() {
                 Js::str("")
+            } else if matches!(a[0], Js::SymbolIterator) {
+                Js::str("Symbol(Symbol.iterator)")
             } else {
                 Js::String(a[0].to_js_string()?)
             })
@@ -383,6 +483,15 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 ))
             }),
         ),
+        (
+            "isSafeInteger",
+            Js::function("isSafeInteger", |_, a| {
+                Ok(Js::Bool(matches!(
+                    arg(&a, 0),
+                    Js::Number(n) if n.is_finite() && n.trunc() == n && n.abs() <= 9_007_199_254_740_991.0
+                )))
+            }),
+        ),
         ("MAX_SAFE_INTEGER", Js::Number(9_007_199_254_740_991.0)),
         ("NaN", Js::Number(f64::NAN)),
         ("parseFloat", parse_float),
@@ -394,24 +503,8 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "Boolean",
         Js::function("Boolean", |_, a| Ok(Js::Bool(arg(&a, 0).truthy()))),
     );
-    def(
-        "Error",
-        Js::constructor("Error", |_, a| {
-            let message = arg(&a, 0);
-            let message = if message.is_undefined() {
-                String::new()
-            } else {
-                message.to_display()
-            };
-            Ok(error_object("Error", &message))
-        }),
-    );
-    def(
-        "SyntaxError",
-        Js::constructor("SyntaxError", |_, a| {
-            Ok(error_object("SyntaxError", &arg(&a, 0).to_display()))
-        }),
-    );
+    def("Error", error_constructor("Error"));
+    def("SyntaxError", error_constructor("SyntaxError"));
     def(
         "BigInt",
         Js::function("BigInt", |_, a| {
@@ -477,12 +570,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             ))
         }),
     );
-    def(
-        "TypeError",
-        Js::constructor("TypeError", |_, a| {
-            Ok(error_object("TypeError", &arg(&a, 0).to_display()))
-        }),
-    );
+    def("TypeError", error_constructor("TypeError"));
     def(
         "Array",
         Js::object(vec![
@@ -593,10 +681,11 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             (
                 "parse",
                 Js::function("parse", |_, a| {
-                    let text = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
-                    serde_json::from_str::<serde_json::Value>(&text)
-                        .map(|v| from_json(&v))
-                        .map_err(|e| Thrown::error("SyntaxError", &e.to_string()))
+                    safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                        &arg(&a, 0).to_js_string()?,
+                    )
+                    .map(super::value::from_retained_input)
+                    .map_err(|error| Thrown::error("SyntaxError", &error.to_string()))
                 }),
             ),
         ]),
@@ -667,47 +756,64 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let settled_rt = rt.clone();
     let resolve_rt = rt.clone();
     let reject_rt = rt.clone();
-    def(
-        "Promise",
-        Js::object(vec![
-            (
-                "all",
-                Js::function("all", move |_, a| {
-                    let rt = scope_of(&promise_rt)?;
-                    let values = arg(&a, 0).array_values().unwrap_or_default();
-                    Ok(rt.spawn(Box::pin(promise::all(values))))
-                }),
-            ),
-            (
-                "allSettled",
-                Js::function("allSettled", move |_, a| {
-                    let rt = scope_of(&settled_rt)?;
-                    let values = arg(&a, 0).array_values().unwrap_or_default();
-                    Ok(rt.spawn(Box::pin(promise::all_settled(values))))
-                }),
-            ),
-            (
-                "resolve",
-                Js::function("resolve", move |_, a| {
-                    let rt = scope_of(&resolve_rt)?;
-                    Ok(match arg(&a, 0) {
-                        p @ Js::Promise(_) => p,
-                        v => Js::Promise(promise::Promise::settled(&rt.exchange_runtime(), Ok(v))),
-                    })
-                }),
-            ),
-            (
-                "reject",
-                Js::function("reject", move |_, a| {
-                    let rt = scope_of(&reject_rt)?;
-                    Ok(Js::Promise(promise::Promise::settled(
-                        &rt.exchange_runtime(),
-                        Err(Thrown::new(arg(&a, 0))),
-                    )))
-                }),
-            ),
-        ]),
-    );
+    let constructor_rt = rt.clone();
+    let constructor = Js::constructor("Promise", move |_, args| {
+        construct_promise(
+            &scope_of(&constructor_rt)?.exchange_runtime(),
+            arg(&args, 0),
+        )
+    });
+    for (name, method) in [
+        (
+            "all",
+            Js::function("all", move |_, a| {
+                let rt = scope_of(&promise_rt)?;
+                let runtime = rt.exchange_runtime();
+                let values = arg(&a, 0).iterable_values();
+                Ok(Js::Promise(match values {
+                    Ok(values) => promise::all(&runtime, values),
+                    Err(error) => promise::Promise::settled(&runtime, Err(error)),
+                }))
+            }),
+        ),
+        (
+            "allSettled",
+            Js::function("allSettled", move |_, a| {
+                let rt = scope_of(&settled_rt)?;
+                let runtime = rt.exchange_runtime();
+                let values = arg(&a, 0).iterable_values();
+                Ok(Js::Promise(match values {
+                    Ok(values) => promise::all_settled(&runtime, values),
+                    Err(error) => promise::Promise::settled(&runtime, Err(error)),
+                }))
+            }),
+        ),
+        (
+            "resolve",
+            Js::function("resolve", move |_, a| {
+                let rt = scope_of(&resolve_rt)?;
+                Ok(match arg(&a, 0) {
+                    p @ Js::Promise(_) => p,
+                    v => Js::Promise(promise::Promise::settled(&rt.exchange_runtime(), Ok(v))),
+                })
+            }),
+        ),
+        (
+            "reject",
+            Js::function("reject", move |_, a| {
+                let rt = scope_of(&reject_rt)?;
+                Ok(Js::Promise(promise::Promise::settled(
+                    &rt.exchange_runtime(),
+                    Err(Thrown::new(arg(&a, 0))),
+                )))
+            }),
+        ),
+    ] {
+        constructor
+            .define(name, method)
+            .expect("Promise static method registration");
+    }
+    def("Promise", constructor);
     let timeout_rt = rt.clone();
     def(
         "setTimeout",
@@ -769,27 +875,29 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let console = |severity: &'static str| {
         let rt = rt.clone();
         Js::function(severity, move |_, a| {
-            let mut parts = Vec::with_capacity(a.len());
-            for value in &a {
-                parts.push(String::from_utf16_lossy(&value.to_js_string()?));
-            }
             scope_of(&rt)?
                 .exchange_runtime()
-                .console(severity, &parts.join(" "));
+                .console_values(severity, &a);
             Ok(Js::Undefined)
         })
     };
     def(
         "console",
-        Js::object(vec![("error", console("error")), ("warn", console("warn"))]),
+        Js::object(vec![
+            ("error", console("error")),
+            ("warn", console("warn")),
+            ("info", console("info")),
+            ("debug", console("debug")),
+        ]),
     );
-    let clock_rt = rt.clone();
     def(
         "virtualClock",
         Js::object(vec![(
             "getCurrentTimeMs",
             Js::function("getCurrentTimeMs", move |_, _| {
-                Ok(Js::Number(scope_of(&clock_rt)?.now()))
+                Ok(Js::Number(
+                    safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+                ))
             }),
         )]),
     );
@@ -849,13 +957,14 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "Set",
         Js::constructor("Set", |_, a| {
             let set = Js::new_set();
-            if let (Js::Set(s), Some(values)) = (&set, arg(&a, 0).array_values()) {
-                let mut s = s.borrow_mut();
-                for v in values {
-                    if !s.iter().any(|x| x.same_value_zero(&v)) {
-                        s.push(v);
-                    }
-                }
+            let values = arg(&a, 0);
+            if !values.is_nullish() {
+                let iterator = iterate(&values)?.ok_or_else(|| not_iterable(&values))?;
+                let add = set.get("add")?;
+                consume_iterator(iterator, |value, _| {
+                    add.call(set.clone(), vec![value])?;
+                    Ok(())
+                })?;
             }
             Ok(set)
         }),

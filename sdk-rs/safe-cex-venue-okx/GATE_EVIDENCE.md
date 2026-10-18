@@ -20,7 +20,8 @@ wire literals declared only there and checked-in public declarations visible to
 the invention gate. No permissive inherent public decoder, FromStr or public
 conversion from wire input is exposed. Public qualified-call regressions reject
 objects; the live gate rejects arrays/null/booleans/numbers, unknown literals,
-case changes, whitespace and U+FEFF. Injecting an alias in RegionWire fails
+case changes, whitespace and U+FEFF. Injecting an alias in the actual
+RegionWireSchema decoder fails
 `derived_accepted_sets_match_typescript` at 101 with OKX_ALIAS explicitly named.
 Restoring default wide decoding fails the protocol table gate on {okx:null}.
 The draft anonymous TickerMarkInput also now rejects positional arrays and null
@@ -778,3 +779,99 @@ traffic, browser checks, credential checks, deployment or PR creation/merge.
 Generated logs remain ignored under target/; this manually authored gate sheet
 is tracked. This receipt changes documentation only and retains the archive
 above as a byte-exact prefix.
+
+## Private literal-wire owner repair
+
+The compiler census independently exposes `types::RegionWire` and
+`types::InstrumentWire`. Their former derived decoders accepted tagged-null maps
+although the maintained TypeScript literal unions admit strings. Both owners
+remain in the census and now require `String::deserialize` before delegating to
+private Serde remote schemas, following
+[the shared string-only enum recipe](../safe-cex-parity/accepted-set/MAP-ONLY-INGRESS.md#string-only-literal-enums).
+Serialization, native variants and typed `From` mappings remain covered. The
+remote schema declarations introduce no independent `Deserialize` owner.
+
+The original native tests failed both named tagged-map assertions before repair.
+After repair, all four library tests and both table tests pass, including the
+live TypeScript literal inventory. Each literal has native-variant and existing
+serialization checks through owned, borrowed, qualified and text entry paths;
+each tagged-null form is refused through those paths. Fresh compiler discovery
+still reports 145 owners and four aliases. Two selected actual production
+accepted-set probes pass with zero failed owners, using the independently
+reviewed contracts for these private owners.
+
+Run `python3 safe-cex-venue-okx/tests/private_wire_controls.py` from `sdk-rs`
+with the normal live TypeScript oracle setup. The checked-in control separately
+removes each actual owner's string frontdoor, requires successful compilation
+and its named tagged-map regression failure, then restores exact source bytes
+and passes. It also adds `OKX_ALIAS` to the actual remote schema and proves the
+complete TypeScript literal inventory fails before exact restoration passes.
+Separately executed production-probe controls removed each guard independently:
+only that owner's native receipt failed, and both receipts passed after each
+restoration. Compiler failures never count as a successful negative control.
+This closes these two owner contracts; it does not claim the remaining OKX
+compiler inventory is fully classified.
+
+## Production intrinsic spread and UTF-16 repair
+
+The original 53-case order-read suite passed with its private mock dispatcher.
+Deleting that table and using the production dispatcher with shared `Js` and
+`Thrown` compiled, then failed the unchanged independent order-count assertion
+(2 versus 5). The existing websocket corpus, after the same cutover, exposed a
+second mismatch: `dedupe/lone` used U+FFFD where the maintained source retains
+U+D800. No source fixture or expected result was changed for either repair.
+
+The migrated suites retain 53 order-read and 56 websocket scenarios. The
+websocket fixture uses actual shared JSON stringify/parse at its wire boundary;
+external callbacks remain scripted. The new production Exchange case loads five
+distinct groups, checks their native IDs and order variants in source order,
+commits them through Store, then asserts symbol cancellation posts the normal
+order and every algo ID. Direct dispatcher tests retain object references,
+iterate strings and Sets, materialize holes, preserve negative zero, and reject
+a noniterable fifth group. The last check asserts TypeError kind; it makes no
+claim about engine-specific diagnostic wording.
+
+Maintained authority: `okx.exchange.ts` fetchOrders at lines 733–745,
+`okx.ws-public.ts` onMarketsChanged at lines 90–140, and `okx.ws-private.ts`
+isDuplicateFillEvent. These are repaired Rust porting bugs, with no new source
+divergence, source change or accepted-contract exemption.
+
+Executed `python3 safe-cex-venue-okx/tests/production_intrinsic_controls.py`
+from `sdk-rs`: four independent controls each compiled, failed the named runtime
+assertion at exit 101, restored the exact source bytes, and passed at exit 0:
+
+| Restored defect | Actual failure assertion |
+| --- | --- |
+| Two-group production spread, order-read suite | `ORDER native independent result count` |
+| Two-group production spread, production Exchange | `OKX production retains all five order groups in source order` |
+| Two-group production spread, new-market subscriptions | `MARKETS native 100-topic batch widths` |
+| Lossy UTF-16 colon join, dedupe | `maintained source dedupe/4` |
+
+The focused restored baseline passed 16 production Exchange tests, two direct
+dispatcher tests and all seven websocket family tests; the order-read control
+also passed its complete 53-case source comparison after restoration. Full scoped
+suite, host/WASM lint, formatting and parity results are recorded in the PR.
+The other five harness migrations and missing API/history intrinsic names are
+separate remaining audit work.
+
+### Terminal Store bridge and production private frames
+
+The original real-binding order witness failed with native status Open instead
+of Closed when the JS Store facade lacked `markOrdersTerminal`. The bridge now
+calls the existing native terminal-memory operation. Source authority is
+`store/store.base.ts:517-529` and `okx/okx.ws-private.ts:229-254`.
+
+Three production-binding tests pass through actual private socket dispatch:
+orders/final fills (all filled, canceled and mmp-canceled states), positions and
+account balance. They pin terminal commit before fill, the exact bare fill object
+and converted amount/price, duplicate suppression, no canceled/account/position
+fill, and stale REST snapshot refusal. Three direct native Store/facade tests
+pass for absent-ID memory, subscriber error metadata and typed UTF-16 refusal.
+The shared emitter behavior is inherited from #425, not reimplemented here.
+
+`python3 tests/terminal_store_controls.py` completed five compiled, named REDs
+(exit 101) followed by exact-byte restored PASS runs: missing bridge, ordinary
+status update without terminal memory, empty-Store shortcut, discarded subscriber
+error and lossy terminal-ID replacement. Receipts are written to
+`sdk-rs/target/okx-terminal-store-controls/`. The source is restored after each
+fault. These controls exercise the production facade, not test-only collaborators.

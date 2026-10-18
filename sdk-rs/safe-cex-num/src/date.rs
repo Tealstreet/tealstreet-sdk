@@ -11,6 +11,46 @@ pub fn js_time_clip(value: f64) -> f64 {
     }
 }
 
+/// ECMAScript Date Number construction followed by Date.prototype.toISOString.
+/// Reuses TimeClip, then renders the UTC calendar including extended years.
+pub fn js_date_to_iso_string(
+    value: f64,
+) -> Result<String, safe_cex_types::js_coercion::JsCoercionError> {
+    let milliseconds = js_time_clip(value);
+    if !milliseconds.is_finite() {
+        return Err(safe_cex_types::js_coercion::JsCoercionError {
+            name: "RangeError",
+            message: "Invalid time value",
+        });
+    }
+    let milliseconds = milliseconds.trunc() as i64;
+    let days = milliseconds.div_euclid(86_400_000);
+    let time = milliseconds.rem_euclid(86_400_000);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_offset = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_offset + 2) / 5 + 1;
+    let month = month_offset + if month_offset < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    let year = if (0..=9999).contains(&year) {
+        format!("{year:04}")
+    } else {
+        format!("{year:+07}")
+    };
+    Ok(format!(
+        "{year}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
+        time / 3_600_000,
+        time / 60_000 % 60,
+        time / 1000 % 60,
+        time % 1000
+    ))
+}
+
 /// V8 Date.parse acceptance with explicit host local-wall-time to UTC conversion.
 /// The adapter must implement the host timezone, including V8-compatible DST disambiguation.
 /// CHOSEN reference: Node V8 grammar and its 32-bit signed Smi timezone bound.

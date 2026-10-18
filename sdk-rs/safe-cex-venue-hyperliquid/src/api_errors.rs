@@ -93,7 +93,7 @@ fn route<H: ApiErrorHost>(
     Err(host.exception_from_value(native))
 }
 pub mod core {
-    use super::*;
+    use super::{ApiErrorClass, ApiErrorHost, Infallible, construct, route};
     #[derive(Debug, Clone)]
     pub struct HyperliquidAPIError<V> {
         pub native: V,
@@ -115,7 +115,7 @@ pub mod core {
     }
 }
 pub mod spot {
-    use super::*;
+    use super::{ApiErrorClass, ApiErrorHost, Infallible, construct, route};
     #[derive(Debug, Clone)]
     pub struct HyperliquidAPIError<V> {
         pub native: V,

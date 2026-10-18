@@ -5,7 +5,7 @@ use crate::binding::{
     promise::{JsFuture, await_js},
     rt::{Rt, Shared},
     sockets,
-    value::{Js, Str, Thrown, from_json, from_typed, to_json, to_typed, utf16},
+    value::{Js, Str, Thrown, from_typed, to_json, to_typed, utf16},
 };
 use crate::{
     numeric::FiniteNumberInput,
@@ -861,9 +861,9 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
     def(
         "jsonParse",
         Js::function("jsonParse", |_, a| {
-            Ok(from_json(&safe_cex_transport::how::json_parse(&text(
-                &arg(&a, 0),
-            )?)))
+            Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+                safe_cex_transport::how::json_parse(&text(&arg(&a, 0))?),
+            ))
         }),
     );
     let w = weak.clone();

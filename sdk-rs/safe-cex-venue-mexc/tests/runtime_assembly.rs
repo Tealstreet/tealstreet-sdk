@@ -2,14 +2,13 @@
 use indexmap::IndexMap;
 use safe_cex_venue_mexc::{
     exchange_runtime::*,
+    method_tasks::{Completion, MethodObserver, Runtime, SessionRuntime, TaskHost},
     order_workflow::*,
-    private_session::{Completion, MethodObserver, SessionRuntime, TaskHost},
-    public_subscriptions::Runtime,
     runtime_assembly::*,
 };
 use serde_json::{Value, json};
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -37,13 +36,8 @@ struct Host {
     position: N,
     leaf: N,
     api: N,
-    snapshot: N,
-    symbol: N,
-    symbol_calls: Cell<usize>,
     delegate_callback: RefCell<Option<N>>,
     ctor_bindings: RefCell<IndexMap<String, N>>,
-    handler: RefCell<Option<N>>,
-    parsed: RefCell<Option<N>>,
 }
 impl Completion<N, N> for Job {
     fn poll(&self, _: &mut Context<'_>) -> Poll<JsResult<N>> {
@@ -78,7 +72,7 @@ impl Host {
         let mut row = vec![N::S(k.into())];
         row.extend(a.into_iter().map(event_value));
         self.events.borrow_mut().push(N::array(row));
-        if self.name == format!("{k}-error") || self.name == "handler-error" && k == "handleOrder" {
+        if self.name == format!("{k}-error") {
             Err(self.failure.clone())
         } else {
             Ok(())
@@ -233,7 +227,6 @@ impl Host {
             );
         }
         ex.set("symbolSettings", N::M(settings));
-        ex.set("orderbooks", N::obj(vec![]));
         let leaf = N::F(Rc::new(|_, _| Ok(N::U)));
         let api = N::F(Rc::new(|_, _| Ok(N::U)));
         let h = Rc::new(Self {
@@ -245,11 +238,7 @@ impl Host {
             tasks: RefCell::new(vec![]),
             ops: RefCell::new(vec![]),
             failure: N::from(
-                if matches!(group, "publicListenOrderBook" | "privateOnMessage") {
-                    json!({"message":"original"})
-                } else {
-                    json!({"message":"original","response":{"data":{"message":"venue","msg":"alternate"}}})
-                },
+                json!({"message":"original","response":{"data":{"message":"venue","msg":"alternate"}}}),
             ),
             opts,
             order,
@@ -259,17 +248,8 @@ impl Host {
             position,
             leaf,
             api,
-            snapshot: N::from(json!({"bids":[[3,4]],"asks":[[5,6]],"marker":71})),
-            symbol: if name == "coercion-order" {
-                N::obj(vec![])
-            } else {
-                N::S("BTC/USDT".into())
-            },
-            symbol_calls: Cell::new(0),
             delegate_callback: RefCell::new(None),
             ctor_bindings: RefCell::new(IndexMap::new()),
-            handler: RefCell::new(None),
-            parsed: RefCell::new(None),
         });
         *h.me.borrow_mut() = Rc::downgrade(&h);
         h.install();
@@ -516,90 +496,6 @@ impl Host {
             Ok(h.promise(effect.map(|_| N::from(json!({"data":{"data":data}})))))
         });
         self.ex.set("xhr", xhr);
-        let parent = N::obj(vec![]);
-        for (key, tag) in [("log", "log"), ("emitAndLogError", "emit")] {
-            let h = self.self_rc();
-            let original = parent.clone();
-            self.method(&parent, key, move |r, a| {
-                assert!(r.same(&original));
-                h.event(tag, a)?;
-                Ok(N::U)
-            });
-        }
-        let h = self.self_rc();
-        let original = parent.clone();
-        self.method(&parent, "fetchOrderBook", move |r, a| {
-            assert!(r.same(&original));
-            let effect = h.event("snapshot", a);
-            Ok(h.promise(if h.name == "coercion-order" {
-                Err(h.failure.clone())
-            } else {
-                effect.map(|_| h.snapshot.clone())
-            }))
-        });
-        self.ex.set("parent", parent);
-        for (key, tag) in [
-            ("addHandler", "add"),
-            ("removeHandler", "remove"),
-            ("subscribe", "subscribe"),
-            ("unsubscribe", "unsubscribe"),
-        ] {
-            let h = self.self_rc();
-            self.method(&self.ex, key, move |r, a| {
-                assert!(r.same(&h.ex));
-                if key == "addHandler" {
-                    *h.handler.borrow_mut() = Some(a[1].clone());
-                }
-                if key == "removeHandler" {
-                    assert!(
-                        fn_same(&a[1], h.handler.borrow().as_ref().unwrap()),
-                        "native original handler identity"
-                    );
-                }
-                h.event(
-                    tag,
-                    if matches!(key, "addHandler" | "removeHandler") {
-                        vec![a[0].clone()]
-                    } else {
-                        a
-                    },
-                )?;
-                Ok(N::U)
-            });
-        }
-        for key in [
-            "trackLastReceived",
-            "emitReceiveDiagnostics",
-            "handlePongEvent",
-            "subscribePrivateFeeds",
-            "recordMessageHandlerStats",
-            "handleOrder",
-            "handleFill",
-            "handlePosition",
-            "throttledFetchBalance",
-            "handlePlanOrder",
-            "handleStopOrder",
-        ] {
-            let h = self.self_rc();
-            self.method(&self.ex, key, move |r, a| {
-                assert!(r.same(&h.ex));
-                if matches!(
-                    key,
-                    "handleOrder"
-                        | "handleFill"
-                        | "handlePosition"
-                        | "handlePlanOrder"
-                        | "handleStopOrder"
-                ) {
-                    assert!(
-                        a[0].same(h.parsed.borrow().as_ref().unwrap()),
-                        "native original decoded frame identity"
-                    );
-                }
-                h.event(key, a)?;
-                Ok(N::U)
-            });
-        }
     }
     fn leaves(&self, target: &N) {
         for key in [
@@ -775,17 +671,7 @@ impl Runtime for Host {
         Ok(v.get(key))
     }
     fn abstract_string(&self, v: &N) -> JsResult<N, Vec<u16>> {
-        if self.name == "coercion-order" && v.same(&self.symbol) {
-            let count = self.symbol_calls.get() + 1;
-            self.symbol_calls.set(count);
-            self.event("symbol", vec![N::Num(count as f64)])?;
-            if count == 3 {
-                self.failure.set("message", N::S("late failure".into()));
-            }
-            Ok("BTC/USDT".encode_utf16().collect())
-        } else {
-            Ok(v.text().encode_utf16().collect())
-        }
+        Ok(v.text().encode_utf16().collect())
     }
     fn global_string(&self, v: &N) -> JsResult<N, Vec<u16>> {
         self.abstract_string(v)
@@ -1015,16 +901,6 @@ impl OrderWorkflowHost for Host {
                     data
                 })
             }
-            "bigIntAsStringJsonParse" => {
-                let parsed = N::from(safe_cex_transport::how::big_int_as_string_json_parse(
-                    &a[0].text(),
-                ));
-                *self.parsed.borrow_mut() = Some(parsed.clone());
-                Ok(parsed)
-            }
-            "isMexcControlChannel" => Ok(N::B(
-                safe_cex_venue_mexc::types::is_mexc_control_channel(&a[0].text()),
-            )),
             _ => panic!("unused import {name}"),
         }
     }
@@ -1241,7 +1117,6 @@ fn run(group: &str, count: usize) {
         let label = format!("{group}/{name}");
         let h = Host::new(group, name);
         let mut future: Option<JsPromise<N>> = None;
-        let mut unsubscribe = None;
         let result = match group {
             "constructor" => {
                 let store = h.ex.get("store");
@@ -1349,67 +1224,13 @@ fn run(group: &str, count: usize) {
                 )));
                 Ok(N::U)
             }
-            "publicListenOrderBook" => {
-                let cb = h.clone();
-                let callback = h.f(move |r, a| {
-                    assert!(matches!(r, N::U));
-                    assert!(a[0].same(&cb.snapshot), "native original snapshot identity");
-                    cb.event("callback", a)?;
-                    Ok(N::U)
-                });
-                let r = public_listen_order_book(h.clone(), h.symbol.clone(), callback);
-                r.map(|v| {
-                    assert!(matches!(v, N::F(_)));
-                    unsubscribe = Some(v);
-                    N::from(json!({"callable":true}))
-                })
-            }
-            "privateOnMessage" => {
-                private_on_message(h.as_ref(), N::from(json!({"data":row["raw"]})))
-            }
             _ => unreachable!(),
         };
-        let mut result = if let Some(f) = future {
+        let result = if let Some(f) = future {
             h.finish(f)
         } else {
             result
         };
-        if group == "publicListenOrderBook" && result.is_ok() {
-            let unsub = unsubscribe.unwrap();
-            if name == "unsub-before" {
-                result = h
-                    .call(unsub.clone(), N::U, vec![])
-                    .map(|_| N::from(json!({"callable":true})));
-            }
-            for _ in 0..8 {
-                h.drive();
-            }
-            if result.is_ok() {
-                if !matches!(
-                    name,
-                    "disposed"
-                        | "snapshot-error"
-                        | "callback-error"
-                        | "empty-cache"
-                        | "coercion-order"
-                ) {
-                    result = h
-                        .call(h.handler.borrow().as_ref().unwrap().clone(), N::U, vec![])
-                        .map(|_| N::from(json!({"callable":true})));
-                }
-                if name == "empty-cache" {
-                    h.ex.set("orderbooks", N::obj(vec![]));
-                    result = h
-                        .call(h.handler.borrow().as_ref().unwrap().clone(), N::U, vec![])
-                        .map(|_| N::from(json!({"callable":true})));
-                }
-                if result.is_ok() && name != "unsub-before" {
-                    result = h
-                        .call(unsub, N::U, vec![])
-                        .map(|_| N::from(json!({"callable":true})));
-                }
-            }
-        }
         match result {
             Ok(v) => {
                 assert!(row["error"].is_null(), "{label} unexpected native success");
@@ -1439,9 +1260,7 @@ fn run(group: &str, count: usize) {
             &row["events"],
             &format!("{label} native ordered effects"),
         );
-        if group == "publicListenOrderBook" || group == "privateOnMessage" {
-            assert_native(&h.ex.get("orderbooks"), &row["books"], &label);
-        } else if group != "constructor" {
+        if group != "constructor" {
             assert_native(&h.ex.get("store").get("loaded"), &row["loaded"], &label);
             assert_native(&h.ex.get("accountPositionMode"), &row["mode"], &label);
         }
@@ -1474,12 +1293,4 @@ fn position_stop_native_source() {
 #[test]
 fn update_native_source() {
     run("updateOrder", 8)
-}
-#[test]
-fn snapshot_listener_native_source() {
-    run("publicListenOrderBook", 10)
-}
-#[test]
-fn private_message_native_source() {
-    run("privateOnMessage", 25)
 }

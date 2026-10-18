@@ -38,12 +38,14 @@ export function scannerExecutable(metadata, output, packageManifest) {
 
 // Build from the SDK context, even when the audited workspace is a fixture.
 // Force a host tool independently of the audited target or Cargo's target default.
-export function buildScanner() {
+export function buildScanner(jobLimit = 2) {
+  const jobs = String(jobLimit);
+  assert.match(jobs, /^[12]$/, `${prefix}: jobs must be 1 or 2`);
   const sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   function run(command, args) {
     const result = spawnSync(command, args, {
       cwd: sdk, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, CARGO_BUILD_JOBS: '2' },
+      env: { ...process.env, CARGO_BUILD_JOBS: jobs },
     });
     assert.equal(result.status, 0, `${prefix}: ${command} failed\n${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
     return result.stdout;
@@ -52,6 +54,6 @@ export function buildScanner() {
   assert.ok(host, `${prefix}: rustc must identify its host`);
   const manifest = path.join(sdk, 'Cargo.toml');
   const metadata = JSON.parse(run('cargo', ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', manifest]));
-  const output = run('cargo', ['build', '--locked', '--manifest-path', manifest, '-p', 'safe-cex-parity', '--bin', 'accepted-source', '--target', host, '--jobs', '2', '--message-format=json']);
+  const output = run('cargo', ['build', '--locked', '--manifest-path', manifest, '-p', 'safe-cex-parity', '--bin', 'accepted-source', '--target', host, '--jobs', jobs, '--message-format=json']);
   return scannerExecutable(metadata, output, path.join(sdk, 'safe-cex-parity/Cargo.toml'));
 }

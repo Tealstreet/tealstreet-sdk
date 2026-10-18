@@ -1,5 +1,10 @@
 # Orderly venue port
 
+`classes::construct` is the constructor used by the production binding and the
+source-oracle class tests. Test-only convenience constructor wrappers were removed.
+`scripts/classes-controls.py` checks normalization and all family tags against
+those class tests and the real Exchange/signing binding, restoring exact source.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/orderly/CLAUDE.md).
 
 `types.rs` mirrors the ten runtime constants from `orderly.types.ts`. Ordered
@@ -18,8 +23,8 @@ Set `SAFE_CEX_TYPESCRIPT_PATH=/Users/sam/cs/tealstreet-next/node_modules/typescr
 Scope cargo commands to `-p safe-cex-venue-orderly --jobs 1`. During development
 use cargo check or a single scoped test target; reserve the full scoped suite,
 fmt check and separate strict host/wasm clippy for merge-up readiness. Never run
-two Cargo processes concurrently. The runtime Exchange, REST and websocket hooks
-are not implemented. Reuse the six shared crates as those slices are added.
+two Cargo processes concurrently. The concrete `native_exchange::OrderlyExchange` composes the existing source bodies
+on shared `js_runtime` primitives; keep source workflows in their owning modules.
 
 `tests/controls.py` mutates one production constant/helper or one oracle capture
 at a time and requires the named assertion to fail, restores exact bytes in a
@@ -185,3 +190,46 @@ combinations, two rejection identities and one pending/resumed call. Fixed sourc
 counts and native index walks prevent shortening a capture from shortening the
 test. Mode and reduceOnly inversion controls require named exit-101 failures and
 passing restorations. The getter's own REST body remains separately rowed.
+
+
+`native_exchange` constructs all six Orderly family names from real options.
+`binding` implements only their runtime/import/HTTP/socket primitives on the
+shared Scope/Js layer. All 16 Exchange methods execute existing source bodies;
+the four inherited unsupported methods retain the exact `Not implemented`
+error. `fetchPositions` retains its source balance write. The mutable source
+disposal flag is set before socket disposal; source disposal does not invoke
+BaseExchange cleanup. Private subscriptions remain server-auth-gated.
+P4 signing-exception recovery uses the shared authenticate_and_subscribe wrapper
+around the unchanged private onOpen body. This intentional difference and the
+native cleanup boundary are named in BINDING_GATES.md and the PR description.
+`tests/exchange_trait.rs` constructs production exchanges over scripted transport;
+its all-16 method witness and production-disabling controls are described in
+BINDING_GATES.md. The registry's native server test verifies exact Ed25519
+preimages for all six names. The native registry shares hosted HTTP signing and account metadata with typed
+availability. Source private HTTP still signs locally before the hosted adapter;
+private WS never reads remoteSigner. Empty secrets retain the source HTTP error
+and the already approved shared WS onOpen recovery. See HOSTED_SIGNER_EVIDENCE.md.
+
+The public `set_all_leverage` trait hook invokes Orderly account leverage, even
+when the Store has no positions. The existing member validates finiteness, clamps
+and rounds 1..100, writes CROSS leverage once, skips unchanged values and advances
+its cache only after success. Binding regressions cover those source behaviors
+and emitted, swallowed failures through the actual signed HTTP client.
+
+Public trait cancellation invokes the existing Orderly cancel-all/symbol members.
+Both ordinary and algo endpoints are attempted in source order, even with an empty
+Store or a failed first request; source errors are emitted and swallowed. The real
+binding target checks both trait paths, signed symbol queries and continuation.
+Private execution and position frames assert Store changes and actual fill events.
+Orderly subscribes to executionreport, algoexecutionreportv2 and position only;
+balance comes from the REST fetchPositions path, not a private balance topic.
+
+
+Public ticker, BBO and mark-price frames enforce the approved strict Ticker row
+policy at the native Store boundary. A null/string/undefined numeric field
+refuses that complete row; valid siblings update before deferred reports name
+each refused symbol, field and value. Later source property or Store errors
+retain precedence. This intentionally differs from TS retaining malformed values.
+`exchange_trait` mixed-row regressions run each topic through all six real account
+classes and sockets. The source-only stream oracle retains its raw-value Store;
+it does not substitute for these native typed-boundary witnesses.

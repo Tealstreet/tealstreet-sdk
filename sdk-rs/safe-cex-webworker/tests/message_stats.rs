@@ -1,8 +1,9 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 #[path = "support/ws_runtime.rs"]
 mod ws_runtime;
 use runtime::Runtime;
+use safe_cex_exchange::message_stats::*;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
@@ -12,7 +13,6 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::store::{DEFAULT_STORE, DefaultStore};
 use safe_cex_types::ExchangeName;
-use safe_cex_webworker::message_stats::*;
 use serde_json::{Value, json};
 use std::rc::Rc;
 struct Venue {

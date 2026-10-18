@@ -119,9 +119,6 @@ impl WsProtocol for Protocol {
     fn on_message(&self, _: &Rc<BaseWebSocket>, frame: &SocketFrame) -> Result<(), ExchangeError> {
         self.0.upgrade().map_or(Ok(()), |s| s.on_message(frame))
     }
-    fn resyncs_private_state_on_reopen(&self) -> Option<bool> {
-        Some(false)
-    }
 }
 fn coercion(error: safe_cex_num::JsCoercionError) -> ExchangeError {
     let mut e = ExchangeError::new(error.message);
@@ -311,7 +308,7 @@ impl PrivateStream {
                 return Ok(());
             };
             if data.is_object() || data.is_array() {
-                data = safe_cex_transport::signing::try_parse_json(Value::String(raw));
+                data = safe_cex_transport::signing::try_parse_params_json(Value::String(raw));
             }
             if !js_truthy(Some(&data)) {
                 return Ok(());
@@ -394,7 +391,7 @@ impl PrivateStream {
         emit: bool,
     ) -> Result<(), ExchangeError> {
         let mut patch = ModelPatch::default();
-        order.status = status;
+        order.status = (status).into();
         patch.set_json("status", serde_json::to_value(status).unwrap());
         if let Some(v) = filled {
             order.filled = v;
@@ -452,12 +449,12 @@ impl PrivateStream {
             let amount = parsed(d.get("q"))?;
             let filled = parsed(d.get("z"))?;
             let order = Order {
-                client_order_id: None,
+                client_order_id: (None).into(),
                 id: id.ok_or_else(|| {
                     ExchangeError::new("Missing private order id cannot enter native Order")
                 })?,
-                parent_id: None,
-                status: OrderStatus::Open,
+                parent_id: (None).into(),
+                status: safe_cex_types::ModelField::Value(OrderStatus::Open),
                 symbol: d
                     .get("s")
                     .and_then(Value::as_str)
@@ -465,29 +462,29 @@ impl PrivateStream {
                     .into(),
                 r#type: kind,
                 side: if d.get("S").and_then(Value::as_str) == Some("BUY") {
-                    OrderSide::Buy
+                    safe_cex_types::ModelField::Value(OrderSide::Buy)
                 } else {
-                    OrderSide::Sell
+                    safe_cex_types::ModelField::Value(OrderSide::Sell)
                 },
                 price: if price == 0.0 || price.is_nan() {
-                    parsed(d.get("sp"))?
+                    (parsed(d.get("sp"))?).into()
                 } else {
-                    price
+                    (price).into()
                 },
                 amount,
                 filled,
                 remaining: amount - filled,
-                reduce_only: js_truthy(d.get("R")) || js_truthy(d.get("cp")),
+                reduce_only: (js_truthy(d.get("R")) || js_truthy(d.get("cp"))).into(),
                 last_update: self.parent.virtual_time_ms(),
-                info: Some(d.clone()),
-                close: None,
-                time_in_force: None,
-                trigger_type: None,
-                tp_trigger_type: None,
-                sl_trigger_type: None,
-                take_profit: None,
-                stop_loss: None,
-                extra: None,
+                info: (Some(d.clone())).into(),
+                close: (None).into(),
+                time_in_force: (None).into(),
+                trigger_type: (None).into(),
+                tp_trigger_type: (None).into(),
+                sl_trigger_type: (None).into(),
+                take_profit: (None).into(),
+                stop_loss: (None).into(),
+                extra: (None).into(),
             };
             self.parent.store().add_or_update_order(order)?;
             self.parent.log(

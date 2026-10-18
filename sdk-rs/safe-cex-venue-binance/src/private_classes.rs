@@ -485,15 +485,12 @@ impl PrivateState {
                 2,
             ),
         ] {
-            if !json.nullish() && json.get("e")?.same(&string(event)) {
+            if !json.nullish() && json.read("e")?.same(&string(event)) {
                 self.base().stats(topic)?;
-                self.handle_events(
-                    kind,
-                    EventValue::Array(Rc::new(RefCell::new(vec![json.clone()]))),
-                )?;
+                self.handle_events(kind, EventValue::array(vec![json.clone()]))?;
             }
         }
-        if !json.nullish() && json.get("id")?.same(&number(42.0)) {
+        if !json.nullish() && json.read("id")?.same(&number(42.0)) {
             self.base().pong()?;
         }
         Ok(())
@@ -551,8 +548,9 @@ impl PrivateState {
                             let update = retained
                                 .parent
                                 .capture_store(PrivateOperation::UpdateStore)?;
-                            let loaded = EventValue::object(retained.parent.loaded()?.spread());
-                            loaded.define("orders", EventValue::Bool(true));
+                            let loaded =
+                                EventValue::record_object(retained.parent.loaded()?.spread());
+                            loaded.write("orders", EventValue::Bool(true));
                             update(vec![record([("orders", orders), ("loaded", loaded)])])
                         }
                         .await;
@@ -815,20 +813,9 @@ impl PrivateEventBindings for Events {
         self.0.parent.balance()
     }
     fn reject_reason(&mut self, data: &EventValue) -> Result<EventValue, Failure> {
-        let code = fallback(data.get("r")?, string("")).text()?.to_uppercase();
-        Ok(
-            if ["POST_ONLY", "GTX", "MAKER"]
-                .iter()
-                .any(|s| code.contains(s))
-            {
-                EventValue::Enum(PrivateEnum::Reject(
-                    safe_cex_types::OrderRejectReason::PostOnly,
-                ))
-            } else {
-                EventValue::Undefined
-            },
-        )
+        crate::private_events::get_order_reject_reason(data)
     }
+
     fn asset_price(&mut self, asset: &EventValue) -> Result<f64, Failure> {
         self.0.parent.asset_price(asset)
     }

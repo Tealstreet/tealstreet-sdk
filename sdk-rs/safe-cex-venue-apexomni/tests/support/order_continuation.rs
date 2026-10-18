@@ -82,15 +82,37 @@ fn order_coercions_and_clocks_precede_typed_admission() {
                 Some(("type", "function", "unknown venue order type"))
             }
             "type-prototype" => Some(("type", "object", "unknown venue order type")),
-            "type-missing" => Some(("type", "undefined", "unknown venue order type")),
             "status-function" => Some(("status", "function", "unknown venue order status")),
             "status-prototype" => Some(("status", "object", "unknown venue order status")),
-            "null-side" => Some(("side", "undefined", "unknown venue order side")),
             "numeric-id" => Some(("id", "number", "non-string field")),
-            "numeric-reduce" => Some(("reduceOnly", "number", "non-boolean reduceOnly")),
             _ => None,
         };
-        if let Some((field, kind, reason)) = refusal {
+        if label == "numeric-reduce" {
+            assert!(
+                actual
+                    .expect("per-row refusal is not a batch error")
+                    .is_empty()
+            );
+            assert_eq!(row["result"]["ok"], true);
+            let source = &row["result"]["value"]["values"];
+            assert_eq!(source.as_array().unwrap().len(), 3);
+            native::check(
+                &n(17.),
+                source_field(&source[0], "reduceOnly"),
+                &format!("{marker} source keeps numeric field"),
+            );
+            assert_eq!(
+                host.operations.borrow_mut().pop(),
+                Some(J::Array(vec![
+                    s("console"),
+                    s("warn"),
+                    s(
+                        "[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got Number(17.0)"
+                    ),
+                    J::Undefined,
+                ]))
+            );
+        } else if let Some((field, kind, reason)) = refusal {
             let error = actual.expect_err(&format!("{marker} native output refusal"));
             assert_eq!(error.name, "Error", "{marker} native refusal kind");
             assert!(
@@ -180,7 +202,11 @@ fn order_coercions_and_clocks_precede_typed_admission() {
             );
             positive += 1;
         }
-        assert_eq!(host.now_calls.get(), clocks, "{marker} native clock count");
+        assert_eq!(
+            host.now_calls.get(),
+            0,
+            "{marker} virtual clock must not read the raw runtime"
+        );
         assert_eq!(row["clocks"], clocks, "{marker} source clock count");
         native::check(
             &J::Array(host.operations.borrow().clone()),
@@ -189,11 +215,11 @@ fn order_coercions_and_clocks_precede_typed_admission() {
         );
     }
     assert_eq!(
-        refused, 9,
+        refused, 6,
         "APEX-ORDER independent whole-result refusal floor"
     );
     assert_eq!(errors, 11, "APEX-ORDER independent matching-error floor");
-    assert_eq!(positive, 8, "APEX-ORDER independent positive floor");
+    assert_eq!(positive, 10, "APEX-ORDER independent positive floor");
     // Every native result/refusal/error/clock assertion above runs before wire.
     let mut wire_count = 0;
     for (label, field) in [

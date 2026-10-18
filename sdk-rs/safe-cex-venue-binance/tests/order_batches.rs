@@ -1,10 +1,15 @@
+#[path = "support/canonical_value.rs"]
+mod canonical_value;
+use canonical_value::category;
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_num::{JsJsonValue, PrecisionInput, js_json_stringify};
 use safe_cex_types::{OrderSide, OrderStopTriggerType, OrderType, PositionSide};
 use safe_cex_venue_binance::{
     order_batches::*,
     order_operations::{Method, Operation, Sync, Venue, array},
-    private_event_value::{EventValue, PrivateEnum, number, record, string},
+    private_event_value::{
+        EventOps, EventValue, PrivateEnum, array_values, number, record, string,
+    },
     request_weight::Failure,
 };
 use serde_json::{Value, json};
@@ -40,7 +45,8 @@ fn decoded(v: Value) -> EventValue {
             ("slTriggerType", 2),
         ] {
             if let EventValue::String(s) = out.get(key).unwrap() {
-                let e = match (kind, s.as_str()) {
+                let spelling = String::from_utf16(&s).unwrap();
+                let e = match (kind, spelling.as_str()) {
                     (0, "limit") => PrivateEnum::Type(OrderType::Limit),
                     (0, "market") => PrivateEnum::Type(OrderType::Market),
                     (0, "stop_market") => PrivateEnum::Type(OrderType::StopLoss),
@@ -53,7 +59,7 @@ fn decoded(v: Value) -> EventValue {
                     (2, "last_price") => PrivateEnum::Trigger(OrderStopTriggerType::LastPrice),
                     _ => continue,
                 };
-                out.define(key, EventValue::Enum(e));
+                out.write(key, EventValue::enum_value(e));
             }
         }
     }
@@ -61,10 +67,9 @@ fn decoded(v: Value) -> EventValue {
 }
 fn snap(v: &EventValue) -> EventValue {
     match v {
-        EventValue::Array(a) => array(a.borrow().iter().map(snap).collect()),
-        EventValue::Object(o) => EventValue::object(
-            o.borrow()
-                .fields
+        EventValue::Array(a) => array(array_values(a).iter().map(snap).collect()),
+        EventValue::Object(_) => EventValue::record_object(
+            v.spread()
                 .iter()
                 .map(|(k, v)| (k.clone(), snap(v)))
                 .collect(),
@@ -84,12 +89,10 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::Bool(v) => json!(v),
-        EventValue::String(s) => json!(s),
-        EventValue::Enum(e) => e.wire(),
-        EventValue::Array(a) => a.borrow().iter().map(wire).collect(),
-        EventValue::Object(o) => o
-            .borrow()
-            .fields
+        EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
+        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
@@ -118,24 +121,28 @@ fn text(v: &EventValue, s: &str, l: &str) {
     let EventValue::String(v) = v else {
         panic!("{l}: expected native String {s:?}, got {v:?}")
     };
-    assert_eq!(v, s, "{l}")
+    assert_eq!(v.as_ref(), s.encode_utf16().collect::<Vec<_>>(), "{l}")
 }
 fn values(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native Array")
     };
     assert_eq!(a.borrow().len(), n, "{l}: native array count");
-    a.borrow().clone()
+    array_values(a)
 }
 fn own(v: &EventValue, k: &str) -> bool {
     let EventValue::Object(o) = v else {
         panic!("native Object")
     };
-    o.borrow().fields.contains_key(k)
+    o.props
+        .borrow()
+        .contains_key(safe_cex_exchange::js_runtime::value::utf16(k).as_ref())
 }
 fn remove(v: &EventValue, k: &str) {
     let EventValue::Object(o) = v else { panic!() };
-    o.borrow_mut().fields.remove(k);
+    o.props
+        .borrow_mut()
+        .shift_remove(safe_cex_exchange::js_runtime::value::utf16(k).as_ref());
 }
 fn key(m: Method) -> &'static str {
     match m {
@@ -152,12 +159,12 @@ fn encoded_input(v: &EventValue) -> JsJsonValue {
         EventValue::Null => JsJsonValue::Null,
         EventValue::Bool(v) => JsJsonValue::Bool(*v),
         EventValue::Number(v) => JsJsonValue::Number(*v),
-        EventValue::String(v) => JsJsonValue::String(v.clone()),
-        EventValue::Enum(e) => JsJsonValue::String(e.wire().as_str().unwrap().into()),
-        EventValue::Array(a) => JsJsonValue::Array(a.borrow().iter().map(encoded_input).collect()),
-        EventValue::Object(o) => JsJsonValue::Object(
-            o.borrow()
-                .fields
+        EventValue::String(v) => JsJsonValue::String(String::from_utf16(v).unwrap()),
+        EventValue::Array(a) => {
+            JsJsonValue::Array(array_values(a).iter().map(encoded_input).collect())
+        }
+        EventValue::Object(_) => JsJsonValue::Object(
+            v.spread()
                 .iter()
                 .map(|(k, v)| (k.clone(), encoded_input(v)))
                 .collect(),
@@ -237,11 +244,13 @@ struct Bindings(Shared);
 fn error(name: &str) -> Failure {
     let mut e = ExchangeError::new("batch fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!(if name == "post-only-reject" {
-        -5022
-    } else {
-        -1000
-    }));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        if name == "post-only-reject" {
+            -5022
+        } else {
+            -1000
+        }
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
     Rc::new(e)
 }
@@ -277,7 +286,7 @@ fn state(family: &str, name: &str) -> Shared {
     }
     if name == "seven" {
         let p = decoded(f["payloads"][0].clone());
-        p.define("newClientOrderId", string("c6"));
+        p.write("newClientOrderId", string("c6"));
         payloads.push(p)
     }
     if name == "null-payload" {
@@ -295,19 +304,19 @@ fn state(family: &str, name: &str) -> Shared {
         .collect::<Vec<_>>();
     if name == "zero-contracts" {
         for p in &positions {
-            p.define("contracts", number(0.0))
+            p.write("contracts", number(0.0))
         }
     }
     if name == "nonnumeric-quantity" {
         for i in [1, 3, 4] {
-            payloads[i].define("quantity", string("bad"))
+            payloads[i].write("quantity", string("bad"))
         }
     }
     if name == "raw-quantity-array" {
-        payloads[1].define("quantity", array(vec![number(3.6)]))
+        payloads[1].write("quantity", array(vec![number(3.6)]))
     }
     if name == "strategy-override" {
-        payloads[1].define("strategyType", string("OVERRIDE"))
+        payloads[1].write("strategyType", string("OVERRIDE"))
     }
     let payloads = if name == "null-input" {
         EventValue::Null
@@ -326,22 +335,22 @@ fn state(family: &str, name: &str) -> Shared {
     };
     let opts = decoded(f["conflict_opts"].clone());
     match name {
-        "non-stop" => opts.define(
+        "non-stop" => opts.write(
             "type",
-            EventValue::Enum(PrivateEnum::Type(OrderType::Limit)),
+            EventValue::enum_value(PrivateEnum::Type(OrderType::Limit)),
         ),
         "sized" => {
-            opts.define("close", EventValue::Bool(false));
-            opts.define("amount", number(3.6))
+            opts.write("close", EventValue::Bool(false));
+            opts.write("amount", number(3.6))
         }
         "adjust-zero" => {
-            opts.define("close", EventValue::Bool(false));
-            opts.define("amount", number(0.04))
+            opts.write("close", EventValue::Bool(false));
+            opts.write("amount", number(0.04))
         }
-        "raw-close-string" => opts.define("close", string("yes")),
+        "raw-close-string" => opts.write("close", string("yes")),
         "raw-amount-string" => {
-            opts.define("close", EventValue::Bool(false));
-            opts.define("amount", string("0"))
+            opts.write("close", EventValue::Bool(false));
+            opts.write("amount", string("0"))
         }
         _ => {}
     }
@@ -404,7 +413,9 @@ fn state(family: &str, name: &str) -> Shared {
     };
     let mut replacement = ExchangeError::new("emitter fixture");
     replacement.name = "SyntaxError".into();
-    replacement.code = Some(json!("emit-code"));
+    replacement.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "emit-code"
+    )));
     replacement.response = Some(json!({"status":504,"data":{"msg":"emit detail"}}));
     Rc::new(RefCell::new(State {
         family: family.into(),
@@ -447,12 +458,12 @@ fn append_payload(s: &State) {
         panic!()
     };
     let p = decoded(fixture()["payloads"][0].clone());
-    p.define("newClientOrderId", string("c6"));
-    a.borrow_mut().push(p)
+    p.write("newClientOrderId", string("c6"));
+    EventValue::Array(a.clone()).push(p).unwrap()
 }
 fn added_order() -> EventValue {
     let o = decoded(fixture()["orders"][0].clone());
-    o.define("id", string("added"));
+    o.write("id", string("added"));
     o
 }
 impl BatchBindings for Bindings {
@@ -470,7 +481,7 @@ impl BatchBindings for Bindings {
             }
             if b.name == "assert-appends" {
                 let EventValue::Array(a) = o else { panic!() };
-                a.borrow_mut().push(added_order())
+                EventValue::Array(a.clone()).push(added_order()).unwrap()
             }
             Ok(EventValue::Undefined)
         }))
@@ -491,26 +502,26 @@ impl BatchBindings for Bindings {
                 let EventValue::Array(a) = &b.orders else {
                     panic!()
                 };
-                a.borrow_mut().push(added_order())
+                EventValue::Array(a.clone()).push(added_order()).unwrap()
             }
             if b.name == "format-replaces-next" && b.formats.len() == 1 {
                 let EventValue::Array(a) = &b.orders else {
                     panic!()
                 };
                 let replaced = decoded(fixture()["orders"][1].clone());
-                replaced.define("id", string("replaced"));
-                a.borrow_mut()[1] = replaced;
+                replaced.write("id", string("replaced"));
+                a.borrow_mut()[1] = Some(replaced);
             }
-            let id = o.get("id")?.text()?;
+            let id = o.read("id")?.text()?;
             let regular = record([
-                ("symbol", o.get("symbol")?),
-                ("price", o.get("price")?),
-                ("quantity", o.get("quantity")?),
+                ("symbol", o.read("symbol")?),
+                ("price", o.read("price")?),
+                ("quantity", o.read("quantity")?),
                 ("newClientOrderId", string(format!("r-{id}"))),
-                ("nested", o.get("nested")?),
+                ("nested", o.read("nested")?),
             ]);
-            let algo = EventValue::object(regular.spread());
-            algo.define("newClientOrderId", string(format!("a-{id}")));
+            let algo = EventValue::record_object(regular.spread());
+            algo.write("newClientOrderId", string(format!("a-{id}")));
             let out = if b.venue == Venue::Futures {
                 record([
                     ("regular", array(vec![regular])),
@@ -542,7 +553,7 @@ impl BatchBindings for Bindings {
                     "native configured cancel rows",
                 );
                 let originals = if let EventValue::Array(a) = &b.conflicts {
-                    a.borrow().clone()
+                    array_values(a)
                 } else {
                     panic!()
                 };
@@ -609,7 +620,7 @@ impl BatchBindings for Bindings {
                     append_payload(&b)
                 }
                 if b.name == "mutate-client-ids" {
-                    payload.define("newClientOrderId", string(format!("late-{n}")))
+                    payload.write("newClientOrderId", string(format!("late-{n}")))
                 }
                 Ok(if b.family == "regular" {
                     if ep.ends_with("batchOrders") {
@@ -674,16 +685,20 @@ impl BatchBindings for Bindings {
                 let EventValue::Array(a) = &b.data else {
                     panic!()
                 };
-                a.borrow()[4].define("msg", string("changed row error"));
-                a.borrow_mut()
-                    .push(record([("orderId", string("appended"))]));
+                a.borrow()[4]
+                    .as_ref()
+                    .unwrap()
+                    .write("msg", string("changed row error"));
+                EventValue::Array(a.clone())
+                    .push(record([("orderId", string("appended"))]))
+                    .unwrap();
             }
             let input = match &v {
                 Rejection::Row(row) => classifier_input(row),
                 Rejection::Error(e) => {
                     let mut fields = serde_json::Map::new();
                     fields.insert("message".into(), json!(e.message));
-                    if let Some(c) = &e.code {
+                    if let Some(c) = &observed_error_code(&e.code) {
                         fields.insert("code".into(), c.clone());
                     }
                     if let Some(r) = &e.response {
@@ -719,7 +734,7 @@ impl BatchBindings for Bindings {
             return Err(b.error.clone());
         }
         if b.name == "position-get-mutates" {
-            b.payloads.get("1")?.define("side", string("BUY"))
+            b.payloads.read("1")?.write("side", string("BUY"))
         }
         Ok(b.positions.clone())
     }
@@ -738,15 +753,17 @@ impl BatchBindings for Bindings {
             return Err(b.error.clone());
         }
         if b.name == "adjust-mutates" {
-            b.opts.define(
+            b.opts.write(
                 "type",
-                EventValue::Enum(PrivateEnum::Type(OrderType::TakeProfit)),
+                EventValue::enum_value(PrivateEnum::Type(OrderType::TakeProfit)),
             );
-            b.opts
-                .define("side", EventValue::Enum(PrivateEnum::Side(OrderSide::Buy)));
+            b.opts.write(
+                "side",
+                EventValue::enum_value(PrivateEnum::Side(OrderSide::Buy)),
+            );
         }
         let p = match precision {
-            EventValue::String(s) => PrecisionInput::String(s),
+            EventValue::String(s) => PrecisionInput::String(String::from_utf16(&s).unwrap()),
             v => PrecisionInput::Number(v.number()?),
         };
         Ok(number(safe_cex_num::adjust(value.number()?, p)))
@@ -808,7 +825,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
         "{l}"
     );
     assert_eq!(
-        e.code,
+        observed_error_code(&e.code),
         Some(if replaced {
             json!("emit-code")
         } else {
@@ -831,7 +848,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
     );
 }
 fn error_wire(e: &Failure, b: &State) -> Value {
-    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
 }
 impl Trace {
     fn wire(&self, b: &State) -> Value {
@@ -859,7 +876,7 @@ impl Trace {
     }
 }
 fn state_wire(b: &State, result: &Result<EventValue, Failure>) -> Value {
-    json!({"name":b.name,"trace":b.trace.iter().map(|t|t.wire(b)).collect::<Vec<_>>(),"posts":b.posts.iter().map(|p|json!({"endpoint":p.endpoint,"payload":wire(&p.sent)})).collect::<Vec<_>>(),"emissions":b.emissions.iter().map(wire).collect::<Vec<_>>(),"classifications":b.classifications.iter().map(|v|match v{Rejection::Row(v)=>{let EventValue::Array(a)=&b.data else{panic!()};json!({"kind":"row","original":a.borrow().iter().any(|o|o.same(v)),"value":wire(v)})},Rejection::Error(e)=>json!({"kind":"error","original":Rc::ptr_eq(e,&b.error)||Rc::ptr_eq(e,&b.replacement),"value":error_wire(e,b)})}).collect::<Vec<_>>(),"logs":b.logs.iter().map(|(m,s)|json!({"message":m,"severity":s})).collect::<Vec<_>>(),"methods":b.methods.iter().map(|m|json!({"method":key(m.method),"version":m.version,"args":wire(&m.sent)})).collect::<Vec<_>>(),"formats":b.formats.iter().map(wire).collect::<Vec<_>>(),"stringifies":b.stringifies.iter().map(wire).collect::<Vec<_>>(),"positions":b.position_reads,"markets":b.market_reads,"adjusts":b.adjusts.len(),"orderReads":b.order_reads,"assertRefs":b.assert_refs,"cancelRefs":b.cancel_refs,"returnedRef":result.as_ref().is_ok_and(|v|v.same(&b.returned)),"value":result.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"failure":result.as_ref().err().map(|e|error_wire(e,b))})
+    json!({"name":b.name,"trace":b.trace.iter().map(|t|t.wire(b)).collect::<Vec<_>>(),"posts":b.posts.iter().map(|p|json!({"endpoint":p.endpoint,"payload":wire(&p.sent)})).collect::<Vec<_>>(),"emissions":b.emissions.iter().map(wire).collect::<Vec<_>>(),"classifications":b.classifications.iter().map(|v|match v{Rejection::Row(v)=>{let EventValue::Array(a)=&b.data else{panic!()};json!({"kind":"row","original":array_values(&a).iter().any(|o|o.same(v)),"value":wire(v)})},Rejection::Error(e)=>json!({"kind":"error","original":Rc::ptr_eq(e,&b.error)||Rc::ptr_eq(e,&b.replacement),"value":error_wire(e,b)})}).collect::<Vec<_>>(),"logs":b.logs.iter().map(|(m,s)|json!({"message":m,"severity":s})).collect::<Vec<_>>(),"methods":b.methods.iter().map(|m|json!({"method":key(m.method),"version":m.version,"args":wire(&m.sent)})).collect::<Vec<_>>(),"formats":b.formats.iter().map(wire).collect::<Vec<_>>(),"stringifies":b.stringifies.iter().map(wire).collect::<Vec<_>>(),"positions":b.position_reads,"markets":b.market_reads,"adjusts":b.adjusts.len(),"orderReads":b.order_reads,"assertRefs":b.assert_refs,"cancelRefs":b.cancel_refs,"returnedRef":result.as_ref().is_ok_and(|v|v.same(&b.returned)),"value":result.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"failure":result.as_ref().err().map(|e|error_wire(e,b))})
 }
 fn compare(family: &str, actual: Vec<Value>, floor: usize) {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1120,13 +1137,13 @@ fn http_test(family: &str) {
             );
             for row in rows {
                 num(
-                    &row.get("price").unwrap(),
+                    &row.read("price").unwrap(),
                     12.3,
                     &format!("{l}: native codec input price"),
                 );
                 assert!(
                     matches!(
-                        row.get("quantity").unwrap(),
+                        row.read("quantity").unwrap(),
                         EventValue::String(_) | EventValue::Number(_)
                     ),
                     "{l}: native codec input quantity kind"
@@ -1135,7 +1152,7 @@ fn http_test(family: &str) {
                     panic!()
                 };
                 assert!(
-                    original.borrow().iter().any(|p| p.same(&row)),
+                    array_values(&original).iter().any(|p| p.same(&row)),
                     "{l}: native codec original payload referent"
                 );
             }
@@ -1163,15 +1180,16 @@ fn http_test(family: &str) {
             if family == "regular" && p.endpoint.ends_with("batchOrders") {
                 assert_eq!(p.arg.spread().len(), 1, "{l}: native batch param count");
                 assert!(
-                    matches!(p.arg.get("batchOrders").unwrap(), EventValue::String(_)),
+                    matches!(p.arg.read("batchOrders").unwrap(), EventValue::String(_)),
                     "{l}: native encoded batch String"
                 );
-                let EventValue::String(encoded) = p.arg.get("batchOrders").unwrap() else {
+                let EventValue::String(encoded) = p.arg.read("batchOrders").unwrap() else {
                     panic!("native encoded String")
                 };
                 // Decode ONCE and assert authored native fields; never re-encode.
                 let decoded_batch = EventValue::from_json(
-                    serde_json::from_str(&encoded).expect("native batchOrders valid JSON"),
+                    serde_json::from_str(&String::from_utf16(&encoded).unwrap())
+                        .expect("native batchOrders valid JSON"),
                 );
                 let rows = values(
                     &decoded_batch,
@@ -1181,9 +1199,9 @@ fn http_test(family: &str) {
                 for (k, row) in rows.iter().enumerate() {
                     let index = if j == 0 { k } else { k + 5 };
                     assert_eq!(row.spread().len(), 7, "{l}: native decoded field count");
-                    text(&row.get("symbol").unwrap(), "BTCUSDT", &l);
+                    text(&row.read("symbol").unwrap(), "BTCUSDT", &l);
                     text(
-                        &row.get("type").unwrap(),
+                        &row.read("type").unwrap(),
                         [
                             "LIMIT",
                             "STOP_MARKET",
@@ -1196,24 +1214,24 @@ fn http_test(family: &str) {
                         &format!("{l}: native decoded type"),
                     );
                     text(
-                        &row.get("side").unwrap(),
+                        &row.read("side").unwrap(),
                         if index == 1 { "SELL" } else { "BUY" },
                         &l,
                     );
                     num(
-                        &row.get("price").unwrap(),
+                        &row.read("price").unwrap(),
                         12.3,
                         &format!("{l}: native decoded price"),
                     );
                     if index == 4 {
                         num(
-                            &row.get("quantity").unwrap(),
+                            &row.read("quantity").unwrap(),
                             0.0,
                             &format!("{l}: native decoded quantity"),
                         )
                     } else {
                         text(
-                            &row.get("quantity").unwrap(),
+                            &row.read("quantity").unwrap(),
                             if index == 1 {
                                 "0"
                             } else if index == 3 {
@@ -1225,12 +1243,12 @@ fn http_test(family: &str) {
                         )
                     };
                     text(
-                        &row.get("newClientOrderId").unwrap(),
+                        &row.read("newClientOrderId").unwrap(),
                         &format!("c{index}"),
                         &format!("{l}: native decoded client ID"),
                     );
                     num(
-                        &row.get("nested").unwrap().get("marker").unwrap(),
+                        &row.read("nested").unwrap().read("marker").unwrap(),
                         4.2,
                         &format!("{l}: native decoded nested marker"),
                     );
@@ -1245,7 +1263,7 @@ fn http_test(family: &str) {
                 continue;
             }
             num(
-                &p.arg.get("price").unwrap(),
+                &p.arg.read("price").unwrap(),
                 12.3,
                 &format!("{l}: native POST price{j}"),
             );
@@ -1261,7 +1279,7 @@ fn http_test(family: &str) {
                 assert!(!p.arg.same(&original), "{l}: native fresh conditional body");
                 assert!(!own(&p.arg, "type"), "{l}: native conditional removed type");
                 text(
-                    &p.arg.get("strategyType").unwrap(),
+                    &p.arg.read("strategyType").unwrap(),
                     if name == "strategy-override" && j == 3 {
                         "OVERRIDE"
                     } else {
@@ -1269,10 +1287,10 @@ fn http_test(family: &str) {
                     },
                     &format!("{l}: native strategyType"),
                 );
-                let q = p.arg.get("quantity").unwrap();
+                let q = p.arg.read("quantity").unwrap();
                 if name == "raw-quantity-array" && j == 3 {
                     assert!(
-                        q.same(&original.get("quantity").unwrap()),
+                        q.same(&original.read("quantity").unwrap()),
                         "{l}: native raw quantity array identity"
                     );
                     num(&values(&q, 1, &l)[0], 3.6, &l)
@@ -1286,9 +1304,9 @@ fn http_test(family: &str) {
                     num(&q, 3.6, &format!("{l}: native fallback quantity{j}"))
                 };
                 if name == "position-get-mutates" && j == 3 {
-                    text(&original.get("side").unwrap(), "BUY", &l);
+                    text(&original.read("side").unwrap(), "BUY", &l);
                     text(
-                        &p.arg.get("side").unwrap(),
+                        &p.arg.read("side").unwrap(),
                         "SELL",
                         &format!("{l}: native side snapshot"),
                     );
@@ -1301,14 +1319,14 @@ fn http_test(family: &str) {
             }
             assert!(
                 p.arg
-                    .get("nested")
+                    .read("nested")
                     .unwrap()
-                    .same(&original.get("nested").unwrap()),
+                    .same(&original.read("nested").unwrap()),
                 "{l}: native nested payload alias{j}"
             );
             if name == "mutate-client-ids" {
                 text(
-                    &p.arg.get("newClientOrderId").unwrap(),
+                    &p.arg.read("newClientOrderId").unwrap(),
                     &format!("late-{}", j + 1),
                     &format!("{l}: native late client ID{j}"),
                 );
@@ -1320,12 +1338,12 @@ fn http_test(family: &str) {
                     panic!()
                 };
                 assert!(
-                    a.borrow().iter().any(|o| o.same(row)),
+                    array_values(&a).iter().any(|o| o.same(row)),
                     "{l}: native classifier original row"
                 );
                 assert!(
                     matches!(
-                        row.get("code").unwrap(),
+                        row.read("code").unwrap(),
                         EventValue::Number(_) | EventValue::String(_)
                     ),
                     "{l}: native classifier code kind"
@@ -1507,38 +1525,38 @@ fn many_test(family: &str) {
                     "added"
                 };
                 text(
-                    &original.get("id").unwrap(),
+                    &original.read("id").unwrap(),
                     id,
                     &format!("{l}: native reread input ID{k}"),
                 );
                 text(
-                    &p.get("newClientOrderId").unwrap(),
+                    &p.read("newClientOrderId").unwrap(),
                     &format!("{}-{id}", if kind == "algo" { "a" } else { "r" }),
                     &format!("{l}: native batch client ID{k}"),
                 );
                 num(
-                    &p.get("price").unwrap(),
+                    &p.read("price").unwrap(),
                     if k == 1 { 12.4 } else { 12.3 },
                     &format!("{l}: native payload price{k}"),
                 );
                 num(
-                    &p.get("quantity").unwrap(),
+                    &p.read("quantity").unwrap(),
                     if k == 1 { 4.2 } else { 3.6 },
                     &format!("{l}: native payload quantity{k}"),
                 );
                 assert!(
-                    p.get("nested")
+                    p.read("nested")
                         .unwrap()
-                        .same(&original.get("nested").unwrap()),
+                        .same(&original.read("nested").unwrap()),
                     "{l}: native nested input alias{k}"
                 );
                 let formatted = &b.format_outputs[k];
                 let expected = if futures {
-                    formatted.get(kind).unwrap().get("0").unwrap()
+                    formatted.get(kind).unwrap().read("0").unwrap()
                 } else if name == "flat-value" {
                     formatted.clone()
                 } else {
-                    formatted.get("0").unwrap()
+                    formatted.read("0").unwrap()
                 };
                 assert!(
                     p.same(&expected),
@@ -1666,7 +1684,7 @@ fn conflict_test() {
             let rows = values(&m.arg, if name == "adjust-mutates" { 1 } else { 2 }, &l);
             for (k, row) in rows.iter().enumerate() {
                 text(
-                    &row.get("id").unwrap(),
+                    &row.read("id").unwrap(),
                     if name == "adjust-mutates" {
                         "tp"
                     } else if k == 0 {
@@ -1677,19 +1695,19 @@ fn conflict_test() {
                     &format!("{l}: native matching ID{k}"),
                 );
                 assert!(
-                    matches!(row.get("type").unwrap(),EventValue::Enum(PrivateEnum::Type(t))if t==if name=="adjust-mutates"{OrderType::TakeProfit}else{OrderType::StopLoss}),
+                    matches!(category::<safe_cex_types::OrderType>(&(row.read("type").unwrap())), t if t==if name=="adjust-mutates"{OrderType::TakeProfit}else{OrderType::StopLoss}),
                     "{l}: native matching type"
                 );
                 assert!(
-                    matches!(row.get("side").unwrap(),EventValue::Enum(PrivateEnum::Side(t))if t==if name=="adjust-mutates"{OrderSide::Buy}else{OrderSide::Sell}),
+                    matches!(category::<safe_cex_types::OrderSide>(&(row.read("side").unwrap())), t if t==if name=="adjust-mutates"{OrderSide::Buy}else{OrderSide::Sell}),
                     "{l}: native matching side"
                 );
                 assert!(
-                    matches!(row.get("close").unwrap(), EventValue::Bool(true)),
+                    matches!(row.read("close").unwrap(), EventValue::Bool(true)),
                     "{l}: native strict close flag"
                 );
                 assert!(
-                    !row.get("amount").unwrap().truthy(),
+                    !row.read("amount").unwrap().truthy(),
                     "{l}: native false raw amount"
                 );
             }
@@ -1745,4 +1763,17 @@ fn many_spot_target() {
 #[ignore = "requires TypeScript oracle"]
 fn conflict() {
     conflict_test()
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

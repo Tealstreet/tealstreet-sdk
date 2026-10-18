@@ -115,7 +115,9 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("no detached tasks in account reads")
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.logs
             .borrow_mut()
             .push((message.into(), severity.into()));
@@ -129,7 +131,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {
@@ -175,7 +181,12 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: Some("OK".into()),
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(next["data"].clone()),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        next["data"].clone(),
+                    )
+                    .unwrap(),
+                ),
             })
         })
     }
@@ -225,7 +236,7 @@ fn assert_native_models<T>(
     actual: &[T],
     source: &Value,
     name: &str,
-    info: impl Fn(&mut T) -> &mut Option<Value>,
+    info: impl Fn(&mut T) -> safe_cex_types::ModelField<Value>,
 ) where
     T: Clone + PartialEq + std::fmt::Debug + serde::de::DeserializeOwned,
 {
@@ -234,8 +245,10 @@ fn assert_native_models<T>(
     for (actual, expected) in actual.iter().zip(expected) {
         let mut actual = actual.clone();
         let mut expected = expected;
-        match (info(&mut actual).take(), info(&mut expected).take()) {
-            (Some(a), Some(b)) => assert_native_json(&a, &b, name),
+        match (info(&mut actual), info(&mut expected)) {
+            (safe_cex_types::ModelField::Value(a), safe_cex_types::ModelField::Value(b)) => {
+                assert_native_json(&a, &b, name)
+            }
             (a, b) => assert_eq!(a, b, "{name} native info presence"),
         }
         assert_eq!(actual, expected, "{name}");
@@ -250,7 +263,7 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 "{name} native position floor"
             );
             assert_native_models(v, source, &format!("{name} native positions"), |v| {
-                &mut v.info
+                v.info.take()
             });
         }
         Output::Orders(v) => {
@@ -259,7 +272,9 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 LENGTHS[index].unwrap(),
                 "{name} native order floor"
             );
-            assert_native_models(v, source, &format!("{name} native orders"), |v| &mut v.info);
+            assert_native_models(v, source, &format!("{name} native orders"), |v| {
+                v.info.take()
+            });
         }
         Output::Markets(v) => {
             assert_eq!(
@@ -268,7 +283,7 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 "{name} native market floor"
             );
             assert_native_models(v, source, &format!("{name} native markets"), |v| {
-                &mut v.info
+                v.info.take().into()
             });
         }
         Output::Tickers(v) => {
@@ -278,7 +293,7 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 "{name} native ticker floor"
             );
             assert_native_models(v, source, &format!("{name} native tickers"), |v| {
-                &mut v.info
+                v.info.take().into()
             });
         }
         Output::Applied(v) => assert_eq!(*v, source.as_bool().unwrap(), "{name} native applied"),
@@ -422,7 +437,7 @@ fn account_fetch_matches_source() {
                 panic!("missing leverage body")
             };
             assert_eq!(
-                body["leverage"].as_f64(),
+                body.clone().into_value().unwrap()["leverage"].as_f64(),
                 Some(3.0),
                 "leverage-in-range-half native rounded leverage"
             );
@@ -433,7 +448,10 @@ fn account_fetch_matches_source() {
                 panic!("missing leverage body")
             };
             assert_eq!(
-                body["leverage"].as_f64().unwrap().to_bits(),
+                body.clone().into_value().unwrap()["leverage"]
+                    .as_f64()
+                    .unwrap()
+                    .to_bits(),
                 (-0.0_f64).to_bits(),
                 "leverage-negative-half-zero native leverage bits"
             );
@@ -459,7 +477,7 @@ fn account_fetch_matches_source() {
             &store.positions(),
             &c["state"]["positions"],
             &format!("{name} native stored positions"),
-            |v| &mut v.info,
+            |v| v.info.take(),
         );
         assert_eq!(
             account.balance_state_version.get(),
@@ -519,9 +537,11 @@ fn account_fetch_matches_source() {
                 "{name} request timeout"
             );
             match &request.body {
-                Some(RestBody::Untransformed(body)) => {
-                    assert_native_json(body, &source["body"], &format!("{name} untransformed body"))
-                }
+                Some(RestBody::Untransformed(body)) => assert_native_json(
+                    &body.clone().into_value().unwrap(),
+                    &source["body"],
+                    &format!("{name} untransformed body"),
+                ),
                 None => assert!(source.get("body").is_none(), "{name} absent body"),
                 _ => panic!("account body must remain untransformed"),
             }

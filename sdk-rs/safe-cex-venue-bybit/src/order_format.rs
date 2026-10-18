@@ -71,6 +71,27 @@ pub fn format_order_for_batch(
     ticker: Option<&Ticker>,
     position_idx: f64,
 ) -> Result<Value, String> {
+    format_order_body(opts, market, ticker, position_idx, false)
+}
+
+// ts: BybitInverseExchange.formatOrderForBatch — integer USD contract sizing,
+// source min/max clamps and the dedicated conditional-order diagnostic.
+pub(crate) fn format_inverse_order_for_batch(
+    opts: &PlaceOrderOpts,
+    market: Option<&Market>,
+    ticker: Option<&Ticker>,
+    position_idx: f64,
+) -> Result<Value, String> {
+    format_order_body(opts, market, ticker, position_idx, true)
+}
+
+fn format_order_body(
+    opts: &PlaceOrderOpts,
+    market: Option<&Market>,
+    ticker: Option<&Ticker>,
+    position_idx: f64,
+    inverse_profile: bool,
+) -> Result<Value, String> {
     let market = market.ok_or_else(|| format!("Market {} not found", opts.symbol))?;
     let price = opts
         .price
@@ -103,7 +124,8 @@ pub fn format_order_for_batch(
         OrderType::Conditional => {
             if !trigger.is_some_and(truthy) {
                 return Err(format!(
-                    "Failed to format order for batch: Trigger price is required for conditional Bybit orders ({})",
+                    "Failed to format order for batch: Trigger price is required for conditional Bybit{} orders ({})",
+                    if inverse_profile { " inverse" } else { "" },
                     opts.symbol
                 ));
             }
@@ -126,13 +148,25 @@ pub fn format_order_for_batch(
     if let Some(kind) = inverse(&crate::types::ORDER_TYPE, &json!(kind)) {
         req.insert("orderType".into(), json!(kind));
     }
-    req.insert(
-        "qty".into(),
-        json!(js_number_string(adjust(
-            opts.amount,
-            market.precision.amount
-        ))),
-    );
+    let amount = if inverse_profile && market.is_inverse.unwrap_or(false) {
+        let mut amount = safe_cex_num::math_round(opts.amount);
+        let minimum = if truthy(market.limits.amount.min) {
+            market.limits.amount.min
+        } else {
+            1.
+        };
+        if amount < minimum {
+            amount = minimum;
+        }
+        let maximum = market.limits.amount.max;
+        if truthy(maximum) && amount > maximum {
+            amount = maximum;
+        }
+        amount.floor()
+    } else {
+        adjust(opts.amount, market.precision.amount)
+    };
+    req.insert("qty".into(), json!(js_number_string(amount)));
     let limit = opts.r#type == OrderType::Limit
         || (opts.r#type == OrderType::Conditional && price.is_some_and(truthy));
     if limit {

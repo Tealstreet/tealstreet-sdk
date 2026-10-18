@@ -317,27 +317,13 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         // ts: WOOXExchange.mapLimitOrder
         "mapLimitOrder" => sync(
             name,
-            |rt, a| {
-                let store = rt.shared.store.clone();
-                match orders::map_limit_order(&object(&arg(&a, 0))?, store.as_ref(), || rt.now())
-                    .map_err(|e| Thrown::type_error(&e))?
-                {
-                    Some(order) => from_typed(&order),
-                    None => Ok(Js::Null),
-                }
-            },
+            |rt, a| super::order_mapping::map_limit_order(rt, arg(&a, 0)),
             rt,
         ),
         // ts: WOOXExchange.mapAlgoOrder
         "mapAlgoOrder" => sync(
             name,
-            |rt, a| {
-                let store = rt.shared.store.clone();
-                let mapped =
-                    orders::map_algo_order(&object(&arg(&a, 0))?, store.as_ref(), || rt.now())
-                        .map_err(|e| Thrown::type_error(&e))?;
-                from_typed(&mapped)
-            },
+            |rt, a| super::order_mapping::map_algo_order(rt, arg(&a, 0)),
             rt,
         ),
         // ts: WOOXExchange#isAlgoOrder

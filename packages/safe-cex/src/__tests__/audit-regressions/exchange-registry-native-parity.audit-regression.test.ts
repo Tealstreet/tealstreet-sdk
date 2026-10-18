@@ -126,6 +126,7 @@ const exportedClassNames = (modulePath: string): Set<string> => {
 };
 
 describe('React Native exchange registry parity', () => {
+  // Parses every registered exchange module's AST; under CI load this outruns vitest's 5s default.
   it('loads the same module exports as the typed web registry', () => {
     const nativeRegistry = parseRegistry('registry.native.ts', parseNativeTarget);
     const webRegistry = parseRegistry('registry.ts', parseWebTarget);
@@ -138,5 +139,5 @@ describe('React Native exchange registry parity', () => {
         `${exchangeName}: ${target.modulePath}.ts must export class ${target.exportName}`,
       ).toContain(target.exportName);
     }
-  });
+  }, 30_000);
 });

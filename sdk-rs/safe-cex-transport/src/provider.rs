@@ -1,6 +1,28 @@
 use crate::routing::{ResolvedRouting, RoutingOptions};
-use safe_cex_types::{ExchangeName, ExchangeOptions};
+use safe_cex_types::{ExchangeName, ExchangeOptions, retained_json::RetainedJsonInput as Input};
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
+
+#[derive(Clone)]
+pub struct TransportErrorOrigin(Arc<dyn std::error::Error + Send + Sync>);
+impl TransportErrorOrigin {
+    pub fn new(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(Arc::new(error))
+    }
+    pub fn error(&self) -> &(dyn std::error::Error + 'static) {
+        self.0.as_ref()
+    }
+}
+impl std::fmt::Debug for TransportErrorOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransportErrorOrigin")
+            .finish_non_exhaustive()
+    }
+}
+impl PartialEq for TransportErrorOrigin {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 // Host futures need not be Send: browser transports may retain JS handles.
 pub type TransportFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, TransportError>> + 'a>>;
@@ -10,6 +32,7 @@ pub enum TransportError {
     DirectRoutingRequested(ExchangeName),
     UnavailableTransport(String),
     Host(String),
+    Rejected(TransportErrorOrigin),
     Timeout,
     Network(NetworkFailure),
     JavaScript(safe_cex_num::JsCoercionError),
@@ -28,12 +51,20 @@ impl std::fmt::Display for TransportError {
             }
             Self::UnavailableTransport(message) | Self::Host(message) => f.write_str(message),
             Self::Network(error) => f.write_str(&error.message),
+            Self::Rejected(origin) => std::fmt::Display::fmt(origin.error(), f),
             Self::JavaScript(error) => f.write_str(error.message),
             Self::Timeout => f.write_str("TradeTunnelTimeoutError"),
         }
     }
 }
-impl std::error::Error for TransportError {}
+impl std::error::Error for TransportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Rejected(origin) => Some(origin.error()),
+            _ => None,
+        }
+    }
+}
 
 /// Originating network error evidence. Retry eligibility is never caller supplied.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,33 +122,27 @@ const NETWORK_DENIED_CODES: &[&str] = &[
 ];
 
 /// Request data before Axios transformation, or bytes already prepared for the wire.
-/// ts-bug: Binance signs a JSON-looking string via character indices, unlike an object.
-/// Deliberately has no Default: callers must identify the representation explicitly.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Signing retains native data and its explicit transform provenance.
+#[derive(Debug, Clone, PartialEq)]
 pub enum RestBody {
-    Untransformed(serde_json::Value),
+    Untransformed(Input),
     Encoded(Vec<u8>),
     Transformed(TransformedData),
 }
-/// Axios data after the shared transform. Private construction preserves its
-/// provenance; this is not an inferred origin for arbitrary encoded bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TransformedData {
-    value: serde_json::Value,
+    value: Input,
 }
 impl TransformedData {
-    pub fn value(&self) -> &serde_json::Value {
+    pub fn value(&self) -> &Input {
         &self.value
     }
 }
 impl RestBody {
-    /// A remote client already ran its signing/transform pipeline. Its returned
-    /// adapter data is authoritative, including objects from an echoing signer.
-    pub(crate) fn from_remote_adapter_data(value: serde_json::Value) -> Self {
+    pub(crate) fn from_remote_adapter_data(value: Input) -> Self {
         Self::Transformed(TransformedData { value })
     }
-    /// Signing cannot recover String-versus-Object identity from encoded bytes.
-    pub fn untransformed(&self) -> Result<&serde_json::Value, TransportError> {
+    pub fn untransformed(&self) -> Result<&Input, TransportError> {
         match self {
             Self::Untransformed(value) => Ok(value),
             Self::Transformed(data) => Ok(&data.value),
@@ -126,9 +151,7 @@ impl RestBody {
             )),
         }
     }
-    /// Retain the Axios transform phase when a signing interceptor returns data.
-    /// An opaque encoded body cannot be used as a signing template.
-    pub fn with_signed_data(&self, value: serde_json::Value) -> Result<Self, TransportError> {
+    pub fn with_signed_data(&self, value: Input) -> Result<Self, TransportError> {
         match self {
             Self::Untransformed(_) => Ok(Self::Untransformed(value)),
             Self::Transformed(_) => Ok(Self::Transformed(TransformedData { value })),
@@ -137,14 +160,14 @@ impl RestBody {
             )),
         }
     }
-    /// Produce the post-transform JS string while its origin is still known.
-    /// Retrying this value uses Axios's identity transform, never JSON reparsing.
     pub fn transform(&self, content_type: Option<&str>) -> Result<Self, TransportError> {
         match self {
             Self::Encoded(_) | Self::Transformed(_) => Ok(self.clone()),
+            Self::Untransformed(Input::Undefined) => Ok(Self::Transformed(TransformedData {
+                value: Input::Undefined,
+            })),
             Self::Untransformed(value)
-                if !value.is_object()
-                    && !value.is_array()
+                if !matches!(value, Input::Object(_) | Input::Array(_))
                     && !content_type.is_some_and(|value| value.contains("application/json")) =>
             {
                 Ok(Self::Transformed(TransformedData {
@@ -156,91 +179,75 @@ impl RestBody {
                 let text = String::from_utf8(bytes)
                     .map_err(|error| TransportError::Host(error.to_string()))?;
                 Ok(Self::Transformed(TransformedData {
-                    value: serde_json::Value::String(text),
+                    value: Input::Text(text.encode_utf16().collect()),
                 }))
             }
         }
     }
-    /// Final data transformation without a JSON content type. Strings stay raw;
-    /// HTTP boundaries must use wire_bytes_for_content_type with actual headers.
-    /// Call only after the signing operation.
     pub fn wire_bytes(&self) -> Result<Vec<u8>, TransportError> {
         self.wire_bytes_for_content_type(None)
     }
-    /// Axios stringifySafely after signing. Header names are resolved by the
-    /// caller; the content-type value match is case-sensitive, as in Axios.
     pub fn wire_bytes_for_content_type(
         &self,
         content_type: Option<&str>,
     ) -> Result<Vec<u8>, TransportError> {
+        let json = |value: &Input| {
+            safe_cex_num::js_retained_json_stringify(value)
+                .map(|text| text.unwrap_or_default().into_bytes())
+                .map_err(|error| TransportError::Host(error.to_string()))
+        };
         match self {
             Self::Encoded(bytes) => Ok(bytes.clone()),
+            // Physical HTTP string encoding follows TextEncoder/Buffer UTF-8 replacement.
             Self::Transformed(data) => match &data.value {
-                serde_json::Value::String(text) => Ok(text.as_bytes().to_vec()),
-                value => safe_cex_num::js_json_stringify(&value.clone().into())
-                    .map_err(|error| TransportError::Host(error.to_string()))?
-                    .map(String::into_bytes)
-                    .ok_or_else(|| TransportError::Host("Undefined identity body".into())),
+                Input::Text(text) => Ok(String::from_utf16_lossy(text).into_bytes()),
+                value => json(value),
             },
             Self::Untransformed(value)
-                if (value.is_object() || value.is_array())
+                if matches!(value, Input::Object(_) | Input::Array(_))
                     && content_type.is_some_and(|value| {
                         value.contains("application/x-www-form-urlencoded")
                     }) =>
             {
                 axios_form_encode(value).map(String::into_bytes)
             }
-            Self::Untransformed(serde_json::Value::String(text)) => {
+            Self::Untransformed(Input::Text(text)) => {
                 if !content_type.is_some_and(|value| value.contains("application/json")) {
-                    return Ok(text.as_bytes().to_vec());
+                    return Ok(String::from_utf16_lossy(text).into_bytes());
                 }
-                // Parse BEFORE trimming: a BOM is valid JS trim whitespace but
-                // invalid JSON.parse input. RawValue validates without binary64
-                // conversion or serde's typed recursion-depth restriction.
-                if serde_json::from_str::<Box<serde_json::value::RawValue>>(text).is_ok() {
-                    return Ok(safe_cex_num::js_trim(text).as_bytes().to_vec());
+                // Parse before trimming: BOM is trim whitespace but invalid JSON input.
+                if Input::parse_json(text).is_ok() {
+                    let text = String::from_utf16_lossy(text);
+                    return Ok(safe_cex_num::js_trim(&text).as_bytes().to_vec());
                 }
-                safe_cex_num::js_json_stringify(&serde_json::Value::String(text.clone()).into())
-                    .map_err(|error| TransportError::Host(error.to_string()))?
-                    .map(String::into_bytes)
-                    .ok_or_else(|| TransportError::Host("JSON string encoded as undefined".into()))
+                json(&Input::Text(text.clone()))
             }
-            Self::Untransformed(value) => safe_cex_num::js_json_stringify(&value.clone().into())
-                .map_err(|error| TransportError::Host(error.to_string()))?
-                .map(String::into_bytes)
-                .ok_or_else(|| {
-                    TransportError::Host("JSON data unexpectedly encoded as undefined".into())
-                }),
+            Self::Untransformed(value) => json(value),
         }
     }
 }
 
 // Axios toURLEncodedForm defaults: URLSearchParams encoding, bracket paths,
 // root flat-array expansion, metadata tokens and null/undefined omission.
-fn axios_form_encode(value: &serde_json::Value) -> Result<String, TransportError> {
-    use serde_json::Value;
+fn axios_form_encode(value: &Input) -> Result<String, TransportError> {
+    fn composite(value: &Input) -> bool {
+        matches!(value, Input::Object(_) | Input::Array(_))
+    }
+    fn nullish(value: &Input) -> bool {
+        matches!(value, Input::Null | Input::Undefined)
+    }
     fn depth_error(depth: usize) -> TransportError {
         TransportError::Host(format!(
             "Object is too deeply nested ({depth} levels). Max depth: 100"
         ))
     }
-    fn check_json_depth(value: &Value, depth: usize) -> Result<(), TransportError> {
-        if value.is_object() || value.is_array() {
+    fn check_json_depth(value: &Input, depth: usize) -> Result<(), TransportError> {
+        if composite(value) {
             if depth > 100 {
                 return Err(depth_error(depth));
             }
-            match value {
-                Value::Array(items) => {
-                    for item in items {
-                        check_json_depth(item, depth + 1)?;
-                    }
-                }
-                Value::Object(items) => {
-                    for item in items.values() {
-                        check_json_depth(item, depth + 1)?;
-                    }
-                }
-                _ => {}
+            for (_, child) in crate::native_data::entries(value) {
+                check_json_depth(child, depth + 1)?;
             }
         }
         Ok(())
@@ -248,61 +255,50 @@ fn axios_form_encode(value: &serde_json::Value) -> Result<String, TransportError
     fn append(
         output: &mut url::form_urlencoded::Serializer<'_, String>,
         key: &str,
-        value: &Value,
+        value: &Input,
     ) -> Result<(), TransportError> {
-        let text = safe_cex_num::js_string(Some(value))
+        let text = safe_cex_types::js_coercion::js_retained_string_utf16(value)
             .map_err(|error| TransportError::Host(error.to_string()))?;
-        output.append_pair(key, &text);
+        // URLSearchParams converts completed pairs to USVString at this physical boundary.
+        output.append_pair(key, &String::from_utf16_lossy(&text));
         Ok(())
     }
     fn visit(
-        value: &Value,
+        value: &Input,
         path: &[String],
         output: &mut url::form_urlencoded::Serializer<'_, String>,
     ) -> Result<(), TransportError> {
         if path.len() > 100 {
             return Err(depth_error(path.len()));
         }
-        let entries: Vec<(String, &Value)> = match value {
-            Value::Object(map) => safe_cex_num::js_own_keys(map.keys().map(String::as_str))
-                .into_iter()
-                .map(|key| (key.to_owned(), &map[key]))
-                .collect(),
-            Value::Array(items) => items
-                .iter()
-                .enumerate()
-                .map(|(i, v)| (i.to_string(), v))
-                .collect(),
-            _ => return Ok(()),
-        };
-        for (original_key, item) in entries {
-            if item.is_null() {
+        for (original_key, item) in crate::native_data::entries(value) {
+            if nullish(item) {
                 continue;
             }
+            let original_key = String::from_utf16_lossy(&original_key);
             let key = safe_cex_num::js_trim(&original_key);
-            if path.is_empty() && (item.is_object() || item.is_array()) {
+            if path.is_empty() && composite(item) {
                 if key.ends_with("{}") {
                     check_json_depth(item, 1)?;
-                    let text = safe_cex_num::js_json_stringify(&item.clone().into())
+                    let text = safe_cex_num::js_retained_json_stringify(item)
                         .map_err(|error| TransportError::Host(error.to_string()))?
                         .ok_or_else(|| TransportError::Host("Undefined form metadata".into()))?;
                     output.append_pair(key, &text);
                     continue;
                 }
-                let flat = item
-                    .as_array()
-                    .is_some_and(|items| items.iter().all(|v| !v.is_object() && !v.is_array()));
+                let array = match item {
+                    Input::Array(values) => Some(values),
+                    _ => None,
+                };
+                let flat = array.is_some_and(|items| items.iter().all(|value| !composite(value)));
                 if flat || key.ends_with("[]") {
-                    let array = item.as_array();
-                    let length = item
-                        .as_object()
-                        .and_then(|map| map.get("length"))
-                        .filter(|v| v.is_number());
+                    let length = crate::native_data::property(item, "length")
+                        .and_then(crate::native_data::number);
                     if array.is_some() || length.is_some() {
                         let length = if let Some(array) = array {
                             array.len()
                         } else {
-                            let number = length.and_then(Value::as_f64).unwrap_or(f64::NAN);
+                            let number = length.expect("numeric length selected");
                             if !number.is_finite()
                                 || number < 0.0
                                 || number.fract() != 0.0
@@ -313,21 +309,21 @@ fn axios_form_encode(value: &serde_json::Value) -> Result<String, TransportError
                             number as usize
                         };
                         let array_key = format!("{}[]", key.strip_suffix("[]").unwrap_or(key));
-                        // Sparse array-like objects need not allocate their declared length.
                         if let Some(array) = array {
                             for element in array {
-                                if !element.is_null() {
+                                if !nullish(element) {
                                     append(output, &array_key, element)?;
                                 }
                             }
-                        } else if let Some(map) = item.as_object() {
-                            for index in safe_cex_num::js_own_keys(map.keys().map(String::as_str)) {
+                        } else {
+                            for (index, element) in crate::native_data::entries(item) {
+                                let index = String::from_utf16_lossy(&index);
                                 if let Ok(i) = index.parse::<usize>()
                                     && i < length
                                     && i.to_string() == index
-                                    && !map[index].is_null()
+                                    && !nullish(element)
                                 {
-                                    append(output, &array_key, &map[index])?;
+                                    append(output, &array_key, element)?;
                                 }
                             }
                         }
@@ -335,9 +331,8 @@ fn axios_form_encode(value: &serde_json::Value) -> Result<String, TransportError
                     }
                 }
             }
-            if item.is_object() || item.is_array() {
+            if composite(item) {
                 let mut next = path.to_vec();
-                // Axios recurses using the original key, before visitor trim.
                 next.push(original_key);
                 visit(item, &next, output)?;
             } else {
@@ -348,9 +343,9 @@ fn axios_form_encode(value: &serde_json::Value) -> Result<String, TransportError
                         .map(String::as_str)
                         .chain(std::iter::once(key))
                         .enumerate()
-                        .map(|(i, token)| {
+                        .map(|(index, token)| {
                             let token = token.strip_suffix("[]").unwrap_or(token);
-                            if i == 0 {
+                            if index == 0 {
                                 token.to_owned()
                             } else {
                                 format!("[{token}]")
@@ -382,6 +377,11 @@ pub struct RestRequest {
     pub query_profile: Option<crate::query::QueryProfile>,
     pub skip_remote_signing: bool,
     pub sign_ms: Option<u64>,
+    /// Retained data-only Axios extension properties, including undefined and native
+    /// nonfinite numbers. These remain separate from HTTP headers: only the
+    /// selected adapter interprets them.
+    pub config_extensions:
+        indexmap::IndexMap<String, safe_cex_types::retained_json::RetainedJsonInput>,
 }
 impl RestRequest {
     /// Axios request header assembly: defaults first, then request overrides.
@@ -418,7 +418,7 @@ impl RestRequest {
             .keys()
             .find(|key| key.eq_ignore_ascii_case("content-type"))
             .cloned();
-        let object = matches!(&self.body, Some(RestBody::Untransformed(value)) if value.is_object() || value.is_array());
+        let object = matches!(&self.body, Some(RestBody::Untransformed(value)) if matches!(value, Input::Object(_) | Input::Array(_)));
         if content_key.is_none() && object {
             self.headers
                 .insert("Content-Type".into(), "application/json".into());
@@ -450,94 +450,78 @@ impl RestRequest {
         let mut wire = self.clone();
         wire.body = match &self.body {
             None => None,
-            Some(RestBody::Transformed(data)) if data.value().is_null() => None,
+            Some(RestBody::Transformed(data))
+                if matches!(data.value(), Input::Null | Input::Undefined) =>
+            {
+                None
+            }
             Some(body) => Some(RestBody::Encoded(body.wire_bytes()?)),
         };
         Ok(wire)
     }
 }
-/// Response data at an explicit adapter boundary. There is deliberately no Default.
-/// Encoded HTTP bytes and a parser-returned string can have identical serialized
-/// bytes while supplying different input to the next response transform.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Response provenance is retained independently of its native data shape.
+#[derive(Debug, Clone, PartialEq)]
 pub enum RestResponseBody {
-    /// Physical response bytes, before text decoding or response transforms.
     Encoded(Vec<u8>),
-    /// Native adapter data before a response transform has run.
-    Untransformed(serde_json::Value),
-    /// Actual output of a response transform; never re-encode to infer its origin.
-    Transformed(serde_json::Value),
+    Untransformed(Input),
+    Transformed(Input),
 }
 impl RestResponseBody {
-    /// Current input for the next transform. Physical bytes become raw UTF-8 text,
-    /// not parsed JSON; native adapter data retains its exact value and type.
-    pub fn into_data(self) -> serde_json::Value {
+    pub fn into_data(self) -> Input {
         match self {
             Self::Encoded(bytes) => {
-                serde_json::Value::String(String::from_utf8_lossy(&bytes).into_owned())
+                Input::Text(String::from_utf8_lossy(&bytes).encode_utf16().collect())
             }
             Self::Untransformed(value) | Self::Transformed(value) => value,
         }
     }
-
-    /// Apply an infallible response transform without changing its input shape.
-    pub fn transform(self, transform: impl FnOnce(serde_json::Value) -> serde_json::Value) -> Self {
+    pub fn transform(self, transform: impl FnOnce(Input) -> Input) -> Self {
         Self::Transformed(transform(self.into_data()))
     }
-
-    /// Apply one caller-selected response transform to current adapter data.
-    /// A transformed string is still passed to the next transform as a string:
-    /// the phase is provenance, not an instruction to skip a source parser.
     pub fn try_transform<E>(
         self,
-        transform: impl FnOnce(serde_json::Value) -> Result<serde_json::Value, E>,
+        transform: impl FnOnce(Input) -> Result<Input, E>,
     ) -> Result<Self, E> {
         transform(self.into_data()).map(Self::Transformed)
     }
-
-    /// Apply Axios's default response JSON transform to current adapter data.
     pub fn transform_axios_response(self) -> Result<Self, TransportError> {
         let data = match self {
             Self::Encoded(bytes) => {
                 let text = String::from_utf8_lossy(&bytes);
-                serde_json::Value::String(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+                Input::Text(
+                    text.strip_prefix('\u{feff}')
+                        .unwrap_or(&text)
+                        .encode_utf16()
+                        .collect(),
+                )
             }
             Self::Untransformed(value) | Self::Transformed(value) => value,
         };
-        let serde_json::Value::String(text) = data else {
+        let Input::Text(text) = data else {
             return Ok(Self::Transformed(data));
         };
-        match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(mut parsed) => {
-                crate::how::normalize_json_numbers(&mut parsed, false, false);
-                Ok(Self::Transformed(parsed))
-            }
-            Err(error) => {
-                if serde_json::from_str::<Box<serde_json::value::RawValue>>(&text).is_ok() {
-                    return Err(TransportError::Host(format!(
-                        "Axios response representation refused: {error}"
-                    )));
-                }
-                Ok(Self::Transformed(serde_json::Value::String(text)))
-            }
+        match Input::parse_json(&text) {
+            Ok(parsed) => Ok(Self::Transformed(parsed)),
+            Err(_) => Ok(Self::Transformed(Input::Text(text))),
         }
     }
-
-    /// Read the current model value. This parses physical JSON bytes once, but
-    /// retains native values unchanged. It does not apply the next Axios/venue
-    /// response transform; use transform or try_transform for that observable operation.
+    /// Explicit fallible typed-model projection; never used to deliver native callbacks.
     pub fn json_value(&self) -> Result<serde_json::Value, serde_json::Error> {
         match self {
             Self::Encoded(bytes) => {
-                serde_json::from_slice::<safe_cex_types::retained_json::RetainedJsonInput>(bytes)
-                    .and_then(safe_cex_types::retained_json::RetainedJsonInput::into_value)
+                serde_json::from_slice::<Input>(bytes).and_then(Input::into_value)
             }
-            Self::Untransformed(value) | Self::Transformed(value) => Ok(value.clone()),
+            Self::Untransformed(value) | Self::Transformed(value) => {
+                let mut projected = value.clone().into_value()?;
+                crate::how::normalize_json_numbers(&mut projected, false, false);
+                Ok(projected)
+            }
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RestResponse {
     pub status: u16,
     /// Direct HTTP statusText when supplied; HOW deliberately leaves this absent.

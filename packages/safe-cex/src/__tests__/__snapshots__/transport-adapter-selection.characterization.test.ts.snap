@@ -1323,52 +1323,52 @@ exports[`transport adapter selection per exchange > hyperliquidspot 1`] = `
 exports[`transport adapter selection per exchange > hyrotrader 1`] = `
 {
   "private direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://hyrotrader-prod.test",
   },
   "private proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:JA https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:JA https://hyrotrader-prod.test",
   },
   "private proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:SG https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:SG https://hyrotrader-prod.test",
   },
   "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "private tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:byBaseURL https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:byBaseURL https://hyrotrader-prod.test",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://hyrotrader-prod.test",
   },
   "public proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:JA https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:JA https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:JA https://hyrotrader-prod.test",
   },
   "public proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:SG https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:SG https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:SG https://hyrotrader-prod.test",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
+    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://hyrotrader-prod.test",
   },
   "public tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-simulator.test",
-    "unlimitedXHR": "how:byBaseURL https://hyrotrader-simulator.test",
+    "_primaryXhr = _secondaryXhr = xhr": "how:byBaseURL https://hyrotrader-prod.test",
+    "unlimitedXHR": "how:byBaseURL https://hyrotrader-prod.test",
   },
 }
 `;

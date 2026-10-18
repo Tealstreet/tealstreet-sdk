@@ -1,6 +1,29 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { defaultTraitInventory } from './accepted-defaults.mjs';
+import { hyperliquidProjectionCompilerIdentity } from './accepted-hyperliquid-projection.mjs';
+
+// Rustdoc coordinates are one-based Unicode scalar columns, with an exclusive
+// end. Resolve them against the current source on every inventory; coordinates
+// themselves are deliberately not stored in policy, so preceding edits can move
+// an unchanged item. Hash exact item text, including internal whitespace.
+export function receiverItemSha256(span, source) {
+  const label = 'accepted-set: reviewed receiver item span';
+  assert.ok(typeof source === 'string' || Buffer.isBuffer(source), `${label}: source bytes required`);
+  const text = typeof source === 'string' ? source : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(source);
+  const lines = text.split('\n');
+  function offset(position) {
+    assert.ok(Array.isArray(position) && position.length === 2 && position.every(value => Number.isSafeInteger(value) && value > 0), `${label}: invalid coordinates`);
+    const [line, column] = position;
+    assert.ok(line <= lines.length, `${label}: line outside source`);
+    const characters = Array.from(lines[line - 1]);
+    assert.ok(column <= characters.length + 1, `${label}: column outside source`);
+    return lines.slice(0, line - 1).reduce((size, value) => size + value.length + 1, 0) + characters.slice(0, column - 1).join('').length;
+  }
+  const begin = offset(span?.begin), end = offset(span?.end);
+  assert.ok(end > begin, `${label}: empty or reversed item`);
+  return createHash('sha256').update(text.slice(begin, end)).digest('hex');
+}
 
 // The pinned compiler, rather than derive syntax, owns the implementation inventory.
 export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, receiverTraits = {}, readSource } = {}) {
@@ -214,12 +237,13 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
   }
   function reviewedReceiver(key, span, contract) {
     const label = `${key}: accepted-set assertion: reviewed receiver classification`;
-    assert.deepEqual(Object.keys(contract).sort(), ['category', 'file', 'reason', 'sourceSha256'], `${label}: unsupported fields`);
+    assert.deepEqual(Object.keys(contract).sort(), ['category', 'file', 'itemSha256', 'reason'], `${label}: unsupported fields`);
     assert.ok(['non-decoder', 'delegated'].includes(contract.category), `${label}: unknown category`);
     assert.ok(contract.reason?.trim(), `${label}: specific reason required`);
     assert.equal(span?.filename, contract.file, `${label}: reviewed source identity changed`);
     assert.equal(typeof readSource, 'function', `${label}: production source reader required`);
-    assert.equal(createHash('sha256').update(readSource(span.filename)).digest('hex'), contract.sourceSha256, `${label}: reviewed source changed`);
+    assert.match(contract.itemSha256, /^[a-f0-9]{64}$/, `${label}: item SHA-256 required`);
+    assert.equal(receiverItemSha256(span, readSource(span.filename)), contract.itemSha256, `${label}: reviewed item source changed`);
   }
   const unreviewed = [];
   for (const item of Object.values(index)) {
@@ -278,7 +302,8 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     if (item.visibility === 'public' && item.inner.use) assert.ok(item.inner.use.id != null, `accepted-set: unresolved public reexport ${item.inner.use.name ?? item.name ?? item.inner.use.source ?? '<unnamed use>'}`);
     // Public aliases can hide an owner implementation. Private aliases are not public surface.
     if (item.inner.type_alias && item.crate_id === 0 && item.visibility === 'public') {
-      publicAliases.push({ name: paths.get(String(item.id))?.join('::') ?? item.name, ident: item.name, span: item.span, generics: normalize(item.inner.type_alias.generics), rawTarget: normalize(item.inner.type_alias.type), target: normalize(expanded(item.inner.type_alias.type)) });
+      const projectionIdentity = hyperliquidProjectionCompilerIdentity(doc, item, paths);
+      publicAliases.push({ name: paths.get(String(item.id))?.join('::') ?? item.name, ident: item.name, span: item.span, generics: normalize(item.inner.type_alias.generics), rawTarget: normalize(item.inner.type_alias.type), target: normalize(expanded(item.inner.type_alias.type)), ...(projectionIdentity ? { projectionIdentity } : {}) });
       const targets = [];
       collectExternalTypePaths(expanded(item.inner.type_alias.type), targets);
       for (const target of targets) externalTypeAliases.push({ name: paths.get(String(item.id))?.join('::') ?? item.name, ...target });

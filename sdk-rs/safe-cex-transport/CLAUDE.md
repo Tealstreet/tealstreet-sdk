@@ -70,20 +70,37 @@ rebuffer lexical -0 into +0 before RestResponseBody even sees it. Keep the paylo
 outside that decoder; this is preservation of current adapter data, not a second
 numeric parser or a typed-f64 ingress implementation.
 
-**Remote signer JSON replay.** `try_parse_json` normalizes only a successfully
-parsed object/array STRING using HOW's canonical numeric/own-key projection.
-Finite numbers collapse to binary64 spelling before reaching a signing consumer;
-negative zero and overflow retain their lexemes for shared String/Boolean/number
-coercion. Existing non-string values remain untouched, matching TypeScript's
-identity passthrough. The live-source corpus observes number bits, String and
-truthiness BEFORE serialization, because JSON null would hide overflow loss.
-The helper's inherited parse-refusal fallback matters: valid lone-surrogate JSON
-and over-depth objects remain the original String where TypeScript returns an
-object. Its manifest row declares these independently from numeric normalization;
-`PARSER_NUMERIC_EVIDENCE.md` records the raw source witnesses and positive Unicode.
+**Native adapter bodies.** `RestBody`, transformed data, response data, custom
+parser results and remote signer `.data` use the canonical `RetainedJsonInput`.
+Text and object keys retain UTF-16; native numbers, own undefined and phase
+provenance survive until the actual JSON wire boundary. Typed model consumers
+use an explicit fallible `into_value` view, never a silent substitute. The core
+legacy Error response view is deliberately lossy while its original RestFailure
+retains the complete native body.
+
+HOW diagnostic redaction matches ASCII sensitive substrings directly over UTF-16
+key units, with the source regex's case-insensitive, non-Unicode semantics. A lone
+surrogate beside `apiKey` cannot bypass redaction; one inside the substring stays
+a match barrier. `tunnel::production_how_logs_redact_sensitive_utf16_keys_without_changing_delivery`
+compares actual HOW request/response logs with the maintained sanitizer across 23
+cases and checks the original native response remains intact. The compiled old
+UTF-8-gated predicate fails the `apiKey` plus high-surrogate case.
+
+**Remote signer JSON replay.** `try_parse_json` parses only object/array STRING
+results with the shared UTF-16 parser. It retains native binary64 values, key
+order, duplicate-key assignment and lone surrogates; non-string values pass
+through unchanged. Invalid JSON or scalar JSON text retains the original string,
+as in TypeScript. The separately named params helper keeps the existing typed
+query boundary. HOW's ordinary, raw, gzip binary and gzip base64 response paths
+have real-host native-unit/bit regressions and actual maintained-source witnesses.
 
 Signing envelope and secondary-options gates assert decoded native fields
-before re-encoding; roundtrip bytes cannot detect symmetric serde-name swaps.
+before re-encoding; roundtrip bytes cannot detect symmetric serde-name swaps. Secondary
+client derivation clones the typed options and overlays only the declared
+secondary credentials plus the selected proxy. Never serialize account options
+to copy them: JSON would erase native nonfinite signer types. The source oracle
+checks nested option identity before fixture encoding, and the native regression
+checks exact signer-type bits including negative zero and NaN payloads.
 The closed tryParseJson bit corpus cannot produce NaN and refuses it at capture.
 Its provenance supplement retains the old golden bytes, records the unknown
 original architecture, and distinguishes fresh verification from original capture.
@@ -111,6 +128,15 @@ undefined. JSON projection is named and confined to remote protocol/diagnostic
 boundaries; it is never used to render a query string. Wire decoding captures
 numeric tokens with the canonical RetainedJsonInput before constructing query
 variants, preserving numeric-looking strings. There is no Value conversion shim.
+
+Accepted-set source discovery reviews local form/query output helpers and retry
+predicates individually, with exact source pins. Their native witnesses are in
+`tests/accepted_local_helpers.rs` and `tests/query_params.rs`: they observe output
+bytes, depth boundaries, retained input identities and predicate error order.
+The private `QueryWire` serializer stays at module scope so its generic Serialize
+implementation remains visible to ordinary compiler discovery. Explicit imports
+and the qualified wasm-bindgen attribute keep macro origins unambiguous; they do
+not grant permission to unknown local macros or input decoders.
 
 RestAdapter success receipts carry the returned response together with its actual
 request configuration. The default receipt method is for terminal adapters;
@@ -151,8 +177,100 @@ requires (REST keeps the default). One TLS stack: rustls on the `ring` provider 
 native roots; do not add a dependency that pulls aws-lc. Run inside a tokio
 `LocalSet`. Proofs live in `safe-cex-registry/tests/native_host_*.rs`.
 
+`RestRequest::config_extensions` uses the canonical `RetainedJsonInput` data
+carrier separately from headers across terminal adapter calls, hosted signing,
+retry, and effective response/error config. Own undefined and native f64 values
+(including NaN payloads, infinities and signed zero) remain native. The shared JS
+client uses its existing typed capture/restore codec; callbacks and ordinary
+request fields keep their existing capabilities and typed paths. HOW alone
+projects truthy `grvtCookie`/`grvtAccountId` extensions into Cookie/account headers,
+matching the actual browser adapter. Direct HTTP keeps X-Ts-Grvt-Session source
+semantics. Unknown extension properties are retained, not emitted as HTTP headers
+or HOW arguments. HOW applies native truthiness first, then the shared
+JSON.stringify projection at its actual frame boundary. This data-only typed profile retains its existing
+BigInt/string, UTF-8, depth and owned-tree limitations; it does not carry arbitrary
+executable Axios objects or live aliases. The live source corpus in
+tests/grvt-config-source.cjs covers seven JSON cases plus five separately named
+native-value cases. The hosted-signing receipt witness checks own undefined,
+NaN payload bits and signed zero at the terminal adapter before any projection.
+
 The native terminal combines baseURL and relative URLs using Axios
 buildFullPath/combineURLs semantics: exactly one joining slash, empty relative
 path retains baseURL, absolute/protocol-relative URLs remain absolute. The
 native::url_tests regression was measured against actual installed Axios and
 prove-failed on the old concatenation; DXtrade's /dxsca-web base exposed it.
+
+Concrete frame/routing/header object admission and the region string unions are
+reviewed in [ACCEPTED_SHAPES.md](ACCEPTED_SHAPES.md). The shared standalone frames
+use owner-specific `deserialize_map` visitors and private remote schemas; SDK
+records use the existing object guard. Keep generic borrowed request payloads,
+all original field/presence rules and the independently inventoried visitor
+contracts. The fourteen compiling disconnect controls restore exact source bytes.
+The bounded follow-up API reviews are recorded in
+[ACCEPTED_API_REVIEWS.md](ACCEPTED_API_REVIEWS.md). Its query and
+diagnostic section records the direct retained-number field decoder, JSON
+projection, error construction, raw URL parsing and separate typed selector
+review, with native/Wasm receipts and serial mutation controls.
+
+The body/secondary accepted review executes all eleven inventoried body APIs,
+including current-data callbacks and separately observable model reads. Its
+controls require compiling named output failures and exact restoration; run
+`scripts/accepted-body-controls.py` serially with other source-sensitive probes.
+The accompanying Axios oracle observes actual transforms and dispatch data.
+
+Signature-rejection predicate failures retain `TransportError::JavaScript`,
+including their original name/message and failed or effective request. They do
+not consume the retry stamp or schedule another attempt. The actual-source
+TypeError witness and native rejection/resend/read/write regressions live in
+`tests/signature_error_kind.rs`; `scripts/signature-error-kind-control.py`
+restores the original message-only wrapper to prove the failures, then restores
+exact source bytes and requires every witness to pass.
+
+The signature/remote-operation accepted batch observes the four retry helpers and
+the RemoteSignerRequest discriminator plus its originating response decoder.
+Native fields, stamp/callback order, failed-config replay and timeout effects
+remain distinct from wire encoding. See ACCEPTED_API_REVIEWS.md; run the nine
+source-disconnect controls serially and require named native failures with exact
+restoration. The source oracle executes the maintained helpers and actual Axios.
+
+Default HTTP query rendering uses `query::axios_default_query` before physical
+I/O. It preserves native NaN/infinities until pair conversion, uses bracket paths
+for nested records/arrays, and applies Axios buildURL encoding. Metadata `{}`
+values retain their JSON.stringify phase. Custom serializers and HOW frame params
+keep their existing ownership. See `QUERY_PARITY_EVIDENCE.md` for executed source,
+HTTP witnesses, and the remaining reqwest apostrophe normalization.
+
+`rate_limit::RateLimiter::acquire` is the cancellation-safe FIFO slot shared with `RateLimitedAdapter`. Native clients acquire it before signing each attempt; the adapter retains the same window, failed-request accounting and effective receipt. Dropping a pending acquire removes its ticket without consuming capacity. `tests/p2c.rs::signing_rate_slots_release_cancelled_waiters_without_spending_capacity` exercises the direct gate.
+
+Native HTTP failures inspect connector causes before assigning a network code.
+DNS lookup refusal and expired certificates remain non-retryable under the
+maintained network-read predicate; temporary DNS and genuine connection refusal
+retain their retry eligibility. `native::network_tests` exercises the physical
+ReqwestAdapter and read retry policy with an injected resolver and a real local
+TLS handshake. Its ephemeral certificate setup needs Node and openssl; it commits
+no certificates or private keys. The installed Axios and maintained predicate
+witness is `scripts/native-network-source.cjs` with SAFE_CEX_TYPESCRIPT_PATH set.
+The connector's erased DNS context is pinned by that native regression, while
+rustls certificate failures are identified through typed nested io causes.
+Specific rustls expiry/validity/revocation/signature/purpose categories map to
+Node-style codes. Hostname mismatch keeps ERR_TLS_CERT_ALTNAME_INVALID and its
+installed retry eligibility, rather than inventing a blanket TLS retry refusal.
+Other InvalidCertificate categories use CERT_REJECTED to retain
+the certificate refusal category; rustls UnknownIssuer cannot identify every
+OpenSSL self-signed/chain/leaf label, so exact label equivalence is unclaimed.
+
+Bybit signature and network retries run through its constructed venue factory and
+the shared signature_rejection module. The obsolete retry.rs compatibility
+engine and the tests that only exercised it have been removed.
+
+HOWWebSocket, RelayWebSocket, TransportRegistry and TealstreetTransport have
+reviewed accepted contracts for all fourteen compiler-discovered APIs. Ten raw
+entrypoints execute twenty-seven independently authored native observations:
+stored endpoints, actual auth/frame bytes, latency fields, relay close events,
+instance-provider precedence and exact upgrade headers. Typed routing/host
+capabilities remain classified separately. The fixture only records host I/O;
+it does not replace protocol or provider bodies. Run
+`node --test sdk-rs/safe-cex-parity/scripts/accepted-transport-socket-native.test.mjs`
+from the repository root. Its four production disconnect controls compile,
+require named observation failures and restore exact bytes; run it serially
+with every other source-sensitive probe or Cargo command in this worktree.

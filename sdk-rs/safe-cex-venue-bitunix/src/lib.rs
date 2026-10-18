@@ -39,3 +39,12 @@ mod adapter_orders;
 mod adapter_rest;
 mod native_http;
 mod sockets;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_bitunix;
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/support/venue_runtime.rs"]
+mod native_query_fixture;
+#[cfg(test)]
+mod native_query_tests;

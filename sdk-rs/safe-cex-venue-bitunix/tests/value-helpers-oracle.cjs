@@ -12,7 +12,7 @@ for(const name of ['parseFiniteNumber','isApiTradingSupported','hasFiniteTrigger
  helpers[name]=vm.runInThisContext(code,{filename:file});
 }
 const bits = n => { const b=Buffer.alloc(8); b.writeDoubleBE(Number.isNaN(n)?NaN:n); return Number.isNaN(n)?'7ff8000000000000':b.toString('hex'); };
-const capture = fn => {try {const value=fn();return {type:typeof value,value:typeof value==='number'?bits(value):value};}catch(e){return {error:e.name};}};
+const capture = fn => {try {const value=fn();return {type:typeof value,value:typeof value==='number'?bits(value):value};}catch(e){return {error:e.name,message:e.message};}};
 const raws=[null,'null','true','false','0','-0','1','-2','1e400','-1e400','5e-324','9007199254740993',
  ...['',' ','\ufeff','\u0085','false','FALSE','  FaLsE  ','0','NO','n','disabled','unsupported','true','yes','-0','0x10','1x','Infinity','NaN','é','😀'].map(JSON.stringify),
  '[]','[null]','[false]','["2"]','[["-0"]]','[1,2]','{}','{"valueOf":2}','{"toString":1}',

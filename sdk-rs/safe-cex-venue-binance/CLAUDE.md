@@ -52,8 +52,9 @@ clock/window numbers become their textual query spelling in the JSON config.
 The former's actual qs bytes are pinned independently; do not silently describe
 all arbitrary Axios data as equivalent. Normal venue requests use structured data.
 
-Wire decoding uses string-only union and map-only record front gates, with
-function-private Serde wire companions. The live union oracle compares the
+Wire decoding uses string-only union and map-only record front gates. Records use
+private Serde remote companions; they do not create another Deserialize owner.
+The live union oracle compares the
 accepted literal inventory (including Serde aliases) to the TypeScript AST;
 qualified public Deserialize calls reject non-string and positional-array inputs.
 
@@ -104,6 +105,22 @@ compiler path is supplied.
 Response-shape helpers use shared js_own_keys before the six-key cutoff. Array
 validators borrow the original rows and preserve TypeError from message coercion.
 The live corpus carries ordered pairs so JSON transport cannot hide key-order bugs.
+
+The response-shape accepted-set review separates three executed outputs (both
+borrowed-array validators and the qualified native error conversion) from four
+diagnostic non-decoder roles (three descriptors and the typed error formatter).
+Classification receipts do not execute those diagnostic functions. Each has its
+own direct named native test, including both private helpers. Preserve nonempty
+slice identity, native element fields/bits, error name/message and Display before
+serialization. `scripts/response-shape-controls.py` requires seven independently
+compiled failures and exact-restoration passes; fresh production observations and
+classification receipts are checked by `scripts/response-shape-contracts.mjs`.
+All five Binance accepted-set runners read reviewed policy shards through the
+shared `loadPolicy` API; never restore deleted flat maps. See the
+[policy storage guide](../safe-cex-parity/accepted-set/POLICY-FILES.md).
+This selected native/default scope does not cover other owners or the feature
+matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
+and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.
 
 Spot order formatting consumes BaseExchange's client-ID resolution and final
 native-count assertion directly. Its market snapshot is cloned before errors
@@ -169,8 +186,9 @@ emitter. It emits exactly once, then returns the unsupported-margin Error; an
 emitter failure takes precedence and retains its metadata. Unused isolated and
 symbol inputs are omitted; concrete class/emitter composition remains pending.
 
-Generated wire records now capture shared JsNumberInput at their public Deserialize
-entry, then decode through the private MapOnly/Wire companion. Keep the explicit
+Generated wire records capture shared JsNumberInput at their public Deserialize
+entry, then call the private remote companion through strict_decode::object. Keep
+all field/default/presence attributes on that schema and keep the explicit
 exhaustive JsNumberOutput impls emitted by the generator, including the income
 union's registration. This repairs raw JSON overflow refusal without trading away
 signed zero on already-parsed Value input. Never replace it with Value-first
@@ -178,6 +196,58 @@ rebuffering or remove the map/string front gates. Numeric ingress tests compare
 bits before serialization over raw str/slice, owned/borrowed Value and the three
 shared js_from_* entrypoints. The separate vanilla Value-rebuffer witness still
 records an unsafe bypass outside these opted-in decoders.
+
+`tests/accepted_record_shapes.rs` authors each complete valid positional array in
+declaration order and reads every decoded native field across those seven routes.
+Run `python3 sdk-rs/safe-cex-venue-binance/scripts/record-shape-controls.py` from
+the repository root to remove each owner's object guard, require its named array
+assertion to fail after compilation, restore the source and require it to pass.
+Do not derive the negative array from record serialization.
+`node sdk-rs/safe-cex-venue-binance/scripts/record-contracts.mjs` runs fresh
+ordinary inventory and the four records' production contract probes. Run accepted
+probes serially; this focused command excludes other owners and the feature/wasm
+matrix.
+
+The income, API-type and orderbook-apply string unions use private Serde remote
+schemas after their existing String admission. Preserve both actual native
+variant identity and the complete Serde rename/alias inventory. The 24 valid
+tags must each reject a tagged-null object through owned, borrowed, qualified
+and text decoding. `tests/accepted_string_shapes.rs` supplies those witnesses;
+`python3 sdk-rs/safe-cex-venue-binance/scripts/string-shape-controls.py` removes
+only one String frontdoor at a time, requires the named valid-tagged-object
+assertion to fail after compilation, restores exact bytes and requires a pass.
+`node sdk-rs/safe-cex-venue-binance/scripts/string-contracts.mjs` performs fresh
+ordinary inventory and production native probes for those three enums only.
+It excludes other owners, aliases, local scopes and feature/wasm coverage.
+
+`order_logic`'s already-set position-mode error recognizer, deprecated balance
+predicate and post-only rejection classifier each have a specific reviewed
+non-decoder reason. Their actual Boolean/error results are witnessed directly in
+`tests/accepted_predicate_roles.rs`, supplemented by the maintained live
+`order_logic` and `rejection` targets. Run
+`python3 sdk-rs/safe-cex-venue-binance/scripts/predicate-role-controls.py` to
+replace one result at a time with an incorrect Boolean, require its named native
+test to fail after compilation, then restore exact source and pass. The separate
+`node sdk-rs/safe-cex-venue-binance/scripts/predicate-role-contracts.mjs` runs fresh
+ordinary compiler discovery and those three production classification receipts.
+Those receipts classify the functions; they do not execute their predicate logic
+or discharge another function, owner, alias, local or feature configuration.
+
+The Futures/PM response-message functions and their private shared helper have
+observed native String/error-name contracts; the websocket rejection mapper has
+actual Option<OrderRejectReason> variant/absence witnesses before serialization.
+These functions preserve their fallback behavior: non-object response payloads
+produce empty text, and the typed Map API for rejection reasons is exercised with
+actual maps. Do not replace those output contracts with string-only/map-only
+admission checks. `tests/accepted_error_outputs.rs` supplies public native
+witnesses. `scripts/error-output-contracts.mjs` performs fresh ordinary compiler
+discovery and four actual production output probes, including a direct call to
+the private helper. `scripts/error-output-controls.py` changes one result at a
+time, requires the changed owner's compiled native output mismatch, restores
+exact bytes and requires all four outputs to pass. A private-helper mutation
+also affects its two public callers; the private owner's own result must fail.
+Compiler errors do not count. Run these probes serially and keep other owners,
+aliases, locals and feature/wasm claims outside this focused evidence.
 
 The public-factory response witness now pins the repaired shared provenance
 boundary: direct quoted HTTP text parses once; HOW custom-parser strings pass
@@ -387,3 +457,82 @@ for POST/PUT — never an axios config object; every call site passes that shape
 Binance ledger ids arrive as JSON numbers and the class keeps them raw as TS
 does; `income_records` projects them through `String()` only at the typed
 `IncomeRecord` boundary (trait income methods, pager, fold).
+
+The family value graph is the canonical `js_runtime::value::Js`: `EventValue`
+is an alias and `EventOps` retains the decoded-data operations without separate
+storage. Closed categorical constructors now create source string primitives.
+Fresh decoded objects capture the existing native `PrototypeRealm` through
+`Js::Builtin`, retaining live intrinsic referents used by core statistics.
+These native referents support the existing data/reference profile, not arbitrary
+intrinsic execution or full descriptors. Typed DTO conversion uses the shared
+native bridge. See [shared value evidence](SHARED_VALUES.md); the separately
+planned typed JS-string cutover remains outside this change.
+
+The native host's `uuid()` must use `safe_cex_crypto::uuid::uuid`, the maintained
+source `nanoid().replace(/-|_/g, '')` implementation. RFC UUID-v4 is36 characters
+before the10-character broker prefix and exceeds every family's ID limit.
+Stripping the default21-character nanoid yields at most21 alphanumerics; do not
+pad it to a fixed length. The production dependency/owner witnesses in
+`tests/private_classes.rs` cover actual host entropy, minting, regular/split and
+attached/standalone/trailing payloads, and preserve caller IDs. Run them with
+`--features native`; a default-feature filtered run cannot execute this host.
+The same native host fixtures deliver private orders/fills/positions/balance
+frames through the assembled private binding and assert real Store and emitted
+fill contents, including the source's ignored derivative balance rows and Spot's
+absence of a derivative-position topic.
+
+
+The unused `private_order_logic` JSON classifier and the opt-in typed historical
+mapper are removed. The production socket and its event tests share
+`private_events::get_order_reject_reason`; history orchestration tests consume
+the same native mapper as the actual exchange. Keep the canonical history source
+corpus in `history_native` and the production private-topic regressions in
+`private_classes --features native`; do not restore a parallel typed mapper to
+make a test host easier to implement.
+
+Signature-predicate coercion failures retain their TypeError name and unprefixed
+message through the shared ExchangeError conversion. The real native receiver
+regressions cover both resolved and rejected HTTP responses without a resend.
+
+Native HTTP dispatch retains the original params/data until the real request
+interceptors run. Query BigInt leaves take qs decimal spelling; signed bodies
+are moved into query fields by the source signer before JSON transformation.
+Public/unsigned BigInt bodies reject with TypeError before terminal I/O, retaining
+the original refusal when signing is skipped. Never turn a conversion error into
+an absent params/body field. `private_classes::native_projection_*` uses actual
+native imports, factories, signing and terminal HTTP; four regressions compile
+and fail on master. Signed GET/POST wire bytes and HMACs compare against actual
+TypeScript with real qs/create-hmac in one two-case capture. Maintained typed
+exchange callers still supply ordinary string/number payloads; these BigInt cases
+cover the reachable native-host boundary, not a new typed DTO admission claim.
+
+Portfolio Margin account updates keep the source body's `info: position` reference
+until the concrete native Store adapter. That adapter applies the approved
+representation choice: a depth-one snapshot of the updated position's own fields,
+excluding `info`. Include the current price/contracts/PnL/side patch before
+capturing it; a previous-state snapshot has stale readable fields. Identity and
+recursive `info` reads remain an accepted divergence from TS's cycle. Never nest
+the previous owned info on every frame. The native `private_classes` growth and
+current-field regressions use the real socket and Store;
+`SAFE_CEX_TYPESCRIPT_PATH=<typescript> node scripts/pm-position-info.mjs` observes
+the maintained TS handler with the actual TS Store across sixteen changing frames.
+
+
+Concrete market reads apply the approved strict-asset row policy after complete
+source REST projection. Non-string base/quote/symbol or nonnumeric leverage-max rows emit their
+field and original value through the existing error path; valid siblings remain available to typed
+fetch and Store refresh. Raw REST helpers retain their source-owned values.
+
+Native depth application converts coercion failures through ExchangeError::from,
+retaining the source error name and cause. The production socket regression covers
+all three families, subsequent valid deltas and sequence-gap snapshot recovery.
+
+The constructed ticker census in `private_classes --features native` uses actual
+NativeImports and ExchangeOwner/PublicSocket dispatch for all three families.
+Futures and PM each cover80 field-independent packed frames through market and
+book sockets; Spot covers48. All native numeric fields compare by bits against
+the constructed maintained TS exchanges and DefaultStores after finite resets,
+with distinct good rows surrounding malformed input. The shared control runner
+misroutes the live last-price publication and requires all three family tests
+to compile and fail, then all three pass after exact restoration. Default-feature
+filtered runs cannot execute these native-host witnesses.

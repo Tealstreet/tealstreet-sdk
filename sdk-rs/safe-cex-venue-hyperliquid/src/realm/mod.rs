@@ -13,6 +13,7 @@ pub(crate) mod json;
 pub(crate) mod ops;
 pub(crate) mod promise;
 pub(crate) mod regex;
+mod typed;
 pub(crate) mod value;
 
 pub(crate) mod builtins;
@@ -23,8 +24,10 @@ pub(crate) mod facade_store;
 mod host_cache;
 mod host_classes;
 mod host_core;
+mod host_income;
 mod host_leaves;
 mod host_market;
+mod host_spot;
 mod host_startup;
 pub(crate) mod imports;
 pub(crate) mod imports_utils;
@@ -187,3 +190,9 @@ impl Realm {
 pub(crate) mod test_runtime;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod socket_tests;
+
+#[cfg(test)]
+mod spot_limiter_tests;

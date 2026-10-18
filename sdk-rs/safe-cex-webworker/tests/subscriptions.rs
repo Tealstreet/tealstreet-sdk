@@ -1,4 +1,8 @@
-#[path = "support/runtime.rs"]
+#[path = "support/data_trace.rs"]
+mod data_trace;
+#[path = "support/error_post.rs"]
+mod error_post_support;
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use indexmap::IndexMap;
 use runtime::Runtime;
@@ -93,21 +97,14 @@ fn numbers(v: Value) -> Value {
 // Trace-only adapter: native book assertions run in the dedicated leaf witness.
 // Production hosts must bind structured clone, never this JSON comparison sink.
 fn trace_post(post: Rc<dyn Fn(StoreWorkerPayload)>) -> OrderBookPost {
-    let regular = post.clone();
-    OrderBookPost::new(
-        Rc::new(move |p| {
-            regular(p);
-            Ok(())
-        }),
-        Rc::new(move |p| {
-            post(StoreWorkerPayload {
-                op: p.op,
-                instance_id: None,
-                data: Some(serde_json::to_value(p.data).unwrap()),
-            });
-            Ok(())
-        }),
-    )
+    OrderBookPost::new(Rc::new(move |p| {
+        post(StoreWorkerPayload {
+            op: p.op,
+            instance_id: None,
+            data: Some(serde_json::to_value(p.data).unwrap()),
+        });
+        Ok(())
+    }))
 }
 #[test]
 fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
@@ -150,6 +147,7 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
                 sink.borrow_mut().push(payload);
             })),
             100.0,
+            error_post_support::unexpected(),
         );
         handler
             .handle(StoreWorkerPayload {
@@ -174,7 +172,7 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
             url: Some("https://example.invalid/bbo".into()),
             method: Some("POST".into()),
             original_error: Some(json!({"original":"bbo-original"})),
-            code: Some(json!(197)),
+            code: Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197))),
         });
         let original_cause: safe_cex_types::StoreSubscriberError = original.clone().into();
         let thrown = original_cause.clone();
@@ -331,9 +329,17 @@ fn subscriptions_match_live_source_dedup_fanout_flush_and_first_envelope() {
                 }).unwrap();
                 }
             });
-        let books =
-            OrderBookSubscriptionsHandler::new(venue.clone(), trace_post(post.clone()), 100.0);
-        let candles = OHLCVSubscriptionsHandler::new(venue.clone(), post);
+        let books = OrderBookSubscriptionsHandler::new(
+            venue.clone(),
+            trace_post(post.clone()),
+            100.0,
+            error_post_support::unexpected(),
+        );
+        let candles = OHLCVSubscriptionsHandler::new(
+            venue.clone(),
+            data_trace::post(post),
+            error_post_support::unexpected(),
+        );
         *target.borrow_mut() = Some(Rc::downgrade(&candles));
         let ob = s["kind"] == "orderbook";
         for a in s["actions"].as_array().unwrap() {
@@ -486,8 +492,12 @@ fn bbo_native_patch_preserves_existing_and_new_nonfinite_prices() {
         setup_error: Cell::new(false),
         cleanup_error: Rc::new(Cell::new(false)),
     });
-    let handler =
-        OrderBookSubscriptionsHandler::new(venue.clone(), trace_post(Rc::new(|_| {})), 100.0);
+    let handler = OrderBookSubscriptionsHandler::new(
+        venue.clone(),
+        trace_post(Rc::new(|_| {})),
+        100.0,
+        error_post_support::unexpected(),
+    );
     handler
         .handle(StoreWorkerPayload {
             op: StoreWorkerOp::SubscribeOrderBook,
@@ -524,22 +534,20 @@ fn bbo_native_patch_preserves_existing_and_new_nonfinite_prices() {
     let sink = messages.clone();
     let fresh = OrderBookSubscriptionsHandler::new(
         venue.clone(),
-        OrderBookPost::new(
-            Rc::new(|_| Ok(())),
-            Rc::new(move |p| {
-                let book = p.data.book().unwrap();
-                assert_eq!(
-                    book.bids[0].price,
-                    f64::INFINITY,
-                    "BBO native post retains Infinity"
-                );
-                assert!(book.asks[0].price.is_nan(), "BBO native post retains NaN");
-                drop(book);
-                sink.borrow_mut().push(p.structured_clone());
-                Ok(())
-            }),
-        ),
+        OrderBookPost::new(Rc::new(move |p| {
+            let book = p.data.book().unwrap();
+            assert_eq!(
+                book.bids[0].price,
+                f64::INFINITY,
+                "BBO native post retains Infinity"
+            );
+            assert!(book.asks[0].price.is_nan(), "BBO native post retains NaN");
+            drop(book);
+            sink.borrow_mut().push(p.structured_clone());
+            Ok(())
+        })),
         100.0,
+        error_post_support::unexpected(),
     );
     fresh
         .handle(StoreWorkerPayload {
@@ -697,50 +705,52 @@ fn bbo_leaf_posts_native_clone_and_observes_reentrant_book_changes() {
         let mut failure = safe_cex_exchange::runtime::ExchangeError::new("post failed");
         failure.name = "TypeError".into();
         let thrown = failure.clone();
-        let post = OrderBookPost::new(
-            Rc::new(|_| panic!("BBO unexpected regular post")),
-            Rc::new(move |mut post| {
-                counted.set(counted.get() + 1);
-                assert_eq!(
-                    observed.tickers()[0].bid,
-                    99.0,
-                    "BBO native post precedes BBO"
-                );
-                assert_book_numbers(&post.data.book().unwrap());
-                assert_eq!(
-                    post.data.fields().map(|(key, _)| key).collect::<Vec<_>>(),
-                    ["2", "42", "symbol", "orderbook", "extra"],
-                    "BBO native own-key order"
-                );
-                *receipt.borrow_mut() = Some(post.structured_clone());
-                if scenario == "post-error" {
-                    return Err(thrown.clone());
+        let post = OrderBookPost::new(Rc::new(move |mut post| {
+            counted.set(counted.get() + 1);
+            assert_eq!(
+                observed.tickers()[0].bid,
+                99.0,
+                "BBO native post precedes BBO"
+            );
+            assert_book_numbers(&post.data.book().unwrap());
+            assert_eq!(
+                post.data.fields().map(|(key, _)| key).collect::<Vec<_>>(),
+                ["2", "42", "symbol", "orderbook", "extra"],
+                "BBO native own-key order"
+            );
+            *receipt.borrow_mut() = Some(post.structured_clone());
+            if scenario == "post-error" {
+                return Err(thrown.clone());
+            }
+            if scenario == "book-mutation" {
+                {
+                    let mut book = post.data.book_mut().unwrap();
+                    book.bids[0].price = 101.0;
+                    book.asks[0].price = 103.0;
                 }
-                if scenario == "book-mutation" {
-                    {
-                        let mut book = post.data.book_mut().unwrap();
-                        book.bids[0].price = 101.0;
-                        book.asks[0].price = 103.0;
-                    }
-                    // Reassigning the posted field must not replace the sender's original o.
-                    *post.data.get_mut("orderbook").unwrap() =
-                        OrderBookPostField::Metadata(json!({"bids":[],"asks":[]}).into());
-                }
-                if scenario == "metadata-alias" {
-                    let OrderBookPostField::Metadata(extra) = post.data.get_mut("extra").unwrap()
-                    else {
-                        panic!("metadata field")
-                    };
-                    let safe_cex_num::JsJsonValue::Object(fields) = extra else {
-                        panic!("metadata object")
-                    };
-                    fields.iter_mut().find(|(key, _)| key == "x").unwrap().1 =
-                        safe_cex_num::JsJsonValue::Number(9.0);
-                }
-                Ok(())
-            }),
+                // Reassigning the posted field must not replace the sender's original o.
+                *post.data.get_mut("orderbook").unwrap() =
+                    OrderBookPostField::Metadata(json!({"bids":[],"asks":[]}).into());
+            }
+            if scenario == "metadata-alias" {
+                let OrderBookPostField::Metadata(extra) = post.data.get_mut("extra").unwrap()
+                else {
+                    panic!("metadata field")
+                };
+                let safe_cex_num::JsJsonValue::Object(fields) = extra else {
+                    panic!("metadata object")
+                };
+                fields.iter_mut().find(|(key, _)| key == "x").unwrap().1 =
+                    safe_cex_num::JsJsonValue::Number(9.0);
+            }
+            Ok(())
+        }));
+        let handler = OrderBookSubscriptionsHandler::new(
+            venue.clone(),
+            post,
+            100.0,
+            error_post_support::unexpected(),
         );
-        let handler = OrderBookSubscriptionsHandler::new(venue.clone(), post, 100.0);
         let data = serde_json::from_str::<serde_json::Map<String, Value>>(
             r#"{"42":"b","2":"a","symbol":"BTC","orderbook":null,"extra":{"x":1}}"#,
         )
@@ -843,15 +853,13 @@ fn bbo_leaf_returns_original_store_notification_after_committed_write() {
     let posts = posted.clone();
     let handler = OrderBookSubscriptionsHandler::new(
         venue.clone(),
-        OrderBookPost::new(
-            Rc::new(|_| unreachable!()),
-            Rc::new(move |post| {
-                assert_book_numbers(&post.data.book().unwrap());
-                posts.set(posts.get() + 1);
-                Ok(())
-            }),
-        ),
+        OrderBookPost::new(Rc::new(move |post| {
+            assert_book_numbers(&post.data.book().unwrap());
+            posts.set(posts.get() + 1);
+            Ok(())
+        })),
         100.0,
+        error_post_support::unexpected(),
     );
     let data = JsObjectMap::from_iter([(
         "symbol".into(),
@@ -929,30 +937,28 @@ fn bbo_leaf_metadata_keeps_native_numbers_with_parent_json_finding_explicit() {
         let counted = calls.clone();
         let handler = OrderBookSubscriptionsHandler::new(
             venue,
-            OrderBookPost::new(
-                Rc::new(|_| unreachable!()),
-                Rc::new(move |post| {
-                    counted.set(counted.get() + 1);
-                    for data in [&post.data, &post.structured_clone().data] {
-                        let Some(OrderBookPostField::Metadata(JsJsonValue::Number(value))) =
-                            data.get("metric")
-                        else {
-                            panic!("BBO native metadata number variant")
-                        };
-                        if metric.is_nan() {
-                            assert!(value.is_nan(), "BBO native metadata NaN")
-                        } else {
-                            assert_eq!(
-                                value.to_bits(),
-                                metric.to_bits(),
-                                "BBO native metadata binary64"
-                            )
-                        }
+            OrderBookPost::new(Rc::new(move |post| {
+                counted.set(counted.get() + 1);
+                for data in [&post.data, &post.structured_clone().data] {
+                    let Some(OrderBookPostField::Metadata(JsJsonValue::Number(value))) =
+                        data.get("metric")
+                    else {
+                        panic!("BBO native metadata number variant")
+                    };
+                    if metric.is_nan() {
+                        assert!(value.is_nan(), "BBO native metadata NaN")
+                    } else {
+                        assert_eq!(
+                            value.to_bits(),
+                            metric.to_bits(),
+                            "BBO native metadata binary64"
+                        )
                     }
-                    Ok(())
-                }),
-            ),
+                }
+                Ok(())
+            })),
             100.0,
+            error_post_support::unexpected(),
         );
         let data = JsObjectMap::from_iter([
             ("symbol".into(), JsJsonValue::String("BTC".into())),
@@ -978,21 +984,19 @@ fn bbo_leaf_metadata_keeps_native_numbers_with_parent_json_finding_explicit() {
     let counted = posts.clone();
     let handler = OrderBookSubscriptionsHandler::new(
         venue.clone(),
-        OrderBookPost::new(
-            Rc::new(|_| unreachable!()),
-            Rc::new(move |post| {
-                assert!(
-                    matches!(
-                        post.data.get("metric"),
-                        Some(OrderBookPostField::Metadata(JsJsonValue::Null))
-                    ),
-                    "FINDING parent JSON metadata projected NaN to null before native leaf"
-                );
-                counted.set(counted.get() + 1);
-                Ok(())
-            }),
-        ),
+        OrderBookPost::new(Rc::new(move |post| {
+            assert!(
+                matches!(
+                    post.data.get("metric"),
+                    Some(OrderBookPostField::Metadata(JsJsonValue::Null))
+                ),
+                "FINDING parent JSON metadata projected NaN to null before native leaf"
+            );
+            counted.set(counted.get() + 1);
+            Ok(())
+        })),
         100.0,
+        error_post_support::unexpected(),
     );
     handler
         .handle(StoreWorkerPayload {
@@ -1020,9 +1024,17 @@ fn listener_setup_failure_propagates_but_cleanup_failure_keeps_source_catch_orde
         let posts = Rc::new(Cell::new(0));
         let count = posts.clone();
         let post: Rc<dyn Fn(StoreWorkerPayload)> = Rc::new(move |_| count.set(count.get() + 1));
-        let books =
-            OrderBookSubscriptionsHandler::new(venue.clone(), trace_post(post.clone()), 100.0);
-        let candles = OHLCVSubscriptionsHandler::new(venue.clone(), post);
+        let books = OrderBookSubscriptionsHandler::new(
+            venue.clone(),
+            trace_post(post.clone()),
+            100.0,
+            error_post_support::unexpected(),
+        );
+        let candles = OHLCVSubscriptionsHandler::new(
+            venue.clone(),
+            data_trace::post(post),
+            error_post_support::unexpected(),
+        );
         let payload = |subscribe, id: &str| StoreWorkerPayload {
             op: match (book, subscribe) {
                 (true, true) => StoreWorkerOp::SubscribeOrderBook,
@@ -1112,4 +1124,50 @@ fn listener_setup_failure_propagates_but_cleanup_failure_keeps_source_catch_orde
             "native cleanup failure still removes worker map before resubscribe: book={book}"
         );
     }
+}
+
+#[test]
+fn ohlcv_worker_subscribes_every_source_timeframe_and_delivers_candles() {
+    let (venue, _) = leaf_venue();
+    venue.base.store.update(serde_json::from_value(json!({"markets":[{"id":"BTC","symbol":"BTC","base":"BTC","quote":"USD","active":true,"precision":{"amount":1,"price":0.1},"limits":{"amount":{"min":1,"max":100},"leverage":{"min":1,"max":20}}}]})).unwrap(), false).unwrap();
+    let posts = Rc::new(RefCell::new(Vec::new()));
+    let capture = posts.clone();
+    let handler = OHLCVSubscriptionsHandler::new(
+        venue.clone(),
+        data_trace::post(Rc::new(move |post| capture.borrow_mut().push(post))),
+        error_post_support::unexpected(),
+    );
+    let intervals = [
+        "1M", "1s", "5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h",
+        "12h", "1d", "1w", "3h", "5h", "7h", "8h", "9h", "10h", "11h", "24h", "2d", "3d",
+    ];
+    for (i, interval) in intervals.iter().enumerate() {
+        handler
+            .handle(StoreWorkerPayload {
+                op: StoreWorkerOp::SubscribeOHLCV,
+                instance_id: None,
+                data: Some(json!({"symbol":"BTC","interval":interval,"subId":format!("s{i}")})),
+            })
+            .unwrap();
+        let callback = venue
+            .candles
+            .borrow()
+            .get(&format!("BTC:{interval}"))
+            .cloned()
+            .unwrap_or_else(|| panic!("OHLCV-WORKER subscription for {interval} must reach venue"));
+        callback(
+            serde_json::from_value(
+                json!({"timestamp":123,"open":1,"high":3,"low":0.5,"close":2,"volume":4}),
+            )
+            .unwrap(),
+        );
+        let posts = posts.borrow();
+        let post = posts.last().unwrap();
+        assert_eq!(post.op, StoreWorkerOp::ListenOHLCV);
+        assert_eq!(post.data.as_ref().unwrap()["interval"], *interval);
+        assert_eq!(post.data.as_ref().unwrap()["subId"], format!("s{i}"));
+        assert_eq!(post.data.as_ref().unwrap()["candle"]["volume"], 4.0);
+    }
+    assert_eq!(venue.candles.borrow().len(), 27);
+    assert_eq!(posts.borrow().len(), 27);
 }

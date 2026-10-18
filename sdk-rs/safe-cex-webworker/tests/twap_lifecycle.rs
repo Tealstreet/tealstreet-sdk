@@ -1,6 +1,7 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use indexmap::IndexMap;
+use safe_cex_exchange::delivery_timers::WorkerPortTimers;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
@@ -8,10 +9,10 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, OrderSide, OrderType, PlaceOrderOpts};
-use safe_cex_webworker::{
-    chaser::ChaserOrderInstance, task_types::*, twap_instance::*, twap_manager::*,
-    worker_ports::WorkerPortTimers,
-};
+use safe_cex_webworker::chaser::ChaserOrderInstance;
+use safe_cex_webworker::task_types::*;
+use safe_cex_webworker::twap_instance::*;
+use safe_cex_webworker::twap_manager::*;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -68,11 +69,15 @@ impl ExchangeRuntime for Clock {
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.inner.spawn_local(f)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn is_worker(&self) -> bool {
         true
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, v: &Value) {

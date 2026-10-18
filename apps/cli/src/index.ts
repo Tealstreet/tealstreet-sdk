@@ -2,7 +2,7 @@
 // Shim WebSocket for tealstreet.io proxy connections (must be first import)
 import './ws-shim';
 import '@tealstreet/safe-cex/src/transport/registerTealstreetTransport';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
 import {
@@ -32,6 +32,10 @@ import { initCliSentry, captureCliError, flushCliSentry } from './sentry';
 
 // Start console interception early to catch all logs
 interceptConsole();
+
+// cli-core prints the product name and docs URL in REPL `help`; a whitelabel
+// binary must never print Tealstreet's. See src/brand.ts.
+setCliBrand(BRAND.cliCore);
 
 const JSON_MODE = isJsonMode();
 if (JSON_MODE) enterJsonMode();
@@ -97,6 +101,8 @@ process.on('unhandledRejection', (reason: unknown) => {
 });
 import { checkForUpdatesBackground, performUpdate, forceCheckForUpdates, getCurrentVersion } from './updater';
 import { registerCrossTradeCommand } from './commands/cross-trade';
+import { BRAND } from './brand';
+import { setCliBrand } from '@tealstreet/cli-core';
 
 // Dynamic import for repl to avoid circular dependency issues with safe-cex
 const getRepl = async () => import('./repl');
@@ -104,12 +110,12 @@ const getRepl = async () => import('./repl');
 // Check for updates in background (non-blocking). Its banner would corrupt --json output.
 if (!JSON_MODE) checkForUpdatesBackground();
 
-const CLI_DOCS_URL = 'https://docs.tealstreet.io/cli';
+const CLI_DOCS_URL = BRAND.docsUrl;
 
 const program = new Command();
 
 program
-  .name('tealstreet')
+  .name(BRAND.binName)
   .description('Trade crypto from your terminal')
   .version(getCurrentVersion(), '-v, --version', 'Display version number')
   .option('--update', 'Update CLI to the latest version')
@@ -124,7 +130,7 @@ program
 // `tealstreet login` exits with "unknown command 'login'".
 program
   .command('login')
-  .description('Authenticate with Tealstreet (required for proxy/tunnel routing)')
+  .description(`Authenticate with ${BRAND.displayName} (required for proxy/tunnel routing)`)
   .action(async () => {
     const ok = await login();
     process.exit(ok ? 0 : 1);
@@ -132,7 +138,7 @@ program
 
 program
   .command('logout')
-  .description('Clear the stored Tealstreet auth token')
+  .description(`Clear the stored ${BRAND.displayName} auth token`)
   .action(() => logout());
 
 program
@@ -176,7 +182,7 @@ accountCmd
 
     if (accounts.length === 0) {
       console.log(chalk.yellow('No accounts configured.'));
-      console.log(chalk.gray('Run: tealstreet account add'));
+      console.log(chalk.gray(`Run: ${BRAND.binName} account add`));
       return;
     }
 
@@ -223,9 +229,13 @@ accountCmd
   .option('--grvt-trading-account-id <id>', 'GRVT trading account ID')
   .option('--enable-spot-markets', 'Enable spot markets for exchanges with a spot toggle')
   .option('-t, --testnet', 'Use testnet')
-  .option('--tealstreet-proxy', 'Route REST through the Tealstreet proxy (required for IP-whitelisted keys)')
-  .option('--tealstreet-tunnel', 'Route REST through the Tealstreet tradetunnel')
-  .option('--tealstreet-ws-route', 'Route private WebSockets through Tealstreet')
+  // Routing flags: both spellings on every brand, help shows the brand's own.
+  .option('--proxy', `Route REST through the ${BRAND.displayName} proxy (required for IP-whitelisted keys)`)
+  .option('--tunnel', `Route REST through the ${BRAND.displayName} tradetunnel`)
+  .option('--ws-route', `Route private WebSockets through ${BRAND.displayName}`)
+  .addOption(new Option('--tealstreet-proxy', 'Alias of --proxy').hideHelp())
+  .addOption(new Option('--tealstreet-tunnel', 'Alias of --tunnel').hideHelp())
+  .addOption(new Option('--tealstreet-ws-route', 'Alias of --ws-route').hideHelp())
   .option('--proxy-region <region>', 'Pin the proxy egress region')
   .option('--default', 'Set as default account')
   .action((options) => {
@@ -256,9 +266,9 @@ accountCmd
         grvtSignerAddress: options.grvtSignerAddress,
         grvtTradingAccountId: options.grvtTradingAccountId,
         testnet: options.testnet || false,
-        tealstreetProxy: options.tealstreetProxy,
-        tealstreetTunnel: options.tealstreetTunnel,
-        tealstreetWsRoute: options.tealstreetWsRoute,
+        tealstreetProxy: options.proxy || options.tealstreetProxy,
+        tealstreetTunnel: options.tunnel || options.tealstreetTunnel,
+        tealstreetWsRoute: options.wsRoute || options.tealstreetWsRoute,
         proxyRegion: options.proxyRegion,
         enableSpotMarkets: options.enableSpotMarkets,
       });
@@ -411,7 +421,7 @@ accountCmd
       return;
     }
 
-    const outputFile = file ? resolve(file) : resolve('tealstreet-accounts.json');
+    const outputFile = file ? resolve(file) : resolve(`${BRAND.binName}-accounts.json`);
     try {
       // The export carries API keys; chmod covers overwriting an older export.
       writeFileSync(outputFile, JSON.stringify(accounts, null, 2), { mode: 0o600 });
@@ -766,7 +776,7 @@ recordCmd
 // ============ Update Commands ============
 program
   .command('update')
-  .description('Update Tealstreet CLI to the latest version')
+  .description(`Update ${BRAND.displayName} CLI to the latest version`)
   .option('-c, --check', 'Only check for updates, do not install')
   .action(async (options) => {
     if (options.check) {
@@ -780,7 +790,7 @@ program
 program
   .command('logs')
   .alias('log')
-  .description('View CLI logs (tail -f ~/.tealstreet/cli.log)')
+  .description(`View CLI logs (tail -f ~/${BRAND.configDirName}/cli.log)`)
   .option('-c, --clear', 'Clear log file')
   .option('-n, --lines <number>', 'Number of lines to show', '50')
   .action(async (options) => {
@@ -789,7 +799,7 @@ program
     const { join } = await import('path');
     const { homedir } = await import('os');
 
-    const logFile = join(homedir(), '.tealstreet', 'cli.log');
+    const logFile = join(homedir(), BRAND.configDirName, 'cli.log');
 
     if (options.clear) {
       if (existsSync(logFile)) {
@@ -897,11 +907,11 @@ program
     const shell = program.commands.map(describe);
     const repl = buildCommandCatalog();
     if (options.json) await emitJsonOrCrash(() => ({ version: getCurrentVersion(), shell, repl }));
-    console.log(chalk.cyan('\nShell commands (tealstreet <command>):\n'));
+    console.log(chalk.cyan(`\nShell commands (${BRAND.binName} <command>):\n`));
     for (const command of shell) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
-    console.log(chalk.cyan("\nTrading commands (at the prompt, or tealstreet exec '<command>'):\n"));
+    console.log(chalk.cyan(`\nTrading commands (at the prompt, or ${BRAND.binName} exec '<command>'):\n`));
     for (const command of repl) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
-    console.log(chalk.gray('\nDetails: https://docs.tealstreet.io/cli/reference/commands'));
+    console.log(chalk.gray(`\nDetails: ${BRAND.docsUrl}/reference/commands`));
   });
 
 // ============ Default Action ============
@@ -935,7 +945,7 @@ if (args.includes('--update')) {
     if (askedForHelp || error?.code === 'commander.helpDisplayed' || error?.code === 'commander.version')
       process.exit(0);
     if (error?.code === 'commander.help')
-      error = { ...error, message: 'missing subcommand; see `tealstreet commands --json`' };
+      error = { ...error, message: `missing subcommand; see \`${BRAND.binName} commands --json\`` };
     const fromCommander = String(error?.code ?? '').startsWith('commander.');
     void emitJsonAndExit(
       {

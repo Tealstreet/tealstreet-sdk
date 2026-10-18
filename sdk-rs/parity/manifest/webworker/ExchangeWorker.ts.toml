@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/webworker/ExchangeWorker.ts"
-rust_files = [ "safe-cex-webworker/src/worker_logging.rs", "safe-cex-webworker/src/store_payload.rs", "safe-cex-webworker/src/worker_buffer.rs", "safe-cex-webworker/src/exchange_worker.rs", "safe-cex-webworker/src/exchange_worker_start.rs" ]
+rust_files = [ "safe-cex-webworker/src/worker_logging.rs", "safe-cex-exchange/src/store_payload.rs", "safe-cex-webworker/src/worker_buffer.rs", "safe-cex-webworker/src/exchange_worker.rs", "safe-cex-webworker/src/exchange_worker_start.rs", "safe-cex-exchange/src/store_delivery.rs", "safe-cex-registry/src/native_store.rs" ]
 
 [[symbol]]
 ts = "isRecord"
@@ -38,9 +38,9 @@ note = "MIXED: FORCED shared String/ExchangeName ingress cannot retain non-USV o
 ts = "ExchangeWorker#_throttledStoreUpdate"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle", "safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle::new", "safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle::call", "safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle::cancel", "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorkerHost::report_timer_error", "safe-cex-webworker/src/exchange_worker.rs::StoreFrame" ]
+rs = [ "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle", "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::new", "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::call", "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::cancel", "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottleHost::report_store_timer_error", "safe-cex-exchange/src/store_delivery.rs::StoreFrame", "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottleHost", "safe-cex-registry/src/native_store.rs::NativeStoreDelivery::new" ]
 status = "divergent"
-note = "CHOSEN: actual lodash leading/trailing/maxWait=wait logic is native call/cancel with binary64 delays and zero-valued opaque timer support; omits lodash flush and mutable function-object properties. Explicit host queues timers; callback errors use Result and timer-time errors go to host reporting. Weak worker/timer closures and Drop cancellation replace source closure retention to avoid native Rc cycles. Retains exact latest mutable frame through trailing invocation, arms timer before leading callback, commits invocation state before errors, reschedules early wakeups and preserves wall-clock rollback. Seven constructor wait cases and one six-delivery trace are a floor, not exhaustive clock enumeration. Rename target: `safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle`. Split members `safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle::new`, `safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle::call`, `safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle::cancel`; construction of the lodash throttle, invocation of the throttled function and its cancel(). Split member `safe-cex-webworker/src/exchange_worker.rs::ExchangeWorkerHost::report_timer_error`; plumbing this body consumes: required member of the ExchangeWorkerHost host capability (store postMessage, the shared chaser manager and supervisor bindings and timer-error reporting) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm. Split member `safe-cex-webworker/src/exchange_worker.rs::StoreFrame`; plumbing this body consumes: rust-only shared mutable store-data frame carrier passed through the throttle, postprocessors and store delivery of the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows; no TypeScript symbol."
+note = "CHOSEN: actual lodash leading/trailing/maxWait=wait logic is native call/cancel with binary64 delays and zero-valued opaque timer support; omits lodash flush and mutable function-object properties. Explicit host queues timers; callback errors use Result and timer-time errors go to host reporting. Weak worker/timer closures and Drop cancellation replace source closure retention to avoid native Rc cycles. Retains exact latest mutable frame through trailing invocation, arms timer before leading callback, commits invocation state before errors, reschedules early wakeups and preserves wall-clock rollback. Seven constructor wait cases and one six-delivery trace are a floor, not exhaustive clock enumeration. Rename target: `safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle`. Split members `safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::new`, `safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::call`, `safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::cancel`; construction of the lodash throttle, invocation of the throttled function and its cancel(). Split member `safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottleHost::report_store_timer_error`; plumbing this body consumes: required member of the ExchangeWorkerHost host capability (store postMessage, the shared chaser manager and supervisor bindings and timer-error reporting) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm. Split member `safe-cex-exchange/src/store_delivery.rs::StoreFrame`; plumbing this body consumes: rust-only shared mutable store-data frame carrier passed through the throttle, postprocessors and store delivery of the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows; no TypeScript symbol. Split members `safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottleHost` and `safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottleHost::report_store_timer_error` retain the minimal timer-error capability used by the same throttle in worker and registry hosts. One implementation now resides in exchange-core; the worker host delegates its existing reporter through this capability. Split member `safe-cex-registry/src/native_store.rs::NativeStoreDelivery::new` assembles that shared throttle at 250 ms times the configured multiplier, with weak native account owners and the existing payload preparer; it does not add a second throttle algorithm. Real registry/Node Store-delivery regressions cover native composition; the existing worker throttle witness remains authoritative for its timing policy."
 
 [[symbol]]
 ts = "ExchangeWorker#_cancelStartup"
@@ -94,49 +94,49 @@ note = "FINDING owner: safe-cex-webworker audit. New annotation finding: Exchang
 ts = "ExchangeWorker#_sanitizeForPostMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-webworker/src/store_payload.rs::sanitize_for_post_message"
+rs = "safe-cex-exchange/src/store_payload.rs::sanitize_for_post_message"
 status = "divergent"
-note = "CHOSEN: Renamed to safe-cex-webworker/src/store_payload.rs::sanitize_for_post_message. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias: later balance and untouched order mutations reach the source payload, while Rust nested snapshots stay frozen. Live witnesses compare both runtimes and independently pin the required updateIds/loaded/socketHealth snapshots. Forty-eight live whole-payload cases cover falsey/truthy info stripping, omission flags and retained fields; direct typed probes preserve nonfinite values without JSON round-trips."
+note = "CHOSEN: Renamed to safe-cex-exchange/src/store_payload.rs::sanitize_for_post_message. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias: later balance and untouched order mutations reach the source payload, while Rust nested snapshots stay frozen. Live witnesses compare both runtimes and independently pin the required updateIds/loaded/socketHealth snapshots. Forty-eight live whole-payload cases cover falsey/truthy info stripping, omission flags and retained fields; direct typed probes preserve nonfinite values without JSON round-trips."
 
 [[symbol]]
 ts = "ExchangeWorker#_shouldSendUpdateIdBackedSnapshot"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-webworker/src/store_payload.rs::should_send_update_id_backed_snapshot"
+rs = "safe-cex-exchange/src/store_payload.rs::should_send_update_id_backed_snapshot"
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/store_payload.rs::should_send_update_id_backed_snapshot. Typed optional update IDs preserve missing, NaN, infinities and signed-zero comparison; 243 live source decisions."
+note = "Renamed to safe-cex-exchange/src/store_payload.rs::should_send_update_id_backed_snapshot. Typed optional update IDs preserve missing, NaN, infinities and signed-zero comparison; 243 live source decisions."
 
 [[symbol]]
 ts = "ExchangeWorker#_recordSentUpdateIdBackedSnapshot"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-webworker/src/store_payload.rs::record_sent_update_id_backed_snapshot"
+rs = "safe-cex-exchange/src/store_payload.rs::record_sent_update_id_backed_snapshot"
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/store_payload.rs::record_sent_update_id_backed_snapshot. Option represents the numeric-or-null last-sent state; live source oracle pins nonfinite and signed-zero retention."
+note = "Renamed to safe-cex-exchange/src/store_payload.rs::record_sent_update_id_backed_snapshot. Option represents the numeric-or-null last-sent state; live source oracle pins nonfinite and signed-zero retention."
 
 [[symbol]]
 ts = "ExchangeWorker#_copyTickerBaseline"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-webworker/src/store_payload.rs::TickerBaseline", "safe-cex-webworker/src/store_payload.rs::TickerBaseline::copy_from" ]
+rs = [ "safe-cex-exchange/src/store_payload.rs::TickerBaseline", "safe-cex-exchange/src/store_payload.rs::TickerBaseline::copy_from" ]
 status = "ported"
-note = "Split: safe-cex-webworker/src/store_payload.rs::TickerBaseline owns the worker private baseline state; safe-cex-webworker/src/store_payload.rs::TickerBaseline::copy_from refreshes id, symbol and the eleven numeric fields. Baseline remains decoupled from live tickers; 70 live source transition traces pin copy/reuse/length changes."
+note = "Split: safe-cex-exchange/src/store_payload.rs::TickerBaseline owns the worker private baseline state; safe-cex-exchange/src/store_payload.rs::TickerBaseline::copy_from refreshes id, symbol and the eleven numeric fields. Baseline remains decoupled from live tickers; 70 live source transition traces pin copy/reuse/length changes."
 
 [[symbol]]
 ts = "ExchangeWorker#_packTickerDeltasSinceBaseline"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-webworker/src/store_payload.rs::TickerBaseline::pack_deltas"
+rs = "safe-cex-exchange/src/store_payload.rs::TickerBaseline::pack_deltas"
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/store_payload.rs::TickerBaseline::pack_deltas. Shared PackedTickerDelta output, live field-order inventory, all-field masks, NaN repeats, signed-zero equality and identity/length fallback. ts-bug: preserves earlier baseline mutations before a later ticker identity mismatch returns null."
+note = "Renamed to safe-cex-exchange/src/store_payload.rs::TickerBaseline::pack_deltas. Shared PackedTickerDelta output, live field-order inventory, all-field masks, NaN repeats, signed-zero equality and identity/length fallback. ts-bug: preserves earlier baseline mutations before a later ticker identity mismatch returns null."
 
 [[symbol]]
 ts = "ExchangeWorker#_prepareStorePayload"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-webworker/src/store_payload.rs::StorePayloadPreparer", "safe-cex-webworker/src/store_payload.rs::StorePayloadPreparer::prepare" ]
+rs = [ "safe-cex-exchange/src/store_payload.rs::StorePayloadPreparer", "safe-cex-exchange/src/store_payload.rs::StorePayloadPreparer::prepare" ]
 status = "divergent"
-note = "CHOSEN: Split: safe-cex-webworker/src/store_payload.rs::StorePayloadPreparer owns last-sent state; safe-cex-webworker/src/store_payload.rs::StorePayloadPreparer::prepare receives current store versions, hosted mode and force flag. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias: inherits sanitize_for_post_message; later balance/untouched-row mutations reach the source prepared payload but leave Rust snapshots frozen, pinned by the live witness. Seventy-two live source sequences cover active-chaser entry/exit exemptions, raw versus derived position omission, full/packed tickers, identity fallback, market versions and hosted-mode transitions. No JSON round-trip of typed numerics."
+note = "CHOSEN: Split: safe-cex-exchange/src/store_payload.rs::StorePayloadPreparer owns last-sent state; safe-cex-exchange/src/store_payload.rs::StorePayloadPreparer::prepare receives current store versions, hosted mode and force flag. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias: inherits sanitize_for_post_message; later balance/untouched-row mutations reach the source prepared payload but leave Rust snapshots frozen, pinned by the live witness. Seventy-two live source sequences cover active-chaser entry/exit exemptions, raw versus derived position omission, full/packed tickers, identity fallback, market versions and hosted-mode transitions. No JSON round-trip of typed numerics."
 
 [[symbol]]
 ts = "ExchangeWorker#_storeUpdate"
@@ -166,9 +166,9 @@ note = "Returns the current nullable opaque exchange handle with identical Rc id
 ts = "ExchangeWorker.sendSnapshot"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::send_snapshot"
+rs = [ "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::send_snapshot", "safe-cex-registry/src/native_store.rs::NativeStoreDelivery::snapshot" ]
 status = "divergent"
-note = "MIXED: FORCED shared StoreData row String fields cannot represent non-USV text (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN: native typed Store serialization and Result error ABI inherit real DefaultStore/StorePayloadPreparer owned nested values rather than arbitrary live JS aliases (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). Cancels real throttle before checking live disposed exchange, no-exchange still sends, and forces full baseline through actual store_update/processors. Processor/post errors propagate without rolling back committed cache."
+note = "MIXED: FORCED shared StoreData row String fields cannot represent non-USV text (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN: native typed Store serialization and Result error ABI inherit real DefaultStore/StorePayloadPreparer owned nested values rather than arbitrary live JS aliases (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). Cancels real throttle before checking live disposed exchange, no-exchange still sends, and forces full baseline through actual store_update/processors. Processor/post errors propagate without rolling back committed cache. Split member `safe-cex-registry/src/native_store.rs::NativeStoreDelivery::snapshot` is the native host snapshot entry: cancels pending throttled delivery, skips disposed exchanges, serializes the live Store and forces a full prepared payload. Weak account/Store owners replace closure retention. Real native-account Store regressions cover the post-start full snapshot and trailing cancellation."
 
 [[symbol]]
 ts = "ExchangeWorker.dispose"
@@ -182,9 +182,9 @@ note = "FINDING owner: safe-cex-webworker audit. New annotation finding: Exchang
 ts = "ExchangeWorker#_clearRuntimePipeline"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::clear_runtime_pipeline"
+rs = [ "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::clear_runtime_pipeline", "safe-cex-registry/src/native_store.rs::NativeStoreDelivery::cancel" ]
 status = "divergent"
-note = "FINDING owner: safe-cex-webworker audit. Annotation-only: dense Rc arrays/Result error projection disclose omissions but give no reason for declining sparse/proxy array/throw identity. No new disposal mismatch is inferred. packages/safe-cex/src/webworker/ExchangeWorker.ts:688 :: _clearRuntimePipeline cancels throttle, source forEach observes original array/initial length, throws abort resets. sdk-rs/safe-cex-webworker/src/exchange_worker.rs:348 captures handler list+initial length, clones each current index, invokes disposers, resets all slots only on success. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: dense typed Rc arrays and Result disposers omit arbitrary sparse/proxy JS arrays and thrown object identity. Cancels throttle first; captures original handler-array identity and initial length like forEach, observes in-place removal/reorder, ignores appends beyond initial length and ignores replacement list during traversal. Only after all disposers succeed replaces three list slots with fresh empty arrays, preserving external aliases to old arrays. A disposer Err prevents all three resets. Rename target: `safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::clear_runtime_pipeline`."
+note = "FINDING owner: safe-cex-webworker audit. Annotation-only: dense Rc arrays/Result error projection disclose omissions but give no reason for declining sparse/proxy array/throw identity. No new disposal mismatch is inferred. packages/safe-cex/src/webworker/ExchangeWorker.ts:688 :: _clearRuntimePipeline cancels throttle, source forEach observes original array/initial length, throws abort resets. sdk-rs/safe-cex-webworker/src/exchange_worker.rs:348 captures handler list+initial length, clones each current index, invokes disposers, resets all slots only on success. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: dense typed Rc arrays and Result disposers omit arbitrary sparse/proxy JS arrays and thrown object identity. Cancels throttle first; captures original handler-array identity and initial length like forEach, observes in-place removal/reorder, ignores appends beyond initial length and ignores replacement list during traversal. Only after all disposers succeed replaces three list slots with fresh empty arrays, preserving external aliases to old arrays. A disposer Err prevents all three resets. Rename target: `safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::clear_runtime_pipeline`. Split member `safe-cex-registry/src/native_store.rs::NativeStoreDelivery::cancel` is the Store-delivery part of native watch teardown: marks the watcher inactive and cancels the same shared throttle before callback handles are released. Remaining worker handler/processor cleanup stays with the existing worker body; native close/deactivate regressions cover this watcher cancellation."
 
 [[symbol]]
 ts = "ExchangeWorker.handlePayload"
@@ -206,6 +206,6 @@ note = "FINDING owner: safe-cex-webworker audit. Annotation-only: actual constru
 ts = "ExchangeWorker#_setupExchangeEventListeners"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::setup_exchange_event_listeners"
+rs = [ "safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::setup_exchange_event_listeners", "safe-cex-webworker/src/exchange_worker_start.rs::install_exchange_event_bridge", "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::post_event", "safe-cex-registry/src/native_store.rs::NativeStoreDelivery::update" ]
 status = "divergent"
-note = "CHOSEN: real native Store subscriptions accept typed owned StoreData snapshots; BaseExchange events accept one owned JSON payload rather than variadic JS values/live nested aliases; log bridges wrap that single payload into args. Weak worker closure lifetime replaces JS strong listener retention to avoid Rc cycles. Registers real store throttle, fill, twelve logs, reconnect and deactivate bodies. Selected event enumeration stops at twelve log registrations plus three special events. Rename target: `safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::setup_exchange_event_listeners`."
+note = "Rename target: `safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::setup_exchange_event_listeners`; registers the Store, reconnect and deactivate listeners. Split member `safe-cex-webworker/src/exchange_worker_start.rs::install_exchange_event_bridge`; registers fill and the twelve log events. Split member `safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::post_event`; plumbing this body consumes: required capability posting their native `WorkerDataPayload` through the same worker host. Fill keeps its first payload; log events keep their original variadic array, including zero and single-array arguments. The shared Js carrier retains own undefined, native numbers, UTF-16 and local identity before the host post. Actual TinyEmitter/formatter source, constructed Aster private-frame and compiled Wasm browser materializer witnesses cover the cutover; JSON and single-payload controls fail named assertions. Typed Store snapshots and weak worker retention remain separate limitations under sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. The owned cross-thread host codec retains its separate data-tree profile. Split member `safe-cex-registry/src/native_store.rs::NativeStoreDelivery::update`; plumbing this body consumes: the native Store-subscription callback forwards the current owned Store frame to the same mapped throttle while the account watch is active. It inherits the explicit owned-frame boundary above; real registry/Node Store regressions cover this production watcher."

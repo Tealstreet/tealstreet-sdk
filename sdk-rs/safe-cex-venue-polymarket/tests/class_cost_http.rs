@@ -45,7 +45,9 @@ fn class_cost_http_native() {
         let result = if index % 8 == 7 {
             Err(failure.clone())
         } else {
-            Ok(response(RestResponseBody::Untransformed(json!(value))))
+            Ok(response(RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!(value)).unwrap(),
+            )))
         };
         let xhr = client(result, calls.clone());
         let future = get_server_time(&xhr);

@@ -1,3 +1,39 @@
+# Reviewed inherited refusals: complete native owner cohort
+
+After merging the shared inherited-refusal mechanism, this branch installs only
+five independently reviewed Breakout specs in
+`accepted-set/inherited-constant-outputs/safe-cex-venue-breakoutprop.json`.
+Their Rust source, maintained TS base/venue, fixture, compiler APIs, native adapters
+and cases match the approved v2 bytes. No source or fixture rollback was used.
+The lifecycle owner retains all nine actual compiler entrypoints; get_account and
+schedule_cancel are not invented as indexed APIs.
+
+Fresh default native rustdoc/check, actual compiler artifacts, alias claims,
+macro origins and local-scope guards cover **60 owners + 7 aliases**. All
+**67/67 native receipts pass** (47 production runtime results, 20 explicit
+classifications, zero failed owners). This includes the complete nine-API
+lifecycle owner and the ten actual refusal observations: exact Error/Not
+implemented, default metadata, zero HTTP and unchanged observed native state.
+The ProductionHost Clone construction obligation remains separately classified.
+
+The cohort-aware shared policy tests pass 2/2, including three actually executed
+source/fixture/adapter guard mutations with named refusal/restored pass. The
+previous five compiled dispatch controls and the full earlier native controls
+remain documented below; their source and fixture bytes are unchanged.
+
+This is the complete selected Breakout owner/alias cohort, not transitive or
+matrix clearance. The ordinary full transitive run after #325 compiles and
+executes all four selected packages: Breakout 67/67 pass; shared types report 227
+receipts with zero failed owners; shared exchange has five failed owners among
+169 receipts; transport has 58 failed owners among 115 receipts. The gate exits
+one with 63 failed owners. Transport failures include 32 missing owner/function
+contracts, six missing alias contracts, five stale APIs, two raw APIs classified
+as typed, nine positional-array admissions, two tagged-object admissions, one
+stale positive sample and one unreviewed function-local decoder. These shared
+reviews/repairs are separately owned. No foreign classifications, guard changes
+or omitted scopes were used to clear them. Exact local failure summaries and
+logs stay outside the repository.
+
 # Account lookup, validation and session invalidation
 
 This slice follows fetched integration b46ce8b19a2e67d6add3cf454450997f75150d12.
@@ -454,3 +490,335 @@ The expanded portfolio_reads target has six passing tests. Strict host and wasm
 clippy were rerun separately after adding this witness. Production is unchanged
 from the six successful mutation/restore pairs. The prior 11 tests are unchanged
 from their slice-boundary passing run; no newer full-suite measurement is claimed.
+
+### Accepted-contract review: concrete response object ingress
+
+The selected native/default census contains 55 owners and seven aliases before
+integration of the production binding in PR #193. Independently authored
+contracts cover those exact 62 keys. The focused production runner emitted 41
+runtime results and 21 explicit classification receipts. These selected results
+do not establish dependency discovery, new binding owners or the feature/wasm
+matrix. Ordinary scoped discovery initially refused a stale shared Exchange
+receiver source pin; PR #263 repairs that pin separately.
+
+All 23 existing record decoders (22 public response records and private
+`quotes::Combined`) accepted otherwise valid complete positional arrays before
+repair. The executed baseline reported exactly 46 native mismatches: each record's
+Value and raw-text full-array cases expected refusal but observed actual decoded
+fields. Positive objects, scalar/null refusal and the other runtime cases passed.
+Applying object guards through private remote Serde schemas gave zero failures
+across the same 62 selected receipts, with unchanged compiler owner/alias counts.
+The shared numeric ingress pipeline and custom cash-transaction decoder remain
+in place. Native number projections compare binary64 bits, with raw-text cases
+retaining signed zero through contract loading.
+
+Each guard then had its own isolated compiled control: remove only the concrete
+`strict_decode::object(...)` wrapper, require both named full-array native
+observations to fail, restore exact source bytes, and require a passing native
+receipt. All 23 removal/restoration pairs passed; compilation failures were not
+accepted as controls. The formatted multiline InstrumentDetailsResponse call
+initially stopped the control selector before mutation; its whitespace-preserving
+selector was corrected and its actual failure/restoration pair then passed.
+
+The controls used fresh real compiler declarations and `runProbes(..., {target:
+"native", features: [], jobs: 1})`. For repeated body-only controls, all production
+source bytes were checked against that baseline or exactly the named guard
+removal, preserving declaration spans and line counts. This reuse conveys no
+ordinary discovery or matrix permission. Final restoration compared every venue
+production Rust file byte-for-byte with the guarded baseline.
+
+Reproduce an individual control by removing only that owner's object wrapper,
+leaving its remote schema intact, and running its production accepted-set probes;
+the `nativeObservation` complete-array Value/text cases must report expected
+`{"ok":false}` versus observed `{"ok":true,...}`. Restore and rerun. Decoder-field
+mutation selectors now target the remote schemas, including exactly 13 typed Vec
+fields rather than the duplicate public data-field declarations. Their runtime
+corpora and the broader crate gates still need a post-integration run before this
+PR is ready.
+
+# Per-crate contract storage integration
+
+After master #279/#286, only this PR's 62 Breakout rows moved to
+`accepted-set/contracts/safe-cex-venue-breakoutprop.json`; all 18 inherited master
+contract files were verified byte-identical. The deleted flat file was removed.
+The post-migration focused native run passed 62 receipts (41 executed runtime
+results and 21 explicit classifications), preserving exact compiler aliases.
+
+Two error-response projections now execute their raw-data observations rather
+than using effect-only classifications: validate_account distinguishes logged
+message from returned msg and truthy fallbacks; quotes::report retains object
+messages and propagates logger failure. All nine independently authored cases
+pass. The strengthened focused run passes 43 runtime results and 19 explicit
+classifications, still exactly 62 reviewed owners/aliases. An initial adapter
+build had a local variable shadowing error; it was corrected before execution
+and was not counted as a mutation failure.
+
+The full native venue suite passes 56 tests; scoped formatting and parity also
+pass (7459 rows, 17189 public Rust items). The ordinary accepted gate was rerun
+with #286 and refuses shared TransportFuture's Result-wrapped output against
+the current fixed local-future alias probe. That refusal remains visible; the
+shared policy owner is implementing finite support. These focused receipts do
+not claim a full dependency, feature or wasm accepted-gate pass.
+
+# Production Exchange binding and native registry (2026-10-16)
+
+The existing BreakoutpropExchange constructor now assembles shared js_runtime
+class functions/promises over the existing source ports and the real
+ProductionHost. All 16 trait methods are called by the constructor E2E;
+getAccount, fetchSymbolMaxLeverage, setLeverage, changePositionMode,
+changeMarginType, scheduleCancel and fetchPublicTrades retain BaseExchange's
+exact source Error("Not implemented") without HTTP. Caller client-order IDs
+reject before session acquisition. Private portfolio reads leave Store and
+loaded flags unchanged. This adapter uses DXtrade sessions and polling, with no
+network websocket; the scripted runtime panics on any dial.
+
+Measured verification:
+
+- Full venue suite, including the existing actual-TypeScript oracles: 70 tests
+  passed. Production binding target: 14 passed. Source oracles still load the
+  actual mirror source; no TypeScript or original fixture values were edited.
+- scripts/binding-controls.py: all 16 independent dispatch changes compiled,
+  failed their named production E2E at exit101, then restored source passed
+  14/14. These prove dispatch coverage, not complete JavaScript semantics.
+- scripts/registry-control.py: removal of only the Breakoutprop table entry
+  compiled and failed the actual native registry construction witness; original
+  source bytes restored and the native HTTP test passed 1/1.
+- http_failure_preserves_axios_code_and_config compiled and failed on lost
+  ECONNABORTED metadata before the bridge fix. The fixed production wire retains
+  code, config, Axios identity and response alongside original native metadata;
+  all 14 binding tests pass. Preliminary fixtures using an allowed network retry
+  code did not isolate metadata loss and are not counted as this proof.
+- Native registry E2E uses loopback reqwest HTTP for DXtrade login, startup,
+  reads, placement and cancellation. It checks the source login body, DXAPI
+  session header, independent amount/price rounding and no websocket dial.
+  Source formatPositions deliberately synthesizes a flat position for each
+  stored market; the integration assertion retains that behavior.
+
+The first native HTTP run exposed missing Axios baseURL/relative-URL joining in
+shared transport. That production defect is fixed separately in merged PR182;
+its actual-Axios eight-case comparison and compiling regression belong there.
+This binding is stacked on that fix and the required shared-limiter registry
+cutover in PR164. It preserves additive Coinbase and Polymarket constructors.
+
+Native DXtrade remoteSigner login refuses visibly. The native JS date realm
+explicitly uses UTC for offset-less legacy dates; other embedding hosts supply
+the required local_to_utc dependency. The Vec<String> native order-result ABI
+wraps a scalar source ID, retains scalar array entries and visibly refuses
+nonscalar IDs or lone surrogates. Existing strict-codec, owned snapshot and
+source helper scheduling choices remain disclosed in their original rows.
+Manifests were reconciled row by row, never regenerated.
+
+Final local gates: native venue all-targets strict clippy, native registry strict
+clippy and venue/registry wasm32 library strict clippy pass; scoped formatting
+passes. Native registry HTTP passes 1/1 and the constructor suite passes 13/13.
+Global parity passes with 7,459 rows and 17,108 public Rust items (zero findings).
+Layers pass 88/88; the live registry oracle observes 48 ordered names and its
+script test passes 1/1. Gate and mutation logs stay outside the repository.
+
+
+The production polling bridge reuses shared loop_util for the source five-second
+fallback, warning deduplication and deferred callback. An infinite interval
+returns before scheduling any task. poll_loop_uses_source_fallback_and_disables_infinity
+compiled and failed the original immediate callback, then passed after the fix.
+It covers omitted, zero, negative, NaN, configured finite and infinite intervals,
+and checks callback deferral separately from the sleep deadline. This adds one
+binding test; the final binding target is 14/14 and full venue suite is 70/70.
+
+# Binding-integrated construction review
+
+After inheriting #193, the ordinary gate named ProductionHost's private-field
+Clone as a new construction obligation, then refused the binding's glob import.
+The import is now the ten concrete used types; no scanner exemption was added.
+ProductionHost Clone retains reusable runtime/HTTP/provider/transport/date handles
+and the same parent attachment slot. Its exact construction review is separate
+from all raw API/record contracts.
+
+The integrated full venue suite passes 71 tests, including the new native cloned
+host witness: second-account construction rejects before any request and the
+original account still logs in with its original credentials. A control replaces
+only the derived host Clone with an implementation that detaches the parent slot;
+it compiles and fails the named live-account assertion at exit101. Exact source
+restoration then passes the same native test. This proves the attachment boundary
+without changing production Clone or adding any validation authority.
+
+# Five indexed inherited refusals: native proposal evidence
+
+The fresh compiler inventory indexes fetch_symbol_max_leverage, set_leverage,
+change_position_mode, change_margin_type and fetch_public_trades on the production
+Exchange implementation. get_account and schedule_cancel are absent from that
+indexed owner; no contract entries or unit-input permission are proposed for them.
+
+Each indexed method now has a native observer that calls the actual production
+Exchange method for two independently authored cases: empty state and seeded
+session/account/cache/balance state with different symbol/numeric/boolean inputs.
+The observations retain the exact refusal message/name/default metadata, zero HTTP,
+unchanged store/native balance bits/options/session/cache/disposal state, unchanged
+clock/tasks/reports and client/socket/login identities, and no store/error events.
+The binding target passes all 20 tests. Each of five independent dispatch-target
+controls compiles and fails its named native witness at exit 101; restoring exact
+production bytes passes that witness.
+
+The five exact proposed adapter expressions also compile and execute all ten cases
+in a native example against this library. That temporary example is removed; logs
+and proposed policy rows remain outside the repository. This proves the adapters,
+not accepted-set policy permission or a complete package gate. The ordinary gate
+and the binding-integrated inventory expansion remain separate work.
+
+# Binding-integrated mutation completion and typed refusal adapters
+
+The interrupted original corpus was resumed at its first incomplete control.
+All remaining 30 controls compiled, failed a named native assertion at exit 101,
+then passed after exact restoration: six default controls, six supplemental,
+fourteen consuming decoders, two auth decoders and two candle decoders. With the
+previous thirteen complete default controls, all 43 planned controls are proven.
+The final consuming/candle controls bypass their separate census/cardinality
+checks so decoded native full-value assertions independently detect element loss.
+Each corpus verified exact source/test bytes restored; no compiler failure counts
+as a negative control. This is the venue corpus, not the global accepted-set
+mutation gate.
+
+The first inherited-refusal expressions called concrete fixture methods and
+therefore did not meet the multi-entry validator's literal $type requirement.
+The corrected expressions name the actual owner and invoke its Exchange trait
+methods on the native observer's production receiver. All five exact expressions
+compile and execute the ten independently expected native cases. The observer
+returns the actual ExchangeError after polling; it creates no policy exception.
+
+# Five new binding owners and expanded lifecycle review
+
+The binding-integrated compiler inventory contains 67 owners/aliases: the original
+62 plus binding::decoded, binding::native_call, binding::report, host::PollingBase
+and host::ProductionHost. All 61 retained contracts outside the lifecycle owner
+remain structurally identical. That owner's entrypoints now retain all nine actual
+compiler APIs: its original constructor/listener, two portfolio reads and five
+indexed inherited refusals. The separate Clone construction obligation remains.
+
+The generic decoded function executes a concrete production Vec<String> profile
+with independent valid/order/Unicode and malformed shape/type cases. native_call
+executes actual production reads, an invalid order DTO and unbound dispatch.
+Portfolio reads observe native position/order fields and numeric bits, original
+auth headers and unchanged store/loading state. Their independent expectations
+also match executions of the actual maintained TypeScript formatters.
+PollingBase observations materialize real callbacks, reconcile native shared stats
+and inspect decoded ticker bid bits. ProductionHost observations exercise changing
+clock values, retained/released caller handler ownership, cleanup and zero HTTP.
+The report helper alone is classified as a specific native-string telemetry effect;
+it projects no raw error data, unlike the separately executed raw-error helpers.
+Its direct native witness checks exact worker error metadata and disposal suppression.
+
+scripts/accepted-binding-controls.py compiles seven exact production witnesses
+in their owning modules; all seven pass. Five independent behavior controls then
+produce their exact named native test failures at exit 101 and restored passes:
+decoder rejection, raw dispatch, statistics cleanup, handler ownership and telemetry.
+The script injects only test modules for baseline/restored runs and restores all
+production files byte-for-byte in finally. The named failure lines were separately
+verified for all five controls. The first telemetry expectation assumed a main-thread
+runtime; source review showed this maintained clock fixture is a worker, so that
+expectation was corrected before any telemetry control. It is not a porting-bug RED.
+
+These native witnesses do not grant shared inherited-refusal policy permission or
+clear the ordinary dependency/feature/wasm gates. PR252 remains draft for those gates.
+
+Fresh binding-integrated discovery and default native probing retain all 60 owners
+and seven aliases, exact compiler artifacts/expanded alias claims, one separately
+reviewed construction owner, and a clean local macro/helper scan. The 67 receipts
+contain 66 passes and one explicit lifecycle-owner refusal: the shared policy has
+not yet installed its five inherited constant-output entries. No owner is omitted.
+The seven direct production witnesses and ten exact refusal cases pass separately;
+they do not convert that policy refusal into an accepted-set pass.
+
+The pre-binding finite helper fixture also now implements the two newly required
+trait hooks with explicit panics outside its witness scope. A missing-method
+compile failure was fixed before runtime probing; it is not a negative control.
+All 76 tests in the integrated venue suite pass, and strict native all-targets
+clippy passes. Shared policy-table sharding and its ordinary gate refresh remain
+pending; the PR stays draft.
+
+# Per-crate reviewed policy storage integration
+
+After inheriting #315, only this PR's ProductionHost Clone row moves into
+construction/safe-cex-venue-breakoutprop.json. All 52 inherited master policy
+shards remain byte-identical; the deleted flat construction map is not restored.
+The direct native runner now uses loadPolicy for construction/default/receiver
+reviews. Five inherited-refusal source and fixture prerequisite hashes remain
+unchanged. Strict wasm32 library clippy passes.
+
+The post-split ordinary scoped gate still stops at the explicit shared
+safe_cex_transport::provider::NetworkFailure Clone/Copy construction review,
+tracked separately in #297. The finite inherited-refusal mechanism follows in
+#293; after it lands, this PR will add its five reviewed Breakout specs beside
+their actual Rust source and native fixture prerequisites. These are outstanding
+policy reviews, with no table fallback or classification bypass.
+
+The serialized post-split parity command exits zero: 7,459 rows and 17,204 public
+Rust items, with zero invention/status findings. Native all-targets clippy, wasm32
+library clippy, formatting and the 76-test venue suite pass. No accepted-set
+completion is claimed while the named shared and inherited-method reviews remain.
+
+
+# Native trait candle reads and polling listeners
+
+The constructed production-host tests in `tests/binding.rs` expose the actual
+Exchange trait defaults: four regressions fail before installing the hooks.
+The repaired native hooks dispatch candle reads through the existing
+`candles::fetch_ohlcv` orchestration and attach listeners to the actual polling
+container. Two distinct candle rows are inspected natively, independently of the
+ignored request limit. Request body/auth, original HTTP rejection metadata,
+polling ticks and cleanup-handler removal are checked at the real host boundary.
+An additional invalid-date test checks the original RangeError and absence of a
+marketdata POST. Login and account discovery retain their source ordering.
+
+`scripts/stream-binding-controls.py` compiles five independent production faults:
+removing the trait hooks, disabling both cleanup closures, returning zero candle
+rows, returning only one row, and bypassing shared Date TimeClip. Every fault
+fails its named runtime assertion with exit101; exact byte restoration passes
+all five binding regressions. The TimeClip fault also fails the actual JavaScript
+ISO comparison, and restoration passes that separate target.
+
+The canonical ISO formatter moved from websocket diagnostics into
+`safe-cex-num::js_date_to_iso_string`; the websocket wrapper delegates to it.
+`safe-cex-num/tests/date_iso.rs` compares exactly1,044 raw-bit inputs and completed
+outputs with actual `new Date(value).toISOString()`, including extended years,
+nonfinite values, signed zero, fractional milliseconds and both TimeClip edges.
+Only four whole-websocket-file cancellation dependency hashes change after
+review of the formatter move. Future creator bodies and cleanup guards retain
+their existing ownership. The all-features cancellation target passes all seven
+tests including explicit discovery export, with211 creators and no open findings;
+the override target passes8 tests and binding scanner25 tests. Scoped invention
+checks pass54 BreakoutProp rows/136 public items and233 num rows/193 public items.
+These counts describe the inspected native scope, not universal runtime parity.
+
+
+## Session auth queue and retry ordering
+
+Three `auth_pipeline_` tests in binding.rs compiled against master 5cce34378f
+and failed at the actual stale-token request outcome: queued invalidation sent a
+request instead of rejecting, while queued replacement and network retry both
+sent `DXAPI token` instead of `DXAPI replacement`. The native ProductionHost,
+Axios interceptor/limiter/retry implementation and real exchange session state
+run unchanged; only terminal HTTP and the deterministic timer are supplied.
+
+After moving auth into the native request interceptor, all three pass. A fourth
+control preserves overflow URL params and an untouched native Infinity field.
+Replacing retained parameter capture with JSON projection compiles and fails
+at the terminal `/users/{username}` request; exact source restoration passes all
+four. Existing 401 recovery, HTTP metadata, source order payload and the API
+source comparison pass, as does strict Clippy for both touched test targets.
+The all-features cancellation inventory passes six tests; override inventory,
+parity (7459 rows) and TS extractor check pass without unrelated pin changes.
+
+## Money-path amendment caller-ID guard
+
+`binding::amendment_preserves_caller_id_and_refuses_replacement_after_cancellation`
+drives the public constructed exchange through actual session/account/client I/O.
+Four maintained-source cases use actual updateOrder/placeOrder and BaseExchange
+resolveCallerClientOrderId/rejectPreflight bodies. Absent and own-undefined IDs
+cancel then replace; nonempty and empty IDs cancel then emit one refusal with no
+replacement POST. The original runtime body compiles/fails with Ok(["placed"])
+versus the required refusal; exact final bytes restored and the test passes.
+
+Final normal-master refresh through52d945d9ac: binding55 +polling_lifecycle10,
+native/Wasm all-target strict Clippy, all-features cancellation6/1export-ignore,
+override7/1live-TS-ignore, binding gate25, parity7459/16581 and extractor0 pass.
+Logs: /tmp/breakout-amendment-caller-{red,native,control-red,control-restored,
+native-clippy,wasm-clippy,inventories,parity,extract}.log.

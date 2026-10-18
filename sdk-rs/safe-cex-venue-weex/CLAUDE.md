@@ -1,8 +1,96 @@
 # WEEX Rust venue
 
+`WeexExchange` and `WeexDependencies` expose the production composition. The
+concrete binding supplies every class member through the existing native bodies,
+shared js_runtime services, native-number bridges, Store facade, HTTP factory,
+retry engine and BaseWebSocket lifecycle. The generic class interface retains
+its separately declared host contract; older extraction-stage notes below refer
+to those standalone components.
+
+The host supplies HTTP/WS runtime, an optional external-data factory and local
+wall-time conversion. The native registry supplies the common signed HTTP host,
+gateway factory and UTC date profile, with its existing caller-owned limiter.
+The source's inherited scheduleCancel rejection remains `Not implemented`.
+Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
+native body; batch capability registration invokes the source batch algorithm.
+The trading runtime's `updateStoredOrder` capability binds the real Store's
+`updateOrder` with its Store receiver. Accepted single/batch PostOnly placements
+and TP/SL amendments then apply the source patch and return IDs.
+Successful batch replies require a positive ASCII decimal order ID, exactly like
+the source regex. Every result is validated before any PostOnly Store patch;
+leading zeroes, signs, whitespace and nondecimal strings visibly refuse the batch. Constructed
+regressions check existing and absent rows, batch-result reordering and both
+protective order types; an absent row remains absent.
+
+The explicit Weex bigint response parser consumes original wire tokens on both
+success and HTTP failure before venue status/error handling. Private WS uses the
+shared prepared dial operation with required headers and a retained auth provider
+for every attempt. The inherited exchange dispose reaches source socket overrides
+through the shared JsProtocol hook: public cleanup removes its symbol listener,
+and private cleanup cancels all three refresh timers before core disposal.
+Source-own methods retain weak receivers; externally returned unsubscribe closures
+and pending snapshot observers retain their host until cleanup or settlement.
+
+The source nukePositions body replaces Store.positions with the refetched snapshot.
+It does not merge positions absent from that response. Constructed exchange tests
+call the public Exchange trait and cover both nonempty and empty
+REST responses, stale IDs, updated contracts and exact fake-zero snapshots. The
+public trait wiring remains separate from this Store-policy correction.
+
+Positions and historical fills use the source's default extractArray admission:
+raw arrays and the `data` array only. Extra `items`, `list` and `rows` wrappers
+are ignored. Constructed HTTP regressions cover all six direct/nested extra
+wrappers plus the two accepted forms, retaining fake zero positions when needed.
+
+Historical-fill pages apply the final strict-field policy per row. The concrete
+normalizer warns with the offending field/value and refuses only an Execution
+whose maker or commission asset cannot inhabit the shared model, retaining all
+valid rows. Missing maker stays absent, false stays false, and assets are never
+coerced. Source coercion/capture errors retain their order and propagation;
+warning subscriber failures also propagate. Both the public utility and the
+binding use one normalization pipeline; standalone utility error names/messages
+remain unchanged. This intentionally differs from TS retaining malformed rows.
+Mixed-page and all-refused-page regressions use the constructed exchange.
+
+Market snapshots apply the same strict-field policy per row. Source coercions
+finish before required-string admission; a malformed symbol or base is reported
+with its field and received value, then only that row is omitted. An all-refused
+page returns an empty snapshot. Source coercion/capture failures still use the
+existing error/cached-market catch. The utility and binding share one normalizer;
+the utility's prior error messages stay unchanged. Constructed tests cover twelve
+mixed-page refusals, an all-refused page and source-error precedence. An actual
+maintained-method probe separately pins TS retaining all raw fields; this is an
+intentional typed-output difference, not arbitrary malformed-input parity.
+
+`tests/exchange_binding.rs` drives production methods through scripted native HTTP
+and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
+request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
+disables each of the sixteen required bindings, requires its compiled native
+witness to fail and restores the complete target. Standalone algorithm/source
+oracles and their existing mutation runners remain independent evidence.
+Gap re-snapshot failures and routed-callback throws are silently discarded,
+matching source. Initial book subscription failures retain their source warning.
+Constructed HTTP/socket coverage checks no gap warning, no failed replacement
+delivery and a later contiguous update against the retained book.
+
+Remaining reporting and async ownership choices remain priced at
+[weex-async-observation-choice](../parity/MANIFEST-SPEC.md#weex-async-observation-choice);
+normalizer record boundaries keep their existing declarations.
+
+`fetchOrders` retains only fulfilled normal/algo legs and silently discards each
+rejection, matching Promise.allSettled in the maintained source. Its constructed
+regression checks successful rows and the actual error emitter after one HTTP
+leg rejects. The removed reporting capability and old native-only expectation
+are no longer part of the account-read runtime; source order/dedup mutation
+coverage replaces the former reporting-divergence control.
+
+
 The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly and
 async observation choices cite their explicit MANIFEST-SPEC anchors; ready
-private-refresh reactions suspend before disposal checks, updates and reports.
+private-refresh reactions suspend before disposal checks and updates. All three
+refresh callbacks silently catch fetch and Store-update failures, matching source.
+The real private-account-frame regression rejects its balance REST refresh and
+checks that the old balance survives with no host exception report.
 
 The API request callback signs an already serialized string body verbatim on
 replay, matching the bytes Axios sends. Other truthy values still use JSON
@@ -42,6 +130,37 @@ and [§19](../parity/MANIFEST-SPEC.md#forced-surrogate-conflict).
 The response target checks declared shapes, native fields and depth-150 refusals;
 record_boundaries adds differentiated native names/IDs and exact source unit
 observations without treating the aliases as runtime validators.
+
+`tests/accepted_responses.rs` separately inspects the four response owners through
+raw and qualified Deserialize calls: optional fields, object/array variants and
+binary64 bits precede any owner serialization. The accepted-set contracts execute
+additional direct native projections. Run `tests/accepted-response-controls.py`
+alone to remove each object response's guard in turn: a complete valid array in
+Serde field order must fail the named assertion, then restoring the guard must
+pass all four tests. The record union continues to admit arrays.
+
+Forty-nine selected helper contracts record individually reviewed dispatch,
+request-construction and host-operation roles with exact compiler signatures.
+Their native receipts are classification evidence. Response owners use the
+separate executed decoder observations above.
+
+Retained-input, typed-error conversion, present-field, optional-boolean and
+public-trade contracts execute direct native adapters. The three generic class
+constructors have typed API classifications; their concrete Factory behavior is
+covered by the production constructor E2E, including both source sockets.
+
+The concrete Host and Factory contracts additionally execute native property
+lookup, receiver binding, requests, callback bodies and prototype linkage. The
+concrete Exchange contracts call all twelve selected raw-input methods through
+the production binding with scripted HTTP/WS hosts. They inspect native model
+fields and numeric bits, request effects, and order-book delivery and cleanup.
+`accepted-set/weex-binding-fixture.rs` reuses the E2E I/O hosts for these adapters;
+it replaces no venue method. The constant-table projection uses a module-scope
+typed serializer helper instead of a local macro with opaque declaration effects.
+
+Run `tests/accepted-binding-controls.mjs` alone to remove capture, undefined
+omission and side-normalizer routing in turn. Each compiling production mutation
+must fail its native contract; exact source restoration must pass.
 
 Seven enum normalizers in `src/utils.rs` mirror their source control flow and use
 the actual shared tables. `WeexUtilityInput` captures its opaque `value` with
@@ -412,3 +531,40 @@ Snapshot rulings cite [§16](../parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-a
 Market/response admission rulings cite the record-shape declaration above.
 Native assertions precede oracle-wire comparisons, and existing corpora remain
 unchanged.
+
+The typed Exchange `fetch_leverage_for_symbol` entrypoint uses the existing WEEX
+symbol-config member. Cross leverage and separate isolated buy/sell values update
+`fetchedLeverage`; the market maximum belongs only to `fetch_symbol_max_leverage`.
+The production binding tests distinguish those paths through the public trait.
+
+WEEX's assembled UUID callbacks and client-ID mint remove both nanoid separators
+before prefixing or truncation, matching the source UUID helper. The production
+binding regressions retain caller IDs verbatim and exercise generated ordinary,
+conditional, protective and minted IDs with controlled runtime entropy. Real
+private frames additionally cover order/position Store writes, the REST balance
+refresh triggered by account frames, and the emitted fill event.
+
+API signing and private WebSocket upgrade headers read the shared synced
+`VIRTUAL_CLOCK`, matching the source's `getCurrentTimeMs()` calls. Retry-After
+parsing and public socket pacing retain their source raw clocks. The production
+binding's `synced_clock` regression independently checks HMACs and synced time
+for REST and two private dials with different server corrections, so reopening
+must reevaluate the current offset.
+
+The typed Exchange `nuke` and `nuke_positions` entrypoints dispatch to the existing
+WEEX members: close all venue positions, replace the refreshed snapshot, then
+(for `nuke`) cancel ordinary and algo orders. The source has no retry-count input.
+`exchange_binding` proves endpoint reachability from an empty Store and close/refresh/
+cancel order; private order, position and account frames assert actual Store changes
+alongside the retained fill-event witness.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` adds
+96 field-independent cases through the constructed production socket/Store:
+consecutive ticker frames, object/array payloads and finite fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py weex` fault must fail that test and
+pass after exact source restoration.

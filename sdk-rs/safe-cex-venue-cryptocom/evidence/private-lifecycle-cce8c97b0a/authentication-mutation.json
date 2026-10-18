@@ -1,6 +1,0 @@
-{
-  "base_sha": "cce8c97b0a0c965a25c360d8928827888eaf03a1",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n@@ -124,7 +124,7 @@\n         if let Err(error) = result {\n             // Catch-body effects/errors lie outside the source try block.\n             let emit = host.prepare_error_emit()?;\n-            let message = \"Failed to authenticate WebSocket: \"\n+            let message = \"Wrong authentication prefix: \"\n                 .encode_utf16()\n                 .chain(host.error_as_template(error)?)\n                 .collect();\n",
-  "expected_named_assertion": "CRYPTOCOM-LIFECYCLE-NATIVE-EMIT auth-catch-generate before-poll"
-}

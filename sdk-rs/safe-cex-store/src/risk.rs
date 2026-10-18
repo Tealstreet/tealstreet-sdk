@@ -54,21 +54,24 @@ fn js_sort<T>(rows: &mut [T], compare: impl Fn(&T, &T) -> Ordering) {
         rows[left..=i].rotate_right(1);
     }
 }
-fn opposite(side: PositionSide) -> PositionSide {
+fn opposite(side: impl Into<safe_cex_types::ModelField<PositionSide>>) -> PositionSide {
+    let side = side.into();
     if side == PositionSide::Long {
         PositionSide::Short
     } else {
         PositionSide::Long
     }
 }
-fn closing_side(side: PositionSide) -> OrderSide {
+fn closing_side(side: impl Into<safe_cex_types::ModelField<PositionSide>>) -> OrderSide {
+    let side = side.into();
     if side == PositionSide::Long {
         OrderSide::Sell
     } else {
         OrderSide::Buy
     }
 }
-fn side_name(side: PositionSide) -> &'static str {
+fn side_name(side: impl Into<safe_cex_types::ModelField<PositionSide>>) -> &'static str {
+    let side = side.into();
     if side == PositionSide::Long {
         "Long"
     } else {
@@ -242,26 +245,27 @@ fn is_full_stop(order: &Order) -> bool {
 pub fn filter_and_sort_orders_in_profit_direction(
     orders: &[Order],
     entry_price: f64,
-    side: PositionSide,
+    side: impl Into<safe_cex_types::ModelField<PositionSide>>,
 ) -> Vec<Order> {
+    let side = side.into();
     let mut filtered: Vec<_> = orders
         .iter()
         .filter(|o| {
             o.status == OrderStatus::Open
                 && o.side == closing_side(side)
                 && if side == PositionSide::Long {
-                    o.price >= entry_price
+                    o.price.to_number() >= entry_price
                 } else {
-                    o.price <= entry_price
+                    o.price.to_number() <= entry_price
                 }
         })
         .cloned()
         .collect();
     js_sort(&mut filtered, |a, b| {
         if side == PositionSide::Long {
-            compare_difference(a.price, b.price)
+            compare_difference(a.price.to_number(), b.price.to_number())
         } else {
-            compare_difference(b.price, a.price)
+            compare_difference(b.price.to_number(), a.price.to_number())
         }
     });
     filtered
@@ -269,26 +273,27 @@ pub fn filter_and_sort_orders_in_profit_direction(
 pub fn filter_and_sort_orders_in_loss_direction(
     orders: &[Order],
     entry_price: f64,
-    side: PositionSide,
+    side: impl Into<safe_cex_types::ModelField<PositionSide>>,
 ) -> Vec<Order> {
+    let side = side.into();
     let mut filtered: Vec<_> = orders
         .iter()
         .filter(|o| {
             o.status == OrderStatus::Open
                 && (o.side == closing_side(side) || o.r#type == OrderType::Limit)
                 && if side == PositionSide::Long {
-                    o.price < entry_price
+                    o.price.to_number() < entry_price
                 } else {
-                    o.price > entry_price
+                    o.price.to_number() > entry_price
                 }
         })
         .cloned()
         .collect();
     js_sort(&mut filtered, |a, b| {
         if side == PositionSide::Short {
-            compare_difference(a.price, b.price)
+            compare_difference(a.price.to_number(), b.price.to_number())
         } else {
-            compare_difference(b.price, a.price)
+            compare_difference(b.price.to_number(), a.price.to_number())
         }
     });
     filtered
@@ -338,7 +343,7 @@ pub fn calculate_orders_risk(
             fake.entry_price = last;
             active.push(fake.clone());
             if p.position_mode != Some(PositionMode::Hedged) {
-                fake.side = opposite(p.side);
+                fake.side = (opposite(p.side)).into();
                 active.push(fake);
             }
         }
@@ -366,7 +371,7 @@ fn risk_line(order_pnl: f64, rolling: f64) -> Result<String, RiskError> {
 // Direct constructor for the eight-field TS result row.
 #[allow(clippy::too_many_arguments)]
 fn profile(
-    side: PositionSide,
+    side: safe_cex_types::ModelField<PositionSide>,
     pnl: f64,
     total: f64,
     rolling: f64,
@@ -380,7 +385,7 @@ fn profile(
         order_pnl: pnl,
         total_realized_pnl: total,
         rolling_unrealized_pnl: rolling,
-        order_line_pos_side: side,
+        order_line_pos_side: side.into_property(),
         position_size: size,
         order_line_text: Some(text),
         fee: Some(fee),
@@ -428,9 +433,9 @@ fn process_orders_risk_for_positions(
             if size <= 0.0 {
                 break;
             }
-            let mut distance = (order.price - p.entry_price).abs();
-            if (p.side == PositionSide::Long && order.price < p.entry_price)
-                || (p.side == PositionSide::Short && order.price > p.entry_price)
+            let mut distance = (order.price.to_number() - p.entry_price).abs();
+            if (p.side == PositionSide::Long && order.price.to_number() < p.entry_price)
+                || (p.side == PositionSide::Short && order.price.to_number() > p.entry_price)
             {
                 distance = -distance;
             }
@@ -440,7 +445,7 @@ fn process_orders_risk_for_positions(
                 && order.r#type == OrderType::Limit
                 && order.side == closing_side(p.side)
                 && hedged
-                && !order.reduce_only
+                && order.reduce_only != true
             {
                 if !safe_cex_num::js_table_lookup::<&str, ()>(&[], &order.id).is_present() {
                     result.entry(order.id.clone()).or_default();
@@ -459,12 +464,12 @@ fn process_orders_risk_for_positions(
                     multiply(size, distance),
                     0.0,
                     format!("PnL: {}", format_pnl(total, None, None)?),
-                    multiply(size * order.price, taker),
+                    multiply(size * order.price.to_number(), taker),
                     true,
                 ));
                 let mut fake = p.clone();
-                fake.side = opposite(p.side);
-                fake.entry_price = order.price;
+                fake.side = (opposite(p.side)).into();
+                fake.entry_price = order.price.to_number();
                 fake.contracts = 0.0;
                 next.push(fake);
                 break;
@@ -474,7 +479,7 @@ fn process_orders_risk_for_positions(
                 total += pnl;
                 let next_size = size - order.remaining;
                 let mut text = risk_line(pnl, rolling)?;
-                if !hedged && order.remaining > size && !order.reduce_only {
+                if !hedged && order.remaining > size && order.reduce_only != true {
                     text.push_str(&format!(", Opens {}", side_name(opposite(p.side))));
                 }
                 rows.push(profile(
@@ -484,14 +489,17 @@ fn process_orders_risk_for_positions(
                     rolling,
                     next_size,
                     text,
-                    multiply(js_min(size, order.remaining) * order.price, maker),
+                    multiply(
+                        js_min(size, order.remaining) * order.price.to_number(),
+                        maker,
+                    ),
                     false,
                 ));
                 size = next_size;
                 if size <= 0.0 {
                     let mut fake = p.clone();
-                    fake.side = opposite(p.side);
-                    fake.entry_price = order.price;
+                    fake.side = (opposite(p.side)).into();
+                    fake.entry_price = order.price.to_number();
                     fake.contracts = size.abs();
                     next.push(fake);
                     break;
@@ -502,9 +510,9 @@ fn process_orders_risk_for_positions(
         total = 0.0;
         let mut adjusted = p.entry_price;
         for order in loss {
-            let distance = (order.price - adjusted).abs();
-            let mult = if (p.side == PositionSide::Long && order.price < adjusted)
-                || (p.side == PositionSide::Short && order.price > adjusted)
+            let distance = (order.price.to_number() - adjusted).abs();
+            let mult = if (p.side == PositionSide::Long && order.price.to_number() < adjusted)
+                || (p.side == PositionSide::Short && order.price.to_number() > adjusted)
             {
                 -1.0
             } else {
@@ -522,13 +530,13 @@ fn process_orders_risk_for_positions(
                     mult * multiply(size, distance),
                     0.0,
                     format!("PnL: {}", format_pnl(total, None, None)?),
-                    multiply(size * order.price, taker),
+                    multiply(size * order.price.to_number(), taker),
                     true,
                 ));
                 break;
             } else if order.r#type == OrderType::Limit {
-                adjusted =
-                    (order.remaining * order.price + size * adjusted) / (size + order.remaining);
+                adjusted = (order.remaining * order.price.to_number() + size * adjusted)
+                    / (size + order.remaining);
                 let rolling = mult * multiply(size, distance);
                 let next_size = size + order.remaining;
                 let text = if size == 0.0 {
@@ -550,7 +558,7 @@ fn process_orders_risk_for_positions(
                     rolling,
                     next_size,
                     text,
-                    multiply(order.remaining * order.price, maker),
+                    multiply(order.remaining * order.price.to_number(), maker),
                     false,
                 );
                 row.position_size_before_fee = true;
@@ -560,7 +568,7 @@ fn process_orders_risk_for_positions(
                     break;
                 }
             } else {
-                let triggered = if order.reduce_only {
+                let triggered = if order.reduce_only == true {
                     js_min(size, order.remaining)
                 } else {
                     order.remaining
@@ -576,7 +584,7 @@ fn process_orders_risk_for_positions(
                     rolling,
                     next_size,
                     risk_line(pnl, rolling)?,
-                    multiply(triggered * order.price, maker),
+                    multiply(triggered * order.price.to_number(), maker),
                     false,
                 ));
                 size = next_size;
@@ -589,11 +597,10 @@ fn process_orders_risk_for_positions(
     Ok((result.into_iter().collect(), next))
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RiskAtPrice {
     pub position_size: f64,
-    pub position_side: PositionSide,
+    pub position_side: safe_cex_types::ModelField<PositionSide>,
     pub unrealized_pnl: f64,
     pub realized_pnl: f64,
 }
@@ -613,7 +620,7 @@ pub fn calculate_risk_at_price(
         .iter()
         .filter(|p| p.contracts.abs() > 0.0)
         .collect();
-    let mut side = PositionSide::Long;
+    let mut side = safe_cex_types::ModelField::Value(PositionSide::Long);
     let mut entry = 0.0;
     let mut size = 0.0;
     if !open.is_empty() {
@@ -639,30 +646,37 @@ pub fn calculate_risk_at_price(
                 o.status == OrderStatus::Open
                     && o.symbol == symbol
                     && o.side == OrderSide::Sell
-                    && !o.reduce_only
+                    && o.reduce_only != true
             })
             .collect();
-        js_sort(&mut sells, |a, b| compare_difference(a.price, b.price));
+        js_sort(&mut sells, |a, b| {
+            compare_difference(a.price.to_number(), b.price.to_number())
+        });
         let mut buys: Vec<_> = orders
             .iter()
             .filter(|o| {
                 o.status == OrderStatus::Open
                     && o.symbol == symbol
                     && o.side == OrderSide::Buy
-                    && !o.reduce_only
+                    && o.reduce_only != true
             })
             .collect();
-        js_sort(&mut buys, |a, b| compare_difference(b.price, a.price));
-        if let Some(order) = sells.first().filter(|o| buys.is_empty() || price > o.price) {
-            side = PositionSide::Short;
-            entry = order.price;
+        js_sort(&mut buys, |a, b| {
+            compare_difference(b.price.to_number(), a.price.to_number())
+        });
+        if let Some(order) = sells
+            .first()
+            .filter(|o| buys.is_empty() || price > o.price.to_number())
+        {
+            side = PositionSide::Short.into();
+            entry = order.price.to_number();
             size = order.remaining;
         } else {
             let order = buys
                 .first()
-                .filter(|o| sells.is_empty() || price < o.price)?;
-            side = PositionSide::Long;
-            entry = order.price;
+                .filter(|o| sells.is_empty() || price < o.price.to_number())?;
+            side = PositionSide::Long.into();
+            entry = order.price.to_number();
             size = order.remaining;
         }
     }
@@ -675,18 +689,18 @@ pub fn calculate_risk_at_price(
             o.status == OrderStatus::Open
                 && o.symbol == symbol
                 && (if price > entry {
-                    o.price > entry && o.price <= price
+                    o.price.to_number() > entry && o.price.to_number() <= price
                 } else {
-                    o.price < entry && o.price >= price
+                    o.price.to_number() < entry && o.price.to_number() >= price
                 })
                 && risk.get(&o.id).is_some_and(|r| !r.is_empty())
         })
         .collect();
     js_sort(&mut candidates, |a, b| {
         if price > entry {
-            compare_difference(b.price, a.price)
+            compare_difference(b.price.to_number(), a.price.to_number())
         } else {
-            compare_difference(a.price, b.price)
+            compare_difference(a.price.to_number(), b.price.to_number())
         }
     });
     if let Some(order) = candidates.first() {
@@ -694,12 +708,12 @@ pub fn calculate_risk_at_price(
         size = pivot.position_size;
         offset = pivot.rolling_unrealized_pnl - pivot.order_pnl;
         total = pivot.total_realized_pnl;
-        reference = order.price;
+        reference = order.price.to_number();
         side = pivot.order_line_pos_side;
     }
     Some(RiskAtPrice {
         position_size: size,
-        position_side: side,
+        position_side: side.into_property(),
         unrealized_pnl: (price - reference)
             * size
             * if side == PositionSide::Long {
@@ -717,7 +731,7 @@ mod tests {
     use super::*;
     fn position(side: PositionSide) -> Position {
         let mut p:Position=serde_json::from_value(serde_json::json!({"id":"p","symbol":"BTC","side":"long","entryPrice":100,"notional":200,"leverage":5,"unrealizedPnl":10,"contracts":2,"liquidationPrice":0})).unwrap();
-        p.side = side;
+        p.side = (side).into();
         p
     }
     fn order(id: &str, price: f64, remaining: f64) -> Order {
@@ -731,7 +745,7 @@ mod tests {
         let p = position(PositionSide::Long);
         let tp = order("tp", 110.0, 1.0);
         let mut stop = order("stop", 90.0, 0.0);
-        stop.r#type = OrderType::StopLoss;
+        stop.r#type = safe_cex_types::ModelField::Value(OrderType::StopLoss);
         let market:Market=serde_json::from_value(serde_json::json!({"id":"BTC","symbol":"BTC","base":"BTC","quote":"USD","active":true,"precision":{"amount":0.01,"price":0.01},"limits":{"amount":{"min":0,"max":100},"leverage":{"min":1,"max":100}},"makerFee":0.001,"takerFee":0.002})).unwrap();
         let orders = vec![tp, stop];
         let positions = vec![p];
@@ -754,8 +768,8 @@ mod tests {
     fn hedge_ambiguity_and_numeric_truthiness() {
         let mut long = position(PositionSide::Long);
         let mut short = position(PositionSide::Short);
-        long.position_mode = Some(PositionMode::Hedged);
-        short.position_mode = Some(PositionMode::Hedged);
+        long.position_mode = (Some(PositionMode::Hedged)).into();
+        short.position_mode = (Some(PositionMode::Hedged)).into();
         assert!(
             calculate_risk_at_price(
                 105.0,
@@ -829,9 +843,9 @@ mod tests {
                     1.0,
                 );
                 if i % 11 == 0 {
-                    row.price = f64::NAN;
+                    row.price = (f64::NAN).into();
                 }
-                row.reduce_only = false;
+                row.reduce_only = false.into();
                 row
             })
             .collect();
@@ -916,5 +930,19 @@ mod language_tests {
         assert_eq!(safe_cex_num::parse_float("\u{feff}12.5tail"), 12.5);
         assert!(safe_cex_num::parse_float("\u{0085}12.5").is_nan());
         assert!(safe_cex_num::parse_float("\u{001c}12.5").is_nan());
+    }
+}
+
+impl Serialize for RiskAtPrice {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state =
+            serializer.serialize_struct(safe_cex_types::model_field::MODEL_RECORD, 4)?;
+        state.serialize_field("positionSize", &self.position_size)?;
+        self.position_side
+            .serialize_field(&mut state, "positionSide")?;
+        state.serialize_field("unrealizedPnl", &self.unrealized_pnl)?;
+        state.serialize_field("realizedPnl", &self.realized_pnl)?;
+        state.end()
     }
 }

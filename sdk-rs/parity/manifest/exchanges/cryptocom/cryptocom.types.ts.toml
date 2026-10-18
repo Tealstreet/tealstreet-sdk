@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/cryptocom/cryptocom.types.ts"
-rust_files = [ "safe-cex-venue-cryptocom/src/types.rs", "safe-cex-venue-cryptocom/src/wire.rs", "safe-cex-venue-cryptocom/src/ws_payloads.rs", "safe-cex-venue-cryptocom/src/account_envelopes.rs", "safe-cex-venue-cryptocom/src/public_endpoints.rs", "safe-cex-venue-cryptocom/src/wire_record.rs", "safe-cex-num/src/numeric_ingress.rs" ]
+rust_files = [ "safe-cex-venue-cryptocom/src/types.rs", "safe-cex-venue-cryptocom/src/wire.rs", "safe-cex-venue-cryptocom/src/ws_payloads.rs", "safe-cex-venue-cryptocom/src/public_endpoints.rs", "safe-cex-venue-cryptocom/src/wire_record.rs", "safe-cex-num/src/numeric_ingress.rs" ]
 
 [[symbol]]
 ts = "mapCandlestickInterval"
@@ -141,18 +141,18 @@ note = "FORCED: observed D800 in present optional account_id; residual cause: sd
 [[symbol]]
 ts = "CryptocomOrderRequest"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomOrderRequest", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomOrderRequest::from_native", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestType", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestType::from_units", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestTimeInForce", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestTimeInForce::from_units", "safe-cex-venue-cryptocom/src/account_envelopes.rs::NativeRecord", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost", "safe-cex-venue-cryptocom/src/account_envelopes.rs::optional", "safe-cex-venue-cryptocom/src/account_envelopes.rs::strings", "safe-cex-venue-cryptocom/src/account_envelopes.rs::equal", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::field", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::string", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::number", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::boolean", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::undefined", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::record", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::array", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::invalid_literal", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::Error", "safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::Value" ]
-status = "ported"
-note = "Renamed/split targets: `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomOrderRequest`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomOrderRequest::from_native`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestType`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestType::from_units`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestTimeInForce`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomRequestTimeInForce::from_units`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::NativeRecord`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::optional`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::strings`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::equal`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::field`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::string`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::number`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::boolean`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::undefined`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::record`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::array`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::invalid_literal`. Full request fields, six closed order-type literals and four time-in-force literals; optional string/boolean/vector members retain declared primitive values. Shared NativeRecord/host/projection helpers represent typed captured native field carriers and preserve generic referents, not a source interface runtime validator. Static port/adapted at captured typed-native member projection boundary. Rust Vec<u16> retains UTF16 including lone surrogates/NUL, f64 retains source Number bits, NativeRecord<V>/unknown/generic<T> preserve original native reference carriers. Optionality describes field reads, not own-key presence. Tests/account_envelopes.rs reads actual source interface schemas, asserts every decoded native field/literal/presence and original pointer BEFORE schema/census inventories, proves original decoded record/result survives parent replacement and allows old object mutation. Independent floor235 stops index234 CryptocomAccountSummary:account-undefined-account_id. JSON serialization/deserialization, ordinary getters/prototypes/own keys, object/array alias bindings outside generic record/result carriers, interface runtime validation and class/API wiring remain pending. No encoder/reencoder/roundtrip proof. Split member `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::Error`. Associated type Error of host trait AccountEnvelopeHost, which this row already maps; the row body calls through AccountEnvelopeHost members whose signatures carry Error. Split member `safe-cex-venue-cryptocom/src/account_envelopes.rs::AccountEnvelopeHost::Value`. Associated type Value of host trait AccountEnvelopeHost, which this row already maps; the row body calls through AccountEnvelopeHost members whose signatures carry Value."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "CryptocomPosition"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomPosition", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomPosition::from_native" ]
-status = "ported"
-note = "Renamed/split targets: `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomPosition`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomPosition::from_native`. Full fifteen REST position fields, including optional account/position/leverage/margin/string and numeric update timestamp, three position-type literals and optional ISOLATED_MARGIN. Reuses already mapped native WS literal enums. Static port/adapted at captured typed-native member projection boundary. Rust Vec<u16> retains UTF16 including lone surrogates/NUL, f64 retains source Number bits, NativeRecord<V>/unknown/generic<T> preserve original native reference carriers. Optionality describes field reads, not own-key presence. Tests/account_envelopes.rs reads actual source interface schemas, asserts every decoded native field/literal/presence and original pointer BEFORE schema/census inventories, proves original decoded record/result survives parent replacement and allows old object mutation. Independent floor235 stops index234 CryptocomAccountSummary:account-undefined-account_id. JSON serialization/deserialization, ordinary getters/prototypes/own keys, object/array alias bindings outside generic record/result carriers, interface runtime validation and class/API wiring remain pending. No encoder/reencoder/roundtrip proof."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "CryptocomAccountsResponse"
@@ -165,10 +165,10 @@ note = "FORCED: observed D800 in this_account.uuid; residual cause: sdk-rs/parit
 [[symbol]]
 ts = "CryptocomAccountSummary"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccountSummary", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccountSummary::from_native", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccount", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccount::from_native" ]
-status = "ported"
-note = "Renamed/split targets: `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccountSummary`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccountSummary::from_native`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccount`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomAccount::from_native`. Full accounts array and all thirteen anonymous account fields, including eight numeric account measures, flags, currency/margin-score strings, optional account id. Anonymous account carrier has explicit split ownership. Static port/adapted at captured typed-native member projection boundary. Rust Vec<u16> retains UTF16 including lone surrogates/NUL, f64 retains source Number bits, NativeRecord<V>/unknown/generic<T> preserve original native reference carriers. Optionality describes field reads, not own-key presence. Tests/account_envelopes.rs reads actual source interface schemas, asserts every decoded native field/literal/presence and original pointer BEFORE schema/census inventories, proves original decoded record/result survives parent replacement and allows old object mutation. Independent floor235 stops index234 CryptocomAccountSummary:account-undefined-account_id. JSON serialization/deserialization, ordinary getters/prototypes/own keys, object/array alias bindings outside generic record/result carriers, interface runtime validation and class/API wiring remain pending. No encoder/reencoder/roundtrip proof."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "CryptocomTradeFill"
@@ -181,26 +181,26 @@ note = "FORCED: observed D800 in account_id; residual cause: sdk-rs/parity/MANIF
 [[symbol]]
 ts = "CryptocomWsRequest"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsRequest", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsRequest::from_native" ]
-status = "ported"
-note = "Renamed/split targets: `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsRequest`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsRequest::from_native`. Full id/method/params/api_key/sig/nonce contract. Optional params NativeRecord retains original generic string-keyed native object; constructor does not hold a borrow guard across later parent-field replacement or mutation. Static port/adapted at captured typed-native member projection boundary. Rust Vec<u16> retains UTF16 including lone surrogates/NUL, f64 retains source Number bits, NativeRecord<V>/unknown/generic<T> preserve original native reference carriers. Optionality describes field reads, not own-key presence. Tests/account_envelopes.rs reads actual source interface schemas, asserts every decoded native field/literal/presence and original pointer BEFORE schema/census inventories, proves original decoded record/result survives parent replacement and allows old object mutation. Independent floor235 stops index234 CryptocomAccountSummary:account-undefined-account_id. JSON serialization/deserialization, ordinary getters/prototypes/own keys, object/array alias bindings outside generic record/result carriers, interface runtime validation and class/API wiring remain pending. No encoder/reencoder/roundtrip proof."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "CryptocomWsResponse"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsResponse", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsResponse::from_native" ]
-status = "ported"
-note = "Renamed/split targets: `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsResponse`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsResponse::from_native`. Full optional id/method/message/result and required code. Unknown result is original generic native value, including null, arrays, objects, functions, symbols and bigint; undefined field reads are None, without own-key presence claims. Static port/adapted at captured typed-native member projection boundary. Rust Vec<u16> retains UTF16 including lone surrogates/NUL, f64 retains source Number bits, NativeRecord<V>/unknown/generic<T> preserve original native reference carriers. Optionality describes field reads, not own-key presence. Tests/account_envelopes.rs reads actual source interface schemas, asserts every decoded native field/literal/presence and original pointer BEFORE schema/census inventories, proves original decoded record/result survives parent replacement and allows old object mutation. Independent floor235 stops index234 CryptocomAccountSummary:account-undefined-account_id. JSON serialization/deserialization, ordinary getters/prototypes/own keys, object/array alias bindings outside generic record/result carriers, interface runtime validation and class/API wiring remain pending. No encoder/reencoder/roundtrip proof."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "CryptocomWsSubscription"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsSubscription", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsSubscription::from_native", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscriptionParams", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscriptionParams::from_native", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscribeMethod", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscribeMethod::from_units" ]
-status = "ported"
-note = "Renamed/split targets: `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsSubscription`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomWsSubscription::from_native`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscriptionParams`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscriptionParams::from_native`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscribeMethod`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomSubscribeMethod::from_units`. Full id, singleton subscribe method enum, anonymous params.channels string array, optional nonce. Anonymous params and literal carrier/method have explicit ownership. Static port/adapted at captured typed-native member projection boundary. Rust Vec<u16> retains UTF16 including lone surrogates/NUL, f64 retains source Number bits, NativeRecord<V>/unknown/generic<T> preserve original native reference carriers. Optionality describes field reads, not own-key presence. Tests/account_envelopes.rs reads actual source interface schemas, asserts every decoded native field/literal/presence and original pointer BEFORE schema/census inventories, proves original decoded record/result survives parent replacement and allows old object mutation. Independent floor235 stops index234 CryptocomAccountSummary:account-undefined-account_id. JSON serialization/deserialization, ordinary getters/prototypes/own keys, object/array alias bindings outside generic record/result carriers, interface runtime validation and class/API wiring remain pending. No encoder/reencoder/roundtrip proof."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "CryptocomWsTickerUpdate"
@@ -285,7 +285,7 @@ note = "FORCED: observed D800 in message; residual cause: sdk-rs/parity/MANIFEST
 [[symbol]]
 ts = "CryptocomApiResponse"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomApiResponse", "safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomApiResponse::from_native" ]
-status = "ported"
-note = "Renamed/split targets: `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomApiResponse`, `safe-cex-venue-cryptocom/src/account_envelopes.rs::CryptocomApiResponse::from_native`. Full generic<T> id/method/code/result/message contract. Explicit FnOnce result projector keeps caller T generic and forwards its native result/error; original generic V identity constructor used in witness. Unknown T may be null/objects/arrays/function/symbol/bigint; absent and read-undefined map to None. Static port/adapted at captured typed-native member projection boundary. Rust Vec<u16> retains UTF16 including lone surrogates/NUL, f64 retains source Number bits, NativeRecord<V>/unknown/generic<T> preserve original native reference carriers. Optionality describes field reads, not own-key presence. Tests/account_envelopes.rs reads actual source interface schemas, asserts every decoded native field/literal/presence and original pointer BEFORE schema/census inventories, proves original decoded record/result survives parent replacement and allows old object mutation. Independent floor235 stops index234 CryptocomAccountSummary:account-undefined-account_id. JSON serialization/deserialization, ordinary getters/prototypes/own keys, object/array alias bindings outside generic record/result carriers, interface runtime validation and class/API wiring remain pending. No encoder/reencoder/roundtrip proof."
+layer = ""
+rs = ""
+status = "pending"
+note = ""

@@ -1,11 +1,11 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import { reviewedHyperliquidProjectionProbe } from './accepted-hyperliquid-projection.mjs';
 
 // One reviewed fixed instantiation per generic alias. The spec owns the
 // expected Rust type; contracts never supply it, and unknown names fall
 // through to the original fail-closed families.
-const specPath = new URL('../accepted-set/generic-aliases.json', import.meta.url);
-const productionSpecs = fs.existsSync(specPath) ? JSON.parse(fs.readFileSync(specPath, 'utf8')) : {};
+const productionSpecs = loadPolicy('generic-aliases');
 const fields = ['canonical', 'expectedType', 'file', 'generics', 'rawTarget', 'suffix', 'target', 'unsized'];
 const callerFields = ['instantiation', 'aliasProbeExpected', 'aliasProbeKind', 'aliasProbeSuffix', 'nativeCanonical'];
 
@@ -24,6 +24,8 @@ export function reviewedGenericAliasProbe(alias, contract, context, specs = prod
   assert.ok(typeof spec.expectedType === 'string' && spec.expectedType.trim(), `${label}: expected compiler type required`);
   assert.ok(/^<.*>$/.test(spec.suffix), `${label}: fixed instantiation suffix required`);
   assert.equal(typeof spec.unsized, 'boolean', `${label}: sizedness must be reviewed`);
+  const projection = reviewedHyperliquidProjectionProbe(alias, contract, context, spec);
+  if (projection) return projection;
   assert.equal(spec.unsized, !rootPath(alias.target), `${label}: only rootless dyn targets are unsized`);
   if (!spec.unsized) assert.equal(spec.canonical, rootPath(alias.target), `${label}: canonical root must be the compiler target root`);
   assert.ok(Array.isArray(context?.macroOrigins) && context.macroOrigins.includes('serde_json'), `${label}: actual serde_json compiler dependency required`);

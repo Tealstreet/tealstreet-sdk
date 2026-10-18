@@ -35,8 +35,10 @@ impl ExchangeTask for Task {
 struct Runtime {
     tasks: RefCell<Vec<Rc<RefCell<Option<Work>>>>>,
     sleeps: RefCell<Vec<u64>>,
+    timers: RefCell<Vec<(u64, Rc<Cell<bool>>)>>,
     sent: Rc<RefCell<Vec<String>>>,
     sequence: Cell<u64>,
+    elapsed: Cell<f64>,
     errors: RefCell<Vec<String>>,
 }
 impl Runtime {
@@ -61,11 +63,19 @@ impl ExchangeRuntime for Runtime {
         12500.
     }
     fn monotonic_now_ms(&self) -> f64 {
-        1250.
+        1250. + self.elapsed.get()
     }
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         self.sleeps.borrow_mut().push(delay);
-        Box::pin(std::future::pending())
+        let fired = Rc::new(Cell::new(false));
+        self.timers.borrow_mut().push((delay, fired.clone()));
+        Box::pin(std::future::poll_fn(move |_| {
+            if fired.get() {
+                std::task::Poll::Ready(Ok(()))
+            } else {
+                std::task::Poll::Pending
+            }
+        }))
     }
     fn spawn_local(&self, mut work: Work) -> Box<dyn ExchangeTask> {
         let pending = work
@@ -76,7 +86,7 @@ impl ExchangeRuntime for Runtime {
         self.tasks.borrow_mut().push(task.clone());
         Box::new(Task(task))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         let next = self.sequence.get() + 1;
         self.sequence.set(next);
@@ -88,7 +98,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -190,6 +204,13 @@ fn venue(
     runtime: Rc<Runtime>,
     fills: Rc<RefCell<Vec<safe_cex_venue_mexc::ws_private::MexcFillEvent>>>,
 ) -> Rc<MexcExchange> {
+    venue_with_adapter(runtime, fills, Rc::new(Response))
+}
+fn venue_with_adapter(
+    runtime: Rc<Runtime>,
+    fills: Rc<RefCell<Vec<safe_cex_venue_mexc::ws_private::MexcFillEvent>>>,
+    http: Rc<dyn RestAdapter>,
+) -> Rc<MexcExchange> {
     let store = Rc::new(DefaultStore::new());
     let market = normalize_market(
         json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
@@ -216,9 +237,13 @@ fn venue(
     );
     MexcExchange::new(
         base,
-        Rc::new(Response),
+        http,
         Rc::new(|v| v),
         MexcSocketDependencies {
+            current_time_ms: {
+                let runtime = runtime.clone();
+                Rc::new(move || runtime.now_ms())
+            },
             runtime,
             remote_account_name: None,
             emit_fill: Rc::new(move |fill| {
@@ -362,7 +387,7 @@ fn registered_public_ticker_route_commits_before_original_subscriber_throw() {
     let first = Rc::new(Cell::new(0));
     let later = Rc::new(Cell::new(0));
     let mut original = ExchangeError::new("public subscriber origin");
-    original.code = Some(json!(313));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(313)));
     let failure = original.clone();
     let calls = first.clone();
     let _first = venue.base().store.subscribe(Box::new(move |_, _| {
@@ -383,7 +408,7 @@ fn registered_public_ticker_route_commits_before_original_subscriber_throw() {
     assert_eq!(first.get(), 1, "MEXC public route first subscriber floor");
     assert_eq!(later.get(), 0, "MEXC public route later subscriber cutoff");
     assert_eq!(
-        error.code,
+        observed_error_code(&error.code),
         Some(json!(313)),
         "MEXC public route original native cause code"
     );
@@ -423,7 +448,7 @@ fn registered_candle_subscription_routes_native_fields_and_cleanup_unsubscribes(
         venue.as_ref(),
         safe_cex_types::OHLCVOptions {
             symbol: "BTCUSDT".into(),
-            interval: safe_cex_types::Timeframe::M1,
+            interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),
             from: None,
             to: None,
             limit: None,
@@ -603,4 +628,80 @@ fn registered_private_open_suspends_ready_login_until_after_reconnected() {
         runtime.errors.borrow().is_empty(),
         "MEXC private assembly background failures"
     );
+}
+
+#[test]
+fn registered_private_asset_refresh_swallows_balance_fetch_failure() {
+    struct FailingBalance(Rc<Cell<usize>>);
+    impl RestAdapter for FailingBalance {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            assert_eq!(
+                request.url, "/api/v1/private/account/assets",
+                "asset refresh uses production fetchBalance"
+            );
+            self.0.set(self.0.get() + 1);
+            Box::pin(async move {
+                Err(safe_cex_transport::RestFailure::pre_transmit(
+                    "balance offline".into(),
+                    request,
+                ))
+            })
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let calls = Rc::new(Cell::new(0));
+    let venue = venue_with_adapter(
+        runtime.clone(),
+        Rc::default(),
+        Rc::new(FailingBalance(calls.clone())),
+    );
+    let private = venue.base().get_socket(SocketSlot::Private).unwrap();
+    private
+        .on_message(&SocketFrame::Text(
+            json!({"channel":"push.personal.asset","data":{}}).to_string(),
+        ))
+        .unwrap();
+    assert_eq!(calls.get(), 0, "refresh waits for its source timeout");
+    runtime.turn();
+    assert!(
+        runtime
+            .timers
+            .borrow()
+            .iter()
+            .any(|(delay, _)| *delay == 1000),
+        "production refresh timeout registered"
+    );
+    runtime.elapsed.set(1000.0);
+    for (delay, fired) in runtime.timers.borrow().iter() {
+        if *delay == 1000 {
+            fired.set(true);
+        }
+    }
+    for _ in 0..4 {
+        runtime.turn();
+    }
+    assert_eq!(
+        calls.get(),
+        1,
+        "production asset handler fetched balance once"
+    );
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "source ignores balance refresh errors: {:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

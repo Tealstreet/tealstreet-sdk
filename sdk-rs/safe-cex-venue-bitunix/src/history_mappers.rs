@@ -1,7 +1,12 @@
 //! History records retain binary64 timestamps and venue net-fee conventions.
 use crate::history_numbers::{income_to_number, order_to_number, order_to_optional_number};
 use safe_cex_num::{JsCoercionError, js_number_string, js_string, js_truthy, parse_int};
-use safe_cex_types::*;
+use safe_cex_types::{
+    ClosedPnlEntry, ClosedPnlEntryContracts, ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice,
+    ClosedPnlEntryFees, ClosedPnlEntryLeverage, ClosedPnlEntryNotional,
+    ClosedPnlEntryUnrealizedPnl, DataProvenance, HistoricalOrder, IncomeCategory, IncomeRecord,
+    OrderSide, OrderStatus, OrderType,
+};
 use serde_json::Value;
 
 fn text(value: Option<&Value>, fallback: &str) -> Result<String, JsCoercionError> {

@@ -1,4 +1,4 @@
-#[path = "../../safe-cex-webworker/tests/support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::{
     exchange::BaseExchange,
@@ -41,8 +41,8 @@ impl ExchangeRuntime for Clock {
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.runtime.spawn_local(f)
     }
-    fn console(&self, l: &str, m: &str) {
-        self.runtime.console(l, m);
+    fn console_values(&self, l: &str, m: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.runtime.console_values(l, m);
     }
     fn unique_id(&self) -> String {
         self.runtime.unique_id()
@@ -53,7 +53,11 @@ impl ExchangeRuntime for Clock {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, c: &Value) {
@@ -84,6 +88,9 @@ struct Client {
     id: u32,
 }
 impl DxClient for Client {
+    fn rate_limit(&self, _: f64) -> Result<(), ExchangeError> {
+        Err(ExchangeError::new("fixture host owns rate limiting"))
+    }
     fn request(&self, request: RestRequest) -> ExchangeFuture<'static, JsNumberInput> {
         self.state.requests.borrow_mut().push((self.id, request));
         let reply = self
@@ -136,6 +143,9 @@ impl PollingAncestor for Ancestor {
     }
 }
 impl BreakoutHost for Host {
+    fn runtime_host(&self) -> Rc<dyn safe_cex_venue_breakoutprop::native_reads::NativeRuntimeHost> {
+        Rc::new(Host(self.0.clone()))
+    }
     fn construct_base(
         &self,
         n: ExchangeName,
@@ -541,7 +551,7 @@ fn session_coalesces_expiry_retry_finally_and_reentrant_clock_values() {
         assert_eq!(r.url, "/login");
         assert!(r.params.is_none());
         assert!(
-            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&json!({"domain":"default","username":"k","password":"s"}))
+            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"domain":"default","username":"k","password":"s"})).unwrap())
         );
     }
     s.ready.set(true);
@@ -774,23 +784,52 @@ fn context(s: Rc<State>, ex: Rc<BreakoutpropExchange>) -> (Rc<BreakoutRuntime>, 
 #[derive(Default)]
 struct Wire {
     trace: RefCell<Vec<String>>,
+    interceptor: RefCell<std::rc::Weak<safe_cex_venue_breakoutprop::api::DxApi>>,
     requests: RefCell<Vec<RestRequest>>,
     unauthorized: Cell<u32>,
     status: Cell<f64>,
     faults: RefCell<VecDeque<(f64, bool)>>,
 }
 impl ApiWire for Wire {
+    fn install_request_interceptor(
+        &self,
+        api: std::rc::Weak<safe_cex_venue_breakoutprop::api::DxApi>,
+    ) -> Result<(), ExchangeError> {
+        *self.interceptor.borrow_mut() = api;
+        Ok(())
+    }
+    fn rate_limit(&self, max: f64) -> Result<(), ExchangeError> {
+        self.trace.borrow_mut().push(format!("limit:{max}"));
+        Ok(())
+    }
     fn request(
         &self,
         c: Config,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<JsNumberInput, ApiFailure>>>> {
+        if let Err(error) = self
+            .interceptor
+            .borrow()
+            .upgrade()
+            .unwrap()
+            .intercept_request(&mut c.borrow_mut())
+        {
+            return Box::pin(async move {
+                Err(ApiFailure {
+                    error,
+                    status: None,
+                    config: None,
+                })
+            });
+        }
         let request = c.borrow().request.clone();
         self.trace.borrow_mut().push(request.url.clone());
         self.requests.borrow_mut().push(request.clone());
         let fault = self.faults.borrow_mut().pop_front();
         let reply = if let Some((status, has_config)) = fault {
             let mut error = ExchangeError::new("guard error");
-            error.code = Some(json!("EXACT"));
+            error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "EXACT"
+            )));
             Err(ApiFailure {
                 error,
                 status: Some(status),
@@ -801,7 +840,7 @@ impl ApiWire for Wire {
         } else if self.unauthorized.get() > 0 {
             self.unauthorized.set(self.unauthorized.get() - 1);
             let mut error = ExchangeError::new("wire unauthorized");
-            error.code = Some("EXACT".into());
+            error.code = Some(safe_cex_exchange::js_runtime::value::Js::str("EXACT"));
             Err(ApiFailure {
                 error,
                 status: Some(self.status.get()),
@@ -936,7 +975,7 @@ fn final_api_native_auth_and_retry() {
     wire.unauthorized.set(2);
     config.borrow_mut().session_retried = false;
     let error = finish(&s, api.request_config(config.clone())).unwrap_err();
-    assert_eq!(error.code, Some(json!("EXACT")));
+    assert_eq!(observed_error_code(&error.code), Some(json!("EXACT")));
     assert!(config.borrow().session_retried);
     let mut login = DxConfig {
         request: RestRequest {
@@ -968,7 +1007,7 @@ fn final_api_native_auth_and_retry() {
         )
         .unwrap_err();
         assert_eq!(error.message, "guard error");
-        assert_eq!(error.code, Some(json!("EXACT")));
+        assert_eq!(observed_error_code(&error.code), Some(json!("EXACT")));
         assert_eq!(
             wire.requests.borrow().len(),
             before + 1,
@@ -1115,6 +1154,9 @@ fn final_cancel_batches_and_update() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["limitPrice"], 102.2, "UPDATE native patched price");
     assert_eq!(body["quantity"], 2.35, "UPDATE native patched amount");
@@ -1140,7 +1182,7 @@ fn final_place_native_numeric_payload_and_failures() {
     );
     assert_eq!(payload.stop_price, None);
     assert_eq!(payload.position_effect, "CLOSE");
-    assert_eq!(payload.side, "BUY");
+    assert_eq!(payload.side, Some("BUY"));
     assert_eq!(payload.tif, "GTC");
     assert_eq!(payload.order_code, "tealstreet-fixed");
     let mut stop = opts.clone();
@@ -1216,6 +1258,9 @@ fn final_place_native_numeric_payload_and_failures() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["instrument"], "BTC");
     assert_eq!(body["quantity"], 1.23);
@@ -1377,7 +1422,9 @@ fn final_portfolio_and_notification_cutovers() {
     let (fail_ctx, fail_reads) = context(fail_s.clone(), fail_ex.clone());
     let mut original = ExchangeError::new("notification failed");
     original.name = "CustomError".into();
-    original.code = Some(json!("SUB"));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "SUB"
+    )));
     original.response = Some(json!({"data":{"msg":"source message"}}));
     original.context = Some(json!({"trace":42}));
     let expected = original.clone();
@@ -1389,7 +1436,10 @@ fn final_portfolio_and_notification_cutovers() {
     let error = finish(&fail_s, fail_ctx.start()).unwrap_err();
     assert_eq!(error.message, expected.message);
     assert_eq!(error.name, expected.name);
-    assert_eq!(error.code, expected.code);
+    assert_eq!(
+        observed_error_code(&error.code),
+        observed_error_code(&expected.code)
+    );
     assert_eq!(error.response, expected.response);
     assert_eq!(error.context, expected.context);
     assert_eq!(
@@ -1410,7 +1460,9 @@ fn final_portfolio_and_notification_cutovers() {
         "TICK native caught update error schedules next loop"
     );
     let mut report_error = ExchangeError::new("reporter failed");
-    report_error.code = Some(json!("REPORT"));
+    report_error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "REPORT"
+    )));
     let reporter = report_error.clone();
     fail_ex
         .base
@@ -1510,4 +1562,47 @@ fn final_native_read_bindings() {
         4,
         "NATIVE two raw instrument requests"
     );
+}
+
+impl safe_cex_venue_breakoutprop::native_reads::NativeRuntimeHost for Host {
+    fn create_external(
+        &self,
+        _: &safe_cex_types::ExchangeOptionsExternalPublicData,
+    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData> {
+        panic!("constructor fixture has no external source")
+    }
+    fn local_to_utc(&self, value: f64) -> f64 {
+        value
+    }
+    fn uuid(&self) -> String {
+        "fixed".into()
+    }
+    fn spawn_order(&self, future: ExchangeFuture<'static, ()>) {
+        self.0.tasks.borrow_mut().push(future);
+    }
+    fn schedule_loop(
+        &self,
+        next: Rc<dyn Fn() -> ExchangeFuture<'static, ()>>,
+        delay: Option<f64>,
+    ) -> Result<(), ExchangeError> {
+        let clock = self.0.clock.clone();
+        self.0.tasks.borrow_mut().push(Box::pin(async move {
+            clock.sleep(delay.unwrap_or(0.0).max(0.0) as u64).await?;
+            next().await
+        }));
+        Ok(())
+    }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

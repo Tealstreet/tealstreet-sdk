@@ -17,6 +17,21 @@ pub enum JsJsonValue {
     BigInt(num_bigint::BigInt),
 }
 
+impl JsJsonValue {
+    /// Boolean conversion before JSON serialization can omit undefined or
+    /// replace nonfinite numbers with null.
+    pub fn truthy(&self) -> bool {
+        match self {
+            Self::Undefined | Self::Null => false,
+            Self::Bool(value) => *value,
+            Self::Number(value) => *value != 0.0 && !value.is_nan(),
+            Self::String(value) => !value.is_empty(),
+            Self::Array(_) | Self::Object(_) => true,
+            Self::BigInt(value) => value != &num_bigint::BigInt::from(0),
+        }
+    }
+}
+
 impl From<Value> for JsJsonValue {
     fn from(value: Value) -> Self {
         match value {
@@ -46,13 +61,21 @@ pub fn js_json_stringify(value: &JsJsonValue) -> Result<Option<String>, JsCoerci
     Ok(Some(output))
 }
 
+fn quoted_utf16(value: &[u16], output: &mut String) {
+    let mut text = Vec::new();
+    safe_cex_types::js_coercion::json_quote_utf16(value, &mut text);
+    output.push_str(&String::from_utf16(&text).expect("well-formed JSON quotation"));
+}
 fn quoted(value: &str, output: &mut String) -> Result<(), JsCoercionError> {
-    let text = serde_json::to_string(value).map_err(|_| JsCoercionError {
-        name: "TypeError",
-        message: "Cannot serialize string",
-    })?;
-    output.push_str(&text);
+    quoted_utf16(&value.encode_utf16().collect::<Vec<_>>(), output);
     Ok(())
+}
+fn number(value: f64, output: &mut String) {
+    if value.is_finite() {
+        output.push_str(&js_number_string(value));
+    } else {
+        output.push_str("null");
+    }
 }
 
 fn write(value: &JsJsonValue, output: &mut String) -> Result<(), JsCoercionError> {
@@ -60,11 +83,7 @@ fn write(value: &JsJsonValue, output: &mut String) -> Result<(), JsCoercionError
         JsJsonValue::Undefined | JsJsonValue::Null => output.push_str("null"),
         JsJsonValue::Bool(v) => output.push_str(if *v { "true" } else { "false" }),
         JsJsonValue::Number(v) => {
-            if v.is_finite() {
-                output.push_str(&js_number_string(*v));
-            } else {
-                output.push_str("null");
-            }
+            number(*v, output);
         }
         JsJsonValue::String(v) => quoted(v, output)?,
         JsJsonValue::Array(values) => {
@@ -107,6 +126,90 @@ fn write(value: &JsJsonValue, output: &mut String) -> Result<(), JsCoercionError
                 name: "TypeError",
                 message: "Do not know how to serialize a BigInt",
             });
+        }
+    }
+    Ok(())
+}
+
+/// Boolean conversion of canonical retained data before JSON wire projection.
+pub fn js_retained_truthy(value: &safe_cex_types::retained_json::RetainedJsonInput) -> bool {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match value {
+        Input::Undefined | Input::Null => false,
+        Input::Bool(value) => *value,
+        Input::Text(value) => !value.is_empty(),
+        Input::Float(value) => *value != 0.0 && !value.is_nan(),
+        Input::Lexeme(value) => value
+            .parse::<f64>()
+            .is_ok_and(|value| value != 0.0 && !value.is_nan()),
+        Input::Array(_) | Input::Object(_) => true,
+    }
+}
+/// Direct canonical retained-data JSON projection; no UTF-8 prepared-data copy.
+pub fn js_retained_json_stringify(
+    value: &safe_cex_types::retained_json::RetainedJsonInput,
+) -> Result<Option<String>, JsCoercionError> {
+    if matches!(
+        value,
+        safe_cex_types::retained_json::RetainedJsonInput::Undefined
+    ) {
+        return Ok(None);
+    }
+    let mut output = String::new();
+    write_retained(value, &mut output)?;
+    Ok(Some(output))
+}
+fn write_retained(
+    value: &safe_cex_types::retained_json::RetainedJsonInput,
+    output: &mut String,
+) -> Result<(), JsCoercionError> {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match value {
+        Input::Undefined | Input::Null => output.push_str("null"),
+        Input::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Input::Float(value) => number(*value, output),
+        Input::Lexeme(value) => number(
+            value.parse().map_err(|_| JsCoercionError {
+                name: "TypeError",
+                message: "Invalid retained numeric lexeme",
+            })?,
+            output,
+        ),
+        Input::Text(value) => quoted_utf16(value, output),
+        Input::Array(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                write_retained(value, output)?;
+            }
+            output.push(']');
+        }
+        Input::Object(entries) => {
+            let mut keys = Vec::new();
+            let mut values = HashMap::new();
+            for (key, value) in entries {
+                if values.insert(key.as_slice(), value).is_none() {
+                    keys.push(key.as_slice());
+                }
+            }
+            output.push('{');
+            let mut first = true;
+            for key in safe_cex_types::js_coercion::js_own_keys_utf16(keys) {
+                let value = values[key];
+                if matches!(value, Input::Undefined) {
+                    continue;
+                }
+                if !first {
+                    output.push(',');
+                }
+                first = false;
+                quoted_utf16(key, output);
+                output.push(':');
+                write_retained(value, output)?;
+            }
+            output.push('}');
         }
     }
     Ok(())

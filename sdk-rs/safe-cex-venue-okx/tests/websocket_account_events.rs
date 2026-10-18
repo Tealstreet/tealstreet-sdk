@@ -9,155 +9,80 @@ use std::{
     process::{Command, Stdio},
     rc::Rc,
 };
-type V = Rc<Native>;
-type E = Rc<Error>;
-struct Error {
-    name: &'static str,
-    message: String,
-    fresh: bool,
-    code: Option<&'static str>,
-    ids: Option<[u8; 2]>,
-}
-enum Native {
-    U,
-    Null,
-    B(bool),
-    N(f64),
-    S(Vec<u16>),
-    O(RefCell<Vec<(String, V)>>),
-    A(RefCell<Vec<V>>),
-    Call(String),
-    Member(V, String),
-    Callback(Rc<dyn Fn(V) -> Result<V, E>>),
-    Map(RefCell<Vec<(V, V)>>),
-    Set(RefCell<Vec<V>>),
-    Wire(V),
-    Coerce(E),
-}
-fn u() -> V {
-    Rc::new(Native::U)
-}
-fn s(x: &str) -> V {
-    Rc::new(Native::S(x.encode_utf16().collect()))
-}
-fn n(x: f64) -> V {
-    Rc::new(Native::N(x))
-}
-fn b(x: bool) -> V {
-    Rc::new(Native::B(x))
-}
-fn array(x: Vec<V>) -> V {
-    Rc::new(Native::A(RefCell::new(x)))
-}
-fn object(x: Vec<(&str, V)>) -> V {
-    Rc::new(Native::O(RefCell::new(
-        x.into_iter().map(|(k, v)| (k.into(), v)).collect(),
-    )))
-}
-fn get(v: &V, k: &str) -> V {
-    match v.as_ref() {
-        Native::O(x) => x
-            .borrow()
-            .iter()
-            .find(|(key, _)| key == k)
-            .map(|(_, v)| v.clone())
-            .unwrap_or_else(u),
-        Native::A(x) => {
-            if k == "length" {
-                n(x.borrow().len() as f64)
-            } else {
-                k.parse::<usize>()
-                    .ok()
-                    .and_then(|i| x.borrow().get(i).cloned())
-                    .unwrap_or_else(u)
-            }
-        }
-        _ => u(),
-    }
-}
+#[path = "support/production_intrinsics.rs"]
+#[allow(dead_code)]
+mod production;
+use production::{E, V, array, b, equal, get, n, object, s, u};
+use safe_cex_exchange::js_runtime::{
+    globals,
+    value::{Js, Prop, Thrown},
+};
 fn put(v: &V, k: &str, value: V) {
-    let Native::O(x) = v.as_ref() else {
-        panic!("object set")
-    };
-    let mut x = x.borrow_mut();
-    if let Some((_, v)) = x.iter_mut().find(|(key, _)| key == k) {
-        *v = value
-    } else {
-        x.push((k.into(), value))
-    }
+    v.set(k, value).expect("fixture Set");
 }
 fn items(v: &V) -> Vec<V> {
-    let Native::A(x) = v.as_ref() else {
-        panic!("array")
-    };
-    x.borrow().clone()
+    v.array_values().expect("fixture array")
 }
 fn text(v: &V) -> String {
-    match v.as_ref() {
-        Native::S(s) => String::from_utf16_lossy(s),
-        Native::N(x) => safe_cex_num::js_number_string(*x),
-        Native::U => "undefined".into(),
-        Native::Null => "null".into(),
-        Native::B(x) => x.to_string(),
-        _ => panic!("primitive"),
-    }
+    String::from_utf16_lossy(&v.to_js_string().expect("fixture String"))
 }
 fn num(v: &V) -> f64 {
-    match v.as_ref() {
-        Native::N(x) => *x,
-        Native::S(x) => safe_cex_num::number_from_string(&String::from_utf16_lossy(x)),
-        Native::Null => 0.,
-        Native::U => f64::NAN,
-        _ => panic!("number"),
-    }
+    v.to_number().expect("fixture Number")
 }
 fn truth(v: &V) -> bool {
-    match v.as_ref() {
-        Native::U | Native::Null => false,
-        Native::B(x) => *x,
-        Native::N(x) => *x != 0. && !x.is_nan(),
-        Native::S(x) => !x.is_empty(),
-        _ => true,
-    }
+    v.truthy()
 }
 fn null(v: &V) -> bool {
-    matches!(v.as_ref(), Native::U | Native::Null)
-}
-fn equal(a: &V, b: &V) -> bool {
-    match (a.as_ref(), b.as_ref()) {
-        (Native::U, Native::U) | (Native::Null, Native::Null) => true,
-        (Native::S(a), Native::S(b)) => a == b,
-        (Native::N(a), Native::N(b)) => a == b,
-        (Native::B(a), Native::B(b)) => a == b,
-        _ => Rc::ptr_eq(a, b),
-    }
+    v.is_nullish()
 }
 fn pack(v: &V) -> Value {
-    match v.as_ref() {
-        Native::U => json!({"u":true}),
-        Native::Null => Value::Null,
-        Native::B(x) => json!(x),
-        Native::S(x) => json!({"s":x}),
-        Native::N(x) => {
+    match v {
+        Js::Undefined => json!({"u":true}),
+        Js::Null => Value::Null,
+        Js::Bool(x) => json!(x),
+        Js::String(x) => json!({"s":x}),
+        Js::Number(x) => {
             json!({"n":if x.is_nan(){"nan".into()}else{format!("{:016x}",x.to_bits())}})
         }
-        Native::O(x) => {
-            json!({"o":x.borrow().iter().map(|(k,v)|json!([k,pack(v)])).collect::<Vec<_>>()})
+        Js::Object(_) => {
+            json!({"o":v.own_entries().unwrap().iter().map(|(k,v)|json!([String::from_utf16(k).unwrap(),pack(v)])).collect::<Vec<_>>()})
         }
-        Native::A(x) => json!(x.borrow().iter().map(pack).collect::<Vec<_>>()),
-        Native::Call(x) => json!({"call":x}),
-        Native::Map(rows) => json!(
+        Js::Array(_) => json!(items(v).iter().map(pack).collect::<Vec<_>>()),
+        Js::Function(f) => json!({"call":String::from_utf16(&f.name).unwrap()}),
+        Js::Map(rows) => json!(
             rows.borrow()
                 .iter()
-                .filter(|(k, _)| !matches!(k.as_ref(), Native::U))
                 .map(|(k, v)| json!([pack(k), pack(v)]))
                 .collect::<Vec<_>>()
         ),
-        Native::Set(rows) => json!(rows.borrow().iter().map(pack).collect::<Vec<_>>()),
-        Native::Wire(v) => pack(v),
-        Native::Coerce(_) => json!({"o":[]}),
-        _ => panic!("pack"),
+        Js::Set(rows) => json!(rows.borrow().iter().map(pack).collect::<Vec<_>>()),
+        _ => panic!("fixture pack"),
     }
+}
+fn coerce(t: Rc<State>) -> V {
+    let out = object(vec![]);
+    let f = Js::function("toString", move |_, _| {
+        event(&t, "coerce", vec![])?;
+        Err(t.err.clone())
+    });
+    let Js::Object(data) = &out else {
+        unreachable!()
+    };
+    data.props.borrow_mut().insert(
+        "toString".encode_utf16().collect(),
+        Prop::DataDescriptor {
+            value: f,
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        },
+    );
+    out
+}
+fn json_global() -> Js {
+    let g = object(vec![]);
+    globals::install_builtins::<()>(&g, std::rc::Weak::new());
+    get(&g, "JSON")
 }
 fn unused<T>() -> T {
     panic!("unused capability in this source family")
@@ -191,25 +116,13 @@ fn event(t: &State, name: &str, args: Vec<V>) -> Result<(), E> {
     }
 }
 fn map_entries(v: &V) -> Vec<(V, V)> {
-    let Native::Map(entries) = v.as_ref() else {
-        panic!("map")
+    let Js::Map(rows) = v else {
+        panic!("fixture map")
     };
-    entries
-        .borrow()
-        .iter()
-        .filter(|(k, _)| !matches!(k.as_ref(), Native::U))
-        .cloned()
-        .collect()
+    rows.borrow().iter().cloned().collect()
 }
-fn units(v: &V, t: &State) -> Result<Vec<u16>, E> {
-    match v.as_ref() {
-        Native::S(v) => Ok(v.clone()),
-        Native::Coerce(e) => {
-            event(t, "coerce", vec![])?;
-            Err(e.clone())
-        }
-        _ => Ok(text(v).encode_utf16().collect()),
-    }
+fn units(v: &V, _: &State) -> Result<Vec<u16>, E> {
+    v.to_js_string().map(|s| s.to_vec())
 }
 fn parse(v: &V, t: &State) -> Result<f64, E> {
     Ok(safe_cex_num::parse_float(&String::from_utf16_lossy(
@@ -221,19 +134,10 @@ fn finite(v: &V, t: &State) -> Result<f64, E> {
     Ok(if p.is_finite() { p } else { 0. })
 }
 fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
-    if let Native::Callback(f) = callee.as_ref() {
-        return f(args[0].clone());
+    let name = production::name(&callee);
+    if name == "fixture-callback" || name == "slice" {
+        return callee.call(Js::Undefined, args);
     }
-    if let Native::Member(receiver, key) = callee.as_ref() {
-        assert_eq!(key, "slice");
-        let rows = items(receiver);
-        return Ok(array(
-            rows[num(&args[0]) as usize..(num(&args[1]) as usize).min(rows.len())].to_vec(),
-        ));
-    }
-    let Native::Call(name) = callee.as_ref() else {
-        panic!("callee")
-    };
     Ok(match name.as_str() {
         "this.parent.mapOrders" => {
             event(&t, "mapOrders", args)?;
@@ -245,7 +149,7 @@ fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
         }
         "this.store.markOrdersTerminal" => {
             assert!(
-                Rc::ptr_eq(&args[0], &t.mapped_orders),
+                args[0].same_reference(&t.mapped_orders),
                 "ORDER native terminal original mapped rows"
             );
             event(&t, "terminal", args)?;
@@ -253,7 +157,7 @@ fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
         }
         "this.store.addOrUpdateOrders" => {
             assert!(
-                Rc::ptr_eq(&args[0], &t.mapped_orders),
+                args[0].same_reference(&t.mapped_orders),
                 "ORDER native original mapped rows"
             );
             event(&t, "orders", args)?;
@@ -265,7 +169,7 @@ fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
         }
         "this.parent.contractsToBase" => {
             assert!(
-                Rc::ptr_eq(&args[1], &t.market),
+                args[1].same_reference(&t.market),
                 "ORDER native original conversion market"
             );
             let amount = num(&args[0]) * 2.;
@@ -298,9 +202,9 @@ fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
             n(sum)
         }
         "parseFloat" => n(parse(&args[0], &t)?),
-        "String" => Rc::new(Native::S(units(&args[0], &t)?)),
-        "Array.isArray" => b(matches!(args[0].as_ref(), Native::A(_))),
-        "Number.isFinite" => b(matches!(args[0].as_ref(),Native::N(x) if x.is_finite())),
+        "String" => Js::utf16(&units(&args[0], &t)?),
+        "Array.isArray" => b(args[0].is_array()),
+        "Number.isFinite" => b(matches!(&args[0],Js::Number(x) if x.is_finite())),
         "roundUSD" => n(safe_cex_num::round_usd(num(&args[0]))),
         "sumBy" => {
             let values = items(&args[0]);
@@ -313,7 +217,7 @@ fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
         "subtract" => n(safe_cex_num::subtract(num(&args[0]), num(&args[1]))),
         "this.store.addOrUpdatePositions" => {
             assert!(
-                Rc::ptr_eq(&args[0], &t.positions),
+                args[0].same_reference(&t.positions),
                 "POSITION native original mapped positions"
             );
             event(&t, "positions", args)?;
@@ -341,18 +245,7 @@ fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
         }
         "this.recentFillKeys.delete" => {
             event(&t, "forget", args.clone())?;
-            let Native::Map(rows) = t.map.as_ref() else {
-                panic!("map")
-            };
-            let mut rows = rows.borrow_mut();
-            let found = rows.iter_mut().find(|(k, _)| equal(k, &args[0]));
-            if let Some((k, v)) = found {
-                *k = u();
-                *v = u();
-                b(true)
-            } else {
-                b(false)
-            }
+            t.map.call_method("delete", args)?
         }
         "this.recentFillKeys.has" => {
             event(&t, "has", args.clone())?;
@@ -360,29 +253,18 @@ fn invoke(t: Rc<State>, callee: V, args: Vec<V>) -> Result<V, E> {
         }
         "this.recentFillKeys.set" => {
             event(&t, "remember", args.clone())?;
-            let Native::Map(rows) = t.map.as_ref() else {
-                panic!("map")
-            };
-            let mut rows = rows.borrow_mut();
-            if let Some((_, v)) = rows.iter_mut().find(|(k, _)| equal(k, &args[0])) {
-                *v = args[1].clone()
-            } else {
-                rows.push((args[0].clone(), args[1].clone()))
-            }
-            t.map.clone()
+            t.map.call_method("set", args)?
         }
         "this.parent.getIndexTickerInstId" => {
             event(&t, "index", vec![get(&args[0], "id")])?;
             let mut id = units(&get(&args[0], "id"), &t)?;
             id.extend("-INDEX".encode_utf16());
-            Rc::new(Native::S(id))
+            Js::utf16(&id)
         }
-        "JSON.stringify" => Rc::new(Native::Wire(args[0].clone())),
+        "JSON.stringify" => json_global().call_method("stringify", args)?,
         "this.send" => {
-            let Native::Wire(payload) = args[0].as_ref() else {
-                panic!("packet")
-            };
-            event(&t, "send", vec![payload.clone()])?;
+            let payload = json_global().call_method("parse", args)?;
+            event(&t, "send", vec![payload])?;
             t.sends.set(t.sends.get() + 1);
             if t.case == "send-reentry" && t.sends.get() == 1 {
                 let topics = get(&t.receiver, "topics");
@@ -422,56 +304,28 @@ fn host(t: Rc<State>) -> Rc<SocketEventOps<V, E>> {
                 "OrderStatus.Closed" => s("closed"),
                 "OrderStatus.Canceled" => s("canceled"),
                 "this.handleTickerEvents" if capture.replacement.get() => {
-                    Rc::new(Native::Call("replacement".into()))
+                    production::named("replacement")
                 }
-                _ => Rc::new(Native::Call(name.into())),
+                "Map" | "Set" | "WsDirectFallback" => {
+                    let state = capture.clone();
+                    let name = name.to_owned();
+                    Js::function(&name.clone(), move |_, _| {
+                        event(&state, "construct", vec![s(&name)])?;
+                        Ok(match name.as_str() {
+                            "Map" => Js::new_map(),
+                            "Set" => Js::new_set(),
+                            "WsDirectFallback" => object(vec![("tag", s("fallback"))]),
+                            _ => unreachable!(),
+                        })
+                    })
+                }
+                _ => production::named(name),
             })
         }),
-        member: Rc::new(|v, k| Ok(Rc::new(Native::Member(v, k.into())))),
+        member: Rc::new(|v, k| v.get(k)),
         invoke: Rc::new(move |f, args| invoke(call.clone(), f, args)),
         intrinsic: Rc::new(move |name, args| {
-            Ok(match name {
-                "construct" => {
-                    let Native::Call(class) = args[0].as_ref() else {
-                        panic!("class")
-                    };
-                    event(&intrinsic, "construct", vec![s(class)])?;
-                    match class.as_str() {
-                        "Map" => Rc::new(Native::Map(RefCell::new(vec![]))),
-                        "Set" => Rc::new(Native::Set(RefCell::new(vec![]))),
-                        "WsDirectFallback" => object(vec![("tag", s("fallback"))]),
-                        _ => panic!("constructor"),
-                    }
-                }
-                "get-index" => {
-                    let key = String::from_utf16(&units(&args[1], &intrinsic)?).unwrap();
-                    get(&args[0], &key)
-                }
-                "greater-than" => b(num(&args[0]) > num(&args[1])),
-                "less-than" => b(num(&args[0]) < num(&args[1])),
-                "less-or-equal" => b(num(&args[0]) <= num(&args[1])),
-                "subtract" => n(num(&args[0]) - num(&args[1])),
-                "template-string" => Rc::new(Native::S(units(&args[0], &intrinsic)?)),
-                "colon-append" => {
-                    let mut out = units(&args[0], &intrinsic)?;
-                    out.push(58);
-                    out.extend(units(&args[1], &intrinsic)?);
-                    Rc::new(Native::S(out))
-                }
-                "object-spread" => {
-                    let Native::O(fields) = args[0].as_ref() else {
-                        panic!("spread")
-                    };
-                    Rc::new(Native::O(RefCell::new(fields.borrow().clone())))
-                }
-                "define-literal-field" => {
-                    let key = String::from_utf16(&units(&args[1], &intrinsic)?).unwrap();
-                    put(&args[0], &key, args[2].clone());
-                    u()
-                }
-                "array-spread" => array(args.iter().flat_map(items).collect()),
-                other => panic!("intrinsic {other}"),
-            })
+            production::intrinsic(intrinsic.receiver.clone(), name, args)
         }),
         truthy: Rc::new(truth),
         nullish: Rc::new(null),
@@ -500,25 +354,14 @@ fn host(t: Rc<State>) -> Rc<SocketEventOps<V, E>> {
             Ok(array(out))
         }),
         for_of: Rc::new(|v, f| {
-            let mut i = 0;
-            match v.as_ref() {
-                Native::Map(rows) => {
-                    while i < rows.borrow().len() {
-                        let (k, value) = rows.borrow()[i].clone();
-                        i += 1;
-                        if !matches!(k.as_ref(), Native::U) {
-                            f(array(vec![k, value]))?;
-                        }
-                    }
+            let iter = v.iterator()?;
+            let next = iter.get("next")?;
+            loop {
+                let item = next.call(iter.clone(), vec![])?;
+                if item.get("done")?.truthy() {
+                    break;
                 }
-                Native::A(rows) => {
-                    while i < rows.borrow().len() {
-                        let row = rows.borrow()[i].clone();
-                        i += 1;
-                        f(row)?;
-                    }
-                }
-                _ => panic!("iterable"),
+                f(item.get("value")?)?;
             }
             Ok(())
         }),
@@ -534,17 +377,20 @@ fn host(t: Rc<State>) -> Rc<SocketEventOps<V, E>> {
     };
     Rc::new(SocketEventOps {
         value: Rc::new(value),
-        callback: Rc::new(|f| Rc::new(Native::Callback(f))),
+        callback: Rc::new(|f| {
+            Js::function("fixture-callback", move |_, args| {
+                f(args.first().cloned().unwrap_or(Js::Undefined))
+            })
+        }),
     })
 }
 fn fixture(method: &str, case: &str) -> Value {
-    let err = Rc::new(Error {
-        name: "TypeError",
-        message: "boom".into(),
-        fresh: false,
-        code: Some("SOCKET"),
-        ids: Some([4, 9]),
-    });
+    let err = Thrown::new(object(vec![
+        ("name", s("TypeError")),
+        ("message", s("boom")),
+        ("code", s("SOCKET")),
+        ("ids", array(vec![n(4.), n(9.)])),
+    ]));
     let balance = object(vec![
         (
             "used",
@@ -581,7 +427,7 @@ fn fixture(method: &str, case: &str) -> Value {
         (
             "ws",
             if case == "no-socket" {
-                Rc::new(Native::Null)
+                Js::Null
             } else {
                 object(vec![])
             },
@@ -593,11 +439,13 @@ fn fixture(method: &str, case: &str) -> Value {
         err: err.clone(),
         receiver,
         store,
-        map: Rc::new(Native::Map(RefCell::new(vec![
-            (s("stale"), n(9.)),
-            (s("edge"), n(10.)),
-            (s("future"), n(11.)),
-        ]))),
+        map: {
+            let map = Js::new_map();
+            for (k, v) in [("stale", 9.), ("edge", 10.), ("future", 11.)] {
+                map.call_method("set", vec![s(k), n(v)]).unwrap();
+            }
+            map
+        },
         mapped_orders: array(vec![object(vec![
             ("id", s("mapped")),
             ("side", s("sell")),
@@ -620,7 +468,7 @@ fn fixture(method: &str, case: &str) -> Value {
         (
             "ordId",
             if case == "lone" {
-                Rc::new(Native::S(vec![0xd800]))
+                Js::utf16(&[0xd800])
             } else {
                 s("O")
             },
@@ -653,7 +501,7 @@ fn fixture(method: &str, case: &str) -> Value {
         (
             "fillPx",
             if case == "throw-price" {
-                Rc::new(Native::Coerce(err.clone()))
+                coerce(t.clone())
             } else {
                 s("12.5x")
             },
@@ -693,7 +541,7 @@ fn fixture(method: &str, case: &str) -> Value {
                 "CLASS native inherited dedupe window"
             );
             assert!(
-                matches!(state.topics.as_ref(),Native::O(v) if v.borrow().is_empty()),
+                state.topics.own_entries().unwrap().is_empty(),
                 "CLASS native fresh business topics"
             );
             object(vec![
@@ -746,7 +594,7 @@ fn fixture(method: &str, case: &str) -> Value {
             );
             for (_, args) in calls.iter().filter(|(n, _)| n != "construct") {
                 assert!(
-                    Rc::ptr_eq(&args[0], &data),
+                    args[0].same_reference(&data),
                     "CLASS native original callback data"
                 );
             }
@@ -793,15 +641,15 @@ fn fixture(method: &str, case: &str) -> Value {
                 t.now.set(120011.);
                 let third = port::is_duplicate_fill_event(h.clone(), row)?;
                 assert!(
-                    matches!(first.as_ref(), Native::B(false)),
+                    matches!(first, Js::Bool(false)),
                     "DEDUPE native first fill is new"
                 );
                 assert!(
-                    matches!(second.as_ref(), Native::B(true)),
+                    matches!(second, Js::Bool(true)),
                     "DEDUPE native cutoff does not refresh TTL"
                 );
                 assert!(
-                    matches!(third.as_ref(), Native::B(false)),
+                    matches!(third, Js::Bool(false)),
                     "DEDUPE native expires beyond cutoff"
                 );
                 Ok(array(vec![first, second, third]))
@@ -847,16 +695,13 @@ fn fixture(method: &str, case: &str) -> Value {
                     object(vec![("totalEq", s("1e308"))]),
                     object(vec![("totalEq", s("1e308"))]),
                 ]),
-                "throw-price" => array(vec![object(vec![(
-                    "totalEq",
-                    Rc::new(Native::Coerce(err.clone())),
-                )])]),
+                "throw-price" => array(vec![object(vec![("totalEq", coerce(t.clone()))])]),
                 "negative-zero" => array(vec![object(vec![("totalEq", s("-0"))])]),
                 _ => array(vec![
                     object(vec![("totalEq", s("10.235usd"))]),
                     object(vec![("totalEq", s("bad"))]),
                     object(vec![("totalEq", n(0.))]),
-                    object(vec![("totalEq", Rc::new(Native::Null))]),
+                    object(vec![("totalEq", Js::Null)]),
                 ]),
             };
             port::handle_account_topic(h.clone(), object(vec![("data", data)]))
@@ -882,14 +727,19 @@ fn fixture(method: &str, case: &str) -> Value {
         Ok(v) => (false, v),
         Err(e) => {
             assert!(
-                Rc::ptr_eq(&e, &t.err),
+                e.value.same_reference(&t.err.value),
                 "SOCKET native original error identity"
             );
-            assert_eq!(e.name, "TypeError");
-            assert_eq!(e.message, "boom");
-            assert_eq!(e.code, Some("SOCKET"));
-            assert_eq!(e.ids, Some([4, 9]));
-            assert!(!e.fresh);
+            assert_eq!(text(&get(&e.value, "name")), "TypeError");
+            assert_eq!(e.message(), "boom");
+            assert_eq!(text(&get(&e.value, "code")), "SOCKET");
+            assert_eq!(
+                items(&get(&e.value, "ids"))
+                    .iter()
+                    .map(num)
+                    .collect::<Vec<_>>(),
+                [4., 9.]
+            );
             (true, u())
         }
     };
@@ -919,7 +769,7 @@ fn fixture(method: &str, case: &str) -> Value {
                 "ORDER native parsed fill price"
             );
             assert!(
-                Rc::ptr_eq(&get(fill, "id"), &get(&items(&t.mapped_orders)[0], "id")),
+                equal(&get(fill, "id"), &get(&items(&t.mapped_orders)[0], "id")),
                 "ORDER native original mapped ID"
             );
         }

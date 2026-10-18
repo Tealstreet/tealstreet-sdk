@@ -228,7 +228,8 @@ pub trait SyncHost {
     fn symbols(&mut self) -> Result<Vec<Self::Symbol>, Self::Error>;
     fn clear_symbols(&mut self) -> Result<(), Self::Error>;
     fn disposed(&mut self) -> Result<bool, Self::Error>;
-    fn account(&mut self) -> impl Future<Output = Result<Self::Account, Self::Error>>;
+    type AccountRead: Future<Output = Result<Self::Account, Self::Error>>;
+    fn account(&mut self) -> Self::AccountRead;
     fn parts(
         &mut self,
         account: Self::Account,
@@ -245,14 +246,39 @@ pub trait SyncHost {
         positions_loaded: bool,
     ) -> Result<(), Self::Error>;
 }
-pub async fn sync_positions_and_balance<H: SyncHost>(host: &mut H) -> Result<(), H::Error> {
+pub(crate) struct SyncStart<S, R> {
+    symbols: Vec<S>,
+    account: R,
+}
+pub(crate) fn begin_sync<H: SyncHost>(
+    host: &mut H,
+) -> Result<Option<SyncStart<H::Symbol, H::AccountRead>>, H::Error> {
     host.unset_timeout()?;
     let symbols = host.symbols()?;
     host.clear_symbols()?;
     if host.disposed()? {
-        return Ok(());
+        return Ok(None);
     }
-    let account = host.account().await?;
+    Ok(Some(SyncStart {
+        symbols,
+        account: host.account(),
+    }))
+}
+pub fn sync_positions_and_balance<H: SyncHost>(
+    host: &mut H,
+) -> impl Future<Output = Result<(), H::Error>> {
+    // The source async function runs this prefix before returning its Promise.
+    let started = begin_sync(host);
+    async move { finish_sync(host, started?).await }
+}
+pub(crate) async fn finish_sync<H: SyncHost>(
+    host: &mut H,
+    started: Option<SyncStart<H::Symbol, H::AccountRead>>,
+) -> Result<(), H::Error> {
+    let Some(SyncStart { symbols, account }) = started else {
+        return Ok(());
+    };
+    let account = account.await?;
     let (balance, positions) = host.parts(account)?;
     if host.disposed()? {
         return Ok(());
@@ -326,4 +352,16 @@ pub async fn sync_positions_and_balance<H: SyncHost>(host: &mut H) -> Result<(),
     }
     host.store_positions(unique)?;
     host.update(balance, true, true)
+}
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn utf16_encoder_preserves_native_units() {
+        assert_eq!(units(""), Vec::<u16>::new());
+        assert_eq!(units("A🚀\0"), vec![65, 55357, 56960, 0]);
+        assert_eq!(units("é雪"), vec![233, 38634]);
+    }
 }

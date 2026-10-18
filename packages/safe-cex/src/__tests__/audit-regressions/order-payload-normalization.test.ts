@@ -169,6 +169,7 @@ describe('audit regression: exact order payload normalization', () => {
     });
   });
 
+  // Builds a full Bitget client; under CI load this outruns vitest's 5s default.
   it('matches Bitget V2 market, post-only reduce limit, and TPSL stop contracts', async () => {
     const store = new DefaultStore();
     store.update({ markets: [market('BTCUSDT')] });
@@ -229,5 +230,5 @@ describe('audit regression: exact order payload normalization', () => {
       size: '0.5',
       triggerType: 'fill_price',
     });
-  });
+  }, 30_000);
 });

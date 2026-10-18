@@ -1,3 +1,5 @@
+> Historical evidence: the test-only V3 comparison/canonical bodies, operation holders and their oracle commands are retired. The live legacy operation shape is retained; see CLAUDE.md.
+
 WOO public parity core — nine rows
 
 Gate SHA: `039d00875a6265e5c3b8f753e57a5b39d7ac6593`. Fresh branch `feat/rust-woo-public-parity-helpers`

@@ -3,11 +3,16 @@
 // expectations into one, which is the homogenized-corpus false green the
 // cardinality audits in this tree exist to prevent.
 #![allow(clippy::if_same_then_else)]
+#[path = "support/canonical_value.rs"]
+mod canonical_value;
+use canonical_value::category;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_types::{OrderSide, OrderStatus, OrderStopTriggerType, OrderType};
 use safe_cex_venue_binance::{
     order_operations::*,
-    private_event_value::{EventValue, PrivateEnum, number, record, string},
+    private_event_value::{
+        EventOps, EventValue, PrivateEnum, array_values, number, record, string,
+    },
     request_weight::Failure,
 };
 use serde_json::{Value, json};
@@ -43,7 +48,8 @@ fn decoded(v: Value) -> EventValue {
             ("slTriggerType", 2),
         ] {
             if let EventValue::String(s) = out.get(key).unwrap() {
-                let e = match (kind, s.as_str()) {
+                let spelling = String::from_utf16(&s).unwrap();
+                let e = match (kind, spelling.as_str()) {
                     (0, "limit") => PrivateEnum::Type(OrderType::Limit),
                     (0, "market") => PrivateEnum::Type(OrderType::Market),
                     (0, "stop_market") => PrivateEnum::Type(OrderType::StopLoss),
@@ -53,7 +59,7 @@ fn decoded(v: Value) -> EventValue {
                     (2, "last_price") => PrivateEnum::Trigger(OrderStopTriggerType::LastPrice),
                     _ => continue,
                 };
-                out.define(key, EventValue::Enum(e));
+                out.write(key, EventValue::enum_value(e));
             }
         }
     }
@@ -61,10 +67,9 @@ fn decoded(v: Value) -> EventValue {
 }
 fn snap(v: &EventValue) -> EventValue {
     match v {
-        EventValue::Array(a) => array(a.borrow().iter().map(snap).collect()),
-        EventValue::Object(o) => EventValue::object(
-            o.borrow()
-                .fields
+        EventValue::Array(a) => array(array_values(a).iter().map(snap).collect()),
+        EventValue::Object(_) => EventValue::record_object(
+            v.spread()
                 .iter()
                 .map(|(k, v)| (k.clone(), snap(v)))
                 .collect(),
@@ -84,12 +89,10 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::Bool(v) => json!(v),
-        EventValue::String(s) => json!(s),
-        EventValue::Enum(e) => e.wire(),
-        EventValue::Array(a) => a.borrow().iter().map(wire).collect(),
-        EventValue::Object(o) => o
-            .borrow()
-            .fields
+        EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
+        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
@@ -118,24 +121,28 @@ fn text(v: &EventValue, s: &str, l: &str) {
     let EventValue::String(v) = v else {
         panic!("{l}: expected native String {s:?}, got {v:?}")
     };
-    assert_eq!(v, s, "{l}")
+    assert_eq!(v.as_ref(), s.encode_utf16().collect::<Vec<_>>(), "{l}")
 }
 fn values(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native Array")
     };
     assert_eq!(a.borrow().len(), n, "{l}: native array count");
-    a.borrow().clone()
+    array_values(a)
 }
 fn own(v: &EventValue, k: &str) -> bool {
     let EventValue::Object(o) = v else {
         panic!("native Object")
     };
-    o.borrow().fields.contains_key(k)
+    o.props
+        .borrow()
+        .contains_key(safe_cex_exchange::js_runtime::value::utf16(k).as_ref())
 }
 fn remove(v: &EventValue, k: &str) {
     let EventValue::Object(o) = v else { panic!() };
-    o.borrow_mut().fields.remove(k);
+    o.props
+        .borrow_mut()
+        .shift_remove(safe_cex_exchange::js_runtime::value::utf16(k).as_ref());
 }
 fn key(m: Method) -> &'static str {
     match m {
@@ -171,7 +178,7 @@ impl Trace {
                 "status",
                 one,
                 wire(v),
-                wire(&EventValue::Enum(PrivateEnum::Status(*status)))
+                wire(&EventValue::enum_value(PrivateEnum::Status(*status)))
             ]),
             Self::Emit(v) => json!(["emit", wire(v)]),
             Self::Resolve(v) => json!(["resolve_id", wire(v)]),
@@ -211,11 +218,11 @@ fn fail(name: &str) -> Failure {
     let mut e = ExchangeError::new("operation fixture");
     e.name = "RangeError".into();
     e.code = Some(if matches!(name, "unknown-number" | "status-unknown") {
-        json!(-2011)
+        safe_cex_exchange::js_runtime::value::from_json(&json!(-2011))
     } else if name == "unknown-string" {
-        json!("-2011")
+        safe_cex_exchange::js_runtime::value::from_json(&json!("-2011"))
     } else {
-        json!(-1000)
+        safe_cex_exchange::js_runtime::value::from_json(&json!(-1000))
     });
     e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
     Rc::new(e)
@@ -272,8 +279,8 @@ fn state(venue: Venue, name: &str) -> Shared {
         _ => record([("price", number(12.4)), ("amount", number(4.2))]),
     };
     if name == "raw-flags" {
-        order.define("reduceOnly", string("yes"));
-        order.define("close", string("close"))
+        order.write("reduceOnly", string("yes"));
+        order.write("close", string("close"))
     }
     if name == "no-triggers" {
         for k in ["tpTriggerType", "slTriggerType", "close"] {
@@ -324,7 +331,9 @@ fn state(venue: Venue, name: &str) -> Shared {
     };
     let mut replacement = ExchangeError::new("emitter fixture");
     replacement.name = "SyntaxError".into();
-    replacement.code = Some(json!("emit-code"));
+    replacement.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "emit-code"
+    )));
     replacement.response = Some(json!({"status":504,"data":{"msg":"emit detail"}}));
     Rc::new(RefCell::new(State {
         name: name.into(),
@@ -386,12 +395,14 @@ impl OrderBindings for Bindings {
                     let EventValue::Array(a) = &b.orders else {
                         panic!()
                     };
-                    for (i, o) in a.borrow().iter().enumerate() {
-                        o.define("id", string(format!("changed-{i}")))
+                    for (i, o) in array_values(&a).iter().enumerate() {
+                        o.write("id", string(format!("changed-{i}")))
                     }
-                    a.borrow_mut().push(decoded(
-                        json!({"id":"appended","symbol":"BTCUSDT","type":"limit"}),
-                    ));
+                    EventValue::Array(a.clone())
+                        .push(decoded(
+                            json!({"id":"appended","symbol":"BTCUSDT","type":"limit"}),
+                        ))
+                        .unwrap();
                 }
                 Ok(EventValue::Undefined)
             }))
@@ -440,14 +451,16 @@ impl OrderBindings for Bindings {
                 let EventValue::Array(a) = &b.orders else {
                     panic!()
                 };
-                a.borrow_mut().push(decoded(
-                    json!({"id":"later","symbol":"BTCUSDT","type":"limit"}),
-                ));
+                EventValue::Array(a.clone())
+                    .push(decoded(
+                        json!({"id":"later","symbol":"BTCUSDT","type":"limit"}),
+                    ))
+                    .unwrap();
             }
-            let algo = match v {
-                EventValue::Enum(PrivateEnum::Type(t)) => {
-                    safe_cex_venue_binance::order_logic::is_algo_order_type(t)
-                }
+            let algo = match &v {
+                EventValue::String(_) => safe_cex_venue_binance::order_logic::is_algo_order_type(
+                    category::<OrderType>(&v),
+                ),
                 _ => false,
             };
             Ok(EventValue::Bool(algo))
@@ -467,7 +480,7 @@ impl OrderBindings for Bindings {
                 return Err(b.error.clone());
             }
             if b.name == "mutate-opts" {
-                opts.define("price", number(12.4))
+                opts.write("price", number(12.4))
             }
             Ok(string("ignored"))
         }))
@@ -497,14 +510,16 @@ impl OrderBindings for Bindings {
                 && matches!(m, Method::Batch | Method::RegularBatch | Method::AlgoBatch)
             {
                 let target = if b.venue == Venue::Futures {
-                    b.formatted.get("regular").unwrap()
+                    b.formatted.read("regular").unwrap()
                 } else {
                     b.formatted.clone()
                 };
                 let EventValue::Array(a) = target else {
                     panic!()
                 };
-                a.borrow_mut().push(record([("native", number(9.9))]));
+                EventValue::Array(a.clone())
+                    .push(record([("native", number(9.9))]))
+                    .unwrap();
             }
         }
         Ok(Rc::new(move |value| {
@@ -522,8 +537,8 @@ impl OrderBindings for Bindings {
                 }
                 Method::Batch | Method::RegularBatch | Method::AlgoBatch => {
                     let expected = match m {
-                        Method::RegularBatch => b.formatted.get("regular").unwrap(),
-                        Method::AlgoBatch => b.formatted.get("algo").unwrap(),
+                        Method::RegularBatch => b.formatted.read("regular").unwrap(),
+                        Method::AlgoBatch => b.formatted.read("algo").unwrap(),
                         _ => b.formatted.clone(),
                     };
                     b.batch_refs = Some(value.same(&expected));
@@ -548,14 +563,14 @@ impl OrderBindings for Bindings {
                     return Err(b.error.clone());
                 }
                 if b.name == "after-cancel-mutation" && m == Method::Cancel {
-                    b.order.define("price", number(99.0));
-                    b.update.define("price", number(99.0))
+                    b.order.write("price", number(99.0));
+                    b.update.write("price", number(99.0))
                 }
                 if b.name == "mutate-opts" && m == Method::ConflictCancel {
-                    b.opts.define("amount", number(4.2))
+                    b.opts.write("amount", number(4.2))
                 }
                 if b.name == "regular-mutates-algo" && m == Method::RegularBatch {
-                    let EventValue::Array(a) = b.formatted.get("algo").unwrap() else {
+                    let EventValue::Array(a) = b.formatted.read("algo").unwrap() else {
                         panic!()
                     };
                     a.borrow_mut().clear();
@@ -603,7 +618,11 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
         },
         "{l}"
     );
-    assert_eq!(e.code, expected.code, "{l}: native Error code");
+    assert_eq!(
+        observed_error_code(&e.code),
+        observed_error_code(&expected.code),
+        "{l}: native Error code"
+    );
     assert_eq!(
         e.response,
         Some(if replaced {
@@ -615,10 +634,10 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
     );
 }
 fn error_wire(e: Option<&Failure>, b: &State) -> Value {
-    e.map_or(Value::Null,|e|json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))
+    e.map_or(Value::Null,|e|json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))
 }
 fn state_wire(b: &State, result: &Result<EventValue, Failure>) -> Value {
-    json!({"name":b.name,"trace":b.trace.iter().map(Trace::wire).collect::<Vec<_>>(),"calls":b.deletes.iter().map(|(ep,p)|json!({"endpoint":ep,"params":wire(p)})).collect::<Vec<_>>(),"statuses":b.statuses.iter().map(|(one,v,s)|json!({"single":one,"rows":wire(v),"status":wire(&EventValue::Enum(PrivateEnum::Status(*s)))})).collect::<Vec<_>>(),"emissions":b.emissions.iter().map(wire).collect::<Vec<_>>(),"value":result.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"forwarded":wire(&b.forwarded),"cancelRefs":b.cancel_refs,"formatRefs":b.format_refs,"batchRefs":b.batch_refs,"returnedRef":result.as_ref().is_ok_and(|v|v.same(&b.returned)),"failure":error_wire(result.as_ref().err(),b)})
+    json!({"name":b.name,"trace":b.trace.iter().map(Trace::wire).collect::<Vec<_>>(),"calls":b.deletes.iter().map(|(ep,p)|json!({"endpoint":ep,"params":wire(p)})).collect::<Vec<_>>(),"statuses":b.statuses.iter().map(|(one,v,s)|json!({"single":one,"rows":wire(v),"status":wire(&EventValue::enum_value(PrivateEnum::Status(*s)))})).collect::<Vec<_>>(),"emissions":b.emissions.iter().map(wire).collect::<Vec<_>>(),"value":result.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"forwarded":wire(&b.forwarded),"cancelRefs":b.cancel_refs,"formatRefs":b.format_refs,"batchRefs":b.batch_refs,"returnedRef":result.as_ref().is_ok_and(|v|v.same(&b.returned)),"failure":error_wire(result.as_ref().err(),b)})
 }
 fn compare(venue: &str, op: &str, actual: Vec<Value>, floor: usize) {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -877,13 +896,13 @@ fn cancel_test(v: Venue, label: &str) {
             if ep.ends_with("algoOrder") {
                 assert_eq!(params.spread().len(), 1, "{l}: native params count");
                 text(
-                    &params.get("algoId").unwrap(),
+                    &params.read("algoId").unwrap(),
                     &ids[0],
                     &format!("{l}: native algoId"),
                 );
             } else {
                 assert_eq!(params.spread().len(), 2, "{l}: native params count");
-                text(&params.get("symbol").unwrap(), symbol, &l);
+                text(&params.read("symbol").unwrap(), symbol, &l);
                 let k = if ep.ends_with("batchOrders") {
                     "orderIdList"
                 } else if ep.ends_with("conditional/order") {
@@ -909,7 +928,7 @@ fn cancel_test(v: Venue, label: &str) {
             if *one {
                 assert_eq!(v, Venue::Futures, "{l}: native single status owner");
                 text(
-                    &rows.get("id").unwrap(),
+                    &rows.read("id").unwrap(),
                     if name == "mutate-after-delete" {
                         "changed-2"
                     } else {
@@ -993,7 +1012,7 @@ fn cancel_test(v: Venue, label: &str) {
             for (row, id) in items.iter().zip(expected) {
                 assert_eq!(row.spread().len(), 1, "{l}: native ID-only status");
                 text(
-                    &row.get("id").unwrap(),
+                    &row.read("id").unwrap(),
                     &id,
                     &format!("{l}: native status ID"),
                 );
@@ -1157,18 +1176,18 @@ fn update_test(v: Venue, label: &str) {
                 },
                 "{l}: native new order field count"
             );
-            text(&new.get("symbol").unwrap(), "BTCUSDT", &l);
+            text(&new.read("symbol").unwrap(), "BTCUSDT", &l);
             assert!(
                 matches!(
-                    new.get("type").unwrap(),
-                    EventValue::Enum(PrivateEnum::Type(OrderType::Limit))
+                    category::<safe_cex_types::OrderType>(&(new.read("type").unwrap())),
+                    OrderType::Limit
                 ),
                 "{l}: native type enum"
             );
             assert!(
                 matches!(
-                    new.get("side").unwrap(),
-                    EventValue::Enum(PrivateEnum::Side(OrderSide::Buy))
+                    category::<safe_cex_types::OrderSide>(&(new.read("side").unwrap())),
+                    OrderSide::Buy
                 ),
                 "{l}: native side enum"
             );
@@ -1195,10 +1214,10 @@ fn update_test(v: Venue, label: &str) {
                 }
             }
             if name == "raw-flags" {
-                text(&new.get("reduceOnly").unwrap(), "yes", &l)
+                text(&new.read("reduceOnly").unwrap(), "yes", &l)
             } else {
                 assert!(
-                    matches!(new.get("reduceOnly").unwrap(), EventValue::Bool(false)),
+                    matches!(new.read("reduceOnly").unwrap(), EventValue::Bool(false)),
                     "{l}: native reduceOnly false"
                 )
             };
@@ -1209,13 +1228,13 @@ fn update_test(v: Venue, label: &str) {
             );
             if v == Venue::Futures {
                 match name {
-                    "raw-flags" => text(&new.get("close").unwrap(), "close", &l),
+                    "raw-flags" => text(&new.read("close").unwrap(), "close", &l),
                     "no-triggers" => assert!(
-                        matches!(new.get("close").unwrap(), EventValue::Bool(false)),
+                        matches!(new.read("close").unwrap(), EventValue::Bool(false)),
                         "{l}: native close false"
                     ),
                     _ => assert!(
-                        matches!(new.get("close").unwrap(), EventValue::Bool(true)),
+                        matches!(new.read("close").unwrap(), EventValue::Bool(true)),
                         "{l}: native close true"
                     ),
                 }
@@ -1228,15 +1247,15 @@ fn update_test(v: Venue, label: &str) {
                 assert_eq!(own(new, k), present, "{l}: native {k} presence");
                 if present {
                     assert!(
-                        matches!(new.get(k).unwrap(),EventValue::Enum(PrivateEnum::Trigger(a)) if a==t),
+                        matches!(category::<safe_cex_types::OrderStopTriggerType>(&(new.get(k).unwrap())), a if a==t),
                         "{l}: native trigger enum"
                     )
                 }
             }
             if name == "after-cancel-mutation" {
-                num(&s.order.get("price").unwrap(), 99.0, &l);
+                num(&s.order.read("price").unwrap(), 99.0, &l);
                 num(
-                    &new.get("price").unwrap(),
+                    &new.read("price").unwrap(),
                     12.4,
                     &format!("{l}: native snapshot price"),
                 );
@@ -1306,7 +1325,7 @@ fn place_test(v: Venue, label: &str) {
             );
             let o = &s.formats[0];
             num(
-                &o.get("price").unwrap(),
+                &o.read("price").unwrap(),
                 if futures && name == "mutate-opts" {
                     12.4
                 } else {
@@ -1315,7 +1334,7 @@ fn place_test(v: Venue, label: &str) {
                 &format!("{l}: native format price"),
             );
             num(
-                &o.get("amount").unwrap(),
+                &o.read("amount").unwrap(),
                 if futures && name == "mutate-opts" {
                     4.2
                 } else {
@@ -1324,9 +1343,9 @@ fn place_test(v: Venue, label: &str) {
                 &format!("{l}: native format amount"),
             );
             assert!(
-                o.get("nested")
+                o.read("nested")
                     .unwrap()
-                    .same(&s.opts.get("nested").unwrap()),
+                    .same(&s.opts.read("nested").unwrap()),
                 "{l}: native nested opts alias"
             );
         }
@@ -1398,8 +1417,8 @@ fn place_test(v: Venue, label: &str) {
             );
             for (m, payloads) in batches {
                 let expected = match m {
-                    Method::RegularBatch => s.formatted.get("regular").unwrap(),
-                    Method::AlgoBatch => s.formatted.get("algo").unwrap(),
+                    Method::RegularBatch => s.formatted.read("regular").unwrap(),
+                    Method::AlgoBatch => s.formatted.read("algo").unwrap(),
                     _ => s.formatted.clone(),
                 };
                 assert!(payloads.same(&expected), "{l}: native original payloads");
@@ -1429,14 +1448,14 @@ fn place_test(v: Venue, label: &str) {
                     let rows = values(payloads, count, &format!("{l}: native batch payload count"));
                     if count > 0 {
                         num(
-                            &rows[0].get("native").unwrap(),
+                            &rows[0].read("native").unwrap(),
                             if *m == Method::AlgoBatch { 4.2 } else { 12.3 },
                             &format!("{l}: native first payload"),
                         );
                     }
                     if name == "batch-capture-mutates" && *m != Method::AlgoBatch {
                         num(
-                            &rows[count - 1].get("native").unwrap(),
+                            &rows[count - 1].read("native").unwrap(),
                             9.9,
                             &format!("{l}: native appended payload"),
                         );
@@ -1496,4 +1515,17 @@ fn pm_place() {
 #[ignore = "requires TypeScript oracle"]
 fn spot_place() {
     place_test(Venue::Spot, "spot")
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

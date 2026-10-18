@@ -5,6 +5,7 @@ import re
 import tomllib
 from pathlib import Path
 import subprocess
+from decoder_mutations import transform_schema
 
 crate = Path(__file__).resolve().parents[1]
 workspace = crate.parent
@@ -31,9 +32,8 @@ def probe(name, file, transform, test, diagnostic):
 
 
 def hardcode_bool(source):
-    before, after = source.split('pub struct PortfolioOrder {', 1)
-    after = after.replace('    pub final_status: bool,', '    #[serde(deserialize_with = "always_true")]\n    pub final_status: bool,', 1)
-    return before + 'pub struct PortfolioOrder {' + after + '\nfn always_true<\'de, D: serde::Deserializer<\'de>>(d: D) -> Result<bool, D::Error> { let _ = bool::deserialize(d)?; Ok(true) }\n'
+    changed = transform_schema(source, 'PortfolioOrder', lambda body: body.replace('    pub final_status: bool,', '    #[serde(deserialize_with = "always_true")]\n    pub final_status: bool,', 1))
+    return changed + "\nfn always_true<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> { let _ = bool::deserialize(d)?; Ok(true) }\n"
 
 
 def swap_bid_ask(source):
@@ -55,12 +55,11 @@ def mutate_constant(name, old, new):
 
 def swap_strings(record, first, second):
     def transform(source):
-        prefix, tail = source.split('pub struct ' + record + ' {', 1)
-        body, suffix = tail.split('}', 1)
-        a, b = '#[serde(rename = "' + first + '")]', '#[serde(rename = "' + second + '")]'
-        assert a in body and b in body, record
-        body = body.replace(a, 'SWAP_MARKER').replace(b, a).replace('SWAP_MARKER', b)
-        return prefix + 'pub struct ' + record + ' {' + body + '}' + suffix
+        def swap(body):
+            a, b = '#[serde(rename = "' + first + '")]', '#[serde(rename = "' + second + '")]'
+            assert a in body and b in body, record
+            return body.replace(a, 'SWAP_MARKER').replace(b, a).replace('SWAP_MARKER', b)
+        return transform_schema(source, record, swap)
     return transform
 
 

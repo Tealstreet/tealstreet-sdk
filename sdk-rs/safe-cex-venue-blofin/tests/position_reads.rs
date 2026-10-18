@@ -196,7 +196,12 @@ impl RestAdapter for Adapter<'_> {
                         status: 503,
                         reason: None,
                         headers: Default::default(),
-                        body: RestResponseBody::Untransformed(json!({"msg":hint})),
+                        body: RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                json!({"msg":hint}),
+                            )
+                            .unwrap(),
+                        ),
                     }));
                 }
                 return Poll::Ready(Err(err));
@@ -207,8 +212,14 @@ impl RestAdapter for Adapter<'_> {
                 headers: Default::default(),
                 body: match self.variant % 3 {
                     0 => RestResponseBody::Encoded(serde_json::to_vec(&value).unwrap()),
-                    1 => RestResponseBody::Untransformed(value.clone()),
-                    _ => RestResponseBody::Transformed(value.clone()),
+                    1 => RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                            .unwrap(),
+                    ),
+                    _ => RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                            .unwrap(),
+                    ),
                 },
             }))
         }))
@@ -316,11 +327,11 @@ fn native_positions(actual: &[Position], expected: &Value) {
         ] {
             number(a, &e[key])
         }
-        opt_number(p.realized_pnl, e.get("realizedPnl"));
-        opt_number(p.margin_size, e.get("marginSize"));
-        opt_number(p.last_update, e.get("lastUpdate"));
+        opt_number((p.realized_pnl).into_value(), e.get("realizedPnl"));
+        opt_number((p.margin_size).into_value(), e.get("marginSize"));
+        opt_number((p.last_update).into_value(), e.get("lastUpdate"));
         opt_json(p.info.as_ref(), e.get("info"));
-        match (&p.extra, optional(e.get("extra"))) {
+        match (p.extra.as_ref(), optional(e.get("extra"))) {
             (Some(a), Some(e)) => {
                 opt_number(a.contracts_native, e.get("contractsNative"));
                 opt_number(a.unrealized_pnl_native, e.get("unrealizedPnlNative"));
@@ -553,7 +564,11 @@ fn run(case: &Value, variant: u8, boundary: bool) {
                     let RestResponseBody::Untransformed(value) = &response.body else {
                         panic!("native original response phase")
                     };
-                    assert_eq!(value["msg"], "batch hint", "native original error hint");
+                    assert_eq!(
+                        value.clone().into_value().unwrap()["msg"],
+                        "batch hint",
+                        "native original error hint"
+                    );
                     e.message.clone()
                 }
                 ServiceError::Input(v) => {
@@ -714,7 +729,7 @@ fn run(case: &Value, variant: u8, boundary: bool) {
                         before,
                         "native owned position snapshot"
                     );
-                    if let Some(Value::Object(info)) = &mut v[0].info {
+                    if let Some(Value::Object(info)) = v[0].info.as_mut() {
                         info.insert("__native_probe".into(), json!(true));
                         assert!(
                             store.positions()[0]

@@ -1021,3 +1021,639 @@ pub fn listen_order_book<V: Clone + 'static, E: 'static>(
         Rc::new(move |_| listener_remove(state.clone())),
     ))
 }
+
+#[cfg(test)]
+mod accepted_helpers {
+    use super::*;
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    use std::cell::RefCell;
+    type Trace = Rc<RefCell<Vec<&'static str>>>;
+    fn fixture(globals: Js) -> SocketOps<Js, Thrown> {
+        crate::accepted_test_support::socket(globals)
+    }
+    fn token() -> Js {
+        Js::object(vec![])
+    }
+    fn trace() -> Trace {
+        Rc::new(RefCell::new(vec![]))
+    }
+    fn native(actual: Js, expected: &Js, label: &str) {
+        match (&actual, expected) {
+            (Js::Number(a), Js::Number(b)) => assert_eq!(a.to_bits(), b.to_bits(), "{label}"),
+            _ => assert!(actual.strict_equals(expected), "{label}"),
+        }
+    }
+    fn thrown<T>(result: Result<T, Thrown>, expected: &Js, label: &str) {
+        match result {
+            Err(e) => assert!(e.value.same_reference(expected), "{label}"),
+            Ok(_) => panic!("{label}: swallowed error"),
+        }
+    }
+    fn property(receiver: &Js, key: &str, value: Js, events: Trace, event: &'static str) {
+        let expected = receiver.clone();
+        receiver.define_accessor(
+            key,
+            Some(Rc::new(move |this| {
+                assert!(
+                    this.same_reference(&expected),
+                    "socket property native receiver"
+                );
+                events.borrow_mut().push(event);
+                Ok(value.clone())
+            })),
+            None,
+        );
+    }
+    fn failing(receiver: &Js, key: &str, error: Js, events: Trace, event: &'static str) {
+        receiver.define_accessor(
+            key,
+            Some(Rc::new(move |_| {
+                events.borrow_mut().push(event);
+                Err(Thrown::new(error.clone()))
+            })),
+            None,
+        );
+    }
+    #[test]
+    fn get_native_contract() {
+        let h = fixture(token());
+        let receiver = token();
+        let value = token();
+        let events = trace();
+        property(&receiver, "Ω.item", value.clone(), events.clone(), "get");
+        native(
+            get(&h, &receiver, "Ω.item").unwrap(),
+            &value,
+            "socket get native identity",
+        );
+        assert_eq!(*events.borrow(), ["get"], "socket get native trace");
+        let error = token();
+        failing(&receiver, "bad", error.clone(), events.clone(), "bad");
+        thrown(
+            get(&h, &receiver, "bad"),
+            &error,
+            "socket get original error",
+        );
+        native(
+            get(&h, &receiver, "missing").unwrap(),
+            &Js::Undefined,
+            "socket get missing value",
+        );
+    }
+    #[test]
+    fn method_native_contract() {
+        let h = fixture(token());
+        let receiver = token();
+        let argument = token();
+        let result = token();
+        let events = trace();
+        let (r, a, v, t) = (
+            receiver.clone(),
+            argument.clone(),
+            result.clone(),
+            events.clone(),
+        );
+        let f = Js::function("method", move |this, args| {
+            t.borrow_mut().push("invoke");
+            native(this, &r, "socket method native receiver");
+            assert_eq!(args.len(), 1, "socket method native argument count");
+            native(args[0].clone(), &a, "socket method native argument");
+            Ok(v.clone())
+        });
+        property(&receiver, "method", f, events.clone(), "get");
+        let got = method(&h, receiver.clone(), "method", || {
+            events.borrow_mut().push("args");
+            receiver
+                .define_key(&"method".encode_utf16().collect::<Vec<_>>(), Js::Undefined)
+                .unwrap();
+            Ok(vec![argument.clone()])
+        })
+        .unwrap();
+        native(got, &result, "socket method native identity");
+        assert_eq!(
+            *events.borrow(),
+            ["get", "args", "invoke"],
+            "socket method evaluation order"
+        );
+        for stage in 0..3 {
+            let events = trace();
+            let error = token();
+            let receiver = token();
+            let (e, t) = (error.clone(), events.clone());
+            if stage == 0 {
+                failing(&receiver, "method", e, events.clone(), "get")
+            } else {
+                property(
+                    &receiver,
+                    "method",
+                    Js::function("method", move |_, _| {
+                        t.borrow_mut().push("invoke");
+                        Err(Thrown::new(e.clone()))
+                    }),
+                    events.clone(),
+                    "get",
+                );
+            }
+            thrown(
+                method(&h, receiver, "method", || {
+                    events.borrow_mut().push("args");
+                    if stage == 1 {
+                        Err(Thrown::new(error.clone()))
+                    } else {
+                        Ok(vec![])
+                    }
+                }),
+                &error,
+                "socket method original error",
+            );
+            assert_eq!(
+                &*events.borrow(),
+                &["get", "args", "invoke"][..stage + 1],
+                "socket method failure order"
+            );
+        }
+    }
+    #[test]
+    fn global_native_contract() {
+        let globals = token();
+        let events = trace();
+        let argument = token();
+        let result = token();
+        let (a, r, t) = (argument.clone(), result.clone(), events.clone());
+        property(
+            &globals,
+            "fn",
+            Js::function("fn", move |this, args| {
+                t.borrow_mut().push("invoke");
+                native(this, &Js::Undefined, "socket global undefined receiver");
+                assert_eq!(args.len(), 1);
+                native(args[0].clone(), &a, "socket global original argument");
+                Ok(r.clone())
+            }),
+            events.clone(),
+            "global",
+        );
+        let h = fixture(globals.clone());
+        let got = global(&h, "fn", || {
+            events.borrow_mut().push("args");
+            globals
+                .define_key(&"fn".encode_utf16().collect::<Vec<_>>(), Js::Undefined)
+                .unwrap();
+            Ok(vec![argument.clone()])
+        })
+        .unwrap();
+        native(got, &result, "socket global native identity");
+        assert_eq!(
+            *events.borrow(),
+            ["global", "args", "invoke"],
+            "socket global evaluation order"
+        );
+        for stage in 0..3 {
+            let globals = token();
+            let events = trace();
+            let error = token();
+            let (e, t) = (error.clone(), events.clone());
+            if stage == 0 {
+                failing(&globals, "fn", e, events.clone(), "global")
+            } else {
+                property(
+                    &globals,
+                    "fn",
+                    Js::function("fn", move |_, _| {
+                        t.borrow_mut().push("invoke");
+                        Err(Thrown::new(e.clone()))
+                    }),
+                    events.clone(),
+                    "global",
+                )
+            }
+            let h = fixture(globals);
+            thrown(
+                global(&h, "fn", || {
+                    events.borrow_mut().push("args");
+                    if stage == 1 {
+                        Err(Thrown::new(error.clone()))
+                    } else {
+                        Ok(vec![])
+                    }
+                }),
+                &error,
+                "socket global original error",
+            );
+            assert_eq!(
+                &*events.borrow(),
+                &["global", "args", "invoke"][..stage + 1],
+                "socket global failure order"
+            );
+        }
+    }
+    #[test]
+    fn own_native_contract() {
+        let h = fixture(token());
+        let receiver = token();
+        let expected = receiver.clone();
+        let result = token();
+        let v = result.clone();
+        let events = trace();
+        let t = events.clone();
+        property(
+            &receiver,
+            "own",
+            Js::function("own", move |this, args| {
+                t.borrow_mut().push("invoke");
+                native(this, &expected, "socket own native receiver");
+                assert_eq!(args.len(), 0);
+                Ok(v.clone())
+            }),
+            events.clone(),
+            "get",
+        );
+        native(
+            own(&h, &receiver, "own", || {
+                events.borrow_mut().push("args");
+                Ok(vec![])
+            })
+            .unwrap(),
+            &result,
+            "socket own native identity",
+        );
+        assert_eq!(
+            *events.borrow(),
+            ["get", "args", "invoke"],
+            "socket own evaluation order"
+        );
+        let error = token();
+        failing(&receiver, "bad", error.clone(), events.clone(), "bad");
+        thrown(
+            own(&h, &receiver, "bad", || {
+                panic!("socket own args after failed getter")
+            }),
+            &error,
+            "socket own original error",
+        );
+        thrown(
+            own(&h, &receiver, "own", || Err(Thrown::new(error.clone()))),
+            &error,
+            "socket own argument error",
+        );
+    }
+    #[test]
+    fn math_native_contract() {
+        let globals = token();
+        let math_object = token();
+        let events = trace();
+        let result = token();
+        let argument = token();
+        let (m, r, a, t) = (
+            math_object.clone(),
+            result.clone(),
+            argument.clone(),
+            events.clone(),
+        );
+        property(
+            &math_object,
+            "max",
+            Js::function("max", move |this, args| {
+                t.borrow_mut().push("invoke");
+                native(this, &m, "socket math native receiver");
+                assert_eq!(args.len(), 1);
+                native(args[0].clone(), &a, "socket math native argument");
+                Ok(r.clone())
+            }),
+            events.clone(),
+            "get",
+        );
+        property(&globals, "Math", math_object, events.clone(), "Math");
+        let h = fixture(globals);
+        native(
+            math(&h, "max", || {
+                events.borrow_mut().push("args");
+                Ok(vec![argument.clone()])
+            })
+            .unwrap(),
+            &result,
+            "socket math native identity",
+        );
+        assert_eq!(
+            *events.borrow(),
+            ["Math", "get", "args", "invoke"],
+            "socket math evaluation order"
+        );
+        for stage in 0..4 {
+            let globals = token();
+            let obj = token();
+            let events = trace();
+            let error = token();
+            let (e, t) = (error.clone(), events.clone());
+            if stage == 0 {
+                failing(&globals, "Math", e, events.clone(), "Math")
+            } else {
+                if stage == 1 {
+                    failing(&obj, "max", e, events.clone(), "get")
+                } else {
+                    property(
+                        &obj,
+                        "max",
+                        Js::function("max", move |_, _| {
+                            t.borrow_mut().push("invoke");
+                            Err(Thrown::new(e.clone()))
+                        }),
+                        events.clone(),
+                        "get",
+                    )
+                }
+                property(&globals, "Math", obj, events.clone(), "Math");
+            }
+            let h = fixture(globals);
+            thrown(
+                math(&h, "max", || {
+                    events.borrow_mut().push("args");
+                    if stage == 2 {
+                        Err(Thrown::new(error.clone()))
+                    } else {
+                        Ok(vec![])
+                    }
+                }),
+                &error,
+                "socket math original error",
+            );
+            assert_eq!(
+                &*events.borrow(),
+                &["Math", "get", "args", "invoke"][..stage + 1],
+                "socket math failure order"
+            );
+        }
+    }
+    #[test]
+    fn parsed_field_native_contract() {
+        let globals = token();
+        let data = token();
+        let input = token();
+        let result = token();
+        let events = trace();
+        let (i, r, t) = (input.clone(), result.clone(), events.clone());
+        property(
+            &globals,
+            "parseFloat",
+            Js::function("parseFloat", move |this, args| {
+                t.borrow_mut().push("invoke");
+                native(
+                    this,
+                    &Js::Undefined,
+                    "socket parsed_field undefined receiver",
+                );
+                assert_eq!(args.len(), 1);
+                native(args[0].clone(), &i, "socket parsed_field native input");
+                Ok(r.clone())
+            }),
+            events.clone(),
+            "global",
+        );
+        property(&data, "price", input, events.clone(), "field");
+        let h = fixture(globals);
+        native(
+            parsed_field(&h, &data, "price").unwrap(),
+            &result,
+            "socket parsed_field native identity",
+        );
+        assert_eq!(
+            *events.borrow(),
+            ["global", "field", "invoke"],
+            "socket parsed_field evaluation order"
+        );
+        for stage in 0..3 {
+            let globals = token();
+            let data = token();
+            let events = trace();
+            let error = token();
+            let (e, t) = (error.clone(), events.clone());
+            if stage == 0 {
+                failing(&globals, "parseFloat", e, events.clone(), "global")
+            } else {
+                property(
+                    &globals,
+                    "parseFloat",
+                    Js::function("parseFloat", move |_, _| {
+                        t.borrow_mut().push("invoke");
+                        Err(Thrown::new(e.clone()))
+                    }),
+                    events.clone(),
+                    "global",
+                );
+                if stage == 1 {
+                    failing(&data, "price", error.clone(), events.clone(), "field")
+                } else {
+                    property(&data, "price", token(), events.clone(), "field")
+                }
+            }
+            let h = fixture(globals);
+            thrown(
+                parsed_field(&h, &data, "price"),
+                &error,
+                "socket parsed_field original error",
+            );
+            assert_eq!(
+                &*events.borrow(),
+                &["global", "field", "invoke"][..stage + 1],
+                "socket parsed_field failure order"
+            );
+        }
+    }
+    #[test]
+    fn parsed_or_native_contract() {
+        let cases = [
+            (Js::Number(0.), false),
+            (Js::Number(-0.), false),
+            (Js::Number(f64::NAN), false),
+            (Js::Undefined, false),
+            (Js::Null, false),
+            (Js::Bool(false), false),
+            (Js::str(""), false),
+            (Js::Number(f64::INFINITY), true),
+            (Js::Number(-3.5), true),
+            (Js::str("x"), true),
+            (token(), true),
+        ];
+        assert_eq!(cases.len(), 11, "socket parsed_or independent cases");
+        let mut executed = 0;
+        for (result, truthy) in cases {
+            let globals = token();
+            let r = result.clone();
+            let calls = trace();
+            let t = calls.clone();
+            globals
+                .define_key(
+                    &"parseFloat".encode_utf16().collect::<Vec<_>>(),
+                    Js::function("parseFloat", move |_, _| {
+                        t.borrow_mut().push("invoke");
+                        Ok(r.clone())
+                    }),
+                )
+                .unwrap();
+            let mut h = fixture(globals);
+            let t = calls.clone();
+            h.number = Rc::new(move |n| {
+                t.borrow_mut().push("fallback");
+                Js::Number(n)
+            });
+            let got = parsed_or(&h, &Js::object(vec![("p", Js::str("input"))]), "p", -0.).unwrap();
+            native(
+                got,
+                if truthy { &result } else { &Js::Number(-0.) },
+                "socket parsed_or native value",
+            );
+            assert_eq!(
+                &*calls.borrow(),
+                if truthy {
+                    &["invoke"][..]
+                } else {
+                    &["invoke", "fallback"][..]
+                },
+                "socket parsed_or lazy fallback"
+            );
+            executed += 1;
+        }
+        assert_eq!(executed, 11, "socket parsed_or executed cases");
+        let error = token();
+        let e = error.clone();
+        let globals = Js::object(vec![(
+            "parseFloat",
+            Js::function("parseFloat", move |_, _| Err(Thrown::new(e.clone()))),
+        )]);
+        let mut h = fixture(globals);
+        h.number = Rc::new(|_| panic!("socket parsed_or fallback after error"));
+        thrown(
+            parsed_or(&h, &Js::object(vec![("p", Js::str("input"))]), "p", 1.),
+            &error,
+            "socket parsed_or original error",
+        );
+    }
+    #[test]
+    fn concat_native_contract() {
+        let h = fixture(token());
+        let got = concat(&h, "Ω:", &Js::utf16(&[0xd800, 65, 0xdc00])).unwrap();
+        native(
+            got,
+            &Js::utf16(&[937, 58, 0xd800, 65, 0xdc00]),
+            "socket concat native UTF16",
+        );
+        native(
+            concat(&h, "", &Js::str("")).unwrap(),
+            &Js::str(""),
+            "socket concat empty",
+        );
+        native(
+            concat(&h, "n=", &Js::Number(-0.)).unwrap(),
+            &Js::str("n=0"),
+            "socket concat number",
+        );
+        let error = token();
+        let e = error.clone();
+        let mut h = fixture(token());
+        h.text = Rc::new(move |_| Err(Thrown::new(e.clone())));
+        h.utf16 = Rc::new(|_| panic!("socket concat constructs after coercion error"));
+        thrown(
+            concat(&h, "prefix", &token()),
+            &error,
+            "socket concat original error",
+        );
+    }
+    #[test]
+    fn caught_native_contract() {
+        let h = fixture(token());
+        caught(&h, &Js::Null, "prefix", Ok(())).unwrap();
+        let receiver = token();
+        let parent = token();
+        let error = token();
+        let output = token();
+        let events = trace();
+        let (p, t) = (parent.clone(), events.clone());
+        property(
+            &parent,
+            "emitAndLogError",
+            Js::function("emitAndLogError", move |this, args| {
+                t.borrow_mut().push("invoke");
+                native(this, &p, "socket caught native receiver");
+                assert_eq!(args.len(), 1);
+                native(
+                    args[0].clone(),
+                    &Js::utf16(&[87, 83, 58, 32, 0xd800, 65]),
+                    "socket caught native message",
+                );
+                Ok(output.clone())
+            }),
+            events.clone(),
+            "emit",
+        );
+        property(&receiver, "parent", parent, events.clone(), "parent");
+        let (e, t) = (error.clone(), events.clone());
+        let mut h = fixture(token());
+        h.error_value = Rc::new(move |error| {
+            t.borrow_mut().push("error");
+            assert!(
+                error.value.same_reference(&e),
+                "socket caught native error identity"
+            );
+            error.value
+        });
+        let t = events.clone();
+        h.text = Rc::new(move |_| {
+            t.borrow_mut().push("text");
+            Ok(vec![0xd800, 65])
+        });
+        caught(&h, &receiver, "WS: ", Err(Thrown::new(error))).unwrap();
+        assert_eq!(
+            *events.borrow(),
+            ["parent", "emit", "error", "text", "invoke"],
+            "socket caught native evaluation order"
+        );
+        for stage in 0..4 {
+            let receiver = token();
+            let parent = token();
+            let events = trace();
+            let replacement = token();
+            let original = token();
+            let (e, t) = (replacement.clone(), events.clone());
+            if stage == 0 {
+                failing(&receiver, "parent", e, events.clone(), "parent")
+            } else {
+                if stage == 1 {
+                    failing(&parent, "emitAndLogError", e, events.clone(), "emit")
+                } else {
+                    property(
+                        &parent,
+                        "emitAndLogError",
+                        Js::function("emitAndLogError", move |_, _| {
+                            t.borrow_mut().push("invoke");
+                            Err(Thrown::new(e.clone()))
+                        }),
+                        events.clone(),
+                        "emit",
+                    )
+                }
+                property(&receiver, "parent", parent, events.clone(), "parent");
+            }
+            let mut h = fixture(token());
+            let t = events.clone();
+            let e = replacement.clone();
+            h.text = Rc::new(move |_| {
+                t.borrow_mut().push("text");
+                if stage == 2 {
+                    Err(Thrown::new(e.clone()))
+                } else {
+                    Ok(vec![])
+                }
+            });
+            thrown(
+                caught(&h, &receiver, "prefix", Err(Thrown::new(original))),
+                &replacement,
+                "socket caught replacement error",
+            );
+            assert_eq!(
+                &*events.borrow(),
+                &["parent", "emit", "text", "invoke"][..stage + 1],
+                "socket caught abrupt order"
+            );
+        }
+    }
+}

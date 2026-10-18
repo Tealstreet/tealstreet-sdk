@@ -91,5 +91,22 @@ export function verifiedNumberOutputDefinition(doc, provider, metadata, artifact
   const matches = scanned.stdout.trim().split('\n').filter(Boolean).map(line => line.split('\t'))
     .filter(([source, name]) => real(source) === file && name === ident);
   assert.equal(matches.length, 1, `${prefix}: unique reviewed macro definition required`);
-  return { file, ident, line: Number(matches[0][2]), column: Number(matches[0][3]), selfOrigin: 'safe_cex_num::js_number_output::self' };
+  const attribute = recipe.exportAttribute;
+  assert.ok(attribute?.ident === 'UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export'
+    && Number.isSafeInteger(attribute.line) && attribute.line > 0
+    && Number.isSafeInteger(attribute.column) && attribute.column >= 0,
+    `${prefix}: exact parsed export attribute required`);
+  assert.equal(scanned.stdout.trim().split('\n').filter(Boolean).map(line => line.split('\t'))
+    .filter(([source, name, row, column]) => real(source) === file && name === attribute.ident
+      && Number(row) === attribute.line && Number(column) === attribute.column).length,
+  1, `${prefix}: unique parsed export attribute marker required`);
+  return { file, ident, line: Number(matches[0][2]), column: Number(matches[0][3]), exportAttribute: attribute, selfOrigin: 'safe_cex_num::js_number_output::self' };
+}
+
+// These two scanner events belong to one verified canonical definition. This
+// does not grant attribute permission elsewhere, including in the same file.
+export function numberOutputDefinitionCovers(definition, file, ident, row, column) {
+  if (!definition || real(file) !== definition.file) return false;
+  return [definition, definition.exportAttribute].some(marker => ident === marker.ident
+    && Number(row) === marker.line && Number(column) === marker.column);
 }

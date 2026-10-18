@@ -210,7 +210,7 @@ pub type PrivateOrderEventRoot = Rc<RefCell<PrivateOrderEvent>>;
 #[derive(Debug, Clone)]
 pub struct PrivateOrderFill<S = Value> {
     pub id: String,
-    pub side: OrderSide,
+    pub side: safe_cex_types::ModelField<OrderSide>,
     pub symbol: String,
     pub price: S,
     pub amount: f64,
@@ -462,18 +462,18 @@ pub fn handle_user_event_orders<I: PrivateOrderInfo, E: PrivateOrderEventInput<I
         let now = host.current_time_ms()?;
         orders.borrow_mut().push(Rc::new(RefCell::new(SyncedOrder {
             fields: Order {
-                client_order_id: None,
+                client_order_id: (None).into(),
                 id,
-                parent_id,
-                status,
+                parent_id: parent_id.into(),
+                status: status.into(),
                 symbol,
-                r#type: kind,
-                side,
-                price,
+                r#type: (kind).into(),
+                side: side.into(),
+                price: price.into(),
                 amount,
                 filled,
                 remaining,
-                extra: Some(OrderExtra {
+                extra: (Some(OrderExtra {
                     remaining_native: Some(remaining_native),
                     filled_in_placement_units: None,
                     remaining_notional: None,
@@ -483,17 +483,18 @@ pub fn handle_user_event_orders<I: PrivateOrderInfo, E: PrivateOrderEventInput<I
                     chaser_id: None,
                     chaser_attempts: None,
                     chaser_max_attempts: None,
-                }),
-                reduce_only: false,
-                info: None,
+                }))
+                .into(),
+                reduce_only: false.into(),
+                info: (None).into(),
                 last_update: now,
-                close: None,
-                time_in_force: None,
-                trigger_type: None,
-                tp_trigger_type: None,
-                sl_trigger_type: None,
-                take_profit: None,
-                stop_loss: None,
+                close: (None).into(),
+                time_in_force: (None).into(),
+                trigger_type: (None).into(),
+                tp_trigger_type: (None).into(),
+                sl_trigger_type: (None).into(),
+                take_profit: (None).into(),
+                stop_loss: (None).into(),
             },
             info: raw,
         })));

@@ -1,10 +1,11 @@
 """Consume every element in a production field decoder, then return empty."""
 from pathlib import Path
 import os,re,subprocess
+from decoder_mutations import decoder_vectors
 crate=Path(__file__).resolve().parents[1];source=crate/'src/types.rs';guard=crate/'tests/support/cardinality.rs'
 env=dict(os.environ,SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript')
 cmd=['/opt/homebrew/opt/rustup/bin/cargo','test','--manifest-path',str(crate.parent/'Cargo.toml'),'-p','safe-cex-venue-breakoutprop','--test','parity','--jobs','1','--','native_fields_and_bits','--exact']
-original=source.read_bytes();text=original.decode();matches=list(re.finditer(r'    pub (\w+): Vec<([^>]+)>,',text));assert len(matches)==13
+original=source.read_bytes();text=original.decode();matches=decoder_vectors(text);assert len(matches)==13
 helper='''
 fn consume_every_element_then_empty<'de, D, T>(decoder: D) -> Result<Vec<T>, D::Error>
 where D: serde::Deserializer<'de>, T: serde::Deserialize<'de> {

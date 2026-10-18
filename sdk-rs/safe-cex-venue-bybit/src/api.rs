@@ -51,18 +51,3 @@ pub fn is_bybit_sign_rejection(data: &Value) -> bool {
             .to_ascii_lowercase()
             .contains("error sign")
 }
-
-/// Source retry condition before its one-shot signature stamp, which the factory owns.
-pub fn should_retry_bybit_request(
-    error: &safe_cex_transport::RestFailure,
-) -> Result<bool, safe_cex_num::JsCoercionError> {
-    let network = safe_cex_transport::retry::is_network_error(error)
-        && safe_cex_transport::retry::is_read_only_method(&error.request);
-    if !network {
-        return Ok(error
-            .response
-            .as_deref()
-            .is_some_and(|response| is_bybit_sign_rejection(&response.body.clone().into_data())));
-    }
-    Ok(error.request.url != "/v5/market/instruments-info")
-}

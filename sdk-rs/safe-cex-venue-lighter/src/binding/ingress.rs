@@ -10,9 +10,15 @@ use std::rc::Rc;
 
 fn for_each(value: &Js, mut f: impl FnMut(Js) -> Result<bool, Thrown>) -> Result<(), Thrown> {
     let iterator = JsIterator::open(value)?;
-    while let Some(item) = iterator.step() {
-        if !f(item)? {
-            break;
+    while let Some(item) = iterator.step()? {
+        match f(item) {
+            Ok(true) => {}
+            Ok(false) => return iterator.close(),
+            Err(error) => {
+                // The body throw wins over IteratorClose failures.
+                let _ = iterator.close();
+                return Err(error);
+            }
         }
     }
     Ok(())
@@ -57,7 +63,13 @@ pub(crate) fn ops(realm: &Realm) -> IngressOps<Js, Thrown> {
         error_value: Rc::new(|e: Thrown| e.value),
         throw: Rc::new(Thrown::new),
         spread: Rc::new(spread),
-        tuple_two: Rc::new(|v| Ok((v.get("0")?, v.get("1")?))),
+        tuple_two: Rc::new(|value| {
+            let pair = JsIterator::open(value)?;
+            let first = pair.step()?.unwrap_or(Js::Undefined);
+            let second = pair.step()?.unwrap_or(Js::Undefined);
+            pair.close()?;
+            Ok((first, second))
+        }),
         construct: Rc::new(|callee, args| {
             if !callee.is_callable() {
                 return Err(Thrown::type_error(&format!(

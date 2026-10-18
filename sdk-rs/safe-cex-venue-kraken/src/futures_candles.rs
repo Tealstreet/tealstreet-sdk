@@ -11,13 +11,34 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 struct Options {
     symbol: String,
     interval: String,
     limit: Option<f64>,
     from: Option<f64>,
     to: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "Options")]
+struct FuturesOptionsWire {
+    symbol: String,
+    interval: String,
+    limit: Option<f64>,
+    from: Option<f64>,
+    to: Option<f64>,
+}
+
+impl<'de> Deserialize<'de> for Options {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let input = <JsNumberInput as Deserialize<'de>>::deserialize(d)?;
+        input
+            .decode_with(|decoder| {
+                FuturesOptionsWire::deserialize(safe_cex_types::strict_decode::object(decoder))
+            })
+            .map_err(serde::de::Error::custom)
+    }
 }
 impl JsNumberOutput for Options {
     fn check_number_output(&self) {
@@ -132,13 +153,15 @@ where
                 last_side: None,
             });
         }
-        if candles.iter().any(|c| c.timestamp.is_nan())
-            && candles.iter().any(|c| !c.timestamp.is_nan())
-        {
-            return Err(type_error(
-                "Kraken Futures mixed NaN timestamps are outside sortable timestamp profile",
-            ));
+        for (index, candle) in candles.iter().enumerate() {
+            if candle.timestamp.is_nan() {
+                let error = type_error(format!(
+                    "Kraken Futures candle {index}: refused timestamp=NaN"
+                ));
+                report("[Kraken] fetchOHLCV row refusal:", None, Some(&error))?;
+            }
         }
+        candles.retain(|candle| !candle.timestamp.is_nan());
         candles.sort_by(|a, b| {
             (a.timestamp - b.timestamp)
                 .partial_cmp(&0.0)
@@ -159,5 +182,51 @@ where
             })?;
             Ok(Vec::new())
         }
+    }
+}
+
+#[cfg(test)]
+mod accepted_shape {
+    use super::Options;
+    use crate::accepted_record_shapes_support as support;
+    #[test]
+    fn futures_options_rejects_complete_positional_array() {
+        support::positive::<Options>(
+            r#"{"symbol":"PF_XRPUSD","interval":"1m","limit":17.25,"from":-0,"to":123.5,"ignored":true}"#,
+            |d| {
+                assert_eq!(d.symbol, "PF_XRPUSD");
+                assert_eq!(d.interval, "1m");
+                assert_eq!(d.limit.unwrap().to_bits(), 17.25_f64.to_bits());
+                assert_eq!(d.from.unwrap().to_bits(), (-0.0_f64).to_bits());
+                assert_eq!(d.to.unwrap().to_bits(), 123.5_f64.to_bits());
+            },
+        );
+        for raw in [
+            r#"{"symbol":"ETH/USD","interval":"5m"}"#,
+            r#"{"symbol":"ETH/USD","interval":"5m","limit":null,"from":null,"to":null}"#,
+        ] {
+            support::positive::<Options>(raw, |d| {
+                assert_eq!(d.symbol, "ETH/USD");
+                assert_eq!(d.interval, "5m");
+                assert!(d.limit.is_none() && d.from.is_none() && d.to.is_none());
+            });
+        }
+        support::positive::<Options>(
+            r#"{"symbol":"NUM","interval":"1m","limit":9007199254740993,"from":5e-324,"to":1e400}"#,
+            |d| {
+                assert_eq!(d.symbol, "NUM");
+                assert_eq!(d.interval, "1m");
+                assert_eq!(
+                    d.limit.unwrap().to_bits(),
+                    9_007_199_254_740_992.0_f64.to_bits()
+                );
+                assert_eq!(d.from.unwrap().to_bits(), 1);
+                assert_eq!(d.to.unwrap().to_bits(), f64::INFINITY.to_bits());
+            },
+        );
+        support::rejects::<Options>(
+            r#"["PF_XRPUSD","1m",17.25,31.75,123.5]"#,
+            &["{}", r#"{"symbol":"x","interval":"1m","limit":"17"}"#],
+        );
     }
 }

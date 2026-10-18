@@ -282,7 +282,8 @@ fn check_native(trace: &Trace, source: &Value, name: &str, snapshots: usize, req
             assert_eq!(native.symbol, position["symbol"].as_str().unwrap());
             assert_eq!(
                 native.side,
-                serde_json::from_value(position["side"].clone()).unwrap()
+                serde_json::from_value::<safe_cex_types::PositionSide>(position["side"].clone())
+                    .unwrap()
             );
             for (key, value) in [
                 ("contracts", native.contracts),
@@ -315,19 +316,20 @@ fn check_native(trace: &Trace, source: &Value, name: &str, snapshots: usize, req
             assert_eq!(native.symbol, order["symbol"].as_str().unwrap());
             assert_eq!(
                 native.status,
-                serde_json::from_value(order["status"].clone()).unwrap()
+                serde_json::from_value::<safe_cex_types::OrderStatus>(order["status"].clone())
+                    .unwrap()
             );
             assert_eq!(
                 native.r#type,
-                serde_json::from_value(order["type"].clone()).unwrap()
+                serde_json::from_value::<safe_cex_types::OrderType>(order["type"].clone()).unwrap()
             );
             assert_eq!(
                 native.side,
-                serde_json::from_value(order["side"].clone()).unwrap()
+                serde_json::from_value::<safe_cex_types::OrderSide>(order["side"].clone()).unwrap()
             );
             assert_eq!(native.reduce_only, order["reduceOnly"].as_bool().unwrap());
             for (key, value) in [
-                ("price", native.price),
+                ("price", native.price.to_number()),
                 ("amount", native.amount),
                 ("filled", native.filled),
                 ("remaining", native.remaining),

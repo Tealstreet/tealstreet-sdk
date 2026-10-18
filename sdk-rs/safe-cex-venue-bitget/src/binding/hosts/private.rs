@@ -3,7 +3,7 @@
 use crate::binding::{
     globals::arg,
     rt::{Rt, Shared},
-    value::{Js, Str, Thrown, from_typed, to_json, to_typed},
+    value::{Js, Thrown, from_typed, to_json, to_typed},
 };
 use crate::numeric::{FiniteNumberInput, to_finite_number};
 use crate::private_recovery::{self, PrivateRecoveryHost};
@@ -56,33 +56,27 @@ fn detach(rt: &Rt, value: Js, source: &'static str) {
     }
 }
 
-fn not_iterable(value: &Js) -> Thrown {
-    Thrown::type_error(&format!(
-        "{} is not iterable (cannot read property Symbol(Symbol.iterator))",
-        value.to_display()
-    ))
+/// GetIterator's retained iterator and next method. Collection traversal is owned
+/// by the shared runtime, including stable Map/Set insertion positions.
+pub(crate) struct JsIter {
+    iterator: Js,
+    next: Js,
+    done: bool,
+    in_body: bool,
 }
 
-/// Live for-of iteration: arrays, Sets and Maps re-read their length each step.
-pub(crate) enum JsIter {
-    Live(Js, usize),
-    Items(std::vec::IntoIter<Js>),
-}
-
-fn code_points(text: &Str) -> Vec<Js> {
-    let mut out = vec![];
-    let mut i = 0;
-    while i < text.len() {
-        let c = text[i];
-        let pair = (0xD800..0xDC00).contains(&c)
-            && text
-                .get(i + 1)
-                .is_some_and(|n| (0xDC00..0xE000).contains(n));
-        let end = if pair { i + 2 } else { i + 1 };
-        out.push(Js::utf16(&text[i..end]));
-        i = end;
+impl Drop for JsIter {
+    fn drop(&mut self) {
+        // These private-topic loops run to exhaustion or return a body error.
+        // IteratorClose runs only for the latter, and that original throw wins
+        // over an error from return(). Step/value errors do not close.
+        if self.in_body
+            && let Ok(close) = self.iterator.get("return")
+            && !close.is_nullish()
+        {
+            let _ = close.call(self.iterator.clone(), vec![]);
+        }
     }
-    out
 }
 
 impl PrivateTopicsHost for Rt {
@@ -156,34 +150,31 @@ impl PrivateTopicsHost for Rt {
         array.get(&index.to_string())
     }
     fn iterator(&self, value: &Js) -> Result<JsIter, Thrown> {
-        match value {
-            Js::Array(_) | Js::Set(_) | Js::Map(_) => Ok(JsIter::Live(value.clone(), 0)),
-            Js::String(text) => Ok(JsIter::Items(code_points(text).into_iter())),
-            other => Err(not_iterable(other)),
-        }
+        let iterator = value.iterator()?;
+        let next = iterator.get("next")?;
+        Ok(JsIter {
+            iterator,
+            next,
+            done: false,
+            in_body: false,
+        })
     }
     fn next(&self, iterator: &mut JsIter) -> Result<Option<Js>, Thrown> {
-        Ok(match iterator {
-            JsIter::Items(items) => items.next(),
-            JsIter::Live(source, index) => {
-                let item = match source {
-                    Js::Array(items) => items
-                        .borrow()
-                        .get(*index)
-                        .map(|v| v.clone().unwrap_or(Js::Undefined)),
-                    Js::Set(items) => items.borrow().get(*index).cloned(),
-                    Js::Map(entries) => entries
-                        .borrow()
-                        .get(*index)
-                        .map(|(k, v)| Js::array(vec![k.clone(), v.clone()])),
-                    _ => None,
-                };
-                if item.is_some() {
-                    *index += 1;
-                }
-                item
-            }
-        })
+        if iterator.done {
+            return Ok(None);
+        }
+        iterator.in_body = false;
+        let item = iterator.next.call(iterator.iterator.clone(), vec![])?;
+        if !item.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        if item.get("done")?.truthy() {
+            iterator.done = true;
+            return Ok(None);
+        }
+        let value = item.get("value")?;
+        iterator.in_body = true;
+        Ok(Some(value))
     }
     fn object(&self, fields: Vec<(&str, Js)>) -> Js {
         Js::object(fields)
@@ -218,7 +209,9 @@ impl PrivateTopicsHost for Rt {
     }
     // ts: virtualClock.getCurrentTimeMs()
     fn clock_now(&self) -> Result<f64, Thrown> {
-        Ok(self.now())
+        self.global("virtualClock")?
+            .call_method("getCurrentTimeMs", vec![])?
+            .to_number()
     }
     fn set_of(&self, values: Js) -> Result<Js, Thrown> {
         self.global("Set")?.call(Js::Undefined, vec![values])

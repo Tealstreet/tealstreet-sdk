@@ -212,3 +212,73 @@ fn currency_rows_keep_source_shapes_through_typed_store_updates() {
         assert!(serde_json::from_value::<CurrencyBalance>(invalid).is_err());
     }
 }
+
+#[test]
+fn declared_dto_profile_keeps_present_undefined_and_refuses_callables() {
+    use safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined;
+    use std::collections::BTreeMap;
+    let input = Js::object(vec![
+        ("missing_value", Js::Undefined),
+        ("null_value", Js::Null),
+        ("negative_zero", Js::Number(-0.0)),
+        ("infinity", Js::Number(f64::INFINITY)),
+    ]);
+    let dto: BTreeMap<String, Option<f64>> = to_typed_preserving_undefined(&input).unwrap();
+    assert_eq!(dto.len(), 4, "DTO own undefined remains a present field");
+    assert_eq!(dto.get("missing_value"), Some(&None));
+    assert_eq!(dto.get("null_value"), Some(&None));
+    assert!(!dto.contains_key("absent"));
+    assert_eq!(dto["negative_zero"].unwrap().to_bits(), (-0.0f64).to_bits());
+    assert_eq!(dto["infinity"], Some(f64::INFINITY));
+    let json_shape: BTreeMap<String, Option<f64>> = to_typed(&input).unwrap();
+    assert!(!json_shape.contains_key("missing_value"));
+    assert_eq!(json_shape.get("null_value"), Some(&None));
+    let native = Js::Builtin(
+        std::rc::Rc::<safe_cex_num::PrototypeRealm>::default()
+            .reference(safe_cex_num::ProtoMember::Constructor),
+    );
+    input.define("callable", native).unwrap();
+    assert!(
+        to_typed_preserving_undefined::<BTreeMap<String, Option<f64>>>(&input).is_err(),
+        "DTO callable field refuses rather than silently omitting"
+    );
+}
+
+#[test]
+fn integer_fields_accept_whole_js_numbers_and_reject_fractional_or_overflow() {
+    assert_eq!(to_typed::<u32>(&Js::Number(1.0)).unwrap(), 1);
+    assert_eq!(to_typed::<u32>(&Js::Number(-0.0)).unwrap(), 0);
+    assert_eq!(
+        to_typed::<u32>(&Js::Number(u32::MAX as f64)).unwrap(),
+        u32::MAX
+    );
+    assert_eq!(
+        to_typed::<i32>(&Js::Number(i32::MIN as f64)).unwrap(),
+        i32::MIN
+    );
+    assert_eq!(
+        to_typed::<i128>(&Js::Number(-2.0f64.powi(127))).unwrap(),
+        i128::MIN
+    );
+    assert_eq!(
+        to_typed::<u128>(&Js::Number(2.0f64.powi(127))).unwrap(),
+        1u128 << 127
+    );
+    for number in [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -1.0,
+        0.5,
+        4294967296.0,
+    ] {
+        assert!(to_typed::<u32>(&Js::Number(number)).is_err(), "{number}");
+    }
+    assert!(to_typed::<i32>(&Js::Number(2147483648.0)).is_err());
+    assert!(to_typed::<i64>(&Js::Number(2.0f64.powi(63))).is_err());
+    assert!(to_typed::<u64>(&Js::Number(2.0f64.powi(64))).is_err());
+    assert!(to_typed::<u128>(&Js::Number(2.0f64.powi(128))).is_err());
+    assert!(to_typed::<i128>(&Js::Number(2.0f64.powi(127))).is_err());
+    assert_eq!(to_typed::<Option<u32>>(&Js::Number(7.0)).unwrap(), Some(7));
+    assert!(to_typed::<u32>(&Js::str("7")).is_err());
+}

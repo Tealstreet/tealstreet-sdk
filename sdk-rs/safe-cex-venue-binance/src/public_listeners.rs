@@ -106,13 +106,10 @@ pub trait ListenerHost {
     fn total(&self, book: Book) -> Result<(), Failure>;
 }
 fn payload(method: &str, topic: &str, id: f64) -> EventValue {
-    EventValue::object(
+    EventValue::record_object(
         [
             ("method".into(), string(method)),
-            (
-                "params".into(),
-                EventValue::Array(Rc::new(RefCell::new(vec![string(topic)]))),
-            ),
+            ("params".into(), EventValue::array(vec![string(topic)])),
             ("id".into(), number(id)),
         ]
         .into_iter()
@@ -166,7 +163,7 @@ fn legacy_topic_remove(host: &dyn ListenerHost, topic: &str) {
 }
 fn lower_symbol(symbol: &EventValue) -> Result<String, Failure> {
     match symbol {
-        EventValue::String(s) => Ok(s.to_lowercase()),
+        EventValue::String(s) => Ok(EventValue::String(s.clone()).text()?.to_lowercase()),
         v if v.nullish() => Err(type_error(format!(
             "Cannot read properties of {} (reading 'toLowerCase')",
             v.text()?
@@ -268,27 +265,27 @@ fn candles(
 ) -> Result<Unsubscribe, Failure> {
     let topic = format!(
         "{}@kline_{}",
-        lower_symbol(&opts.get("symbol")?)?,
-        opts.get("interval")?.text()?
+        lower_symbol(&opts.read("symbol")?)?,
+        opts.read("interval")?.text()?
     );
     let handler = format!(
         "kline.{}.{}",
-        opts.get("interval")?.text()?,
-        opts.get("symbol")?.text()?
+        opts.read("interval")?.text()?,
+        opts.read("symbol")?.text()?
     );
     let parser: Parser = Rc::new(move |events| {
-        let json = events.get("0")?;
-        if opts.get("symbol")?.same(&json.get("k")?.get("s")?)
-            && json.get("k")?.get("i")?.same(&opts.get("interval")?)
+        let json = events.read("0")?;
+        if opts.read("symbol")?.same(&json.read("k")?.read("s")?)
+            && json.read("k")?.read("i")?.same(&opts.read("interval")?)
         {
-            let k = json.get("k")?;
+            let k = json.read("k")?;
             callback(Candle {
-                timestamp: k.get("t")?.number()? / 1000.0,
-                open: k.get("o")?.float()?,
-                high: k.get("h")?.float()?,
-                low: k.get("l")?.float()?,
-                close: k.get("c")?.float()?,
-                volume: k.get("v")?.float()?,
+                timestamp: k.read("t")?.number()? / 1000.0,
+                open: k.read("o")?.float()?,
+                high: k.read("h")?.float()?,
+                low: k.read("l")?.float()?,
+                close: k.read("c")?.float()?,
+                volume: k.read("v")?.float()?,
                 last_side: None,
             })?;
         }
@@ -372,7 +369,7 @@ impl DepthListener {
                 this.host
                     .load(this.book.clone(), data.clone(), this.sync.clone())?;
                 let updates = this.inner.updates.borrow().clone();
-                let buffered = this.host.buffered(updates, data.get("lastUpdateId")?)?;
+                let buffered = this.host.buffered(updates, data.read("lastUpdateId")?)?;
                 this.inner.snapshot_loaded.set(true);
                 self::clear_updates(&this.inner);
                 for update in buffered {
@@ -405,8 +402,8 @@ impl DepthListener {
         }));
     }
     fn parse(self: &Rc<Self>, events: EventValue) -> Result<(), Failure> {
-        let data = events.get("0")?;
-        if !data.get("s")?.same(&string(&self.symbol)) {
+        let data = events.read("0")?;
+        if !data.read("s")?.same(&string(&self.symbol)) {
             return Ok(());
         }
         if !self.inner.snapshot_loaded.get() && self.inner.updates.borrow().is_empty() {

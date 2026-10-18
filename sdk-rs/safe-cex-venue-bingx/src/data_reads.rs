@@ -157,7 +157,10 @@ impl BingxDataReads {
         self.configured_request(RestRequest {
             method: "POST".into(),
             url: endpoint.into(),
-            body: Some(safe_cex_transport::RestBody::Untransformed(body)),
+            body: Some(safe_cex_transport::RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            )),
             ..Default::default()
         })
         .await
@@ -319,22 +322,51 @@ impl BingxDataReads {
                     ))
                 })
                 .collect::<Result<Vec<_>, ExchangeError>>()?;
-            prepared
-                .into_iter()
-                .map(|(mut market, base, quote, leverage)| {
-                    market.base = strict_string(base.as_ref(), "base")?;
-                    market.quote = strict_string(quote.as_ref(), "quote")?;
-                    if js_truthy(leverage.as_ref()) {
-                        market.limits.leverage.max =
-                            strict_number(leverage.as_ref(), "max leverage")?;
-                    }
-                    Ok(market)
-                })
-                .collect::<Result<Vec<_>, ExchangeError>>()
+            let mut markets = Vec::new();
+            let mut refusals = Vec::new();
+            for (index, (mut market, base, quote, leverage)) in prepared.into_iter().enumerate() {
+                let invalid = [("base", base.as_ref()), ("quote", quote.as_ref())]
+                    .into_iter()
+                    .filter(|(_, value)| value.and_then(Value::as_str).is_none())
+                    .map(|(field, value)| {
+                        format!(
+                            "{field}={}",
+                            value.map_or_else(|| "undefined".into(), Value::to_string)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if !invalid.is_empty() {
+                    refusals.push(format!(
+                        "Refused BingX market row {index} symbol={}: {}: expected string",
+                        market.id,
+                        invalid.join(", ")
+                    ));
+                    continue;
+                }
+                market.base = strict_string(base.as_ref(), "base")?;
+                market.quote = strict_string(quote.as_ref(), "quote")?;
+                if js_truthy(leverage.as_ref()) {
+                    market.limits.leverage.max = match strict_number(leverage.as_ref(), "max leverage") {
+                        Ok(value) => value,
+                        Err(cause) => {
+                            let value = leverage.as_ref().map_or_else(|| "undefined".into(), Value::to_string);
+                            refusals.push(format!("Refused BingX market row {index} symbol={}: limits.leverage.max={value}: {}", market.id, cause.message));
+                            continue;
+                        }
+                    };
+                }
+                markets.push(market);
+            }
+            Ok::<_, ExchangeError>((markets, refusals))
         }
         .await;
         match result {
-            Ok(markets) => Ok(markets),
+            Ok((markets, refusals)) => {
+                for message in refusals {
+                    self.report(message, None)?;
+                }
+                Ok(markets)
+            }
             Err(error) => {
                 self.report(error_message(&error)?, None)?;
                 Ok(self.base.store.markets().to_vec())
@@ -570,21 +602,21 @@ fn empty_position(metadata: PositionMetadata) -> Position {
             Some(metadata.position_mode),
         ),
         symbol: metadata.symbol,
-        side: metadata.side,
+        side: (metadata.side).into(),
         leverage: metadata.leverage,
-        margin_type: Some(metadata.margin_type),
-        position_mode: Some(metadata.position_mode),
+        margin_type: (Some(metadata.margin_type)).into(),
+        position_mode: (Some(metadata.position_mode)).into(),
         entry_price: 0.0,
         notional: 0.0,
         unrealized_pnl: 0.0,
         contracts: 0.0,
         liquidation_price: 0.0,
-        margin_size: None,
-        info: None,
-        realized_pnl: None,
-        extra: None,
-        last_update: None,
-        option: None,
+        margin_size: (None).into(),
+        info: (None).into(),
+        realized_pnl: (None).into(),
+        extra: (None).into(),
+        last_update: (None).into(),
+        option: (None).into(),
     }
 }
 impl BingxDataReads {
@@ -666,21 +698,21 @@ impl BingxDataReads {
                             Some(mode),
                         ),
                         symbol,
-                        side,
+                        side: side.into(),
                         entry_price,
                         notional,
                         leverage,
-                        margin_type: Some(margin_type),
-                        position_mode: Some(mode),
+                        margin_type: (Some(margin_type)).into(),
+                        position_mode: (Some(mode)).into(),
                         unrealized_pnl: upnl,
                         contracts: contracts.abs(),
                         liquidation_price: float(alias(row, "liquidationPrice")?)?,
-                        margin_size,
-                        info: Some(row.clone()),
-                        realized_pnl: None,
-                        extra: None,
-                        last_update: None,
-                        option: None,
+                        margin_size: margin_size.into(),
+                        info: (Some(row.clone())).into(),
+                        realized_pnl: (None).into(),
+                        extra: (None).into(),
+                        last_update: (None).into(),
+                        option: (None).into(),
                     },
                     inherited_side,
                 ));

@@ -80,7 +80,7 @@ pub trait ExchangeImports {
         value: &EventValue,
         key: &str,
     ) -> Result<EventValue, Failure> {
-        value.get(key)
+        value.read(key)
     }
     fn weight_header_get_member(
         &self,
@@ -196,30 +196,9 @@ fn failure(message: impl Into<String>) -> Failure {
     Rc::new(ExchangeError::new(message))
 }
 fn decoded(v: impl serde::Serialize) -> Result<EventValue, Failure> {
-    use safe_cex_types::retained_json::RetainedJsonInput as R;
-    fn native(value: R) -> EventValue {
-        match value {
-            R::Null => EventValue::Null,
-            R::Bool(value) => EventValue::Bool(value),
-            R::Text(value) => EventValue::String(value),
-            R::Float(value) => EventValue::Number(value),
-            R::Lexeme(value) => {
-                EventValue::Number(value.parse().expect("retained valid JSON number"))
-            }
-            R::Array(values) => EventValue::Array(Rc::new(RefCell::new(
-                values.into_iter().map(native).collect(),
-            ))),
-            R::Object(values) => EventValue::object(
-                values
-                    .into_iter()
-                    .map(|(key, value)| (key, native(value)))
-                    .collect(),
-            ),
-        }
-    }
-    safe_cex_num::numeric_ingress::js_capture_output(&v)
-        .map(native)
-        .map_err(|e| failure(e.to_string()))
+    safe_cex_exchange::js_runtime::value::from_typed(&v)
+        .map(in_current_realm)
+        .map_err(|error| failure(error.message()))
 }
 
 fn json_value(v: &EventValue) -> Result<Value, Failure> {
@@ -270,7 +249,7 @@ impl ExchangeState {
         let mut base = BaseExchange::new(name, options.clone(), store, d.runtime.clone(), settings);
         let opts = decoded(options)?;
         if d.signers.remote_signer.is_some() {
-            opts.define(
+            opts.write(
                 "remoteSigner",
                 d.remote_signer_token
                     .clone()
@@ -278,7 +257,7 @@ impl ExchangeState {
             );
         }
         if d.signers.payload_signer.is_some() {
-            opts.define(
+            opts.write(
                 "payloadSigner",
                 d.payload_signer_token
                     .clone()
@@ -374,7 +353,7 @@ impl ExchangeState {
             .expect("live private child lease")
     }
     fn client(&self, client: Client) -> Result<EventValue, Failure> {
-        self.clients.get(match client {
+        self.clients.read(match client {
             Client::Private => {
                 if self.venue == Venue::PM {
                     "papiXhr"
@@ -695,7 +674,7 @@ impl ExchangeState {
             return Err(failure("weight clients must be an array"));
         };
         let mut objects = vec![];
-        for value in clients.borrow().iter() {
+        for value in clients.borrow().iter().flatten() {
             if let EventValue::Object(object) = value {
                 objects.push(object.clone())
             }
@@ -832,7 +811,7 @@ impl ExchangeState {
                                 EventValue::Null => crate::account_fetch::FetchedPositions::Null,
                                 result => {
                                     let value =
-                                        result.get("positions").map_err(|e| (*e).clone())?;
+                                        result.read("positions").map_err(|e| (*e).clone())?;
                                     crate::account_fetch::FetchedPositions::Present {
                                         positions: (!matches!(value, EventValue::Undefined))
                                             .then_some(value),
@@ -1144,7 +1123,7 @@ impl crate::private_rest::SnapshotBindings for Context {
         Ok(self.0.asset_price(&asset.text()?))
     }
     fn market(&mut self, symbol: &str) -> Result<EventValue, Failure> {
-        self.0.store_field("marketsBySymbol")?.get(symbol)
+        self.0.store_field("marketsBySymbol")?.read(symbol)
     }
     fn has_primary(&mut self) -> Result<bool, Failure> {
         Ok(self.0.client(Client::Primary)?.truthy())
@@ -1192,9 +1171,7 @@ impl crate::position_snapshots::PositionSnapshotBindings for ExchangeState {
         side: EventValue,
         mode: safe_cex_types::PositionMode,
     ) -> Result<String, Failure> {
-        let EventValue::Enum(PrivateEnum::PositionSide(side)) = side else {
-            return Err(failure("native position-side enum required"));
-        };
+        let side = typed::<safe_cex_types::PositionSide>(&side)?;
         Ok(safe_cex_types::model_utils::create_position_id(
             &symbol,
             Some(side),
@@ -1227,14 +1204,19 @@ impl crate::order_operations::OrderBindings for Context {
         let owner = self.0.clone();
         Ok(Rc::new(move |selector, status| {
             let ids = if single {
-                vec![selector.get("id")?.text()?]
+                vec![selector.read("id")?.text()?]
             } else {
                 let EventValue::Array(rows) = selector else {
                     return Err(failure("order selectors must be an array"));
                 };
                 rows.borrow()
                     .iter()
-                    .map(|row| row.get("id")?.text())
+                    .map(|row| {
+                        row.as_ref()
+                            .unwrap_or(&EventValue::Undefined)
+                            .read("id")?
+                            .text()
+                    })
                     .collect::<Result<Vec<_>, _>>()?
             };
             owner
@@ -1254,10 +1236,7 @@ impl crate::order_operations::OrderBindings for Context {
     fn capture_is_algo(&mut self) -> Result<crate::order_operations::Sync, Failure> {
         // SDK callers arrive with the decoded string spelling, class callers with the native enum.
         Ok(Rc::new(|value| {
-            let kind = match value {
-                EventValue::Enum(PrivateEnum::Type(kind)) => kind,
-                other => typed::<safe_cex_types::OrderType>(&other)?,
-            };
+            let kind = typed::<safe_cex_types::OrderType>(&value)?;
             Ok(EventValue::Bool(crate::order_logic::is_algo_order_type(
                 kind,
             )))
@@ -1268,7 +1247,7 @@ impl crate::order_operations::OrderBindings for Context {
         Ok(Rc::new(move |opts| {
             Ok(owner
                 .base
-                .resolve_caller_client_order_id(&typed(&opts)?)
+                .resolve_caller_client_order_id(&typed::<safe_cex_types::PreparedOrderOpts>(&opts)?)
                 .map_err(Rc::new)?
                 .map_or(EventValue::Undefined, string))
         }))
@@ -1334,7 +1313,7 @@ impl crate::order_batches::BatchBindings for Context {
         Ok(Rc::new(|rejection| {
             let value = match rejection {
                 crate::order_batches::Rejection::Error(error) => {
-                    json!({"response":error.response,"code":error.metadata.code,"message":error.message})
+                    json!({"response":error.response,"code":error.metadata.code.as_ref().map(safe_cex_exchange::js_runtime::value::to_json).transpose().map_err(|e| Rc::new(e.to_exchange_error()))?,"message":error.message})
                 }
                 crate::order_batches::Rejection::Row(row) => json_value(&row)?,
             };
@@ -1351,7 +1330,7 @@ impl crate::order_batches::BatchBindings for Context {
     fn market(&mut self, opts: &EventValue) -> Result<EventValue, Failure> {
         self.0
             .store_field("marketsBySymbol")?
-            .get(&opts.get("symbol")?.text()?)
+            .read(&opts.read("symbol")?.text()?)
     }
     fn adjust(&mut self, value: EventValue, precision: EventValue) -> Result<EventValue, Failure> {
         Ok(number(safe_cex_num::adjust(
@@ -1571,7 +1550,7 @@ impl crate::public_rest::RestBindings for RestContext {
                 ("endTime", number(p.end_time)),
             ]);
             if let Some(limit) = p.limit {
-                value.define("limit", number(limit));
+                value.write("limit", number(limit));
             }
             value
         });
@@ -1775,11 +1754,46 @@ impl ExchangeState {
             Venue::PM => crate::public_rest::fetch_pm_markets(&mut context).await?,
             Venue::Spot => crate::public_rest::fetch_spot_markets(&mut context).await?,
         };
-        Ok(EventValue::Array(Rc::new(RefCell::new(
-            rows.iter()
-                .map(market_value)
-                .collect::<Result<Vec<_>, _>>()?,
-        ))))
+        let mut markets = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            let mut invalid = [
+                ("base", row.base.as_ref()),
+                ("quote", row.quote.as_ref()),
+                ("symbol", row.symbol.as_ref()),
+            ]
+            .into_iter()
+            .filter(|(_, value)| value.and_then(Value::as_str).is_none())
+            .map(|(field, value)| {
+                format!(
+                    "{field}={}: expected string",
+                    value.map_or_else(|| "undefined".into(), Value::to_string)
+                )
+            })
+            .collect::<Vec<_>>();
+            if safe_cex_num::numeric_ingress::js_value_as_f64(&row.leverage_max).is_none() {
+                invalid.push(format!(
+                    "limits.leverage.max={}: expected number",
+                    row.leverage_max
+                ));
+            }
+            if !invalid.is_empty() {
+                let symbol = row
+                    .symbol
+                    .as_ref()
+                    .map_or_else(|| "undefined".into(), Value::to_string);
+                emit_json(
+                    &self.base,
+                    &json!(format!(
+                        "Refused Binance market row {index} symbol={symbol}: {}",
+                        invalid.join(", ")
+                    )),
+                )
+                .map_err(Rc::new)?;
+                continue;
+            }
+            markets.push(market_value(row)?);
+        }
+        Ok(EventValue::array(markets))
     }
     pub async fn fetch_tickers(self: &Rc<Self>) -> Result<EventValue, Failure> {
         let mut context = RestContext(self.clone());
@@ -1896,7 +1910,7 @@ impl ExchangeState {
                         let result = class_jobs::reaction(future)
                             .await
                             .map_err(|e| (*e).clone())?;
-                        let balance = result.get("balance").map_err(|e| (*e).clone())?;
+                        let balance = result.read("balance").map_err(|e| (*e).clone())?;
                         Ok(Some(FetchedAccountBalance {
                             balance: (!matches!(balance, EventValue::Undefined)).then_some(balance),
                         }))
@@ -1979,16 +1993,14 @@ impl PrivateParent for ExchangeState {
                 UpdateOrder => owner
                     .base
                     .store
-                    .update_order(&arg(0).get("id")?.text()?, &patch(&arg(1))?)
+                    .update_order(&arg(0).read("id")?.text()?, &patch(&arg(1))?)
                     .map_err(|error| Rc::new(error.into())),
                 OrderStatus => {
-                    let EventValue::Enum(PrivateEnum::Status(status)) = arg(1) else {
-                        return Err(failure("native order status"));
-                    };
+                    let status = typed::<safe_cex_types::OrderStatus>(&arg(1))?;
                     owner
                         .base
                         .store
-                        .update_order_status(&arg(0).get("id")?.text()?, status)
+                        .update_order_status(&arg(0).read("id")?.text()?, status)
                         .map_err(|error| Rc::new(error.into()))
                 }
                 AddPosition => owner
@@ -1996,11 +2008,33 @@ impl PrivateParent for ExchangeState {
                     .store
                     .add_or_update_position(typed(&arg(0))?)
                     .map_err(|error| Rc::new(error.into())),
-                UpdatePosition => owner
-                    .base
-                    .store
-                    .update_position(&arg(0).get("id")?.text()?, &patch(&arg(1))?)
-                    .map_err(|error| Rc::new(error.into())),
+                UpdatePosition => {
+                    let position = arg(0);
+                    let mut changes = arg(1).spread();
+                    if owner.venue == Venue::PM
+                        && changes.get("info").is_some_and(|info| info.same(&position))
+                    {
+                        // The source creates position.info === position. The owned
+                        // Store keeps the chosen depth-one snapshot of the updated
+                        // fields, excluding info so subsequent frames stay bounded.
+                        let mut snapshot = position.spread();
+                        snapshot.remove("info");
+                        for (field, value) in &changes {
+                            if field != "info" {
+                                snapshot.insert(field.clone(), value.clone());
+                            }
+                        }
+                        changes.insert("info".into(), EventValue::record_object(snapshot));
+                    }
+                    owner
+                        .base
+                        .store
+                        .update_position(
+                            &position.read("id")?.text()?,
+                            &patch(&EventValue::record_object(changes))?,
+                        )
+                        .map_err(|error| Rc::new(error.into()))
+                }
                 Fill => owner.fill(arg(0)),
                 MarkPosition => {
                     owner.mark_position_state_updated();
@@ -2012,9 +2046,7 @@ impl PrivateParent for ExchangeState {
         }))
     }
     fn fill(&self, payload: EventValue) -> Result<(), Failure> {
-        self.base
-            .emit("fill", json_value(&payload)?)
-            .map_err(Rc::new)
+        self.base.emit("fill", payload).map_err(Rc::new)
     }
     fn asset_price(&self, asset: &EventValue) -> Result<f64, Failure> {
         Ok(self.asset_price(&asset.text()?))
@@ -2050,7 +2082,7 @@ impl PrivateParent for ExchangeState {
         let request = self.http(Client::Private, HttpMethod::Post, path, None)?;
         Ok(Box::pin(async move {
             let data = request.await?;
-            let value = data.get("listenKey")?;
+            let value = data.read("listenKey")?;
             Ok(crate::listen_key::ListenKeyResponse::Data(
                 crate::listen_key::ListenKeyData::Present(Rc::new(RefCell::new(
                     (!matches!(value, EventValue::Undefined)).then_some(value),
@@ -2147,7 +2179,10 @@ impl WsParent for ExchangeState {
         self.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.base.emit(event, json!(message))
+        self.base.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.base.sync_socket_health_to_store()

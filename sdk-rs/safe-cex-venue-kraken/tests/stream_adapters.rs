@@ -61,7 +61,7 @@ fn book() -> OrderBook {
 fn options() -> OHLCVOptions {
     OHLCVOptions {
         symbol: "BTC/雪".into(),
-        interval: Timeframe::H12,
+        interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::H12),
         from: Some(-0.0),
         to: Some(1770900000123.75),
         limit: Some(17.25),
@@ -104,7 +104,10 @@ fn assert_book(value: &OrderBook, expected: &Value) {
 }
 fn assert_options(value: &OHLCVOptions, expected: &Value) {
     assert_eq!(value.symbol, expected["symbol"]);
-    assert_eq!(value.interval, Timeframe::H12);
+    assert_eq!(
+        value.interval,
+        safe_cex_types::AnyTimeframe::Variant1(Timeframe::H12)
+    );
     assert_eq!(expected["interval"], "12h");
     for (name, number) in [
         ("from", value.from.unwrap()),
@@ -158,7 +161,7 @@ impl Host {
     fn failure(&self) -> ExchangeError {
         let mut error = ExchangeError::new("stream failure");
         error.name = "StreamError".into();
-        error.metadata.code = Some(Value::String("original".into()));
+        error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str("original"));
         self.pointer.set((&*error.metadata as *const _) as usize);
         error
     }
@@ -361,7 +364,9 @@ fn compare(family: &str) {
                         "STREAM native original error identity"
                     );
                     if original {
-                        assert_eq!(error.metadata.code.as_ref().unwrap(), "original")
+                        assert!(error.metadata.code.as_ref().unwrap().strict_equals(
+                            &safe_cex_exchange::js_runtime::value::Js::str("original")
+                        ))
                     }
                 }
             }

@@ -24,6 +24,9 @@ use std::{rc::Rc, task::Poll};
 pub type ApiFactory<'a> = dyn Fn(ExchangeOptions) -> Result<Rc<BingxApi>, ExchangeError> + 'a;
 /// Imported BaseExchange external-data and secondary-key/rate-limit operations.
 pub trait ExchangeHost {
+    fn signers(&self) -> safe_cex_exchange::runtime::ExchangeSigners {
+        Default::default()
+    }
     fn secondary(
         &self,
         options: &ExchangeOptions,
@@ -68,7 +71,7 @@ impl BingxExchange {
         hosts: BingxHosts,
     ) -> Result<Rc<Self>, ExchangeError> {
         let mint = hosts.placement.clone();
-        let base = Rc::new(BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options.clone(),
             store,
@@ -92,7 +95,9 @@ impl BingxExchange {
                 }),
                 ..Default::default()
             },
-        ));
+        );
+        base.signers = hosts.exchange.signers();
+        let base = Rc::new(base);
         let factory = |opts| create_api(opts, &base, hosts.api.clone());
         let xhr = hosts.exchange.secondary(&options, &factory, 3.0)?;
         let unlimited_xhr = create_api(options, &base, hosts.api)?;

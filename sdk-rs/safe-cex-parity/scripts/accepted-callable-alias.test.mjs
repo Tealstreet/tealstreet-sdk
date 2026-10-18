@@ -165,3 +165,47 @@ test('unresolved selected Fn compiler identity refuses before any path-name appr
   const copy=structuredClone(f.doc);copy.external_crates[2].path=null;
   assert.throws(()=>aliasRows(copy),/external alias trait lacks compiler identity/);
 }));
+
+test('hosted signer tuple retains its exact native type and compiler roles', async () => {
+  const path = name => ({ resolved_path: { path: name, args: null } });
+  const applied = (name, type) => ({ resolved_path: { path: name, args: { angle_bracketed: { args: [{ type }], constraints: [] } } } });
+  const target = { tuple: [applied('alloc::rc::Rc', { dyn_trait: { traits: [{ trait: { path: 'safe_cex_exchange::runtime::RemoteSigner', args: null }, generic_params: [] }], lifetime: null } }), applied('core::option::Option', path('alloc::string::String'))] };
+  const alias = { name: 'safe_cex_exchange::js_runtime::base_exchange::HostedSigner', ident: 'HostedSigner', span: { filename: 'safe-cex-exchange/src/js_runtime/base_exchange.rs' }, generics: { params: [], where_predicates: [] }, rawTarget: target, target };
+  const contract = { category: 'non-decoder', evidence: 'Native capability fixture.', reason: 'Existing signer and account label.', generics: alias.generics, rawTarget: target, target };
+  const context = { macroOrigins: ['serde_json'], externalTypeAliases: [['alloc::rc::Rc', 'struct'], ['core::option::Option', 'enum'], ['alloc::string::String', 'struct']].map(([canonical, kind]) => ({ name: alias.name, canonical, kind, artifact: { kind: 'sysroot' } })) };
+  const check = (item = alias, rule = contract, scope = context) => genericAliasProbe(item, rule, scope);
+  const result = check();
+  assert.equal(result.expectedType, '(::std::rc::Rc<dyn crate::runtime::RemoteSigner>,::core::option::Option<::std::string::String>)');
+  assert.equal(result.probeKind, 'reviewed-hosted-signer-tuple');
+  assert.equal(result.suffix, '');
+  for (const mutate of [
+    item => { item.span.filename = 'other.rs'; },
+    item => { item.generics.params = [{ name: 'T' }]; },
+    item => { item.rawTarget.tuple.reverse(); },
+    item => { item.target.tuple[0].resolved_path.args.angle_bracketed.args[0].type.dyn_trait.lifetime = "'static"; },
+  ]) {
+    const item = structuredClone(alias); mutate(item);
+    assert.throws(() => check(item), /hosted signer tuple/);
+  }
+  for (const key of ['instantiation', 'aliasProbeExpected', 'aliasProbeKind', 'aliasProbeSuffix', 'nativeCanonical']) assert.throws(() => check(alias, { ...contract, [key]: 'redirect' }), /caller cannot supply/);
+  assert.throws(() => check(alias, contract, { ...context, macroOrigins: [] }), /actual compiler context/);
+  for (let i = 0; i < context.externalTypeAliases.length; ++i) {
+    const scope = structuredClone(context); scope.externalTypeAliases.splice(i, 1);
+    assert.throws(() => check(alias, contract, scope), /actual sysroot/);
+    const foreign = structuredClone(context); foreign.externalTypeAliases[i].artifact.kind = 'workspace';
+    assert.throws(() => check(alias, contract, foreign), /actual sysroot/);
+  }
+  const { spawnSync } = await import('node:child_process');
+  const url = new URL('./accepted-callable-alias.mjs', import.meta.url).href;
+  const changed = structuredClone(alias); changed.target = { tuple: [...changed.target.tuple].reverse() };
+  const rule = { ...contract, target: changed.target };
+  const anchor = '  assert.deepEqual(alias.target, target, `${label}: expanded target changed`);';
+  const execute = mutate => {
+    const hook = mutate ? `import {registerHooks} from 'node:module';registerHooks({load(url,context,next){const r=next(url,context);if(url!==${JSON.stringify(url)})return r;const source=String(r.source);const anchor=${JSON.stringify(anchor)};assert.equal(source.split(anchor).length,2);return {...r,source:source.replace(anchor,'')};}});` : '';
+    return spawnSync(process.execPath, ['--input-type=module', '--eval', `import assert from 'node:assert/strict';${hook}const {genericAliasProbe}=await import(${JSON.stringify(url)});assert.throws(()=>genericAliasProbe(${JSON.stringify(changed)},${JSON.stringify(rule)},${JSON.stringify(context)}),/expanded target changed/,'HOSTED-TUPLE expanded compiler target must refuse');`], { encoding: 'utf8' });
+  };
+  assert.equal(execute(false).status, 0);
+  const mutant = execute(true); assert.equal(mutant.status, 1); assert.match(mutant.stderr, /HOSTED-TUPLE expanded compiler target must refuse/);
+  console.log('hosted signer tuple expanded target: named assertion; process exit 1');
+  assert.equal(execute(false).status, 0);
+});

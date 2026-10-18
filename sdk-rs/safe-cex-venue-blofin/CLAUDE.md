@@ -1,5 +1,9 @@
 # BloFin Rust venue
 
+The public connection-failure notice emits two listener arguments: the notice
+text and `{forceToast: true}`. `tests/native_warning.rs` drives the real native
+venue and its twenty-second timer, checking the argument shape and one-shot notice.
+
 The maintained behavioral source is
 [`blofin/CLAUDE.md`](../../packages/safe-cex/src/exchanges/blofin/CLAUDE.md)
 and its seven TypeScript files. `src/types.rs` is the first slice: constants,
@@ -14,6 +18,10 @@ the consuming method. Required fields stay required; optional fields distinguish
 omission from present null (null refuses). Records use shared map-only decoding.
 The batch leverage side is a closed net/long/short enum. Unknown properties
 are omitted; shared ingress enforces its recursion budget before projection.
+Its decoder admits strings before delegating to a private remote enum companion,
+so ordinary Serde and qualified decoding also refuse tagged records such as
+`{"long": null}`. Keep the three rename attributes and serialization unchanged;
+`batch_position_side_accepts_only_declared_strings` covers the ingress paths.
 Duplicate JSON keys follow the shared capture’s last-value semantics. No opaque passthrough
 fields exist in this slice. Future open-record readers must capture opaque
 fields before constructing Value. Constant tables hold static JSON data only;
@@ -192,7 +200,9 @@ never automatically the market's contract size. Refuse missing/net direction;
 negate the venue fee while retaining rebates, leave funding unattributed, and use
 historyId for round-trip identity. Native callbacks are infallible and row input is
 retained JSON/UTF-8; dynamic executable/getter inputs are excluded. The focused
-live test is --test position_adapter -- --include-ignored. No fetch wiring is claimed.
+source test is --test position_adapter, enabled in ordinary Cargo runs.
+It needs Node and SAFE_CEX_TYPESCRIPT_PATH; no live account or network is used.
+No fetch wiring is claimed.
 
 `src/modes.rs` ports four instance utilities ahead of their REST consumers:
 getPositionSide, applyConfirmedPositionMode, applyConfirmedMarginType and
@@ -305,3 +315,46 @@ HTTP receipt forwarding preserves the effective configuration after inner signin
 ACCESS-SIGN auth classification reads that configuration, including header removal;
 outer retry-unwind response handling retains the final successful configuration.
 Input headers are not evidence of what the adapter actually returned.
+
+Concrete REST signing reads `VIRTUAL_CLOCK.get_current_time()` and private
+websocket authentication reads `get_current_time_ms()`, matching the two source
+clock calls. Lifecycle clocks and transport deadlines remain runtime operations.
+`tests/native_clock.rs` sends through the production REST adapter and an opened
+private socket with a deliberately different host wall clock and a pushed
+40-second server offset; the shared Bitunix audit control runner independently
+replaces each signing clock with wall time and requires a compiled failure.
+
+Native public/private ping sends copy the venue's already sampled `core.ping_at`
+into `BaseWebSocket::set_ping_at` before sending. The base pong handler owns latency
+and ping timers; do not sample the clock again or leave it reading a detached zero.
+`native_ping_latency` opens the actual constructed exchange sockets, checks both
+pong latencies and pushes private orders/fills/positions/account frames into the
+production handlers, asserting Store contents and the complete emitted fill.
+The baseline ping regression fails at latency 0 versus 13 ms; all five scoped
+checks pass after the timestamp forwarding.
+
+Already-gone normal cancellation response IDs use shared ECMAScript String
+coercion before the native Store key lookup, matching TS DefaultStore's object
+keys. This differs from protective cancellation's strict root-ID comparison,
+where numeric123 cannot remove string123's legs. `tests/native_cancel.rs` drives
+public cancel_orders through the real signed REST host and Store for eight
+actual-source cases, including nonstring normal IDs, a falsy-ID refusal and
+numeric/string protective controls. The optional goneIdLookup oracle mode uses
+actual cancelOrders/cancelNormalOrders/cancelAlgoOrders and TS DefaultStore;
+the original53-case orchestration corpus remains unchanged.
+
+Money-path cancellation receipt: native_cancel compiles/fails on master with
+stale string123, then passes all8 source cases after normal-ID coercion. The
+14 existing order_rest tests, native/Wasm all-target strict Clippy, required
+all-features inventories (cancellation6+export-ignore, override7+live-TS-ignore,
+binding25), parity7459/16581 and extraction0 pass after normal master refresh.
+Logs: /tmp/blofin-gone-{native-red,final-native,native-clippy,wasm-clippy,
+inventories,parity,extract}.log. No reviewed fixture or source corpus replaced.
+
+The constructed ticker census in `tests/native_ping_latency.rs` drives 64
+field-independent cases through 192 real public ticker/funding frames. Null,
+strings, NaN-producing values, malformed objects, overflow, signed zero and
+false are checked with distinct good rows and finite Store resets. All native
+Ticker numeric bits match the constructed TS exchange and DefaultStore. The
+shared control runner misroutes the live last-price field and requires compiled
+failure followed by exact-restored success.

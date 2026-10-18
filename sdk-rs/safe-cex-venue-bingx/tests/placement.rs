@@ -1,3 +1,6 @@
+#[path = "support/oracle_clock.rs"]
+mod oracle_clock;
+
 use safe_cex_exchange::{
     client_order_id::ClientOrderIdRule,
     exchange::{BaseExchange, ExchangeSettings},
@@ -85,7 +88,9 @@ impl ExchangeRuntime for Host {
         self.tasks.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         if severity == "error" {
             self.logs
                 .borrow_mut()
@@ -101,7 +106,11 @@ impl ExchangeRuntime for Host {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -134,7 +143,7 @@ struct Transport {
 impl ReadTransport for Transport {
     fn send(&self, r: safe_cex_transport::RestRequest) -> ExchangeFuture<'_, JsNumberInput> {
         let body = r.body.as_ref().map(|b| match b {
-            safe_cex_transport::RestBody::Untransformed(v) => v.clone(),
+            safe_cex_transport::RestBody::Untransformed(v) => v.clone().into_value().unwrap(),
             _ => panic!("unexpected transformed request"),
         });
         let mut call = json!({"method":r.method,"url":r.url});
@@ -209,7 +218,8 @@ fn fixture(
     base.on(
         "error",
         Rc::new(move |_, v| {
-            events.borrow_mut().push(v[0].as_str().unwrap().into());
+            let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
+            events.borrow_mut().push(v.as_str().unwrap().into());
             Ok(())
         }),
     );
@@ -234,7 +244,7 @@ fn fixture(
     )
 }
 fn state(store: &DefaultStore) -> Value {
-    json!(store.orders().iter().map(|o|{let mut out=json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number(o.price),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"close":o.close.map_or(json!({"undefined":true}),|b|json!(b)),"timeInForce":o.time_in_force.map_or(json!({"undefined":true}),|b|json!(b)),"lastUpdate":number(o.last_update)});out["info"]=o.info.as_ref().map(observe).unwrap_or(json!({"undefined":true}));out}).collect::<Vec<_>>())
+    json!(store.orders().iter().map(|o|{let mut out=json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number((o.price).to_number()),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"close":o.close.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"timeInForce":o.time_in_force.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"lastUpdate":number(o.last_update)});out["info"]=o.info.as_ref().map(observe).unwrap_or(json!({"undefined":true}));out}).collect::<Vec<_>>())
 }
 fn invoke(venue: &Rc<BingxPlacement>, method: &str, input: &Value) -> Result<Value, ExchangeError> {
     let opts: PlaceOrderOpts = serde_json::from_value(input["opts"].clone()).unwrap();
@@ -250,7 +260,7 @@ fn invoke(venue: &Rc<BingxPlacement>, method: &str, input: &Value) -> Result<Val
             input["uuid"].as_str().unwrap()
         ))),
         "getOrderPositionSide" => ready(venue.get_order_position_side(
-            &opts,
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
             input["override"].as_str().map(|s| {
                 if s == "hedged" {
                     PositionMode::Hedged
@@ -260,14 +270,25 @@ fn invoke(venue: &Rc<BingxPlacement>, method: &str, input: &Value) -> Result<Val
             }),
         ))
         .map(|s| json!(s)),
-        "formatCreateOrder" => ready(venue.format_create_order(&opts)).map(|v| observe(&json!(v))),
-        "formatCreateTrailingStopLossOrder" => {
-            ready(venue.format_create_trailing_stop_loss_order(&opts)).map(|v| observe(&json!(v)))
+        "formatCreateOrder" => {
+            ready(venue.format_create_order(&safe_cex_types::PreparedOrderOpts::from(&opts)))
+                .map(|v| observe(&json!(v)))
         }
-        "placeOrder" => ready(venue.place_order(&opts)).map(ids),
-        "placeOrders" => ready(venue.place_orders(
-            &serde_json::from_value::<Vec<PlaceOrderOpts>>(input["orders"].clone()).unwrap(),
+        "formatCreateTrailingStopLossOrder" => ready(venue.format_create_trailing_stop_loss_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
         ))
+        .map(|v| observe(&json!(v))),
+        "placeOrder" => {
+            ready(venue.place_order(&safe_cex_types::PreparedOrderOpts::from(&opts))).map(ids)
+        }
+        "placeOrders" => ready(
+            venue.place_orders(
+                &serde_json::from_value::<Vec<safe_cex_types::PreparedOrderOpts>>(
+                    input["orders"].clone(),
+                )
+                .unwrap(),
+            ),
+        )
         .map(ids),
         "placeOrderBatch" => ready(venue.place_order_batch(
             &serde_json::from_value::<Vec<Value>>(input["payloads"].clone()).unwrap(),
@@ -293,7 +314,11 @@ fn check(case: &Value) {
     let input = &case["input"];
     let (venue, store, transport, host) = fixture(input.clone());
     let method = case["method"].as_str().unwrap();
+    let clock = oracle_clock::ClockWindow::start();
     let result = invoke(&venue, method, input);
+    let clock = clock.finish();
+    let mut native_state = state(&store);
+    clock.normalize_orders(&mut native_state, &case["state"]);
     let output = match result {
         Ok(v) => json!({"ok":v}),
         Err(e) => json!({"error":{"name":e.name,"message":e.message}}),
@@ -317,8 +342,7 @@ fn check(case: &Value) {
         method, case["variant"]
     );
     assert_eq!(
-        state(&store),
-        case["state"],
+        native_state, case["state"],
         "BINGX-PLACE decoded Store {method}"
     );
     assert_eq!(
@@ -470,9 +494,15 @@ fn nan_payload_refusal_is_priced_for_formatter_and_wrappers() {
             serde_json::from_value(corpus()["cases"][index]["input"]["opts"].clone()).unwrap();
         opts.amount = f64::NAN;
         let error = match method {
-            "formatCreateOrder" => ready(venue.format_create_order(&opts)).unwrap_err(),
-            "placeOrder" => ready(venue.place_order(&opts)).unwrap_err(),
-            _ => ready(venue.place_orders(&[opts])).unwrap_err(),
+            "formatCreateOrder" => {
+                ready(venue.format_create_order(&safe_cex_types::PreparedOrderOpts::from(&opts)))
+                    .unwrap_err()
+            }
+            "placeOrder" => {
+                ready(venue.place_order(&safe_cex_types::PreparedOrderOpts::from(&opts)))
+                    .unwrap_err()
+            }
+            _ => ready(venue.place_orders(&[(opts).into()])).unwrap_err(),
         };
         assert_eq!(
             error.message, "BingX typed payload refuses NaN",
@@ -616,9 +646,14 @@ fn rejected_formatter_keeps_pending_sibling_running() {
         transport.clone(),
         uuid.clone(),
     );
-    let error = ready(venue.place_orders(
-        &serde_json::from_value::<Vec<PlaceOrderOpts>>(input["orders"].clone()).unwrap(),
-    ))
+    let error = ready(
+        venue.place_orders(
+            &serde_json::from_value::<Vec<safe_cex_types::PreparedOrderOpts>>(
+                input["orders"].clone(),
+            )
+            .unwrap(),
+        ),
+    )
     .unwrap_err();
     assert_eq!(
         error.message, "Market MISSING not found",

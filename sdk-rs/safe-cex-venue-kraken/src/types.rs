@@ -10,11 +10,28 @@ pub const HISTORY_BASE_URL: &[(&str, &str)] = &[
     ("livenet", "https://futures.kraken.com/api"),
     ("testnet", "https://demo-futures.kraken.com/api"),
 ];
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum KrakenBaseUrl {
     Derivatives,
     History,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "KrakenBaseUrl", rename_all = "lowercase")]
+enum KrakenBaseUrlSerde {
+    Derivatives,
+    History,
+}
+
+impl<'de> serde::Deserialize<'de> for KrakenBaseUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let tag = String::deserialize(deserializer)?;
+        KrakenBaseUrlSerde::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(tag))
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for KrakenBaseUrl {
     fn check_number_output(&self) {

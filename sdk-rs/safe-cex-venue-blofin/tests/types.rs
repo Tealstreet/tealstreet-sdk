@@ -6,6 +6,60 @@ use serde_json::{Value, json};
 use std::process::Command;
 
 #[test]
+fn batch_position_side_accepts_only_declared_strings() {
+    use serde::Deserialize as _;
+
+    for (literal, expected) in [
+        ("net", BatchPositionSide::Net),
+        ("long", BatchPositionSide::Long),
+        ("short", BatchPositionSide::Short),
+    ] {
+        let value = json!(literal);
+        assert_eq!(
+            js_from_value::<BatchPositionSide>(value.clone()).unwrap(),
+            expected
+        );
+        assert_eq!(
+            js_from_value_ref::<BatchPositionSide>(&value).unwrap(),
+            expected
+        );
+        assert_eq!(BatchPositionSide::deserialize(value).unwrap(), expected);
+        assert_eq!(serde_json::to_value(&expected).unwrap(), json!(literal));
+
+        let tagged = json!({(literal): null});
+        let raw = tagged.to_string();
+        assert!(
+            serde_json::from_str::<BatchPositionSide>(&raw).is_err(),
+            "batch_position_side_string_only serde text: {tagged}"
+        );
+        assert!(
+            serde_json::from_value::<BatchPositionSide>(tagged.clone()).is_err(),
+            "batch_position_side_string_only serde owned: {tagged}"
+        );
+        assert!(
+            BatchPositionSide::deserialize(&tagged).is_err(),
+            "batch_position_side_string_only serde borrowed: {tagged}"
+        );
+        assert!(
+            js_from_str::<BatchPositionSide>(&raw).is_err(),
+            "batch_position_side_string_only raw: {tagged}"
+        );
+        assert!(
+            js_from_value::<BatchPositionSide>(tagged.clone()).is_err(),
+            "batch_position_side_string_only owned: {tagged}"
+        );
+        assert!(
+            js_from_value_ref::<BatchPositionSide>(&tagged).is_err(),
+            "batch_position_side_string_only borrowed: {tagged}"
+        );
+        assert!(
+            BatchPositionSide::deserialize(tagged.clone()).is_err(),
+            "batch_position_side_string_only qualified: {tagged}"
+        );
+    }
+}
+
+#[test]
 fn live_typescript_declarations() {
     let output = Command::new("node")
         .arg(concat!(

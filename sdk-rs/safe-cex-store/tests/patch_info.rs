@@ -39,11 +39,11 @@ fn native_info_patch_retains_reserved_key_object() {
                         .update_order(&seed.orders[0].id, patch)
                         .expect("STORE-INFO native order patch accepted");
                     assert_eq!(
-                        store.orders()[0].price.to_bits(),
-                        seed.orders[0].price.to_bits(),
+                        store.orders()[0].price.to_number().to_bits(),
+                        seed.orders[0].price.to_number().to_bits(),
                         "STORE-INFO order sibling"
                     );
-                    store.orders()[0].info.clone()
+                    store.orders()[0].info.clone().into_value()
                 }
                 "position" => {
                     store
@@ -54,18 +54,18 @@ fn native_info_patch_retains_reserved_key_object() {
                         seed.positions[0].entry_price.to_bits(),
                         "STORE-INFO position sibling"
                     );
-                    store.positions()[0].info.clone()
+                    store.positions()[0].info.clone().into_value()
                 }
                 "positions" => {
                     store
-                        .update_positions(&[(seed.positions[0].id.clone(), model)])
+                        .update_positions(&[(Some(seed.positions[0].id.clone()), model)])
                         .expect("STORE-INFO native batch patch accepted");
                     assert_eq!(
                         store.positions()[0].entry_price.to_bits(),
                         seed.positions[0].entry_price.to_bits(),
                         "STORE-INFO batch sibling"
                     );
-                    store.positions()[0].info.clone()
+                    store.positions()[0].info.clone().into_value()
                 }
                 "market" => {
                     store

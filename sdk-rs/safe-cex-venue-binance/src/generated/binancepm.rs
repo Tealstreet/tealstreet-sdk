@@ -147,6 +147,44 @@ pub struct GetPositionRiskResponseRow {
     #[serde(rename = "adlQuantile")]
     pub adl_quantile: f64,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "GetPositionRiskResponseRow")]
+struct GetPositionRiskResponseRowWire {
+    #[serde(rename = "symbol")]
+    pub symbol: String,
+    #[serde(rename = "positionAmt")]
+    pub position_amt: String,
+    #[serde(rename = "entryPrice")]
+    pub entry_price: String,
+    #[serde(rename = "markPrice")]
+    pub mark_price: String,
+    #[serde(rename = "unRealizedProfit")]
+    pub un_realized_profit: String,
+    #[serde(rename = "liquidationPrice")]
+    pub liquidation_price: String,
+    #[serde(rename = "leverage")]
+    pub leverage: String,
+    #[serde(rename = "maxNotionalValue")]
+    pub max_notional_value: String,
+    #[serde(rename = "marginType")]
+    pub margin_type: String,
+    #[serde(rename = "isolatedMargin")]
+    pub isolated_margin: String,
+    #[serde(rename = "isAutoAddMargin")]
+    pub is_auto_add_margin: String,
+    #[serde(rename = "positionSide")]
+    pub position_side: String,
+    #[serde(rename = "notional")]
+    pub notional: String,
+    #[serde(rename = "isolatedWallet")]
+    pub isolated_wallet: String,
+    #[serde(rename = "updateTime")]
+    pub update_time: f64,
+    #[serde(rename = "isolated")]
+    pub isolated: bool,
+    #[serde(rename = "adlQuantile")]
+    pub adl_quantile: f64,
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for GetPositionRiskResponseRow {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self, struct { symbol,position_amt,entry_price,mark_price,un_realized_profit,liquidation_price,leverage,max_notional_value,margin_type,isolated_margin,is_auto_add_margin,position_side,notional,isolated_wallet,update_time,isolated,adl_quantile });
@@ -154,83 +192,16 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for GetPositionRiskResponseRo
 }
 impl<'de> serde::Deserialize<'de> for GetPositionRiskResponseRow {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            pub symbol: String,
-            #[serde(rename = "positionAmt")]
-            pub position_amt: String,
-            #[serde(rename = "entryPrice")]
-            pub entry_price: String,
-            #[serde(rename = "markPrice")]
-            pub mark_price: String,
-            #[serde(rename = "unRealizedProfit")]
-            pub un_realized_profit: String,
-            #[serde(rename = "liquidationPrice")]
-            pub liquidation_price: String,
-            #[serde(rename = "leverage")]
-            pub leverage: String,
-            #[serde(rename = "maxNotionalValue")]
-            pub max_notional_value: String,
-            #[serde(rename = "marginType")]
-            pub margin_type: String,
-            #[serde(rename = "isolatedMargin")]
-            pub isolated_margin: String,
-            #[serde(rename = "isAutoAddMargin")]
-            pub is_auto_add_margin: String,
-            #[serde(rename = "positionSide")]
-            pub position_side: String,
-            #[serde(rename = "notional")]
-            pub notional: String,
-            #[serde(rename = "isolatedWallet")]
-            pub isolated_wallet: String,
-            #[serde(rename = "updateTime")]
-            pub update_time: f64,
-            #[serde(rename = "isolated")]
-            pub isolated: bool,
-            #[serde(rename = "adlQuantile")]
-            pub adl_quantile: f64,
-        }
-        struct MapOnly;
-        impl<'de> serde::de::Visitor<'de> for MapOnly {
-            type Value = GetPositionRiskResponseRow;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("an object")
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                map: A,
-            ) -> Result<Self::Value, A::Error> {
-                let wire = <Wire as serde::Deserialize>::deserialize(
-                    serde::de::value::MapAccessDeserializer::new(map),
-                )?;
-                Ok(GetPositionRiskResponseRow {
-                    symbol: wire.symbol,
-                    position_amt: wire.position_amt,
-                    entry_price: wire.entry_price,
-                    mark_price: wire.mark_price,
-                    un_realized_profit: wire.un_realized_profit,
-                    liquidation_price: wire.liquidation_price,
-                    leverage: wire.leverage,
-                    max_notional_value: wire.max_notional_value,
-                    margin_type: wire.margin_type,
-                    isolated_margin: wire.isolated_margin,
-                    is_auto_add_margin: wire.is_auto_add_margin,
-                    position_side: wire.position_side,
-                    notional: wire.notional,
-                    isolated_wallet: wire.isolated_wallet,
-                    update_time: wire.update_time,
-                    isolated: wire.isolated,
-                    adl_quantile: wire.adl_quantile,
-                })
-            }
-        }
         let input =
             <safe_cex_num::numeric_ingress::JsNumberInput as serde::Deserialize>::deserialize(
                 deserializer,
             )?;
         input
-            .decode_with(|decoder| serde::Deserializer::deserialize_map(decoder, MapOnly))
+            .decode_with(|decoder| {
+                GetPositionRiskResponseRowWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
+            })
             .map_err(serde::de::Error::custom)
     }
 }

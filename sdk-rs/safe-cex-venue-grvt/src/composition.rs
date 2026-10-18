@@ -76,6 +76,7 @@ impl<V: Clone, T, F> GrvtPrivateWebSocket<V, T, F> {
 /// Prototype/reflection and arbitrary untyped cache writes are outside native composition.
 pub trait CompositionHost: SigningHost {
     type Timer: Clone + PartialEq + 'static;
+    type PrivateTimer: Clone + 'static;
     type FillKey: Clone + Eq + Hash + 'static;
     fn base_exchange(
         &self,
@@ -91,7 +92,7 @@ pub trait CompositionHost: SigningHost {
     fn public_field(&self, state: Rc<PublicSubscriptions<Self::Timer>>, key: &str) -> Self::Value;
     fn private_field(
         &self,
-        state: Rc<PrivateCommands<Self::Timer, Self::FillKey>>,
+        state: Rc<PrivateCommands<Self::PrivateTimer, Self::FillKey>>,
         key: &str,
     ) -> Self::Value;
     fn member(
@@ -452,7 +453,7 @@ pub fn new_public_socket<H: CompositionHost>(
 pub fn new_private_socket<H: CompositionHost>(
     h: &H,
     parent: H::Value,
-) -> JsResult<H::Value, GrvtPrivateWebSocket<H::Value, H::Timer, H::FillKey>> {
+) -> JsResult<H::Value, GrvtPrivateWebSocket<H::Value, H::PrivateTimer, H::FillKey>> {
     let base = h.base_socket(parent.clone())?;
     let fields = Rc::new(RefCell::new(IndexMap::new()));
     h.attach_fields(&base, fields.clone());

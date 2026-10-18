@@ -978,7 +978,7 @@ fn mexc_private_fill_boundary_native_fields_match_actual_source() {
         let sink = events.clone();
         let mut failure = safe_cex_exchange::runtime::ExchangeError::new("fill listener failed");
         failure.name = "TypeError".into();
-        failure.code = Some(json!(197));
+        failure.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197)));
         let thrown = failure.clone();
         let handlers = MexcPrivateHandlers::new(
             Rc::new(|value| value),

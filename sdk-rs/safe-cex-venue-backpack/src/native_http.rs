@@ -10,7 +10,7 @@ use std::{
     rc::Rc,
 };
 pub type BuildHttp = Box<
-    dyn FnOnce(
+    dyn Fn(
         api::ClientConfig<ExchangeError>,
         Rc<RefCell<api::Options>>,
     ) -> Result<HttpClient, ExchangeError>,
@@ -22,6 +22,7 @@ pub struct Client {
     pub executor: RefCell<std::sync::Arc<dyn safe_cex_transport::RestAdapter>>,
     pub config: api::ClientConfig<ExchangeError>,
     pub retries: Cell<u32>,
+    rate_limits: RefCell<Vec<Rc<safe_cex_transport::rate_limit::RateLimiter>>>,
     pub request: RefCell<Option<api::RequestHandler<ExchangeError>>>,
     pub success: RefCell<Option<api::ResponseHandler<ExchangeError>>>,
     pub failure: RefCell<Option<api::FailureHandler<ExchangeError>>>,
@@ -42,37 +43,47 @@ impl Client {
         self: &Rc<Self>,
         config: Rc<api::Config>,
     ) -> api::Task<Rc<api::Response>, ExchangeError> {
-        let request = self
-            .request
-            .borrow()
-            .as_ref()
-            .expect("Backpack request interceptor installed")
-            .clone()(config);
         let client = self.clone();
         Box::pin(async move {
-            let config = request.await?;
-            let mut req = RestRequest {
-                method: config.method.clone().unwrap_or_else(|| "GET".into()),
-                url: config.url.clone().unwrap_or_default(),
-                base_url: Some(client.config.base_url.into()),
-                timeout_ms: Some(client.config.timeout as i64),
-                skip_remote_signing: config.skip_remote_signing,
-                ..Default::default()
-            };
-            if let Some(headers) = &config.headers {
-                for (k, v) in &*headers.borrow() {
-                    let text = Native::from_prepared(v.clone()).utf8()?;
-                    req.headers.insert(k.clone(), text);
-                }
-            }
-            if !matches!(&*config.params, JsJsonValue::Undefined) {
-                req.params = Some(wire(&config.params)?);
-            }
-            if !matches!(&*config.data, JsJsonValue::Undefined) {
-                req.body = Some(RestBody::Untransformed(wire(&config.data)?));
-            }
             let mut attempt = 0;
-            let response = loop {
+            let (response, config, req) = loop {
+                let limits = client.rate_limits.borrow().clone();
+                for limit in limits.into_iter().rev() {
+                    limit
+                        .acquire()
+                        .await
+                        .map_err(|error| ExchangeError::new(error.to_string()))?;
+                }
+                let request = client
+                    .request
+                    .borrow()
+                    .as_ref()
+                    .expect("Backpack request interceptor installed")
+                    .clone();
+                let config = request(config.clone()).await?;
+                let mut req = RestRequest {
+                    method: config.method.clone().unwrap_or_else(|| "GET".into()),
+                    url: config.url.clone().unwrap_or_default(),
+                    skip_remote_signing: config.skip_remote_signing,
+                    ..Default::default()
+                };
+                if let Some(headers) = &config.headers {
+                    for (k, v) in &*headers.borrow() {
+                        let text = Native::from_prepared(v.clone()).utf8()?;
+                        req.headers.insert(k.clone(), text);
+                    }
+                }
+                if !matches!(&*config.params, JsJsonValue::Undefined) {
+                    req.params = Some(wire(&config.params)?);
+                }
+                if !matches!(&*config.data, JsJsonValue::Undefined) {
+                    req.body = Some(RestBody::Untransformed(
+                        safe_cex_exchange::js_runtime::value::to_retained_input(
+                            &Native::from_prepared((*config.data).clone()),
+                        )
+                        .map_err(|error| error.to_exchange_error())?,
+                    ));
+                }
                 let executor = client.executor.borrow().clone();
                 let response = executor.execute(req.clone()).await;
                 if let Err(e) = &response {
@@ -84,7 +95,7 @@ impl Client {
                         continue;
                     }
                 }
-                break response;
+                break (response, config, req);
             };
             match response {
                 Ok(response) => {
@@ -93,7 +104,9 @@ impl Client {
                             .unwrap_or_else(|_| {
                                 Value::String(String::from_utf8_lossy(&bytes).into_owned())
                             }),
-                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v,
+                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v
+                            .into_value()
+                            .map_err(|error| ExchangeError::new(error.to_string()))?,
                     };
                     let response = Rc::new(api::Response {
                         data: data.into(),
@@ -112,9 +125,11 @@ impl Client {
                     let mut e = ExchangeError::new(error.message);
                     e.metadata.is_axios_error = true;
                     e.metadata.config = Some(json!({"url":req.url,"method":req.method}));
-                    e.metadata.code = error.code.map(Value::String);
+                    e.metadata.code = error
+                        .code
+                        .map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
                     if let Some(response) = error.response {
-                        let data = response.body.clone().into_data();
+                        let data = safe_cex_exchange::runtime::response_json_view(&response.body);
                         let data = if let Value::String(s) = &data {
                             serde_json::from_str(s).unwrap_or(data.clone())
                         } else {
@@ -159,9 +174,39 @@ impl Client {
         Box::pin(async move { Ok(Native::from_prepared(response.await?.data.clone())) })
     }
 }
+#[derive(Clone)]
+pub struct RoutedClient {
+    primary: Rc<Client>,
+    reader: Rc<Client>,
+}
+impl RoutedClient {
+    pub fn new(primary: Rc<Client>, reader: Rc<Client>) -> Self {
+        Self { primary, reader }
+    }
+    pub fn request(
+        &self,
+        method: &str,
+        url: &str,
+        params: JsJsonValue,
+        data: JsJsonValue,
+    ) -> api::Task<Native, ExchangeError> {
+        let client = if method == "GET" {
+            &self.reader
+        } else {
+            &self.primary
+        };
+        client.request(method, url, params, data)
+    }
+}
+impl std::ops::Deref for RoutedClient {
+    type Target = Rc<Client>;
+    fn deref(&self) -> &Self::Target {
+        &self.primary
+    }
+}
 pub struct Factory {
     pub base: Rc<BaseExchange>,
-    pub build: Option<BuildHttp>,
+    pub build: BuildHttp,
     pub install: InstallTransport,
 }
 impl api::Host for Factory {
@@ -180,17 +225,14 @@ impl api::Host for Factory {
             headers: config.headers,
             serialize: config.serialize.clone(),
         };
-        let build = self
-            .build
-            .take()
-            .ok_or_else(|| ExchangeError::new("Backpack HTTP factory already consumed"))?;
-        let inner = build(shadow, options)?;
+        let inner = (self.build)(shadow, options)?;
         let inner = Rc::new(inner);
         Ok(Rc::new(Client {
             inner: inner.clone(),
             executor: RefCell::new(std::sync::Arc::new(HttpExecution { inner })),
             config,
             retries: Cell::new(0),
+            rate_limits: RefCell::new(vec![]),
             request: RefCell::new(None),
             success: RefCell::new(None),
             failure: RefCell::new(None),
@@ -267,7 +309,7 @@ impl api::Host for Factory {
         secret: String,
         window: f64,
     ) -> Result<api::Task<Vec<(String, JsJsonValue)>, ExchangeError>, ExchangeError> {
-        let now = self.base.runtime.now_ms();
+        let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let future = crate::signing::generate_auth_headers(
             instruction,
             &params,
@@ -326,8 +368,19 @@ impl api::Host for Factory {
         )
     }
     fn emit_error(&mut self, message: String) -> Result<(), ExchangeError> {
-        self.base
-            .emit("error", json!({"name":"Error","message":message}))
+        self.base.emit(
+            "error",
+            safe_cex_exchange::js_runtime::value::Js::object(vec![
+                (
+                    "name",
+                    safe_cex_exchange::js_runtime::value::Js::str("Error"),
+                ),
+                (
+                    "message",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                ),
+            ]),
+        )
     }
     fn append_http_failure(
         &mut self,
@@ -390,13 +443,12 @@ impl Client {
         runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
         max_rps: usize,
     ) {
-        let current = self.executor.borrow().clone();
-        *self.executor.borrow_mut() =
-            std::sync::Arc::new(safe_cex_transport::rate_limit::RateLimitedAdapter::new(
-                current,
+        self.rate_limits.borrow_mut().push(Rc::new(
+            safe_cex_transport::rate_limit::RateLimiter::new(
                 std::sync::Arc::new(RateClock { runtime }),
                 max_rps,
                 1000,
-            ));
+            ),
+        ));
     }
 }

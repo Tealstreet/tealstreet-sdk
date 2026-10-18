@@ -7,11 +7,24 @@ use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Encoding {
     Hex,
     Base64,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "Encoding", rename_all = "lowercase")]
+enum EncodingWire {
+    Hex,
+    Base64,
+}
+impl<'de> Deserialize<'de> for Encoding {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        EncodingWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+    }
 }
 
 fn encode(bytes: &[u8], encoding: Encoding) -> String {
@@ -93,7 +106,7 @@ pub async fn sign_payload(
 #[cfg(test)]
 mod payload_tests;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WsOutputFormat {
     Hex,
@@ -103,6 +116,26 @@ pub enum WsOutputFormat {
     ApexomniBase64,
     BitunixDoubleSha256,
     CoinbaseJwt,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WsOutputFormat", rename_all = "kebab-case")]
+enum WsOutputFormatWire {
+    Hex,
+    Base64,
+    HexBase64,
+    KrakenChallenge,
+    ApexomniBase64,
+    BitunixDoubleSha256,
+    CoinbaseJwt,
+}
+impl<'de> Deserialize<'de> for WsOutputFormat {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        WsOutputFormatWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+            value,
+        ))
+    }
 }
 
 pub use safe_cex_types::ws_auth::{WsAuth, WsAuthRequest, WsAuthResponse};
@@ -234,7 +267,8 @@ pub fn sign_ws_auth(request: &WsAuthRequest, secret: &str) -> WsAuthResponse {
 
 // Node-compatible Buffer decoding; browser equivalence is bounded to ASCII secrets.
 // Malformed non-ASCII input differs in TS browser/Node hosts (see VERIFICATION.md).
-fn node_base64_decode(input: &str) -> Vec<u8> {
+/// Decode using Node Buffer base64 rules, including ignored characters and trailing bits.
+pub fn node_base64_decode(input: &str) -> Vec<u8> {
     let mut output = Vec::new();
     let mut accumulator = 0u32;
     let mut bits = 0u32;

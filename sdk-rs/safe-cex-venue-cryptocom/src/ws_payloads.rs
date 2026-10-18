@@ -598,3 +598,86 @@ impl CryptocomWsPositionBalance {
         })
     }
 }
+
+#[cfg(test)]
+mod accepted_ws_field {
+    use serde_json::Value;
+    #[test]
+    fn field_native_contract() {
+        let cases:Vec<Value>=serde_json::from_str(r###"[{"input":{"value":{"k":"o","v":{"found":{"k":"n","v":"8000000000000000"},"other":{"k":"b","v":false}}},"key":"found"},"output":{"ok":true,"value":{"kind":"number","bits":"8000000000000000"},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"n","v":"4031800000000000"}}},"key":"found"},"output":{"ok":true,"value":{"kind":"number","bits":"4031800000000000"},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"n","v":"7ff0000000000000"}}},"key":"found"},"output":{"ok":true,"value":{"kind":"number","bits":"7ff0000000000000"},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"n","v":"7ff8000000000000"}}},"key":"found"},"output":{"ok":true,"value":{"kind":"number","bits":"7ff8000000000000"},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"s","v":[55296,97,56320]}}},"key":"found"},"output":{"ok":true,"value":{"kind":"string","units":[55296,97,56320]},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"b","v":false}}},"key":"found"},"output":{"ok":true,"value":{"kind":"boolean","value":false},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"null"}}},"key":"found"},"output":{"ok":true,"value":{"kind":"null"},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"u"}}},"key":"found"},"output":{"ok":true,"value":{"kind":"undefined"},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"a","v":[{"k":"s","v":[65]},{"k":"n","v":"8000000000000000"}]}}},"key":"found"},"output":{"ok":true,"value":{"kind":"array","items":[{"kind":"string","units":[65]},{"kind":"number","bits":"8000000000000000"}]},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"o","v":{"inner":{"k":"s","v":[88]}}}}},"key":"found"},"output":{"ok":true,"value":{"kind":"object","fields":[{"key_units":[105,110,110,101,114],"value":{"kind":"string","units":[88]}}]},"reference":true}},{"input":{"value":{"k":"o","v":{"found":{"k":"s","v":[65]}}},"key":"missing"},"output":{"ok":true,"value":{"kind":"undefined"},"reference":false}},{"input":{"value":{"k":"o","v":{}},"key":"constructor"},"output":{"ok":true,"value":{"kind":"undefined"},"reference":false}},{"input":{"value":{"k":"o","v":{"":{"k":"s","v":[]}}},"key":""},"output":{"ok":true,"value":{"kind":"string","units":[]},"reference":true}},{"input":{"value":{"k":"o","v":{"\u03a9\ud83d\ude80":{"k":"n","v":"fff0000000000000"}}},"key":"\u03a9\ud83d\ude80"},"output":{"ok":true,"value":{"kind":"number","bits":"fff0000000000000"},"reference":true}},{"input":{"value":{"k":"u"},"key":"found"},"output":{"ok":false}},{"input":{"value":{"k":"null"},"key":"found"},"output":{"ok":false}},{"input":{"value":{"k":"b","v":true},"key":"found"},"output":{"ok":false}},{"input":{"value":{"k":"n","v":"8000000000000000"},"key":"found"},"output":{"ok":false}},{"input":{"value":{"k":"s","v":[65]},"key":"found"},"output":{"ok":false}},{"input":{"value":{"k":"a","v":[{"k":"s","v":[65]}]},"key":"found"},"output":{"ok":false}}]"###).unwrap();
+        assert_eq!(cases.len(), 20, "ws field independent fixture count");
+        let mut executed = 0usize;
+        for case in cases {
+            let value = &case["input"];
+            let observed = {
+                fn payload(v: &serde_json::Value) -> crate::ws_payloads::PayloadValue {
+                    use crate::ws_payloads::PayloadValue as P;
+                    match v["k"].as_str().unwrap() {
+                        "u" => P::Undefined,
+                        "null" => P::Null,
+                        "b" => P::Bool(v["v"].as_bool().unwrap()),
+                        "n" => P::Number(f64::from_bits(
+                            u64::from_str_radix(v["v"].as_str().unwrap(), 16).unwrap(),
+                        )),
+                        "s" => P::String(
+                            v["v"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .map(|n| u16::try_from(n.as_u64().unwrap()).unwrap())
+                                .collect(),
+                        ),
+                        "a" => P::Array(v["v"].as_array().unwrap().iter().map(payload).collect()),
+                        "o" => P::Object(
+                            v["v"]
+                                .as_object()
+                                .unwrap()
+                                .iter()
+                                .map(|(k, v)| (k.encode_utf16().collect(), payload(v)))
+                                .collect(),
+                        ),
+                        _ => panic!("unclassified captured primitive fixture"),
+                    }
+                }
+                fn native_payload(v: &crate::ws_payloads::PayloadValue) -> serde_json::Value {
+                    use crate::ws_payloads::PayloadValue as P;
+                    match v {
+                        P::Undefined => serde_json::json!({"kind":"undefined"}),
+                        P::Null => serde_json::json!({"kind":"null"}),
+                        P::Bool(value) => serde_json::json!({"kind":"boolean","value":value}),
+                        P::Number(value) => {
+                            serde_json::json!({"kind":"number","bits":format!("{:016x}",value.to_bits())})
+                        }
+                        P::String(units) => serde_json::json!({"kind":"string","units":units}),
+                        P::Array(items) => {
+                            serde_json::json!({"kind":"array","items":items.iter().map(native_payload).collect::<Vec<_>>()})
+                        }
+                        P::Object(fields) => {
+                            serde_json::json!({"kind":"object","fields":fields.iter().map(|(key,value)|serde_json::json!({"key_units":key,"value":native_payload(value)})).collect::<Vec<_>>()})
+                        }
+                    }
+                }
+                let input = payload(&value["value"]);
+                let key = value["key"].as_str().unwrap();
+                match super::field(&input, key) {
+                    Ok(value) => {
+                        let reference = match &input {
+                            crate::ws_payloads::PayloadValue::Object(fields) => fields
+                                .get(&key.encode_utf16().collect::<Vec<_>>())
+                                .is_some_and(|expected| std::ptr::eq(value, expected)),
+                            _ => false,
+                        };
+                        serde_json::json!({"ok":true,"value":native_payload(value),"reference":reference})
+                    }
+                    Err(_) => serde_json::json!({"ok":false}),
+                }
+            };
+            assert_eq!(
+                observed, case["output"],
+                "native websocket field guard/borrow input {value}"
+            );
+            executed += 1;
+        }
+        assert_eq!(executed, 20, "ws field executed fixture count");
+    }
+}

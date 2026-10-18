@@ -91,7 +91,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -101,7 +101,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -325,7 +329,7 @@ fn watchdog_uses_last_open_grace_after_reconnect() {
     assert_eq!(io.closed.get(), 1);
 }
 #[test]
-fn online_transition_reconnects_once_and_emit_throttle_is_strict() {
+fn online_transition_recovers_once_and_emit_throttle_is_strict() {
     let (venue, runtime, _, _) = fixture();
     let s = socket(&venue, &runtime, 1);
     venue.base().set_socket(SocketSlot::Public, Some(s));
@@ -836,6 +840,122 @@ mod js_sockets {
         })
     }
 
+    #[test]
+    fn native_recovery_reads_the_live_receiver_policy() {
+        let (venue, runtime, _, _) = fixture();
+        let context = JsSocketContext::new(runtime);
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let core = core_of(&context, &socket).unwrap();
+        let base = core.base().unwrap();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "the base policy defaults to true"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(false))
+            .unwrap();
+        assert!(
+            !base.recover_after_offline(true).unwrap(),
+            "native recovery must read the source receiver false flag"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(true))
+            .unwrap();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "policy reads remain live"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(false))
+            .unwrap();
+        base.dispose();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "disposal precedes the reload policy"
+        );
+    }
+
+    struct UnusedHttp(Rc<Runtime>);
+    impl safe_cex_exchange::js_runtime::client::JsHttpHost for UnusedHttp {
+        fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+            self.0.clone()
+        }
+        fn send(&self, _: Js) -> safe_cex_exchange::js_runtime::promise::JsFuture<'static> {
+            panic!("socket timeout witness does not issue HTTP")
+        }
+    }
+
+    #[test]
+    fn source_timeout_handles_cancel_owned_core_timers_without_stale_aliases() {
+        use safe_cex_exchange::js_runtime::scope::{Scope, ScopeShared};
+        let (venue, runtime, store, _) = fixture();
+        let scope = Scope {
+            shared: Rc::new(ScopeShared::new(
+                runtime.clone(),
+                Rc::new(UnusedHttp(runtime.clone())),
+                store,
+                Js::object(vec![]),
+                (),
+            )),
+            this: Js::Undefined,
+        };
+        let context = scope.shared.sockets.clone();
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let receiver = base_websocket(&context, Js::object(vec![]));
+        let pings = Rc::new(Cell::new(0));
+        receiver.define("ping", counter(&pings)).unwrap();
+        let base = core_of(&context, &receiver).unwrap().base().unwrap();
+        base.handle_pong_event(100).unwrap();
+        let first = receiver.get("pingTimeoutId").unwrap();
+        assert!(
+            first.truthy(),
+            "source fields must expose the actual native timeout"
+        );
+        assert!(
+            first.same_reference(&receiver.get("pingTimeoutId").unwrap()),
+            "reads preserve handle identity"
+        );
+        base.handle_pong_event(200).unwrap();
+        let replacement = receiver.get("pingTimeoutId").unwrap();
+        assert!(!first.same_reference(&replacement));
+        scope.clear_timeout(&first);
+        runtime.advance(200.0);
+        assert_eq!(
+            pings.get(),
+            1,
+            "a stale handle must not cancel the replacement"
+        );
+        base.handle_pong_event(300).unwrap();
+        let ping = receiver.get("pingTimeoutId").unwrap();
+        let pong = receiver.get("pongMissTimeoutId").unwrap();
+        base.track_last_received().unwrap();
+        let receive = receiver.get("lastReceivedTimer").unwrap();
+        assert!(pong.truthy() && receive.truthy());
+        for (field, handle) in [
+            ("pingTimeoutId", ping),
+            ("pongMissTimeoutId", pong),
+            ("lastReceivedTimer", receive),
+        ] {
+            scope.clear_timeout(&handle);
+            scope.clear_timeout(&handle);
+            receiver.set(field, Js::Undefined).unwrap();
+            assert!(receiver.get(field).unwrap().is_undefined());
+        }
+        runtime.advance(10_000.0);
+        assert_eq!(
+            pings.get(),
+            1,
+            "source cleanup cancels both heartbeat and receive work"
+        );
+        assert_eq!(
+            scope.shared.timers.borrow().len(),
+            0,
+            "native aliases do not allocate duplicate runtime tasks"
+        );
+        base.dispose();
+    }
+
     fn live_socket(runtime: &Rc<Runtime>) -> Rc<Io> {
         runtime.pump();
         runtime.io.borrow().last().expect("dialed").clone()
@@ -1240,4 +1360,109 @@ mod js_sockets {
         let base = core_of(&context, &socket).unwrap().base().unwrap();
         assert_eq!(base.diagnostics().lifetime_close_count, 1);
     }
+}
+
+struct OnlineRecoveryProtocol;
+impl WsProtocol for OnlineRecoveryProtocol {
+    fn on_open(&self, _: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn ping(&self, _: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        Ok(())
+    }
+    fn connect_and_subscribe(
+        &self,
+        socket: Rc<BaseWebSocket>,
+        _: bool,
+    ) -> Result<(), ExchangeError> {
+        socket.start_websocket("wss://venue".into(), vec![], None);
+        Ok(())
+    }
+}
+
+fn assert_online_recovery_after_failures(failures: usize) {
+    let (venue, runtime, _, _) = fixture();
+    let socket = BaseWebSocket::new(
+        91,
+        WsExchangeParent::new(&venue),
+        runtime.clone(),
+        Rc::new(OnlineRecoveryProtocol),
+    );
+    venue
+        .base()
+        .set_socket(SocketSlot::Public, Some(socket.clone()));
+    run(socket.create_websocket("wss://venue".into(), vec![], None)).unwrap();
+    for _ in 0..failures {
+        socket.on_close(Some(1006), "offline").unwrap();
+    }
+    assert_eq!(socket.is_reconnect_pause_active(), failures == 8);
+    assert_eq!(runtime.io.borrow().len(), 1);
+    venue.base().set_online_status(false).unwrap();
+    venue.base().set_online_status(true).unwrap();
+    runtime.pump();
+    assert!(
+        !socket.is_reconnect_pause_active(),
+        "online recovery clears the two-minute failure pause"
+    );
+    assert_eq!(
+        runtime.io.borrow().len(),
+        2,
+        "online recovery must bypass the pending reconnect delay after {failures} failures"
+    );
+    socket.on_close(Some(1006), "new failure").unwrap();
+    assert!(
+        !socket.is_reconnect_pause_active(),
+        "the failure streak restarts after recovery"
+    );
+    runtime.advance(1999.0);
+    runtime.pump();
+    assert_eq!(runtime.io.borrow().len(), 2);
+    runtime.advance(1.0);
+    runtime.pump();
+    assert_eq!(
+        runtime.io.borrow().len(),
+        3,
+        "the first retry uses the reset two-second backoff"
+    );
+}
+
+#[test]
+fn online_transition_runs_pending_reconnect_now() {
+    assert_online_recovery_after_failures(1);
+}
+
+#[test]
+fn online_transition_clears_the_two_minute_failure_pause() {
+    assert_online_recovery_after_failures(8);
+}
+
+#[test]
+fn online_transition_clears_the_explicit_reconnect_cap() {
+    let (venue, runtime, _, _) = fixture();
+    let socket = socket(&venue, &runtime, 92);
+    venue
+        .base()
+        .set_socket(SocketSlot::Public, Some(socket.clone()));
+    let io = runtime.io.borrow().last().unwrap().clone();
+    for _ in 0..101 {
+        socket.reconnect().unwrap();
+    }
+    assert_eq!(
+        io.closed.get(),
+        100,
+        "the source explicit-reconnect cap is reached"
+    );
+    venue.base().set_online_status(false).unwrap();
+    venue.base().set_online_status(true).unwrap();
+    assert_eq!(
+        io.closed.get(),
+        101,
+        "online recovery must bypass and clear the reconnect cap"
+    );
+    socket.reconnect().unwrap();
+    assert_eq!(
+        io.closed.get(),
+        102,
+        "explicit reconnect works again after online recovery"
+    );
 }

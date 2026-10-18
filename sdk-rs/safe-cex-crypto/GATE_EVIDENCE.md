@@ -522,3 +522,21 @@ or export. Decoding failures drop and erase partial storage. Caller-owned
 strings and scalar temporaries in the existing signing primitive are outside
 this erasure guarantee. SDK Apache-2.0 notice is retained. No dependency, root
 script, workflow, deployment or TypeScript production file changes.
+
+## Aster V3 source pin after V1 retry integration
+
+Reviewed TypeScript `8fab4380ad15..9db593a23388`: surrounding imports and V1
+signature-rejection retry handling changed. AST-selected buildV3SigningPayload
+and generateV3Signature declarations are byte-identical (SHA256 b68630d0de74f356d8ffa2a0c7aa095968aeb37eebda726c33fc6ab5fccd706f and b25c339f37d1fed250ff7735f0ad3fd0f1304a207d4013ac31027b5ed395841f).
+The unchanged live oracle produces the same four complete case records, including
+ABI preimages, hashes and signatures. Only its whole-file source pin changes from
+5ade2118df55617de0f4443bc213b8e10bf9dee5058eca1297e2b3e0d23d9ed6 to
+80a7fd744fc6ff268685fbff008e9312306705017ada6adb29bede875c9468be.
+No fixture input, output or comparison is regenerated or weakened.
+
+The old pin fails the live Node oracle with exit1; the reviewed pin passes.
+Scoped native `ethereum::tests::actual_typescript_aster_signing_preimages` passes
+all four records. Swapping the two address words in the production ABI encoder
+compiles and fails101 at `live TS ABI preimage "complete"`; exact source restoration
+passes again. The live Node oracle also passes after restoration. Logs are
+`/tmp/ydwdec-aster-pin-{before,after,native,abi-control,abi-restored}.log`.

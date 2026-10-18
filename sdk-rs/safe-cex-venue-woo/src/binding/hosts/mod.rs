@@ -11,6 +11,7 @@ pub(crate) mod market_reads;
 pub(crate) mod members;
 pub(crate) mod metadata;
 pub(crate) mod order_control;
+pub(crate) mod order_mapping;
 pub(crate) mod order_writes;
 pub(crate) mod socket_control;
 

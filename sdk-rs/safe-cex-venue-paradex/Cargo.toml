@@ -13,3 +13,9 @@ serde_json.workspace = true
 safe-cex-types = { path = "../safe-cex-types" }
 safe-cex-num = { path = "../safe-cex-num" }
 safe-cex-crypto = { path = "../safe-cex-crypto" }
+safe-cex-exchange = { path = "../safe-cex-exchange" }
+safe-cex-store = { path = "../safe-cex-store" }
+safe-cex-transport = { path = "../safe-cex-transport" }
+num-bigint = "0.4"
+starknet-crypto.workspace = true
+starknet-core.workspace = true

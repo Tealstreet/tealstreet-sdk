@@ -172,48 +172,48 @@ pub(crate) fn map_order(
         chaser_max_attempts: None,
     };
     let base = Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: row
             .get("orderId")
             .and_then(Value::as_str)
             .ok_or("Bybit typed Order requires string id")?
             .into(),
-        parent_id: None,
+        parent_id: (None).into(),
         status,
         symbol: row
             .get("symbol")
             .and_then(Value::as_str)
             .ok_or("Bybit typed Order requires string symbol")?
             .into(),
-        r#type: kind,
+        r#type: (kind).into(),
         side,
-        price,
+        price: price.into(),
         amount,
         filled,
         remaining,
-        reduce_only,
-        close: inverse.then_some(close),
-        info: Some(row.clone()),
-        time_in_force: tif,
+        reduce_only: reduce_only.into(),
+        close: (inverse.then_some(close)).into(),
+        info: (Some(row.clone())).into(),
+        time_in_force: (tif).into(),
         last_update,
         trigger_type: if kind == OrderType::Conditional {
-            trigger_type
+            (trigger_type).into()
         } else {
-            None
+            (None).into()
         },
         tp_trigger_type: if kind == OrderType::TakeProfit {
-            trigger_type
+            (trigger_type).into()
         } else {
-            None
+            (None).into()
         },
         sl_trigger_type: if kind == OrderType::StopLoss {
-            trigger_type
+            (trigger_type).into()
         } else {
-            None
+            (None).into()
         },
-        take_profit: None,
-        stop_loss: None,
-        extra: Some(extra),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (Some(extra)).into(),
     };
     let sl = parse_float(field(row, "stopLoss")?)?;
     let tp = parse_float(field(row, "takeProfit")?)?;
@@ -225,13 +225,13 @@ pub(crate) fn map_order(
         if value > 0. {
             let mut order = base.clone();
             order.id = format!("{}__{suffix}", base.id);
-            order.r#type = kind;
+            order.r#type = (kind).into();
             order.side = if base.side == OrderSide::Buy {
-                OrderSide::Sell
+                safe_cex_types::ModelField::Value(OrderSide::Sell)
             } else {
-                OrderSide::Buy
+                safe_cex_types::ModelField::Value(OrderSide::Buy)
             };
-            order.price = value;
+            order.price = (value).into();
             order.filled = 0.;
             order.remaining = if inverse {
                 inverse_remaining(native, value)
@@ -241,9 +241,9 @@ pub(crate) fn map_order(
             order.last_update = now();
             let trigger = optional(lookup(&types::ORDER_TRIGGER_TYPE, field(row, key)?)?)?;
             if kind == OrderType::StopLoss {
-                order.sl_trigger_type = trigger;
+                order.sl_trigger_type = (trigger).into();
             } else {
-                order.tp_trigger_type = trigger;
+                order.tp_trigger_type = (trigger).into();
             }
             orders.push(order);
         }

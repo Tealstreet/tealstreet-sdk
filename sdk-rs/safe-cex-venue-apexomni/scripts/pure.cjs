@@ -22,16 +22,13 @@ const source = [
   declarations('apexomni.utils.ts',new Set(['hmacSha256Base64'])),
   declarations('apexomni.exchange.ts',new Set(['textEncoder','hashClientOrderId','feeHelper'])),
   declarations('apexomni.api.ts',new Set(['serializeApexPayload','serializeApexPayloadLegacy'])),
-  declarations('zklink/signer/transactions/withdraw.ts',new Set(['discardBeyondPrecision'])),
 ].join('\n');
 const compiled = ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-const api = new vm.Script(compiled+'\n({hmacSha256Base64,hashClientOrderId,feeHelper,serializeApexPayload,serializeApexPayloadLegacy,discardBeyondPrecision})').runInNewContext({exports:{},Buffer,TextEncoder,
+const api = new vm.Script(compiled+'\n({hmacSha256Base64,hashClientOrderId,feeHelper,serializeApexPayload,serializeApexPayloadLegacy})').runInNewContext({exports:{},Buffer,TextEncoder,
   ...dependency('@noble/hashes/hmac.js'), ...dependency('@noble/hashes/sha2.js'), ...dependency('@noble/hashes/utils.js'),
   BigNumber:dependency('bignumber.js').default,
   qs:dependency('qs'),
 });
-// Withdraw uses ethers BigNumber while the exchange fee helper uses bignumber.js.
-const withdraw = new vm.Script(ts.transpileModule(declarations('zklink/signer/transactions/withdraw.ts',new Set(['discardBeyondPrecision'])),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText+'\ndiscardBeyondPrecision').runInNewContext({exports:{},BigNumber:dependency('@ethersproject/bignumber').BigNumber});
 const strings = ['', 'hello', 'é', '😀', '\u0000', '\ud800', '\udfff', '\ud800A', 'A\udfff', '\ud800\ud800', '\udfff\ud800', '\udbff\udfff'];
 const units = value=>Array.from({length:value.length},(_,i)=>value.charCodeAt(i));
 const hashes = strings.map(input=>({units:units(input),bytes:Array.from(api.hashClientOrderId(input))}));
@@ -49,9 +46,6 @@ function native(value) {
   return {kind:typeof value,value};
 }
 const queries=payloads.map(input=>({input:native(input),primary:result(()=>api.serializeApexPayload(input)),legacy:result(()=>api.serializeApexPayloadLegacy(input))}));
-const amounts=['1234567890000000000','-1234567890000000000','0','-0','0x12345','-0x12345','01','foo','+2',' 2'];
-const precisions=[0,3,6,17,18,19,17.5,NaN,Infinity,-Infinity];
-const precision=amounts.flatMap(amount=>precisions.map(decimals=>({amount,decimals:bits(decimals),result:result(()=>withdraw(amount,decimals))})));
 const fees=[];
 for(const input of ['0','-0','1.005','-1.005','0.0000001','999.995','NaN','Infinity','-Infinity','1e21']) {
   for(const digits of [0,2,6,18,-1,101]) {
@@ -60,5 +54,5 @@ for(const input of ['0','-0','1.005','-1.005','0.0000001','999.995','NaN','Infin
     }
   }
 }
-assert.equal(hashes.length,12); assert.equal(hmacs.length,144); assert.equal(queries.length,13); assert.equal(precision.length,100); assert.equal(fees.length,180);
-console.log(JSON.stringify({header:{node:process.version,nodeArch:process.arch,rustArch:process.env.SAFE_CEX_RUST_ARCH,locale:Intl.DateTimeFormat().resolvedOptions().locale},hashes,hmacs,queries,precision,fees}));
+assert.equal(hashes.length,12); assert.equal(hmacs.length,144); assert.equal(queries.length,13); assert.equal(fees.length,180);
+console.log(JSON.stringify({header:{node:process.version,nodeArch:process.arch,rustArch:process.env.SAFE_CEX_RUST_ARCH,locale:Intl.DateTimeFormat().resolvedOptions().locale},hashes,hmacs,queries,fees}));

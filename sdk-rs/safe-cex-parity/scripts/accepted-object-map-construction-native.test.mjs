@@ -10,7 +10,7 @@ import test from 'node:test';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 const runner = path.join(scripts, 'accepted-set.mjs');
-const policy = path.join(scripts, '../accepted-set/construction.json');
+const policy = path.join(scripts, '../accepted-set/construction/safe-cex-types.json');
 const owner = 'safe_cex_types::object_map::JsObjectMap';
 const scope = 'JsObjectMap construction assertion only; later owners, source scans and runtime probes excluded';
 const marker = 'OBJECT_MAP_CONSTRUCTION ';

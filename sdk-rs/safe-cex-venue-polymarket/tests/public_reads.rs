@@ -44,7 +44,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("HTTP must not spawn")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -54,7 +54,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -175,8 +179,13 @@ fn server_time_actual_typescript() {
         let value: Value = serde_json::from_str(raw).unwrap();
         let bodies = [
             RestResponseBody::Encoded(raw.as_bytes().to_vec()),
-            RestResponseBody::Untransformed(value.clone()),
-            RestResponseBody::Transformed(value),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                    .unwrap(),
+            ),
+            RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+            ),
         ];
         let mut performed = 0;
         for body in bodies {
@@ -232,7 +241,12 @@ fn server_time_actual_typescript() {
             message: "fixture failure".into(),
             response: Some(Box::new(RestResponse {
                 status: 429,
-                ..response(RestResponseBody::Transformed(json!({"error":"limit"})))
+                ..response(RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"error":"limit"}),
+                    )
+                    .unwrap(),
+                ))
             })),
             request: Box::new(RestRequest {
                 url: "/changed".into(),

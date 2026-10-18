@@ -76,6 +76,7 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         "null" => Js::Null,
         // `+x`
         "unary-plus" => Js::Number(x.to_number()?),
+        "add" => ops::add(&x, &y)?,
         "add-one" => Js::Number(x.to_number()? + 1.0),
         "subtract" => ops::subtract(&x, &y)?,
         "multiply" => ops::multiply(&x, &y)?,
@@ -86,11 +87,24 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         "greater-or-equal" => Js::Bool(ops::greater_equal(&x, &y)?),
         "loose-equal" => Js::Bool(loose_equal(&x, &y)?),
         "typeof-string" => Js::Bool(x.is_string()),
+        "is-array" => Js::Bool(x.is_array()),
+        "string" => Js::utf16(&x.to_js_string()?),
         "Number.isFinite" => Js::Bool(matches!(x, Js::Number(n) if n.is_finite())),
-        // `${x}` / `${a}${b}` / `${id}${suffix}` / `${a}:${b}`
+        // `${x}` / `${a}${b}...` / `${id}${suffix}` / `${a}:${b}`
         "template-string" => Js::utf16(&x.to_js_string()?),
-        "template-concat" | "template-suffix" => Js::str(&(text(&x)? + &text(&y)?)),
-        "colon-append" => Js::str(&format!("{}:{}", text(&x)?, text(&y)?)),
+        "template-concat" | "template-suffix" => {
+            let mut out = Vec::new();
+            for part in &a {
+                out.extend_from_slice(&part.to_js_string()?);
+            }
+            Js::utf16(&out)
+        }
+        "colon-append" => {
+            let mut out = x.to_js_string()?.to_vec();
+            out.push(58);
+            out.extend_from_slice(&y.to_js_string()?);
+            Js::utf16(&out)
+        }
         "id-prefix" => Js::str(&format!("id:{}", text(&x)?)),
         // `String(x).toUpperCase()` on an already-string expression
         "toUpperCase-expression" => Js::str(&text(&x)?.to_uppercase()),
@@ -204,22 +218,22 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
             Js::Undefined
         }
         "array-push-spread" => {
-            for v in items(&y)? {
+            for v in y.iterable_values()? {
                 x.push(v)?;
             }
             Js::Undefined
         }
         // `[...a, ...b]`, `[...acc]`, `[...acc, row]`, `[...a, b]`
         "array-spread" | "array-spread-two" => {
-            let mut out = items(&x)?;
-            if a.len() > 1 {
-                out.extend(items(&y)?);
+            let mut out = Vec::new();
+            for value in a {
+                out.extend(value.iterable_values()?);
             }
             Js::array(out)
         }
-        "array-spread-prefix" | "iterable-spread" => Js::array(items(&x)?),
+        "array-spread-prefix" | "iterable-spread" => Js::array(x.iterable_values()?),
         "array-prefix-append" | "spread-append" => {
-            let mut out = items(&x)?;
+            let mut out = x.iterable_values()?;
             out.push(y);
             Js::array(out)
         }
@@ -237,7 +251,7 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         }
         "new-Map" => Js::new_map(),
         "new-Set" => Js::new_set(),
-        "Map.values-spread" => x.call_method("values", vec![])?,
+        "Map.values-spread" => Js::array(x.call_method("values", vec![])?.iterable_values()?),
         "Map.set-tranId-record" => x.call_method("set", vec![y.get("tranId")?, y])?,
         "Set.has-order-id" => x.call_method("has", vec![y.get("id")?])?,
         "Set.add-order-id" => x.call_method("add", vec![y.get("id")?])?,

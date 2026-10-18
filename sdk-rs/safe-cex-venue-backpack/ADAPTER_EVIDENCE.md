@@ -74,9 +74,14 @@ prepared Options and compatible existing-record reads, not arbitrary JS getters.
 Concrete classes use static Rust dispatch and host-provided HTTP/socket/crypto
 operations, weak socket parents and stored listener frames, and cancellable
 owned work. Native transport/rate/retry scheduling uses the shared SDK contracts.
-Explicit SDK disposal also resets the store and releases base subscriptions;
-the source exchange only marks disposed and disposes venue sockets. These are
-named class divergences, not hidden claims of complete class equivalence.
+Disposal follows the source overrides: the exchange sets its shared flag before
+public then private disposal; each socket clears only its declared source state
+and closes its current transport. Store subscriptions/listeners, handlers/topics,
+ticker throttles and position/balance work omitted from source cleanup remain
+intact. These adapters do not invoke superclass disposal. Three bound native
+regressions fail before this repair and pass against the actual source arrows in
+`tests/disposal_binding.rs` / `tests/disposal-source.cjs`. Existing whole-class
+representation and ownership choices remain separately declared.
 
 Read-only sub-agent review found and prompted fixes for constructor/API identity,
 public-only/signers, caller-ID shape/split validation, malformed-frame parsing,
@@ -180,3 +185,12 @@ divergent / 0 pending**. The source/test/control gates remain observations at
 the code SHA with the above preservation proof. Cargo and the controls were not
 rerun at the merge SHA because their tracked inputs and reachable lock graph were
 unchanged. The following delivery commit changes only this evidence sheet.
+
+Disposal repair gates: all three bound regression tests compiled and failed
+against the old adapters at source-absent superclass/task cleanup, then passed
+against the actual TypeScript disposal arrows after repair. Native and managed
+relay close-state tests pass; the complete core library (139 tests) and all seven
+cancellation-inventory checks pass after reviewing four unchanged guard dependency
+pins. Host all-feature/all-target and wasm library strict Clippy, formatting,
+parity and extractor zero drift pass. The complete Backpack suite including
+ignored source oracles passes 110 tests across 27 targets.

@@ -1,14 +1,14 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/grvt/grvtRetry.ts"
-rust_files = [ "safe-cex-transport/src/retry.rs", "safe-cex-venue-grvt/src/api_runtime.rs" ]
+rust_files = [ "safe-cex-transport/src/retry.rs" ]
 
 [[symbol]]
 ts = "lastSegment"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-grvt/src/api_runtime.rs::last_segment"
-status = "ported"
-note = "Source body against opaque SessionHost operations retaining values, receivers, ordinary assignments, eager async ownership and promise adoption. Native source oracle tests/session_routing.rs compares values, identities, state and ordered effects with actual TypeScript bodies in tests/session-routing-source.cjs. Concrete Axios/socket bindings and class assembly remain outside this slice; enumeration is a bounded fixture floor."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Unexported TypeScript implementation detail of isGrvtRead. Production classification uses the shared safe-cex-transport retry::is_grvt_read owner, mapped below; there is no standalone native caller. Removed the uncalled generic duplicate and its isolated fake-host cases without removing the live read predicate."
 
 [[symbol]]
 ts = "isGrvtRead"

@@ -1,86 +1,86 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/hyrotrader.order-recovery.ts"
-rust_files = [ "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/hyro_order_publication.rs", "safe-cex-venue-bybit/src/binding/members/hyro.rs", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs" ]
 
 [[symbol]]
 ts = "hyroSubmissionKey"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::submission_key"
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Installs the callable using shared JSON.stringify with the source replacer, own entries and canonical root collation. Generated orderLinkId is excluded recursively. Existing UTF-8 collation-key refusal remains explicit under sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; caller request fields use the established typed placement boundary. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::submission_key implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRejectedError"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/failure_diagnostics.rs::HyroOrderRejectedError"
+rs = [ "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::rejected", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::is_rejected" ]
 status = "divergent"
-note = "CHOSEN: native Rust Error and From<String> preserve source inherited Error name, message and String(error) rendering, excluding JavaScript prototype/stack and executable constructor inputs. Shared UTF-8 boundary applies; order recovery consumers remain pending."
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. The private source Error subclass is represented by a retained Error object plus per-recovery prototype identity. Catching definitive rejection tests that identity and retains name/message; the obsolete typed surrogate and fake-only tests were removed. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::rejected implements this source declaration through the native receiver. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::is_rejected implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "isDuplicateIdentity"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/failure_diagnostics.rs::is_duplicate_identity"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::duplicate"
 status = "divergent"
-note = "CHOSEN: native optional number code and retained JSON message preserve strict duplicate codes, lazy message coercion and ECMAScript non-dotAll line terminators. Executable/getter objects, malformed non-number code arguments and lone UTF-16 surrogates are excluded; shared UTF-8 boundary applies. Direct native source predicate assertions precede any wire checks; recovery consumers remain pending. Source synchronous coercion throws adapt to message-only Rust Result errors; JavaScript thrown-error name, stack and prototype identity are not carried by those results."
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Uses strict numeric duplicate codes and the shared retained RegExp matcher. Response metadata supplies the original retained message; the former uncalled JSON-only predicate was removed. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::duplicate implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery"
 kind = "class"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/binding/members/hyro.rs::install", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install" ]
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Allocation keeps one pending Map and the four original capability closures on the active source receiver. This private JS class needs no parallel public Rust record. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install implements this source declaration through the native receiver. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery.constructor"
 kind = "constructor"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/binding/members/hyro.rs::install", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install" ]
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Constructs retained pending state and installs weak scope captures for client, disposal/readiness and publication-boundary capabilities. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install implements this source declaration through the native receiver. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery#getClient"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro.rs::install"
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. The constructor capture getClient reads the actual exchange receiver, including current private session/authoritative orders versions. Weak scope capture avoids a native receiver cycle. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery#isDisposed"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro.rs::install"
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. The constructor capture isDisposed reads the actual exchange receiver, including current private session/authoritative orders versions. Weak scope capture avoids a native receiver cycle. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery#assertCanCreate"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro.rs::install"
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. The constructor capture assertCanCreate reads the actual exchange receiver, including current private session/authoritative orders versions. Weak scope capture avoids a native receiver cycle. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery#getPublicationBoundary"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro.rs::install"
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. The constructor capture getPublicationBoundary reads the actual exchange receiver, including current private session/authoritative orders versions. Weak scope capture avoids a native receiver cycle. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery.observeOrders"
 kind = "method"
 layer = "mirror"
-rs = [ "safe-cex-venue-bybit/src/hyro_order_publication.rs::observe_orders", "safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch" ]
+rs = [ "safe-cex-venue-bybit/src/hyro_order_publication.rs::observe_orders", "safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch", "safe-cex-venue-bybit/src/hyro_order_publication.rs::Callback", "safe-cex-venue-bybit/src/hyro_order_publication.rs::Callback::from_name" ]
 status = "ported"
-note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::observe_orders. Original HyroTrader order observation/reconciliation/publication body over unchanged venue-local AccountRefreshHost/SessionHost raw-value, identity, error, property/call, operator, iterator and Promise capabilities. Native state, decoded fields, raw aliases, request/callback arguments and error outcomes precede all supplemental original-AST comparisons. Async entry is eagerly driven to its first suspension; original dependency and full class composition, complete scheduler and dropped-Future cancellation remain outside this body claim. Split: safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch expands this member's owned lexical predicates/callback; the shared dispatcher is also claimed by the other callback-owning members of this same eight-row unit."
+note = "Closed callback selectors extracted as safe-cex-venue-bybit/src/hyro_order_publication.rs::Callback and safe-cex-venue-bybit/src/hyro_order_publication.rs::Callback::from_name; only the enumerated internal factory names reach this lexical body, so its former unknown-callback intrinsic is unreachable and removed. Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::observe_orders. Original HyroTrader order observation/reconciliation/publication body over unchanged venue-local AccountRefreshHost/SessionHost raw-value, identity, error, property/call, operator, iterator and Promise capabilities. Native state, decoded fields, raw aliases, request/callback arguments and error outcomes precede all supplemental original-AST comparisons. Async entry is eagerly driven to its first suspension; original dependency and full class composition, complete scheduler and dropped-Future cancellation remain outside this body claim. Split: safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch expands this member's owned lexical predicates/callback; the shared dispatcher is also claimed by the other callback-owning members of this same eight-row unit."
 
 [[symbol]]
 ts = "HyroOrderRecovery.dispose"
@@ -93,10 +93,10 @@ note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::dispo
 [[symbol]]
 ts = "HyroOrderRecovery.submit"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::submit"
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Keeps group state across uncertainty, shares a running group, deletes resolved groups, re-mints a definitively rejected pending identity and clears the running slot after settlement. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::submit implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery#runGroup"
@@ -117,10 +117,10 @@ note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::unkno
 [[symbol]]
 ts = "HyroOrderRecovery#submitOne"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::submit_one"
+status = "divergent"
+note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Per-create state retains accepted identity and publication boundary; incomplete or failed lookups preserve uncertainty, terminal recovery returns the ID without an optimistic Store order, and only complete absence permits another create with its original identity. Renamed target safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::submit_one implements this source declaration through the native receiver."
 
 [[symbol]]
 ts = "HyroOrderRecovery#findOrder"

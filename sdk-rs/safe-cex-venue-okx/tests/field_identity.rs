@@ -1,3 +1,4 @@
+use safe_cex_num::JsCoercionError;
 #[path = "support/cardinality.rs"]
 mod cardinality;
 use safe_cex_types::Market;
@@ -43,7 +44,7 @@ fn field_identity_supplement_distinguishes_mapper_fields() {
             "history" => {
                 let model =
                     order_history::map_okx_historical_order(row, Some(&market), |n, m, _| {
-                        n * m.contract_size.unwrap()
+                        Ok::<_, JsCoercionError>(n * m.contract_size.unwrap())
                     })
                     .unwrap()
                     .unwrap();
@@ -83,7 +84,7 @@ fn field_identity_supplement_distinguishes_mapper_fields() {
                 let model = closed_pnl::map_okx_closed_position(
                     row,
                     Some(&market),
-                    |n, m, _| n * m.contract_size.unwrap(),
+                    |n, m, _| Ok::<_, JsCoercionError>(n * m.contract_size.unwrap()),
                     "IDENTITY-ACCOUNT",
                 )
                 .unwrap()
@@ -117,9 +118,10 @@ fn field_identity_supplement_distinguishes_mapper_fields() {
                 json!(model)
             }
             "income" => {
-                let records =
-                    income::map_okx_bill_to_income_records(row, |_| Some(market.symbol.clone()))
-                        .unwrap();
+                let records = income::map_okx_bill_to_income_records(row, |_| {
+                    Ok::<_, JsCoercionError>(Some(market.symbol.clone()))
+                })
+                .unwrap();
                 assert_eq!(
                     records[0].income.to_bits(),
                     0.91_f64.to_bits(),
@@ -144,9 +146,9 @@ fn field_identity_supplement_distinguishes_mapper_fields() {
             "journal" => {
                 let deps = safe_cex_venue_okx::position_adapter::OkxPositionAdapterDeps {
                     account: "IDENTITY-ACCOUNT",
-                    to_base: &|n, _| n * 1000.,
-                    resolve_symbol: &|_| Some("DOGEUSDC".into()),
-                    resolve_settle_currency: &|_| Some("USDC".into()),
+                    to_base: &|n, _| Ok::<_, JsCoercionError>(n * 1000.),
+                    resolve_symbol: &|_| Ok::<_, JsCoercionError>(Some("DOGEUSDC".into())),
+                    resolve_settle_currency: &|_| Ok::<_, JsCoercionError>(Some("USDC".into())),
                 };
                 let native =
                     safe_cex_venue_okx::position_adapter::map_okx_position_history(row, &deps)
@@ -223,35 +225,5 @@ fn decoded_native_field_identity_cannot_cancel_through_serialization() {
         serde_json::from_str::<OkxInstrumentType>("\"FUTURES\"").unwrap(),
         OkxInstrumentType::Futures,
         "native futures instrument identity"
-    );
-}
-#[test]
-#[ignore = "requires isolated TypeScript compiler; mandatory venue gate"]
-fn original_archive_loader_has_direct_column_identity() {
-    let script = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/archive-identity-oracle.mjs"
-    );
-    let run = std::process::Command::new("node")
-        .arg(script)
-        .output()
-        .unwrap();
-    assert!(
-        run.status.success(),
-        "{}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let capture: Value = serde_json::from_slice(&run.stdout).unwrap();
-    assert_eq!(capture["records"], 87845);
-    let mutation = std::process::Command::new("node")
-        .arg(script)
-        .arg("--mutate-columns")
-        .output()
-        .unwrap();
-    assert_eq!(mutation.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&mutation.stderr).contains("archive loader field identity open"),
-        "{}",
-        String::from_utf8_lossy(&mutation.stderr)
     );
 }

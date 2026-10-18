@@ -12,6 +12,8 @@ safe-cex-types.workspace = true
 safe-cex-exchange.workspace = true
 safe-cex-num.workspace = true
 safe-cex-store.workspace = true
+safe-cex-transport.workspace = true
+futures = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 serde.workspace = true
 
 serde_json.workspace = true

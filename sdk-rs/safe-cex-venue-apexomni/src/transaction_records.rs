@@ -153,22 +153,19 @@ pub struct TxSignature {
     #[serde(rename = "signature")]
     pub signature: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TxSignature")]
+struct TxSignatureWire {
+    #[serde(rename = "pubKey")]
+    pub_key: String,
+    #[serde(rename = "signature")]
+    signature: String,
+}
 impl<'de> serde::Deserialize<'de> for TxSignature {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "pubKey")]
-            pub_key: String,
-            #[serde(rename = "signature")]
-            signature: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    pub_key: fields.pub_key,
-                    signature: fields.signature,
-                })
+                TxSignatureWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -204,47 +201,36 @@ pub struct SignContractPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_subsidy: Option<bool>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignContractPayload")]
+struct SignContractPayloadWire {
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "slotId")]
+    slot_id: f64,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "pairId")]
+    pair_id: f64,
+    #[serde(rename = "size")]
+    size: String,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "direction")]
+    direction: bool,
+    #[serde(rename = "feeRates")]
+    fee_rates: [f64; 2],
+    #[serde(rename = "hasSubsidy")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    has_subsidy: Option<bool>,
+}
 impl<'de> serde::Deserialize<'de> for SignContractPayload {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "slotId")]
-            slot_id: f64,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "pairId")]
-            pair_id: f64,
-            #[serde(rename = "size")]
-            size: String,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "direction")]
-            direction: bool,
-            #[serde(rename = "feeRates")]
-            fee_rates: [f64; 2],
-            #[serde(rename = "hasSubsidy")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            has_subsidy: Option<bool>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    account_id: fields.account_id,
-                    sub_account_id: fields.sub_account_id,
-                    slot_id: fields.slot_id,
-                    nonce: fields.nonce,
-                    pair_id: fields.pair_id,
-                    size: fields.size,
-                    price: fields.price,
-                    direction: fields.direction,
-                    fee_rates: fields.fee_rates,
-                    has_subsidy: fields.has_subsidy,
-                })
+                SignContractPayloadWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -281,51 +267,39 @@ pub struct TxContractData {
     #[serde(rename = "signature")]
     pub signature: TxSignature,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TxContractData")]
+struct TxContractDataWire {
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "slotId")]
+    slot_id: f64,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "pairId")]
+    pair_id: f64,
+    #[serde(rename = "size")]
+    size: String,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "direction")]
+    #[serde(deserialize_with = "deserialize_flag")]
+    direction: f64,
+    #[serde(rename = "feeRates")]
+    fee_rates: [f64; 2],
+    #[serde(rename = "hasSubsidy")]
+    #[serde(deserialize_with = "deserialize_flag")]
+    has_subsidy: f64,
+    #[serde(rename = "signature")]
+    signature: TxSignature,
+}
 impl<'de> serde::Deserialize<'de> for TxContractData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "slotId")]
-            slot_id: f64,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "pairId")]
-            pair_id: f64,
-            #[serde(rename = "size")]
-            size: String,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "direction")]
-            #[serde(deserialize_with = "deserialize_flag")]
-            direction: f64,
-            #[serde(rename = "feeRates")]
-            fee_rates: [f64; 2],
-            #[serde(rename = "hasSubsidy")]
-            #[serde(deserialize_with = "deserialize_flag")]
-            has_subsidy: f64,
-            #[serde(rename = "signature")]
-            signature: TxSignature,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    account_id: fields.account_id,
-                    sub_account_id: fields.sub_account_id,
-                    slot_id: fields.slot_id,
-                    nonce: fields.nonce,
-                    pair_id: fields.pair_id,
-                    size: fields.size,
-                    price: fields.price,
-                    direction: fields.direction,
-                    fee_rates: fields.fee_rates,
-                    has_subsidy: fields.has_subsidy,
-                    signature: fields.signature,
-                })
+                TxContractDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -342,17 +316,17 @@ pub struct SignedContractData {
     #[serde(rename = "tx")]
     pub tx: TxContractData,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignedContractData")]
+struct SignedContractDataWire {
+    #[serde(rename = "tx")]
+    tx: TxContractData,
+}
 impl<'de> serde::Deserialize<'de> for SignedContractData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "tx")]
-            tx: TxContractData,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self { tx: fields.tx })
+                SignedContractDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -390,50 +364,38 @@ pub struct SignOrderPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_subsidy: Option<bool>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignOrderPayload")]
+struct SignOrderPayloadWire {
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "slotId")]
+    slot_id: f64,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "baseTokenId")]
+    base_token_id: f64,
+    #[serde(rename = "quoteTokenId")]
+    quote_token_id: f64,
+    #[serde(rename = "amount")]
+    amount: String,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "isSell")]
+    is_sell: bool,
+    #[serde(rename = "feeRates")]
+    fee_rates: [f64; 2],
+    #[serde(rename = "hasSubsidy")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    has_subsidy: Option<bool>,
+}
 impl<'de> serde::Deserialize<'de> for SignOrderPayload {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "slotId")]
-            slot_id: f64,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "baseTokenId")]
-            base_token_id: f64,
-            #[serde(rename = "quoteTokenId")]
-            quote_token_id: f64,
-            #[serde(rename = "amount")]
-            amount: String,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "isSell")]
-            is_sell: bool,
-            #[serde(rename = "feeRates")]
-            fee_rates: [f64; 2],
-            #[serde(rename = "hasSubsidy")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            has_subsidy: Option<bool>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    account_id: fields.account_id,
-                    sub_account_id: fields.sub_account_id,
-                    slot_id: fields.slot_id,
-                    nonce: fields.nonce,
-                    base_token_id: fields.base_token_id,
-                    quote_token_id: fields.quote_token_id,
-                    amount: fields.amount,
-                    price: fields.price,
-                    is_sell: fields.is_sell,
-                    fee_rates: fields.fee_rates,
-                    has_subsidy: fields.has_subsidy,
-                })
+                SignOrderPayloadWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -472,54 +434,41 @@ pub struct TxOrderData {
     #[serde(rename = "signature")]
     pub signature: TxSignature,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TxOrderData")]
+struct TxOrderDataWire {
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "slotId")]
+    slot_id: f64,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "baseTokenId")]
+    base_token_id: f64,
+    #[serde(rename = "quoteTokenId")]
+    quote_token_id: f64,
+    #[serde(rename = "amount")]
+    amount: String,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "isSell")]
+    #[serde(deserialize_with = "deserialize_flag")]
+    is_sell: f64,
+    #[serde(rename = "feeRates")]
+    fee_rates: [f64; 2],
+    #[serde(rename = "hasSubsidy")]
+    #[serde(deserialize_with = "deserialize_flag")]
+    has_subsidy: f64,
+    #[serde(rename = "signature")]
+    signature: TxSignature,
+}
 impl<'de> serde::Deserialize<'de> for TxOrderData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "slotId")]
-            slot_id: f64,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "baseTokenId")]
-            base_token_id: f64,
-            #[serde(rename = "quoteTokenId")]
-            quote_token_id: f64,
-            #[serde(rename = "amount")]
-            amount: String,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "isSell")]
-            #[serde(deserialize_with = "deserialize_flag")]
-            is_sell: f64,
-            #[serde(rename = "feeRates")]
-            fee_rates: [f64; 2],
-            #[serde(rename = "hasSubsidy")]
-            #[serde(deserialize_with = "deserialize_flag")]
-            has_subsidy: f64,
-            #[serde(rename = "signature")]
-            signature: TxSignature,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    account_id: fields.account_id,
-                    sub_account_id: fields.sub_account_id,
-                    slot_id: fields.slot_id,
-                    nonce: fields.nonce,
-                    base_token_id: fields.base_token_id,
-                    quote_token_id: fields.quote_token_id,
-                    amount: fields.amount,
-                    price: fields.price,
-                    is_sell: fields.is_sell,
-                    fee_rates: fields.fee_rates,
-                    has_subsidy: fields.has_subsidy,
-                    signature: fields.signature,
-                })
+                TxOrderDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -536,17 +485,17 @@ pub struct SignedOrderData {
     #[serde(rename = "tx")]
     pub tx: TxOrderData,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignedOrderData")]
+struct SignedOrderDataWire {
+    #[serde(rename = "tx")]
+    tx: TxOrderData,
+}
 impl<'de> serde::Deserialize<'de> for SignedOrderData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "tx")]
-            tx: TxOrderData,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self { tx: fields.tx })
+                SignedOrderDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -582,47 +531,36 @@ pub struct SignTransferPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<f64>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignTransferPayload")]
+struct SignTransferPayloadWire {
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "to")]
+    to: String,
+    #[serde(rename = "fromSubAccountId")]
+    from_sub_account_id: f64,
+    #[serde(rename = "toSubAccountId")]
+    to_sub_account_id: f64,
+    #[serde(rename = "tokenId")]
+    token_id: f64,
+    #[serde(rename = "tokenSymbol")]
+    token_symbol: String,
+    #[serde(rename = "amount")]
+    amount: String,
+    #[serde(rename = "fee")]
+    fee: String,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "ts")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    ts: Option<f64>,
+}
 impl<'de> serde::Deserialize<'de> for SignTransferPayload {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "to")]
-            to: String,
-            #[serde(rename = "fromSubAccountId")]
-            from_sub_account_id: f64,
-            #[serde(rename = "toSubAccountId")]
-            to_sub_account_id: f64,
-            #[serde(rename = "tokenId")]
-            token_id: f64,
-            #[serde(rename = "tokenSymbol")]
-            token_symbol: String,
-            #[serde(rename = "amount")]
-            amount: String,
-            #[serde(rename = "fee")]
-            fee: String,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "ts")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            ts: Option<f64>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    account_id: fields.account_id,
-                    to: fields.to,
-                    from_sub_account_id: fields.from_sub_account_id,
-                    to_sub_account_id: fields.to_sub_account_id,
-                    token_id: fields.token_id,
-                    token_symbol: fields.token_symbol,
-                    amount: fields.amount,
-                    fee: fields.fee,
-                    nonce: fields.nonce,
-                    ts: fields.ts,
-                })
+                SignTransferPayloadWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -659,49 +597,37 @@ pub struct TxTransferData {
     #[serde(rename = "signature")]
     pub signature: TxSignature,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TxTransferData")]
+struct TxTransferDataWire {
+    #[serde(rename = "type")]
+    kind: TransferKind,
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "fromSubAccountId")]
+    from_sub_account_id: f64,
+    #[serde(rename = "toSubAccountId")]
+    to_sub_account_id: f64,
+    #[serde(rename = "to")]
+    to: String,
+    #[serde(rename = "token")]
+    token: f64,
+    #[serde(rename = "amount")]
+    amount: String,
+    #[serde(rename = "fee")]
+    fee: String,
+    #[serde(rename = "ts")]
+    ts: f64,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "signature")]
+    signature: TxSignature,
+}
 impl<'de> serde::Deserialize<'de> for TxTransferData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "type")]
-            kind: TransferKind,
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "fromSubAccountId")]
-            from_sub_account_id: f64,
-            #[serde(rename = "toSubAccountId")]
-            to_sub_account_id: f64,
-            #[serde(rename = "to")]
-            to: String,
-            #[serde(rename = "token")]
-            token: f64,
-            #[serde(rename = "amount")]
-            amount: String,
-            #[serde(rename = "fee")]
-            fee: String,
-            #[serde(rename = "ts")]
-            ts: f64,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "signature")]
-            signature: TxSignature,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    kind: fields.kind,
-                    account_id: fields.account_id,
-                    from_sub_account_id: fields.from_sub_account_id,
-                    to_sub_account_id: fields.to_sub_account_id,
-                    to: fields.to,
-                    token: fields.token,
-                    amount: fields.amount,
-                    fee: fields.fee,
-                    ts: fields.ts,
-                    nonce: fields.nonce,
-                    signature: fields.signature,
-                })
+                TxTransferDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -720,22 +646,19 @@ pub struct SignedTransferData {
     #[serde(rename = "layer1_signature")]
     pub layer1_signature: TxEthSignature,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignedTransferData")]
+struct SignedTransferDataWire {
+    #[serde(rename = "tx")]
+    tx: TxTransferData,
+    #[serde(rename = "layer1_signature")]
+    layer1_signature: TxEthSignature,
+}
 impl<'de> serde::Deserialize<'de> for SignedTransferData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "tx")]
-            tx: TxTransferData,
-            #[serde(rename = "layer1_signature")]
-            layer1_signature: TxEthSignature,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    tx: fields.tx,
-                    layer1_signature: fields.layer1_signature,
-                })
+                SignedTransferDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -782,63 +705,47 @@ pub struct SignWithdrawPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<f64>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignWithdrawPayload")]
+struct SignWithdrawPayloadWire {
+    #[serde(rename = "toChainId")]
+    to_chain_id: f64,
+    #[serde(rename = "withdrawToL1")]
+    withdraw_to_l1: bool,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "to")]
+    to: String,
+    #[serde(rename = "l2SourceTokenId")]
+    l2_source_token_id: f64,
+    #[serde(rename = "l2SourceTokenSymbol")]
+    l2_source_token_symbol: String,
+    #[serde(rename = "l1TargetTokenId")]
+    l1_target_token_id: f64,
+    #[serde(rename = "tokenDecimals")]
+    token_decimals: f64,
+    #[serde(rename = "amount")]
+    amount: String,
+    #[serde(rename = "withdrawFeeRatio")]
+    withdraw_fee_ratio: f64,
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "fee")]
+    fee: String,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "from")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    from: Option<String>,
+    #[serde(rename = "ts")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    ts: Option<f64>,
+}
 impl<'de> serde::Deserialize<'de> for SignWithdrawPayload {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "toChainId")]
-            to_chain_id: f64,
-            #[serde(rename = "withdrawToL1")]
-            withdraw_to_l1: bool,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "to")]
-            to: String,
-            #[serde(rename = "l2SourceTokenId")]
-            l2_source_token_id: f64,
-            #[serde(rename = "l2SourceTokenSymbol")]
-            l2_source_token_symbol: String,
-            #[serde(rename = "l1TargetTokenId")]
-            l1_target_token_id: f64,
-            #[serde(rename = "tokenDecimals")]
-            token_decimals: f64,
-            #[serde(rename = "amount")]
-            amount: String,
-            #[serde(rename = "withdrawFeeRatio")]
-            withdraw_fee_ratio: f64,
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "fee")]
-            fee: String,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "from")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            from: Option<String>,
-            #[serde(rename = "ts")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            ts: Option<f64>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    to_chain_id: fields.to_chain_id,
-                    withdraw_to_l1: fields.withdraw_to_l1,
-                    sub_account_id: fields.sub_account_id,
-                    to: fields.to,
-                    l2_source_token_id: fields.l2_source_token_id,
-                    l2_source_token_symbol: fields.l2_source_token_symbol,
-                    l1_target_token_id: fields.l1_target_token_id,
-                    token_decimals: fields.token_decimals,
-                    amount: fields.amount,
-                    withdraw_fee_ratio: fields.withdraw_fee_ratio,
-                    account_id: fields.account_id,
-                    fee: fields.fee,
-                    nonce: fields.nonce,
-                    from: fields.from,
-                    ts: fields.ts,
-                })
+                SignWithdrawPayloadWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -883,62 +790,46 @@ pub struct TxWithdrawData {
     #[serde(rename = "signature")]
     pub signature: TxSignature,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TxWithdrawData")]
+struct TxWithdrawDataWire {
+    #[serde(rename = "type")]
+    kind: WithdrawKind,
+    #[serde(rename = "toChainId")]
+    to_chain_id: f64,
+    #[serde(rename = "withdrawToL1")]
+    #[serde(deserialize_with = "deserialize_flag")]
+    withdraw_to_l1: f64,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "from")]
+    from: String,
+    #[serde(rename = "to")]
+    to: String,
+    #[serde(rename = "l2SourceToken")]
+    l2_source_token: f64,
+    #[serde(rename = "l1TargetToken")]
+    l1_target_token: f64,
+    #[serde(rename = "amount")]
+    amount: String,
+    #[serde(rename = "fee")]
+    fee: String,
+    #[serde(rename = "withdrawFeeRatio")]
+    withdraw_fee_ratio: f64,
+    #[serde(rename = "ts")]
+    ts: f64,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "signature")]
+    signature: TxSignature,
+}
 impl<'de> serde::Deserialize<'de> for TxWithdrawData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "type")]
-            kind: WithdrawKind,
-            #[serde(rename = "toChainId")]
-            to_chain_id: f64,
-            #[serde(rename = "withdrawToL1")]
-            #[serde(deserialize_with = "deserialize_flag")]
-            withdraw_to_l1: f64,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "from")]
-            from: String,
-            #[serde(rename = "to")]
-            to: String,
-            #[serde(rename = "l2SourceToken")]
-            l2_source_token: f64,
-            #[serde(rename = "l1TargetToken")]
-            l1_target_token: f64,
-            #[serde(rename = "amount")]
-            amount: String,
-            #[serde(rename = "fee")]
-            fee: String,
-            #[serde(rename = "withdrawFeeRatio")]
-            withdraw_fee_ratio: f64,
-            #[serde(rename = "ts")]
-            ts: f64,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "signature")]
-            signature: TxSignature,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    kind: fields.kind,
-                    to_chain_id: fields.to_chain_id,
-                    withdraw_to_l1: fields.withdraw_to_l1,
-                    sub_account_id: fields.sub_account_id,
-                    account_id: fields.account_id,
-                    from: fields.from,
-                    to: fields.to,
-                    l2_source_token: fields.l2_source_token,
-                    l1_target_token: fields.l1_target_token,
-                    amount: fields.amount,
-                    fee: fields.fee,
-                    withdraw_fee_ratio: fields.withdraw_fee_ratio,
-                    ts: fields.ts,
-                    nonce: fields.nonce,
-                    signature: fields.signature,
-                })
+                TxWithdrawDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -957,22 +848,19 @@ pub struct SignedWithdrawData {
     #[serde(rename = "layer1_signature")]
     pub layer1_signature: TxEthSignature,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignedWithdrawData")]
+struct SignedWithdrawDataWire {
+    #[serde(rename = "tx")]
+    tx: TxWithdrawData,
+    #[serde(rename = "layer1_signature")]
+    layer1_signature: TxEthSignature,
+}
 impl<'de> serde::Deserialize<'de> for SignedWithdrawData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "tx")]
-            tx: TxWithdrawData,
-            #[serde(rename = "layer1_signature")]
-            layer1_signature: TxEthSignature,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    tx: fields.tx,
-                    layer1_signature: fields.layer1_signature,
-                })
+                SignedWithdrawDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -989,17 +877,17 @@ pub struct ChangePubKeyOnchain {
     #[serde(rename = "type")]
     pub kind: OnchainKind,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "ChangePubKeyOnchain")]
+struct ChangePubKeyOnchainWire {
+    #[serde(rename = "type")]
+    kind: OnchainKind,
+}
 impl<'de> serde::Deserialize<'de> for ChangePubKeyOnchain {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "type")]
-            kind: OnchainKind,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self { kind: fields.kind })
+                ChangePubKeyOnchainWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -1018,22 +906,19 @@ pub struct ChangePubKeyECDSA {
     #[serde(rename = "ethSignature")]
     pub eth_signature: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "ChangePubKeyECDSA")]
+struct ChangePubKeyECDSAWire {
+    #[serde(rename = "type")]
+    kind: EcdsaKind,
+    #[serde(rename = "ethSignature")]
+    eth_signature: String,
+}
 impl<'de> serde::Deserialize<'de> for ChangePubKeyECDSA {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "type")]
-            kind: EcdsaKind,
-            #[serde(rename = "ethSignature")]
-            eth_signature: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    kind: fields.kind,
-                    eth_signature: fields.eth_signature,
-                })
+                ChangePubKeyECDSAWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -1056,28 +941,23 @@ pub struct ChangePubKeyCREATE2 {
     #[serde(rename = "codeHash")]
     pub code_hash: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "ChangePubKeyCREATE2")]
+struct ChangePubKeyCREATE2Wire {
+    #[serde(rename = "type")]
+    kind: Create2Kind,
+    #[serde(rename = "creatorAddress")]
+    creator_address: String,
+    #[serde(rename = "saltArg")]
+    salt_arg: String,
+    #[serde(rename = "codeHash")]
+    code_hash: String,
+}
 impl<'de> serde::Deserialize<'de> for ChangePubKeyCREATE2 {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "type")]
-            kind: Create2Kind,
-            #[serde(rename = "creatorAddress")]
-            creator_address: String,
-            #[serde(rename = "saltArg")]
-            salt_arg: String,
-            #[serde(rename = "codeHash")]
-            code_hash: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    kind: fields.kind,
-                    creator_address: fields.creator_address,
-                    salt_arg: fields.salt_arg,
-                    code_hash: fields.code_hash,
-                })
+                ChangePubKeyCREATE2Wire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -1115,49 +995,40 @@ pub struct SignChangePubKeyPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<f64>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignChangePubKeyPayload")]
+struct SignChangePubKeyPayloadWire {
+    #[serde(rename = "chainId")]
+    chain_id: f64,
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "feeTokenId")]
+    fee_token_id: f64,
+    #[serde(rename = "ethAuthType")]
+    eth_auth_type: ChangePubkeyTypes,
+    #[serde(rename = "fee")]
+    fee: String,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "newPkHash")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    new_pk_hash: Option<String>,
+    #[serde(rename = "account")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    account: Option<String>,
+    #[serde(rename = "ts")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    ts: Option<f64>,
+}
 impl<'de> serde::Deserialize<'de> for SignChangePubKeyPayload {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "chainId")]
-            chain_id: f64,
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "feeTokenId")]
-            fee_token_id: f64,
-            #[serde(rename = "ethAuthType")]
-            eth_auth_type: ChangePubkeyTypes,
-            #[serde(rename = "fee")]
-            fee: String,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "newPkHash")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            new_pk_hash: Option<String>,
-            #[serde(rename = "account")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            account: Option<String>,
-            #[serde(rename = "ts")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            ts: Option<f64>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    chain_id: fields.chain_id,
-                    account_id: fields.account_id,
-                    sub_account_id: fields.sub_account_id,
-                    fee_token_id: fields.fee_token_id,
-                    eth_auth_type: fields.eth_auth_type,
-                    fee: fields.fee,
-                    nonce: fields.nonce,
-                    new_pk_hash: fields.new_pk_hash,
-                    account: fields.account,
-                    ts: fields.ts,
-                })
+                SignChangePubKeyPayloadWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -1197,53 +1068,40 @@ pub struct TxChangePubKeyData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eth_auth_data: Option<ChangePubKeyAuthData>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TxChangePubKeyData")]
+struct TxChangePubKeyDataWire {
+    #[serde(rename = "type")]
+    kind: ChangePubKeyKind,
+    #[serde(rename = "chainId")]
+    chain_id: f64,
+    #[serde(rename = "subAccountId")]
+    sub_account_id: f64,
+    #[serde(rename = "account")]
+    account: String,
+    #[serde(rename = "accountId")]
+    account_id: f64,
+    #[serde(rename = "newPkHash")]
+    new_pk_hash: String,
+    #[serde(rename = "feeToken")]
+    fee_token: f64,
+    #[serde(rename = "fee")]
+    fee: String,
+    #[serde(rename = "ts")]
+    ts: f64,
+    #[serde(rename = "nonce")]
+    nonce: f64,
+    #[serde(rename = "signature")]
+    signature: TxSignature,
+    #[serde(rename = "ethAuthData")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    eth_auth_data: Option<ChangePubKeyAuthData>,
+}
 impl<'de> serde::Deserialize<'de> for TxChangePubKeyData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "type")]
-            kind: ChangePubKeyKind,
-            #[serde(rename = "chainId")]
-            chain_id: f64,
-            #[serde(rename = "subAccountId")]
-            sub_account_id: f64,
-            #[serde(rename = "account")]
-            account: String,
-            #[serde(rename = "accountId")]
-            account_id: f64,
-            #[serde(rename = "newPkHash")]
-            new_pk_hash: String,
-            #[serde(rename = "feeToken")]
-            fee_token: f64,
-            #[serde(rename = "fee")]
-            fee: String,
-            #[serde(rename = "ts")]
-            ts: f64,
-            #[serde(rename = "nonce")]
-            nonce: f64,
-            #[serde(rename = "signature")]
-            signature: TxSignature,
-            #[serde(rename = "ethAuthData")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            eth_auth_data: Option<ChangePubKeyAuthData>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    kind: fields.kind,
-                    chain_id: fields.chain_id,
-                    sub_account_id: fields.sub_account_id,
-                    account: fields.account,
-                    account_id: fields.account_id,
-                    new_pk_hash: fields.new_pk_hash,
-                    fee_token: fields.fee_token,
-                    fee: fields.fee,
-                    ts: fields.ts,
-                    nonce: fields.nonce,
-                    signature: fields.signature,
-                    eth_auth_data: fields.eth_auth_data,
-                })
+                TxChangePubKeyDataWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -1263,23 +1121,22 @@ pub struct SignedChangePubKeyData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer1_signature: Option<TxEthSignature>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "SignedChangePubKeyData")]
+struct SignedChangePubKeyDataWire {
+    #[serde(rename = "tx")]
+    tx: TxChangePubKeyData,
+    #[serde(rename = "layer1_signature")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    layer1_signature: Option<TxEthSignature>,
+}
 impl<'de> serde::Deserialize<'de> for SignedChangePubKeyData {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "tx")]
-            tx: TxChangePubKeyData,
-            #[serde(rename = "layer1_signature")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            layer1_signature: Option<TxEthSignature>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    tx: fields.tx,
-                    layer1_signature: fields.layer1_signature,
-                })
+                SignedChangePubKeyDataWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }

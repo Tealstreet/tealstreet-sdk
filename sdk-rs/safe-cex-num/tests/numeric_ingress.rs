@@ -725,7 +725,7 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
     fn measure<T: DeserializeOwned + Serialize + JsNumberOutput>(
         raw: &str,
         bits: u64,
-        info: fn(&T) -> &Option<Value>,
+        info: fn(&T) -> Option<&Value>,
     ) {
         let value: Value = serde_json::from_str(raw).unwrap();
         for result in [
@@ -735,7 +735,7 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
         ] {
             let output = result.unwrap();
             assert_eq!(
-                js_value_as_f64(&info(&output).as_ref().unwrap()["nested"][0])
+                js_value_as_f64(&info(&output).unwrap()["nested"][0])
                     .unwrap()
                     .to_bits(),
                 bits,
@@ -752,7 +752,7 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
         ] {
             let SharedInfoTagged::Data { value: output } = result.unwrap();
             assert_eq!(
-                js_value_as_f64(&info(&output).as_ref().unwrap()["nested"][0])
+                js_value_as_f64(&info(&output).unwrap()["nested"][0])
                     .unwrap()
                     .to_bits(),
                 bits,
@@ -773,7 +773,11 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
                 js_from_value(absent.clone()).unwrap(),
                 js_from_value_ref(&absent).unwrap(),
             ] {
-                assert_eq!(info(&output), &expected, "shared info absence/null direct");
+                assert_eq!(
+                    info(&output),
+                    expected.as_ref(),
+                    "shared info absence/null direct"
+                );
             }
             let tagged = format!(r#"{{"kind":"Data","value":{raw}}}"#);
             let value: Value = serde_json::from_str(&tagged).unwrap();
@@ -783,7 +787,11 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
                 js_from_value_ref(&value).unwrap(),
             ] {
                 let SharedInfoTagged::Data { value: output } = output;
-                assert_eq!(info(&output), &expected, "shared info absence/null tagged");
+                assert_eq!(
+                    info(&output),
+                    expected.as_ref(),
+                    "shared info absence/null tagged"
+                );
             }
         }
     }
@@ -796,33 +804,33 @@ fn shared_domain_info_retains_bits_on_direct_and_tagged_entries() {
                 r#"{{"id":"x","symbol":"x","base":"B","quote":"Q","active":true,"precision":{{"amount":1,"price":1}},"limits":{{"amount":{{"min":1,"max":2}},"leverage":{{"min":1,"max":2}}}}{info}}}"#
             ),
             bits,
-            |v| &v.info,
+            |v| v.info.as_ref(),
         );
         measure::<safe_cex_types::Order>(
             &format!(
                 r#"{{"id":"x","symbol":"x","status":"open","type":"limit","side":"buy","price":1,"amount":1,"filled":0,"remaining":1,"reduceOnly":false,"lastUpdate":0{info}}}"#
             ),
             bits,
-            |v| &v.info,
+            |v| v.info.as_ref(),
         );
         measure::<safe_cex_types::Position>(
             &format!(
                 r#"{{"id":"x","symbol":"x","side":"long","entryPrice":1,"notional":1,"leverage":1,"unrealizedPnl":0,"contracts":1,"liquidationPrice":0,"lastUpdate":0{info}}}"#
             ),
             bits,
-            |v| &v.info,
+            |v| v.info.as_ref(),
         );
         measure::<safe_cex_types::Ticker>(
             &format!(
                 r#"{{"id":"x","symbol":"x","bid":1,"ask":1,"last":1,"mark":1,"index":1,"percentage":1,"openInterest":1,"fundingRate":1,"fundingTime":1,"volume":1,"quoteVolume":1{info}}}"#
             ),
             bits,
-            |v| &v.info,
+            |v| v.info.as_ref(),
         );
         measure::<safe_cex_types::Balance>(
             &format!(r#"{{"used":0,"free":1,"total":1,"upnl":0{info}}}"#),
             bits,
-            |v| &v.info,
+            |v| v.info.as_ref(),
         );
     }
 }

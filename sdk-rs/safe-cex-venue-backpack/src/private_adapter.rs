@@ -251,14 +251,7 @@ impl BackpackPrivateWebSocket {
         if let Some(token) = self.state.orders_timeout.borrow_mut().take() {
             token.set(true);
         }
-        self.state.positions.scheduled.set(false);
-        self.state.positions.pending.set(false);
-        self.state.balance.scheduled.set(false);
-        self.state.balance.pending.set(false);
-        for task in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
-        }
-        self.base.dispose();
+        self.base.close_current_websocket();
         Ok(())
     }
     pub fn map_order_type(&self, s: &[u16]) -> OrderType {
@@ -320,7 +313,7 @@ impl auth::AuthHost for AuthFrame {
         secret: JsString,
         window: f64,
     ) -> Result<Self::SignatureFuture, ExchangeError> {
-        let now = self.owner.parent()?.runtime.now_ms();
+        let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let future = crate::signing::generate_ws_auth_signature(
             key,
             secret,
@@ -340,10 +333,19 @@ impl auth::AuthHost for AuthFrame {
                     &secret,
                 );
                 Ok::<_, ExchangeError>(async move {
-                    response
-                        .await
-                        .map(|s| units(&s))
-                        .map_err(ExchangeError::new)
+                    response.await.map(|s| units(&s)).map_err(|message| {
+                        // The crypto adapter retains the source error name in its text.
+                        // Reconstruct that error before String(error), avoiding an extra
+                        // Error prefix in the source's catch-and-log path.
+                        match message.split_once(": ") {
+                            Some((name @ ("Error" | "RangeError" | "TypeError"), text)) => {
+                                let mut error = ExchangeError::new(text);
+                                error.name = name.into();
+                                error
+                            }
+                            _ => ExchangeError::new(message),
+                        }
+                    })
                 })
             },
         );
@@ -501,7 +503,18 @@ impl events::UpdateHost<Value> for PrivateFrame {
         Ok(())
     }
     fn emit_fill(&mut self, _: (), u: events::FillUpdate) -> Result<(), ExchangeError> {
-        self.owner.parent()?.base.emit("fill",serde_json::json!({"orderId":text(&u.order_id)?,"symbol":text(&u.symbol)?,"side":u.side,"price":u.price,"amount":u.amount,"timestamp":u.timestamp}))
+        use safe_cex_exchange::js_runtime::value::{Js, from_typed};
+        self.owner.parent()?.base.emit(
+            "fill",
+            Js::object(vec![
+                ("orderId", Js::str(&text(&u.order_id)?)),
+                ("symbol", Js::str(&text(&u.symbol)?)),
+                ("side", from_typed(&u.side)?),
+                ("price", Js::Number(u.price)),
+                ("amount", Js::Number(u.amount)),
+                ("timestamp", Js::Number(u.timestamp)),
+            ]),
+        )
     }
     fn fetch_positions_throttled(&mut self) -> Result<(), ExchangeError> {
         self.owner.throttled_fetch_positions()

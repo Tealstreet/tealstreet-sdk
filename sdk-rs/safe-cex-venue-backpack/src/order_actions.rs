@@ -3,22 +3,8 @@ use crate::public_control::JsString;
 use safe_cex_types::{OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType};
 use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc};
 pub type Task<T, E> = Pin<Box<dyn Future<Output = Result<T, E>>>>;
-#[derive(Clone, Debug)]
-pub struct Options {
-    pub symbol: JsString,
-    pub kind: OrderType,
-    pub side: OrderSide,
-    pub amount: f64,
-    pub price: Option<f64>,
-    pub trigger_price: Option<f64>,
-    pub take_profit: Option<f64>,
-    pub stop_loss: Option<f64>,
-    pub time_in_force: Option<OrderTimeInForce>,
-    pub reduce_only: bool,
-    pub tp_trigger_type: Option<OrderStopTriggerType>,
-    pub sl_trigger_type: Option<OrderStopTriggerType>,
-    pub client_id: Option<JsString>,
-}
+pub type Options =
+    safe_cex_types::PreparedOrderOpts<JsString, f64, safe_cex_types::ModelField<bool>>;
 #[derive(Clone, Debug)]
 pub enum Field {
     Text(JsString),
@@ -121,11 +107,14 @@ pub fn place_order<H: Host>(host: Rc<RefCell<H>>, opts: Options) -> Task<Vec<JsS
             .market(&opts.symbol)?
             .ok_or_else(|| h.error(join(&[&u("Market not found: "), &opts.symbol]), false))?;
         let post = opts.time_in_force == Some(OrderTimeInForce::PostOnly);
-        let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        let stop = matches!(
+            opts.r#type.into_value(),
+            Some(OrderType::StopLoss | OrderType::TakeProfit)
+        );
         let trigger = stop || opts.trigger_price.is_some();
-        let limit = opts.kind == OrderType::Limit;
+        let limit = opts.r#type == OrderType::Limit;
         let attached = opts.take_profit.is_some() || opts.stop_loss.is_some();
-        let api_market = stop || opts.kind == OrderType::Market;
+        let api_market = stop || opts.r#type == OrderType::Market;
         let mut req = vec![
             ("symbol", Field::Text(h.market_id(&market)?)),
             (
@@ -171,7 +160,7 @@ pub fn place_order<H: Host>(host: Rc<RefCell<H>>, opts: Options) -> Task<Vec<JsS
                 "triggerQuantity",
                 Field::Text(format(&mut *h, &market, opts.amount, false)?),
             ));
-            let tp = opts.kind == OrderType::TakeProfit;
+            let tp = opts.r#type == OrderType::TakeProfit;
             req.push((
                 "triggerBy",
                 Field::Text(h.trigger_by(
@@ -197,7 +186,7 @@ pub fn place_order<H: Host>(host: Rc<RefCell<H>>, opts: Options) -> Task<Vec<JsS
                 req.push(("price", Field::Text(format(&mut *h, &market, n, true)?)));
             }
         }
-        if opts.reduce_only && !stop {
+        if opts.reduce_only == true && !stop {
             req.push(("reduceOnly", Field::Bool(true)));
         }
         let separate = limit && attached;
@@ -337,7 +326,10 @@ pub fn update_order<H: Host>(
             .find_order(&update.id)?
             .ok_or_else(|| h.error(join(&[&u("Order not found: "), &update.id]), false))?;
         let opts = h.order_options(&old)?;
-        let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        let stop = matches!(
+            opts.r#type.into_value(),
+            Some(OrderType::StopLoss | OrderType::TakeProfit)
+        );
         let amount = update.amount.unwrap_or(Some(opts.amount));
         let price = update.price.unwrap_or(opts.price);
         if amount.is_none_or(|n| !truth(n) || n <= 0.0) {
@@ -356,13 +348,14 @@ pub fn update_order<H: Host>(
         let target = h.log_target()?;
         let id = h.order_id(&old)?;
         let now = h.order_options(&old)?;
-        let kind = match now.kind {
-            OrderType::Market => "market",
-            OrderType::Limit => "limit",
-            OrderType::StopLoss => "stop_market",
-            OrderType::TakeProfit => "take_profit_market",
-            OrderType::Conditional => "conditional",
-            OrderType::TrailingStopLoss => "trailing_stop_market",
+        let kind = match now.r#type.into_value() {
+            Some(OrderType::Market) => "market",
+            Some(OrderType::Limit) => "limit",
+            Some(OrderType::StopLoss) => "stop_market",
+            Some(OrderType::TakeProfit) => "take_profit_market",
+            Some(OrderType::Conditional) => "conditional",
+            Some(OrderType::TrailingStopLoss) => "trailing_stop_market",
+            None => "undefined",
         };
         let text = join(&[
             &u("Updating order "),
@@ -392,18 +385,23 @@ pub fn update_order<H: Host>(
             let o = h.order_options(&old)?;
             Options {
                 symbol: o.symbol,
-                kind: o.kind,
+                r#type: o.r#type,
                 side: o.side,
                 amount,
                 price,
                 time_in_force: o.time_in_force,
-                reduce_only: stop || o.reduce_only,
+                reduce_only: if stop {
+                    true.into()
+                } else {
+                    o.reduce_only.into_property()
+                },
                 trigger_price: None,
                 take_profit: None,
                 stop_loss: None,
                 tp_trigger_type: None,
                 sl_trigger_type: None,
-                client_id: None,
+                client_order_id: None,
+                ..Default::default()
             }
         };
         let result = async {

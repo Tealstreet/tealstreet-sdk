@@ -13,7 +13,16 @@ const order=load('hyperliquid.order-response.ts');
 const out={};let interceptor;const waits=[];
 const context={exports:out,ENDPOINTS:{EXCHANGE:'/exchange'},...order,isSigningCaptureRequest:c=>c.capture,hyperliquidRestRateLimiter:{async waitForToken(weight){waits.push(weight)}},getHyperliquidRestRequestWeight:rate.getHyperliquidRestRequestWeight};
 vm.runInNewContext(transpile(['getRequestActionType','getOrderErrorTelemetry','addResponseInterceptor','addRateLimitInterceptor'].map(name=>'const '+name+'=('+init(name)+');').join('\n')+'\nexports.response=addResponseInterceptor;exports.pacing=addRateLimitInterceptor;'),context);
-(async()=>{
+if(process.argv[2]==='--cloid-weights'){
+ const rows=[];
+ for(const mode of ['raw','value'])for(const count of [39,40,80]){
+  const body={action:{type:'cancelByCloid',cancels:Array(count).fill(null)}};
+  const weight=rate.getHyperliquidRestRequestWeight({url:'/exchange',data:mode==='raw'?JSON.stringify(body):body});
+  const bytes=Buffer.alloc(8);bytes.writeDoubleBE(weight);
+  rows.push({mode,count,weight,weightBits:bytes.toString('hex')});
+ }
+ process.stdout.write(JSON.stringify(rows));
+}else (async()=>{
  out.pacing({interceptors:{request:{use(f){interceptor=f}}}});
  const role='{"type":"userRole"}',batch=JSON.stringify({action:{type:'order',orders:Array(40).fill(null)}});
  const raw=[role,JSON.stringify(role),JSON.stringify(batch),'{"type":"userRole","unused":"\\ud800"}','{"type":"userRole","unused":'+'['.repeat(140)+'0'+']'.repeat(140)+'}', '{"type":"userRole","unused":"\\ud83d\\ude00"}','null','not json',role];

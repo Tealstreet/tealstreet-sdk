@@ -3,7 +3,10 @@
 //! CHOSEN: reactions run as runtime tasks, not on a V8 microtask queue, so
 //! settlement order between unrelated promises can differ from Node. Ordering
 //! within one async body is preserved because each await resumes in sequence.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{Kind, PromiseCell, PromiseState, Thrown, Value},
+};
 use std::{
     cell::RefCell,
     future::Future,
@@ -140,7 +143,10 @@ impl Realm {
             if let Ok(code) = self.get_str(thrown, "code")
                 && !code.is_nullish()
             {
-                error.code = self.to_serde(&code).ok();
+                error.code = match self.capture_typed_value(&code, 0) {
+                    Ok(code) => Some(code),
+                    Err(cause) => return self.exchange_error(&cause),
+                };
             }
             if let Ok(response) = self.get_str(thrown, "response")
                 && !response.is_nullish()

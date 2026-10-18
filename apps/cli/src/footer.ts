@@ -27,6 +27,7 @@
 import chalk from 'chalk';
 
 import { addResizeListener, reserveBottom, resumeRegion, suspendRegion } from './scroll-region';
+import { BRAND } from './brand';
 
 const ESC = '\x1b';
 const SAVE_CURSOR = `${ESC}7`;
@@ -88,7 +89,7 @@ export function formatFooterLine(left: string, right: string, width: number): st
 
 /** What the footer should show. Phase 3 replaces this with the segment engine. */
 let renderer: () => { left: string; right: string } = () => ({
-  left: ' tealstreet · footer ready',
+  left: ` ${BRAND.binName} · footer ready`,
   right: '',
 });
 

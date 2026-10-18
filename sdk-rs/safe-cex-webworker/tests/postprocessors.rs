@@ -11,7 +11,7 @@ fn displayed(notional: f64, side: PositionSide) -> DisplayedPosition {
     }))
     .unwrap();
     row.position.notional = notional;
-    row.position.side = side;
+    row.position.side = side.into();
     row
 }
 
@@ -95,7 +95,7 @@ fn chaser_enrichment_matches_live_plain_object_ownership_and_prototype_keys() {
                 "ENRICHMENT-IDENTITY native symbol"
             );
             for (field, value) in [
-                ("price", actual.price),
+                ("price", actual.price.to_number()),
                 ("amount", actual.amount),
                 ("filled", actual.filled),
                 ("remaining", actual.remaining),
@@ -107,7 +107,7 @@ fn chaser_enrichment_matches_live_plain_object_ownership_and_prototype_keys() {
                     "ENRICHMENT-IDENTITY native {field}"
                 );
             }
-            if let Some(extra) = &actual.extra {
+            if let ModelField::Value(extra) = &actual.extra {
                 for (field, value) in [
                     ("chaserAttempts", extra.chaser_attempts),
                     ("chaserMaxAttempts", extra.chaser_max_attempts),
@@ -235,13 +235,13 @@ fn chaser_enrichment_retains_optional_field_identity() {
                 );
             }
             for (field, value) in [
-                ("price", Some(actual.price)),
+                ("price", actual.price.value().copied()),
                 ("amount", Some(actual.amount)),
                 ("filled", Some(actual.filled)),
                 ("remaining", Some(actual.remaining)),
                 ("lastUpdate", Some(actual.last_update)),
-                ("takeProfit", actual.take_profit),
-                ("stopLoss", actual.stop_loss),
+                ("takeProfit", actual.take_profit.value().copied()),
+                ("stopLoss", actual.stop_loss.value().copied()),
             ] {
                 assert_eq!(
                     value.map(f64::to_bits),
@@ -250,7 +250,7 @@ fn chaser_enrichment_retains_optional_field_identity() {
                 );
             }
             assert_eq!(
-                Some(actual.reduce_only),
+                actual.reduce_only.into_value(),
                 source["reduceOnly"].as_bool(),
                 "ENRICHMENT-OPTIONAL native reduceOnly"
             );
@@ -264,9 +264,9 @@ fn chaser_enrichment_retains_optional_field_identity() {
                 source.get("info"),
                 "ENRICHMENT-OPTIONAL native info"
             );
-            native_enum!(Some(actual.status), source, "status", OrderStatus; Open=>"open", Closed=>"closed", Canceled=>"canceled", Creating=>"creating", Updating=>"updating", Canceling=>"canceling");
-            native_enum!(Some(actual.r#type), source, "type", OrderType; Market=>"market", Limit=>"limit", Conditional=>"conditional", StopLoss=>"stop_market", TakeProfit=>"take_profit_market", TrailingStopLoss=>"trailing_stop_market");
-            native_enum!(Some(actual.side), source, "side", OrderSide; Buy=>"buy", Sell=>"sell");
+            native_enum!(actual.status, source, "status", OrderStatus; Open=>"open", Closed=>"closed", Canceled=>"canceled", Creating=>"creating", Updating=>"updating", Canceling=>"canceling");
+            native_enum!(actual.r#type, source, "type", OrderType; Market=>"market", Limit=>"limit", Conditional=>"conditional", StopLoss=>"stop_market", TakeProfit=>"take_profit_market", TrailingStopLoss=>"trailing_stop_market");
+            native_enum!(actual.side, source, "side", OrderSide; Buy=>"buy", Sell=>"sell");
             native_enum!(actual.time_in_force, source, "timeInForce", OrderTimeInForce; GoodTillCancel=>"GoodTillCancel", ImmediateOrCancel=>"ImmediateOrCancel", FillOrKill=>"FillOrKill", PostOnly=>"PostOnly");
             for (field, value) in [
                 ("triggerType", actual.trigger_type),

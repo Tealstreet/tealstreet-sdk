@@ -1,5 +1,8 @@
 //! JSON.parse / JSON.stringify and the typed boundary to `serde_json::Value`.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{Kind, Obj, PropKey, Thrown, Value},
+};
 use crate::json_values::JsonValue;
 use crate::spot_json::JsString;
 use std::rc::Rc;
@@ -195,13 +198,17 @@ impl Realm {
         &mut self,
         value: &Value,
     ) -> Result<T, Thrown> {
-        let json = self.to_serde(value)?;
-        serde_json::from_value(json).map_err(|e| self.type_error(&format!("typed boundary: {e}")))
+        let value = self.capture_typed_value(value, 0)?;
+        safe_cex_exchange::js_runtime::value::to_typed(&value)
+            .map_err(|error| self.typed_error(error))
     }
-    pub(crate) fn from_typed<T: serde::Serialize>(&mut self, value: &T) -> Result<Value, Thrown> {
-        let json = serde_json::to_value(value)
-            .map_err(|e| self.type_error(&format!("typed boundary: {e}")))?;
-        Ok(self.from_serde(&json))
+    pub(crate) fn from_typed<T: serde::Serialize + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<Value, Thrown> {
+        let value = safe_cex_exchange::js_runtime::value::from_typed(value)
+            .map_err(|error| self.typed_error(error))?;
+        self.restore_typed_value(&value)
     }
     pub(crate) fn js_text(&self, text: &str) -> JsString {
         JsString(text.encode_utf16().collect())
@@ -246,27 +253,5 @@ impl Realm {
                 J::Object(out)
             }
         })
-    }
-    pub(crate) fn from_js_json(&self, value: &safe_cex_num::JsJsonValue) -> Value {
-        use safe_cex_num::JsJsonValue as J;
-        match value {
-            J::Undefined => Value::Undefined,
-            J::Null => Value::Null,
-            J::Bool(b) => Value::Bool(*b),
-            J::Number(n) => Value::Number(*n),
-            J::String(s) => Value::str(s),
-            J::BigInt(b) => Value::str(&b.to_string()),
-            J::Array(items) => self.new_array(items.iter().map(|v| self.from_js_json(v)).collect()),
-            J::Object(entries) => {
-                let o = self.new_object();
-                {
-                    let mut d = o.object().unwrap().borrow_mut();
-                    for (k, v) in entries {
-                        d.put(PropKey::str(k), self.from_js_json(v), true);
-                    }
-                }
-                o
-            }
-        }
     }
 }

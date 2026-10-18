@@ -396,17 +396,20 @@ fn date(v: Option<&Value>, local: impl FnOnce(f64) -> f64) -> Result<f64, JsCoer
         _ => js_date_parse(&string(v)?, local),
     })
 }
+fn value_precision(v: Option<&Value>) -> Result<f64, JsCoercionError> {
+    Ok(match v {
+        Some(Value::String(v)) => {
+            safe_cex_num::after_decimal(safe_cex_num::PrecisionInput::String(v.clone()))
+        }
+        None | Some(Value::Null) => 2.0,
+        _ => safe_cex_num::after_decimal(safe_cex_num::PrecisionInput::Number(js_number(v)?)),
+    })
+}
 fn subtract(a: Option<&Value>, b: Option<&Value>) -> Result<f64, JsCoercionError> {
-    fn precision(v: Option<&Value>) -> Result<f64, JsCoercionError> {
-        Ok(match v {
-            Some(Value::String(v)) => {
-                safe_cex_num::after_decimal(safe_cex_num::PrecisionInput::String(v.clone()))
-            }
-            None | Some(Value::Null) => 2.0,
-            _ => safe_cex_num::after_decimal(safe_cex_num::PrecisionInput::Number(js_number(v)?)),
-        })
-    }
-    let factor = safe_cex_num::math_pow(10.0, safe_cex_num::math_max(precision(a)?, precision(b)?));
+    let factor = safe_cex_num::math_pow(
+        10.0,
+        safe_cex_num::math_max(value_precision(a)?, value_precision(b)?),
+    );
     Ok(safe_cex_num::math_round((js_number(a)? - js_number(b)?) * factor) / factor)
 }
 pub fn on_private_message<H: PrivateMessageHost>(

@@ -108,7 +108,7 @@ fn native(r: &Runtime, e: &Value) {
             )
         }
         for (n, k) in [
-            (o.price, "price"),
+            (o.price.to_number(), "price"),
             (o.amount, "amount"),
             (o.filled, "filled"),
             (o.remaining, "remaining"),
@@ -116,7 +116,7 @@ fn native(r: &Runtime, e: &Value) {
         ] {
             number(n, &e[k]);
         }
-        assert!(!o.reduce_only);
+        assert_eq!(o.reduce_only, false);
         assert_eq!(o.time_in_force, Some(OrderTimeInForce::GoodTillCancel));
         plain(o.info.as_ref().unwrap(), &e["info"]);
         let extra = o.extra.as_ref().unwrap();

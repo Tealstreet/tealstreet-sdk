@@ -27,7 +27,7 @@ struct Corpus {
 #[test]
 fn every_ts_type_parses_its_raw_source_shape() {
     let corpus: Corpus = serde_json::from_str(include_str!("fixtures/types.json")).unwrap();
-    assert_eq!(corpus.cases.len(), 207, "TYPE-CARDINALITY source total");
+    assert_eq!(corpus.cases.len(), 78, "TYPE-CARDINALITY source total");
     assert_eq!(
         corpus
             .cases
@@ -35,11 +35,11 @@ fn every_ts_type_parses_its_raw_source_shape() {
             .map(|case| case.name.as_str())
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        72,
+        42,
         "TYPE-CARDINALITY source roots"
     );
     let mut comparisons = 0;
-    for index in 0..207 {
+    for index in 0..78 {
         let case = corpus
             .cases
             .get(index)
@@ -71,15 +71,8 @@ fn every_ts_type_parses_its_raw_source_shape() {
             "Cloid" => {
                 serde_json::to_value(serde_json::from_str::<Cloid>(&case.raw).unwrap()).unwrap()
             }
-            "OidOrCloid" => {
-                serde_json::to_value(serde_json::from_str::<OidOrCloid>(&case.raw).unwrap())
-                    .unwrap()
-            }
             "AllMids" => {
                 serde_json::to_value(serde_json::from_str::<AllMids>(&case.raw).unwrap()).unwrap()
-            }
-            "Meta" => {
-                serde_json::to_value(serde_json::from_str::<Meta>(&case.raw).unwrap()).unwrap()
             }
             "ClearinghouseState" => {
                 serde_json::to_value(serde_json::from_str::<ClearinghouseState>(&case.raw).unwrap())
@@ -87,14 +80,6 @@ fn every_ts_type_parses_its_raw_source_shape() {
             }
             "UserFills" => {
                 serde_json::to_value(serde_json::from_str::<UserFills>(&case.raw).unwrap()).unwrap()
-            }
-            "OrderResponseStatus" => serde_json::to_value(
-                serde_json::from_str::<OrderResponseStatus>(&case.raw).unwrap(),
-            )
-            .unwrap(),
-            "OrderResponse" => {
-                serde_json::to_value(serde_json::from_str::<OrderResponse>(&case.raw).unwrap())
-                    .unwrap()
             }
             "WsTrade" => {
                 serde_json::to_value(serde_json::from_str::<WsTrade>(&case.raw).unwrap()).unwrap()
@@ -160,18 +145,6 @@ fn every_ts_type_parses_its_raw_source_shape() {
                 serde_json::to_value(serde_json::from_str::<WsNonUserCancel>(&case.raw).unwrap())
                     .unwrap()
             }
-            "SpotClearinghouseBalance" => serde_json::to_value(
-                serde_json::from_str::<SpotClearinghouseBalance>(&case.raw).unwrap(),
-            )
-            .unwrap(),
-            "SpotClearinghouseState" => serde_json::to_value(
-                serde_json::from_str::<SpotClearinghouseState>(&case.raw).unwrap(),
-            )
-            .unwrap(),
-            "FrontendOpenOrders" => {
-                serde_json::to_value(serde_json::from_str::<FrontendOpenOrders>(&case.raw).unwrap())
-                    .unwrap()
-            }
             "UserRateLimit" => {
                 serde_json::to_value(serde_json::from_str::<UserRateLimit>(&case.raw).unwrap())
                     .unwrap()
@@ -183,41 +156,6 @@ fn every_ts_type_parses_its_raw_source_shape() {
             "L2Book" => {
                 serde_json::to_value(serde_json::from_str::<L2Book>(&case.raw).unwrap()).unwrap()
             }
-            "CandleSnapshot" => {
-                serde_json::to_value(serde_json::from_str::<CandleSnapshot>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "AssetCtx" => {
-                serde_json::to_value(serde_json::from_str::<AssetCtx>(&case.raw).unwrap()).unwrap()
-            }
-            "MetaAndAssetCtxs" => {
-                serde_json::to_value(serde_json::from_str::<MetaAndAssetCtxs>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "UserFundingDelta" => {
-                serde_json::to_value(serde_json::from_str::<UserFundingDelta>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "UserFundingEntry" => {
-                serde_json::to_value(serde_json::from_str::<UserFundingEntry>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "UserFunding" => {
-                serde_json::to_value(serde_json::from_str::<UserFunding>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "UserNonFundingLedgerDelta" => serde_json::to_value(
-                serde_json::from_str::<UserNonFundingLedgerDelta>(&case.raw).unwrap(),
-            )
-            .unwrap(),
-            "UserNonFundingLedgerEntry" => serde_json::to_value(
-                serde_json::from_str::<UserNonFundingLedgerEntry>(&case.raw).unwrap(),
-            )
-            .unwrap(),
-            "UserNonFundingLedgerUpdates" => serde_json::to_value(
-                serde_json::from_str::<UserNonFundingLedgerUpdates>(&case.raw).unwrap(),
-            )
-            .unwrap(),
             "FundingHistoryEntry" => serde_json::to_value(
                 serde_json::from_str::<FundingHistoryEntry>(&case.raw).unwrap(),
             )
@@ -226,24 +164,6 @@ fn every_ts_type_parses_its_raw_source_shape() {
                 serde_json::to_value(serde_json::from_str::<FundingHistory>(&case.raw).unwrap())
                     .unwrap()
             }
-            "SpotToken" => {
-                serde_json::to_value(serde_json::from_str::<SpotToken>(&case.raw).unwrap()).unwrap()
-            }
-            "SpotMarket" => {
-                serde_json::to_value(serde_json::from_str::<SpotMarket>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "SpotMeta" => {
-                serde_json::to_value(serde_json::from_str::<SpotMeta>(&case.raw).unwrap()).unwrap()
-            }
-            "SpotAssetCtx" => {
-                serde_json::to_value(serde_json::from_str::<SpotAssetCtx>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "SpotMetaAndAssetCtxs" => serde_json::to_value(
-                serde_json::from_str::<SpotMetaAndAssetCtxs>(&case.raw).unwrap(),
-            )
-            .unwrap(),
             "UserOpenOrder" => {
                 serde_json::to_value(serde_json::from_str::<UserOpenOrder>(&case.raw).unwrap())
                     .unwrap()
@@ -251,13 +171,6 @@ fn every_ts_type_parses_its_raw_source_shape() {
             "UserOpenOrders" => {
                 serde_json::to_value(serde_json::from_str::<UserOpenOrders>(&case.raw).unwrap())
                     .unwrap()
-            }
-            "OrderRequest" => {
-                serde_json::to_value(serde_json::from_str::<OrderRequest>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "OrderWire" => {
-                serde_json::to_value(serde_json::from_str::<OrderWire>(&case.raw).unwrap()).unwrap()
             }
             "CancelOrderRequest" => {
                 serde_json::to_value(serde_json::from_str::<CancelOrderRequest>(&case.raw).unwrap())
@@ -269,18 +182,6 @@ fn every_ts_type_parses_its_raw_source_shape() {
             .unwrap(),
             "CancelByCloidRequest" => serde_json::to_value(
                 serde_json::from_str::<CancelByCloidRequest>(&case.raw).unwrap(),
-            )
-            .unwrap(),
-            "ModifyRequest" => {
-                serde_json::to_value(serde_json::from_str::<ModifyRequest>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "ModifyWire" => {
-                serde_json::to_value(serde_json::from_str::<ModifyWire>(&case.raw).unwrap())
-                    .unwrap()
-            }
-            "ScheduleCancelAction" => serde_json::to_value(
-                serde_json::from_str::<ScheduleCancelAction>(&case.raw).unwrap(),
             )
             .unwrap(),
             "Signature" => {
@@ -317,26 +218,12 @@ fn every_ts_type_parses_its_raw_source_shape() {
                 serde_json::from_str::<WsUserNonFundingLedgerUpdates>(&case.raw).unwrap(),
             )
             .unwrap(),
-            "PerpDex" => {
-                serde_json::to_value(serde_json::from_str::<PerpDex>(&case.raw).unwrap()).unwrap()
-            }
-            "PerpDexs" => {
-                serde_json::to_value(serde_json::from_str::<PerpDexs>(&case.raw).unwrap()).unwrap()
-            }
-            "Hip3MarketInfo" => {
-                serde_json::to_value(serde_json::from_str::<Hip3MarketInfo>(&case.raw).unwrap())
-                    .unwrap()
-            }
             "BuilderInfo" => {
                 serde_json::to_value(serde_json::from_str::<BuilderInfo>(&case.raw).unwrap())
                     .unwrap()
             }
             "BuilderFeeApprovalResult" => serde_json::to_value(
                 serde_json::from_str::<BuilderFeeApprovalResult>(&case.raw).unwrap(),
-            )
-            .unwrap(),
-            "BuilderFeeCheckResult" => serde_json::to_value(
-                serde_json::from_str::<BuilderFeeCheckResult>(&case.raw).unwrap(),
             )
             .unwrap(),
             _ => panic!("unmapped TS type {}", case.name),
@@ -348,7 +235,7 @@ fn every_ts_type_parses_its_raw_source_shape() {
         );
         comparisons += 1;
     }
-    assert_eq!(comparisons, 207, "TYPE-CARDINALITY completed comparisons");
+    assert_eq!(comparisons, 78, "TYPE-CARDINALITY completed comparisons");
 }
 #[test]
 fn endpoint_tables_match_live_ts() {

@@ -55,17 +55,27 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
     Ok(out)
 }
 
-fn in_operator(obj: &Js, key: &str) -> bool {
+fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
+    if !obj.is_object() {
+        let rhs = if matches!(obj, Js::SymbolIterator) {
+            "Symbol(Symbol.iterator)".to_owned()
+        } else {
+            obj.to_display()
+        };
+        return Err(Thrown::type_error(&format!(
+            "Cannot use 'in' operator to search for '{key}' in {rhs}"
+        )));
+    }
+    if obj.has_own(key) {
+        return Ok(true);
+    }
     match obj {
-        Js::Object(o) => {
-            obj.has_own(key)
-                || o.proto
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|p| in_operator(p, key))
-        }
-        Js::Array(_) => key == "length" || obj.has_own(key),
-        _ => obj.has_own(key),
+        Js::Object(o) => match o.proto.borrow().as_ref() {
+            Some(proto) if !matches!(proto, Js::Null) => in_operator(proto, key),
+            _ => Ok(false),
+        },
+        Js::Array(_) => Ok(key == "length"),
+        _ => Ok(false),
     }
 }
 
@@ -148,37 +158,30 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             .collect::<Result<Vec<_>, _>>()?;
         rows.push((criteria, index, value));
     }
-    let mut failure = None;
-    rows.sort_by(|(a, ai, _), (b, bi, _)| {
+    super::sorting::stable_sort(&mut rows, |(a, ai, _), (b, bi, _)| {
         for (i, (x, y)) in a.iter().zip(b).enumerate() {
-            match compare_ascending(x, y) {
-                Ok(Ordering::Equal) => continue,
-                Ok(o) => {
-                    return if descending.get(i) == Some(&true) {
-                        o.reverse()
+            match compare_ascending(x, y)? {
+                Ordering::Equal => continue,
+                order => {
+                    return Ok(if descending.get(i) == Some(&true) {
+                        order.reverse()
                     } else {
-                        o
-                    };
-                }
-                Err(e) => {
-                    failure.get_or_insert(e);
-                    return Ordering::Equal;
+                        order
+                    });
                 }
             }
         }
-        ai.cmp(bi)
-    });
-    if let Some(e) = failure {
-        return Err(e);
-    }
+        Ok(ai.cmp(bi))
+    })?;
     Ok(Js::array(rows.into_iter().map(|(_, _, v)| v).collect()))
 }
 
-/// bignumber.js value: `coefficient * 10^-scale`; `None` is NaN.
+/// Finite bignumber.js value: `coefficient * 10^-scale`, retaining zero's sign.
 #[derive(Clone, Debug, PartialEq)]
 struct Decimal {
     coefficient: BigInt,
     scale: i64,
+    negative_zero: bool,
 }
 
 impl Decimal {
@@ -209,6 +212,7 @@ impl Decimal {
             Decimal {
                 coefficient,
                 scale: fraction.len() as i64 - exponent,
+                negative_zero: negative,
             }
             .normalize(),
         )
@@ -243,6 +247,7 @@ impl Decimal {
         Decimal {
             coefficient: a + b,
             scale,
+            negative_zero: self.negative() && other.negative(),
         }
         .normalize()
     }
@@ -251,6 +256,7 @@ impl Decimal {
         Decimal {
             coefficient: a - b,
             scale,
+            negative_zero: self.negative() && !other.negative(),
         }
         .normalize()
     }
@@ -258,16 +264,18 @@ impl Decimal {
         Decimal {
             coefficient: &self.coefficient * &other.coefficient,
             scale: self.scale + other.scale,
+            negative_zero: self.negative() != other.negative(),
         }
         .normalize()
     }
-    /// ROUND_DOWN integer quotient; division by zero is NaN.
-    fn integer_quotient(&self, other: &Self) -> Option<Self> {
+    /// ROUND_DOWN quotient of finite values with a nonzero divisor.
+    fn integer_quotient(&self, other: &Self) -> Self {
         let (a, b, _) = self.aligned(other);
-        (b != BigInt::default()).then(|| Decimal {
+        Decimal {
             coefficient: a / b,
             scale: 0,
-        })
+            negative_zero: self.negative() != other.negative(),
+        }
     }
     fn compare(&self, other: &Self) -> Ordering {
         let (a, b, _) = self.aligned(other);
@@ -278,6 +286,7 @@ impl Decimal {
     }
     fn negative(&self) -> bool {
         self.coefficient < BigInt::default()
+            || self.coefficient == BigInt::default() && self.negative_zero
     }
     /// Plain notation; `dp` rounds ROUND_HALF_UP and pads to that many places.
     fn fixed(&self, dp: Option<i64>) -> String {
@@ -294,6 +303,7 @@ impl Decimal {
                 Decimal {
                     coefficient: if self.negative() { -kept } else { kept },
                     scale: dp,
+                    negative_zero: self.negative(),
                 }
             }
             _ => self.clone(),
@@ -310,8 +320,10 @@ impl Decimal {
             body.push_str(&padded[split..]);
             body.push_str(&"0".repeat(pad));
         }
-        let zero = value.coefficient == BigInt::default();
-        format!("{}{body}", if value.negative() && !zero { "-" } else { "" })
+        // An originally negative nonzero value keeps its sign when rounding to
+        // zero. An actual negative zero formats unsigned, unlike valueOf/JSON.
+        let signed = self.negative() && self.coefficient != BigInt::default();
+        format!("{}{body}", if signed { "-" } else { "" })
     }
     /// bignumber.js toString: exponential outside EXPONENTIAL_AT [-7, 20].
     fn display(&self) -> String {
@@ -332,42 +344,169 @@ impl Decimal {
             if exponent > 0 { "+" } else { "" }
         )
     }
-    fn to_f64(&self) -> f64 {
-        safe_cex_num::number_from_string(&self.display())
+}
+
+#[derive(Clone, Debug)]
+enum BigNumberValue {
+    Finite(Decimal),
+    Infinity { negative: bool },
+    NaN,
+}
+
+impl BigNumberValue {
+    fn parse(source: &str) -> Self {
+        match safe_cex_num::js_trim(source) {
+            "Infinity" | "+Infinity" => Self::Infinity { negative: false },
+            "-Infinity" => Self::Infinity { negative: true },
+            _ => Decimal::parse(source).map_or(Self::NaN, Self::Finite),
+        }
+    }
+    fn from_number(number: f64) -> Self {
+        if number == 0.0 && number.is_sign_negative() {
+            Self::zero(true)
+        } else {
+            Self::parse(&safe_cex_num::js_number_string(number))
+        }
+    }
+    fn zero(negative: bool) -> Self {
+        Self::Finite(Decimal {
+            coefficient: BigInt::default(),
+            scale: 0,
+            negative_zero: negative,
+        })
+    }
+    fn is_zero(&self) -> bool {
+        matches!(self, Self::Finite(d) if d.coefficient == BigInt::default())
+    }
+    fn negative(&self) -> bool {
+        match self {
+            Self::Finite(d) => d.negative(),
+            Self::Infinity { negative } => *negative,
+            Self::NaN => false,
+        }
+    }
+    fn negated(&self) -> Self {
+        match self {
+            Self::Finite(d) => Self::Finite(Decimal {
+                coefficient: -&d.coefficient,
+                scale: d.scale,
+                negative_zero: !d.negative(),
+            }),
+            Self::Infinity { negative } => Self::Infinity {
+                negative: !negative,
+            },
+            Self::NaN => Self::NaN,
+        }
+    }
+    fn plus(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::NaN, _) | (_, Self::NaN) => Self::NaN,
+            (Self::Finite(a), Self::Finite(b)) => Self::Finite(a.plus(b)),
+            (Self::Infinity { negative: a }, Self::Infinity { negative: b }) if a != b => Self::NaN,
+            (Self::Infinity { .. }, _) => self.clone(),
+            (_, Self::Infinity { .. }) => other.clone(),
+        }
+    }
+    fn minus(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::Finite(a), Self::Finite(b)) => Self::Finite(a.minus(b)),
+            _ => self.plus(&other.negated()),
+        }
+    }
+    fn times(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::NaN, _) | (_, Self::NaN) => Self::NaN,
+            (Self::Finite(a), Self::Finite(b)) => Self::Finite(a.times(b)),
+            _ if self.is_zero() || other.is_zero() => Self::NaN,
+            _ => Self::Infinity {
+                negative: self.negative() != other.negative(),
+            },
+        }
+    }
+    fn integer_quotient(&self, other: &Self) -> Self {
+        let negative = self.negative() != other.negative();
+        match (self, other) {
+            (Self::NaN, _) | (_, Self::NaN) | (Self::Infinity { .. }, Self::Infinity { .. }) => {
+                Self::NaN
+            }
+            (Self::Finite(_), Self::Infinity { .. }) => Self::zero(negative),
+            (Self::Infinity { .. }, Self::Finite(_)) => Self::Infinity { negative },
+            (Self::Finite(a), Self::Finite(b)) => {
+                if other.is_zero() {
+                    if self.is_zero() {
+                        Self::NaN
+                    } else {
+                        Self::Infinity { negative }
+                    }
+                } else {
+                    Self::Finite(a.integer_quotient(b))
+                }
+            }
+        }
+    }
+    fn compare(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Self::NaN, _) | (_, Self::NaN) => None,
+            (Self::Finite(a), Self::Finite(b)) => Some(a.compare(b)),
+            (Self::Infinity { negative: a }, Self::Infinity { negative: b }) => Some(b.cmp(a)),
+            (Self::Infinity { negative }, _) => Some(if *negative {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }),
+            (_, Self::Infinity { negative }) => Some(if *negative {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }),
+        }
+    }
+    fn display(&self) -> String {
+        match self {
+            Self::Finite(d) => d.display(),
+            Self::Infinity { negative: true } => "-Infinity".into(),
+            Self::Infinity { negative: false } => "Infinity".into(),
+            Self::NaN => "NaN".into(),
+        }
+    }
+    fn value_string(&self) -> String {
+        if self.is_zero() && self.negative() {
+            "-0".into()
+        } else {
+            self.display()
+        }
+    }
+    fn fixed(&self, dp: Option<i64>) -> String {
+        match self {
+            Self::Finite(d) => d.fixed(dp),
+            _ => self.display(),
+        }
     }
 }
 
-fn decimal_of(v: &Js) -> Result<Option<Decimal>, Thrown> {
+fn decimal_of(v: &Js) -> Result<BigNumberValue, Thrown> {
     match v {
         Js::Object(_) if v.get("_isBigNumber")?.truthy() => {
-            Ok(Decimal::parse(&text(&v.call_method("toString", vec![])?)?))
+            // Unlike toString, valueOf preserves the sign of a cloned zero.
+            Ok(BigNumberValue::parse(&text(
+                &v.call_method("valueOf", vec![])?,
+            )?))
         }
-        Js::String(s) => Ok(Decimal::parse(&String::from_utf16_lossy(s))),
-        Js::Number(n) if n.is_finite() => Ok(Decimal::parse(&safe_cex_num::js_number_string(*n))),
-        Js::Number(_) => Ok(None),
-        other => {
-            let n = other.to_number()?;
-            Ok(n.is_finite()
-                .then(|| Decimal::parse(&safe_cex_num::js_number_string(n)))
-                .flatten())
-        }
+        Js::String(s) => Ok(BigNumberValue::parse(&String::from_utf16_lossy(s))),
+        Js::Number(n) => Ok(BigNumberValue::from_number(*n)),
+        other => Ok(BigNumberValue::from_number(other.to_number()?)),
     }
 }
 
-fn big_number(value: Option<Decimal>) -> Js {
+fn big_number(value: BigNumberValue) -> Js {
     let object = Js::object_with_class("BigNumber", vec![("_isBigNumber", Js::Bool(true))]);
-    let binary = |name: &'static str, op: fn(&Decimal, &Decimal) -> Option<Decimal>| {
+    let binary = |name: &'static str,
+                  op: fn(&BigNumberValue, &BigNumberValue) -> BigNumberValue| {
         let value = value.clone();
         (
             name,
             func(name, move |a| {
-                let other = decimal_of(&arg(&a, 0))?;
-                Ok(big_number(
-                    value
-                        .as_ref()
-                        .zip(other.as_ref())
-                        .and_then(|(x, y)| op(x, y)),
-                ))
+                Ok(big_number(op(&value, &decimal_of(&arg(&a, 0))?)))
             }),
         )
     };
@@ -376,24 +515,20 @@ fn big_number(value: Option<Decimal>) -> Js {
         (
             name,
             func(name, move |a| {
-                let other = decimal_of(&arg(&a, 0))?;
                 Ok(Js::Bool(
-                    value
-                        .as_ref()
-                        .zip(other.as_ref())
-                        .is_some_and(|(x, y)| accept(x.compare(y))),
+                    value.compare(&decimal_of(&arg(&a, 0))?).is_some_and(accept),
                 ))
             }),
         )
     };
     let (fixed, string, number) = (value.clone(), value.clone(), value.clone());
     let members = vec![
-        binary("plus", |x, y| Some(x.plus(y))),
-        binary("minus", |x, y| Some(x.minus(y))),
-        binary("multipliedBy", |x, y| Some(x.times(y))),
-        binary("times", |x, y| Some(x.times(y))),
-        binary("dividedToIntegerBy", Decimal::integer_quotient),
-        binary("idiv", Decimal::integer_quotient),
+        binary("plus", BigNumberValue::plus),
+        binary("minus", BigNumberValue::minus),
+        binary("multipliedBy", BigNumberValue::times),
+        binary("times", BigNumberValue::times),
+        binary("dividedToIntegerBy", BigNumberValue::integer_quotient),
+        binary("idiv", BigNumberValue::integer_quotient),
         compare("lt", |o| o == Ordering::Less),
         compare("lte", |o| o != Ordering::Greater),
         compare("gt", |o| o == Ordering::Greater),
@@ -409,58 +544,61 @@ fn big_number(value: Option<Decimal>) -> Js {
                 } else {
                     Some(dp.to_number()? as i64)
                 };
-                Ok(Js::str(
-                    &fixed.as_ref().map_or("NaN".into(), |d| d.fixed(dp)),
-                ))
+                Ok(Js::str(&fixed.fixed(dp)))
             }),
         ),
         (
             "toString",
-            func("toString", move |_| {
-                Ok(Js::str(
-                    &string.as_ref().map_or("NaN".into(), Decimal::display),
-                ))
-            }),
+            func("toString", move |_| Ok(Js::str(&string.display()))),
         ),
         (
             "toNumber",
             func("toNumber", move |_| {
-                Ok(Js::Number(
-                    number.as_ref().map_or(f64::NAN, Decimal::to_f64),
-                ))
+                Ok(Js::Number(safe_cex_num::number_from_string(
+                    &number.value_string(),
+                )))
             }),
         ),
     ];
     for (k, v) in members {
         let _ = object.define(k, v);
     }
-    let shown = value.clone();
-    let _ = object.define(
-        "valueOf",
-        func("valueOf", move |_| {
-            Ok(Js::str(
-                &shown.as_ref().map_or("NaN".into(), Decimal::display),
-            ))
-        }),
-    );
+    for name in ["valueOf", "toJSON"] {
+        let shown = value.clone();
+        let _ = object.define(
+            name,
+            func(name, move |_| Ok(Js::str(&shown.value_string()))),
+        );
+    }
+    let finite = matches!(&value, BigNumberValue::Finite(_));
+    let _ = object.define("isFinite", func("isFinite", move |_| Ok(Js::Bool(finite))));
     let _ = object.define(
         "isNaN",
-        func("isNaN", move |_| Ok(Js::Bool(value.is_none()))),
+        func("isNaN", move |_| {
+            Ok(Js::Bool(matches!(value, BigNumberValue::NaN)))
+        }),
     );
     object
 }
 
 fn extreme(args: &[Js], pick: Ordering) -> Result<Js, Thrown> {
-    let mut best: Option<Decimal> = None;
+    let mut best: Option<BigNumberValue> = None;
     for v in args {
-        let Some(d) = decimal_of(v)? else {
-            return Ok(big_number(None));
-        };
-        if best.as_ref().is_none_or(|b| d.compare(b) == pick) {
+        let d = decimal_of(v)?;
+        if matches!(d, BigNumberValue::NaN) {
+            return Ok(big_number(d));
+        }
+        if best.as_ref().is_none_or(|b| {
+            d.compare(b) == Some(pick)
+                || d.is_zero()
+                    && b.is_zero()
+                    && d.negative() != b.negative()
+                    && d.negative() == (pick == Ordering::Less)
+        }) {
             best = Some(d);
         }
     }
-    Ok(big_number(best))
+    Ok(big_number(best.unwrap_or(BigNumberValue::NaN)))
 }
 
 const DAY_MS: f64 = 86_400_000.0;
@@ -626,52 +764,135 @@ fn dayjs(ms: f64) -> Js {
     )
 }
 
-/// qs default encoder (RFC 3986 unreserved set kept, UTF-8 percent-encoded).
-fn qs_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(*b as char)
+// The option-bearing qs calls used by venue signers and params serializers.
+struct QsOptions {
+    arrays: String,
+    encode: bool,
+    form: bool,
+    sort: Js,
+}
+impl QsOptions {
+    fn read(value: &Js) -> Result<Self, Thrown> {
+        let get = |key: &str| {
+            if value.is_nullish() {
+                Ok(Js::Undefined)
+            } else {
+                value.get(key)
             }
-            _ => out.push_str(&format!("%{b:02X}")),
+        };
+        let arrays = text(&get("arrayFormat")?)?;
+        let format = get("format")?;
+        if !format.is_undefined() && !matches!(text(&format)?.as_str(), "RFC3986" | "RFC1738") {
+            return Err(Thrown::type_error("Unknown format option provided."));
+        }
+        Ok(Self {
+            arrays,
+            encode: !matches!(get("encode")?, Js::Bool(false)),
+            form: format.strict_equals(&Js::str("RFC1738")),
+            sort: get("sort")?,
+        })
+    }
+    fn encode(&self, value: &str) -> String {
+        if !self.encode {
+            return if self.form {
+                value.replace("%20", "+")
+            } else {
+                value.to_owned()
+            };
+        }
+        let mut output = String::new();
+        for byte in value.bytes() {
+            if byte.is_ascii_alphanumeric()
+                || b"-._~".contains(&byte)
+                || (self.form && b"()".contains(&byte))
+            {
+                output.push(char::from(byte));
+            } else {
+                use std::fmt::Write;
+                write!(output, "%{byte:02X}").expect("writing to String");
+            }
+        }
+        if self.form {
+            output.replace("%20", "+")
+        } else {
+            output
         }
     }
-    out
-}
-
-fn qs_pairs(prefix: &str, value: &Js, out: &mut Vec<String>) -> Result<(), Thrown> {
-    match value {
-        Js::Undefined => {}
-        Js::Null => out.push(format!("{}=", qs_encode(prefix))),
-        Js::Array(_) => {
-            for (i, v) in list(value).iter().enumerate() {
-                qs_pairs(&format!("{prefix}[{i}]"), v, out)?;
+    fn keys(&self, value: &Js) -> Result<Vec<super::value::Str>, Thrown> {
+        let mut keys = value.own_keys();
+        if self.sort.is_callable() {
+            // Stable insertion avoids Rust sort's total-order precondition on JS comparators.
+            // Read values after sorting keys, as qs does.
+            for index in 1..keys.len() {
+                let mut at = index;
+                while at > 0 {
+                    let order = self
+                        .sort
+                        .call(
+                            Js::Undefined,
+                            vec![Js::utf16(&keys[at - 1]), Js::utf16(&keys[at])],
+                        )?
+                        .to_number()?;
+                    if order <= 0.0 || order.is_nan() {
+                        break;
+                    }
+                    keys.swap(at - 1, at);
+                    at -= 1;
+                }
             }
         }
-        Js::Object(_) => {
-            for (k, v) in value.own_entries()? {
-                qs_pairs(
-                    &format!("{prefix}[{}]", String::from_utf16_lossy(&k)),
-                    &v,
-                    out,
-                )?;
+        Ok(keys)
+    }
+}
+fn qs_pairs(
+    prefix: &str,
+    value: &Js,
+    options: &QsOptions,
+    out: &mut Vec<String>,
+) -> Result<(), Thrown> {
+    match value {
+        Js::Undefined => {}
+        Js::Null => out.push(format!("{}=", options.encode(prefix))),
+        Js::Array(_) if options.arrays == "comma" => {
+            if !list(value).is_empty() {
+                out.push(format!(
+                    "{}={}",
+                    options.encode(prefix),
+                    options.encode(&text(value)?)
+                ));
+            }
+        }
+        Js::Array(_) | Js::Object(_) => {
+            for key in options.keys(value)? {
+                let next = if value.is_array() && options.arrays == "repeat" {
+                    prefix.to_owned()
+                } else if value.is_array() && options.arrays == "brackets" {
+                    format!("{prefix}[]")
+                } else {
+                    format!("{prefix}[{}]", String::from_utf16_lossy(&key))
+                };
+                qs_pairs(&next, &value.get_key(&key)?, options, out)?;
             }
         }
         other => out.push(format!(
             "{}={}",
-            qs_encode(prefix),
-            qs_encode(&text(other)?)
+            options.encode(prefix),
+            options.encode(&text(other)?)
         )),
     }
     Ok(())
 }
-
-fn qs_stringify(value: &Js) -> Result<String, Thrown> {
+pub fn qs_stringify(value: &Js, options: &Js) -> Result<String, Thrown> {
+    let options = QsOptions::read(options)?;
     let mut out = vec![];
-    if matches!(value, Js::Object(_)) {
-        for (k, v) in value.own_entries()? {
-            qs_pairs(&String::from_utf16_lossy(&k), &v, &mut out)?;
+    if matches!(value, Js::Object(_) | Js::Array(_)) {
+        for key in options.keys(value)? {
+            qs_pairs(
+                &String::from_utf16_lossy(&key),
+                &value.get_key(&key)?,
+                &options,
+                &mut out,
+            )?;
         }
     }
     Ok(out.join("&"))
@@ -741,49 +962,98 @@ fn sleep_promise<X>(scope: &Scope<X>, ms: f64) -> Js {
 }
 
 fn update_order_book(book: &Js, side: &Js, update: Js, upsert: bool) -> Result<Js, Thrown> {
-    let side_name = text(side)?;
-    let Js::Array(levels) = book.get(&side_name)? else {
-        return Err(Thrown::type_error("orderBook side is not an array"));
-    };
-    let descending = side_name == "bids";
-    let price = update.get("price")?.to_number()?;
-    let amount = update.get("amount")?.to_number()?;
-    let prices = levels
-        .borrow()
-        .iter()
-        .map(|l| l.clone().unwrap_or(Js::Undefined).get("price")?.to_number())
-        .collect::<Result<Vec<_>, _>>()?;
-    let (mut left, mut right) = (0i64, prices.len() as i64 - 1);
+    let levels = book.get(&text(side)?)?;
+    let descending = side.strict_equals(&Js::str("bids"));
+    // The source evaluates update.price before entering binarySearchPrice.
+    let price = update.get("price")?;
+    let (mut left, mut right) = (0.0, levels.get("length")?.to_number()? - 1.0);
     let mut found = None;
     while left <= right {
-        let mid = (left + right) / 2;
-        let p = prices[mid as usize];
-        if p == price {
-            found = Some(mid as usize);
+        // Source midpoint is (left + right) >>> 1, including Uint32 wrapping.
+        let mid = ((left + right).trunc().rem_euclid(4_294_967_296.0) as u32 >> 1) as f64;
+        let mid_price = levels.get(&Js::Number(mid).to_display())?.get("price")?;
+        if mid_price.strict_equals(&price) {
+            found = Some(mid);
             break;
         }
-        if (descending && p > price) || (!descending && p < price) {
-            left = mid + 1;
+        let after = if descending {
+            ops::greater_than(&mid_price, &price)?
         } else {
-            right = mid - 1;
+            ops::less_than(&mid_price, &price)?
+        };
+        if after {
+            left = mid + 1.0;
+        } else {
+            right = mid - 1.0;
         }
     }
-    Ok(Js::Number(match found {
-        None if !upsert || amount == 0.0 => -1.0,
+    let index = match found {
         None => {
-            levels.borrow_mut().insert(left as usize, Some(update));
-            left as f64
+            if !upsert || update.get("amount")?.strict_equals(&Js::Number(0.0)) {
+                return Ok(Js::Number(-1.0));
+            }
+            let Js::Array(rows) = &levels else {
+                return Err(Thrown::type_error("orderBook side is not an array"));
+            };
+            let mut rows = rows.borrow_mut();
+            // splice clamps against the current length, after callback effects.
+            let insert_at = (left as usize).min(rows.len());
+            rows.insert(insert_at, Some(update));
+            left
         }
-        Some(i) if amount == 0.0 => {
-            levels.borrow_mut().remove(i);
-            -1.0
-        }
-        Some(i) => {
-            let level = levels.borrow()[i].clone().unwrap_or(Js::Undefined);
+        Some(index) => {
+            if update.get("amount")?.strict_equals(&Js::Number(0.0)) {
+                let Js::Array(rows) = &levels else {
+                    return Err(Thrown::type_error("orderBook side is not an array"));
+                };
+                let removed = {
+                    let mut rows = rows.borrow_mut();
+                    (index < rows.len() as f64).then(|| rows.remove(index as usize))
+                };
+                drop(removed);
+                return Ok(Js::Number(-1.0));
+            }
+            let level = levels.get(&Js::Number(index).to_display())?;
             level.set("amount", update.get("amount")?)?;
-            i as f64
+            index
         }
-    }))
+    };
+    Ok(Js::Number(index))
+}
+
+// lodash times: ToInteger count, castFunction (non-callables are identity),
+// and ordered calls with one index argument and an undefined receiver.
+fn lodash_times(args: &[Js]) -> Result<Js, Thrown> {
+    let count = arg(args, 0).to_number()?.trunc();
+    if !(1. ..=9_007_199_254_740_991.).contains(&count) {
+        return Ok(Js::array(vec![]));
+    }
+    let iteratee = arg(args, 1);
+    let invoke = |index: u64| {
+        let value = Js::Number(index as f64);
+        if iteratee.is_callable() {
+            iteratee.call(Js::Undefined, vec![value])
+        } else {
+            Ok(value)
+        }
+    };
+    const MAX_ARRAY_LENGTH: u64 = 4_294_967_295;
+    let count = count as u64;
+    let mut values = vec![];
+    for index in 0..count.min(MAX_ARRAY_LENGTH) {
+        values.push(invoke(index)?);
+    }
+    // Preserve lodash's counter/bound arithmetic beyond its result-array limit.
+    let mut index = MAX_ARRAY_LENGTH;
+    let remaining = count.saturating_sub(MAX_ARRAY_LENGTH);
+    loop {
+        index += 1;
+        if index >= remaining {
+            break;
+        }
+        invoke(index)?;
+    }
+    Ok(Js::array(values))
 }
 
 fn define_on(owner: &Js, key: &str, value: Js) {
@@ -793,10 +1063,31 @@ fn define_on(owner: &Js, key: &str, value: Js) {
 /// Install the shared utility modules next to `install_builtins`' globals.
 pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let def = |k: &str, v: Js| define_on(g, k, v);
+    def("times", func("times", |args| lodash_times(&args)));
     let scoped = |name: &'static str, f: fn(&Scope<X>, Vec<Js>) -> Result<Js, Thrown>| -> Js {
         let rt = rt.clone();
         Js::function(name, move |_, a| f(&scope_of(&rt)?, a))
     };
+
+    def(
+        "throttle",
+        scoped("throttle", |rt, a| {
+            let function = arg(&a, 0);
+            if !function.is_callable() {
+                return Err(Thrown::type_error("Expected a function"));
+            }
+            let wait = arg(&a, 1).to_number()?;
+            let wait = if wait.is_nan() { 0. } else { wait };
+            let options = arg(&a, 2);
+            let leading = !options.is_object()
+                || !in_operator(&options, "leading")?
+                || options.get("leading")?.truthy();
+            let trailing = !options.is_object()
+                || !in_operator(&options, "trailing")?
+                || options.get("trailing")?.truthy();
+            Ok(super::throttle::new(rt, function, wait, leading, trailing))
+        }),
+    );
 
     if let Ok(number) = g.get("Number") {
         if let Ok(parse_int) = g.get("parseInt") {
@@ -1058,11 +1349,18 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "calcOrderBookTotal",
         func("calcOrderBookTotal", |a| {
             let book = arg(&a, 0);
-            for side in ["bids", "asks"] {
+            // Destructure both sides before any amount getter can mutate the book.
+            let bids = book.get("bids")?;
+            let asks = book.get("asks")?;
+            for levels in [bids, asks] {
                 let mut total = Js::Number(0.0);
-                for level in list(&book.get(side)?) {
-                    total = ops::add(&total, &level.get("amount")?)?;
-                    level.set("total", total.clone())?;
+                let mut index = 0.0;
+                while ops::less_than(&Js::Number(index), &levels.get("length")?)? {
+                    let key = Js::Number(index).to_display();
+                    total = ops::add(&total, &levels.get(&key)?.get("amount")?)?;
+                    // Re-read the row after the amount getter, as the source does.
+                    levels.get(&key)?.set("total", total.clone())?;
+                    index += 1.0;
                 }
             }
             Ok(Js::Undefined)
@@ -1083,16 +1381,23 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     def(
         "v",
         func("v", |a| {
-            let (obj, key) = (arg(&a, 0), text(&arg(&a, 1))?);
+            let obj = arg(&a, 0);
             if obj.is_nullish() {
                 return Ok(Js::Undefined);
             }
+            let key = arg(&a, 1);
+            if !obj.is_object() && !key.is_string() {
+                return Err(Thrown::type_error(
+                    "Right-hand side of 'in' is not an object",
+                ));
+            }
+            let key = text(&key)?;
             for k in [
                 key.clone(),
                 safe_cex_num::lodash_snake_case(&key),
                 safe_cex_num::lodash_camel_case(&key),
             ] {
-                if in_operator(&obj, &k) {
+                if in_operator(&obj, &k)? {
                     return obj.get(&k);
                 }
             }
@@ -1164,14 +1469,20 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         define_on(
             &clock,
             "getCurrentTime",
-            scoped("getCurrentTime", |s, _| Ok(dayjs(s.now()))),
+            func("getCurrentTime", |_| {
+                Ok(dayjs(
+                    safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time(),
+                ))
+            }),
         );
     }
     def(
         "qs",
         Js::object(vec![(
             "stringify",
-            func("stringify", |a| Ok(Js::str(&qs_stringify(&arg(&a, 0))?))),
+            func("stringify", |a| {
+                Ok(Js::str(&qs_stringify(&arg(&a, 0), &arg(&a, 1))?))
+            }),
         )]),
     );
     def(
@@ -1291,6 +1602,101 @@ mod tests {
     }
 
     #[test]
+    fn lodash_times_preserves_count_callback_and_throw_identity() {
+        use std::cell::RefCell;
+        let g = globals();
+        assert!(
+            g.get("times").unwrap().is_callable(),
+            "shared lodash times import"
+        );
+        assert_eq!(json(&run(&g, "times", vec![Js::Number(3.9)])), "[0,1,2]");
+        let calls = Rc::new(RefCell::new(vec![]));
+        let seen = calls.clone();
+        let thrown = Js::object(vec![("marker", Js::str("callback rejection"))]);
+        let failure = thrown.clone();
+        let callback = Js::function("iteratee", move |this, args| {
+            assert!(this.is_undefined());
+            assert_eq!(args.len(), 1);
+            let index = args[0].to_number()?;
+            seen.borrow_mut().push(index);
+            if index == 1. {
+                Err(Thrown::new(failure.clone()))
+            } else {
+                Ok(Js::Number(index))
+            }
+        });
+        let result = g
+            .get("times")
+            .unwrap()
+            .call(Js::Undefined, vec![Js::str("3"), callback]);
+        assert!(result.unwrap_err().value.strict_equals(&thrown));
+        assert_eq!(*calls.borrow(), [0., 1.]);
+        for n in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -0.,
+            -1.,
+            9007199254740992.,
+        ] {
+            assert_eq!(json(&run(&g, "times", vec![Js::Number(n)])), "[]");
+        }
+    }
+
+    #[test]
+    fn lodash_times_matches_installed_source() {
+        use std::cell::RefCell;
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/js_lodash_times_oracle.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "lodash times source: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        let g = globals();
+        for case in cases {
+            let input = &case["input"];
+            let count = match input["special"].as_str() {
+                Some("NaN") => Js::Number(f64::NAN),
+                Some("Infinity") => Js::Number(f64::INFINITY),
+                Some("-Infinity") => Js::Number(f64::NEG_INFINITY),
+                Some("-0") => Js::Number(-0.),
+                Some(_) => unreachable!(),
+                None => input
+                    .get("count")
+                    .map_or(Js::Undefined, super::super::value::from_json),
+            };
+            let calls = Rc::new(RefCell::new(vec![]));
+            let seen = calls.clone();
+            let callback = match case["kind"].as_str().unwrap() {
+                "absent" => Js::Undefined,
+                "number" => Js::Number(7.),
+                "property" => Js::str("name"),
+                "function" => Js::function("iteratee", move |this, args| {
+                    let index = args[0].to_number()?;
+                    seen.borrow_mut().push(serde_json::json!({"index":index as u64,"arity":args.len(),"undefinedThis":this.is_undefined()}));
+                    Ok(Js::Number(index * 10.))
+                }),
+                _ => unreachable!(),
+            };
+            let values = run(&g, "times", vec![count, callback]);
+            let actual: serde_json::Value = serde_json::from_str(&json(&values)).unwrap();
+            assert_eq!(actual, case["values"], "source times values: {case}");
+            assert_eq!(
+                serde_json::json!(*calls.borrow()),
+                case["calls"],
+                "source times calls: {case}"
+            );
+        }
+    }
+
+    #[test]
     fn big_number_is_exact_decimal() {
         let g = globals();
         let n = |x: Js| run(&g, "BigNumber", vec![x]);
@@ -1366,7 +1772,7 @@ mod tests {
             ("d", Js::Null),
             ("e", Js::str("x y,")),
         ]);
-        let encoded = qs_stringify(&params).unwrap();
+        let encoded = qs_stringify(&params, &Js::Undefined).unwrap();
         assert_eq!(encoded, "a=1&b%5B0%5D=1&b%5B1%5D=2&d=&e=x%20y%2C");
         let decoded = decode_uri_component(&super::super::value::utf16(&encoded)).unwrap();
         assert_eq!(

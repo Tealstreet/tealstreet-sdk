@@ -1,8 +1,7 @@
 //! Bybit options as an instrument: symbol routing, instrument rows and greeks.
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice,
-    MarketPrecision, OptionGreeks, OptionRight, OptionTerms, OptionTermsSettlement,
-    OptionTermsStyle,
+    MarketPrecision, OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle,
 };
 use serde_json::Value;
 
@@ -94,38 +93,6 @@ pub fn map_bybit_option_instrument(raw: &Value) -> Result<Option<Market>, String
         taker_fee: None,
         maker_fee: None,
     }))
-}
-
-// ts: mapBybitOptionGreeks — undefined when the row carries no delta.
-pub fn map_bybit_option_greeks(raw: &Value) -> Result<Option<OptionGreeks>, String> {
-    match raw.get("delta") {
-        None => return Ok(None),
-        Some(Value::String(text)) if text.is_empty() => return Ok(None),
-        _ => {}
-    }
-    Ok(Some(OptionGreeks {
-        delta: num(raw.get("delta"))?,
-        gamma: num(raw.get("gamma"))?,
-        vega: num(raw.get("vega"))?,
-        theta: num(raw.get("theta"))?,
-        units: BYBIT_GREEK_UNITS.into(),
-    }))
-}
-
-// ts: optionExpiries — distinct expiries of the underlying's options, ascending.
-pub fn option_expiries(markets: &[Market], underlying: &str) -> Vec<f64> {
-    let mut expiries: Vec<f64> = Vec::new();
-    for terms in markets.iter().filter_map(|m| m.option.as_ref()) {
-        if terms.underlying == underlying
-            && !expiries
-                .iter()
-                .any(|seen| seen.to_bits() == terms.expiry.to_bits() || *seen == terms.expiry)
-        {
-            expiries.push(terms.expiry);
-        }
-    }
-    expiries.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    expiries
 }
 
 // ts: isBybitOptionSymbol — /^[A-Z0-9]+-\d{1,2}[A-Z]{3}\d{2}-\d+([d.]\d+)?-[CP](-[A-Z]+)?$/

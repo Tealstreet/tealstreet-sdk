@@ -192,6 +192,24 @@ async fn tpsl<H: BatchOrderHost>(
         host.uuid()
     }
 }
+// Ordinary row property access throws on nullish values; the surrounding response
+// envelope keeps its separate optional-chain reads through `field`.
+fn row_field<H: BatchOrderHost>(
+    host: &mut H,
+    row: &H::Value,
+    key: &str,
+) -> Result<H::Value, H::Error> {
+    if host.nullish(row) {
+        let mut message = "Cannot read properties of "
+            .encode_utf16()
+            .collect::<Vec<_>>();
+        message.extend(host.to_string(row)?);
+        message.extend(format!(" (reading '{key}')").encode_utf16());
+        let message = host.string(message)?;
+        return Err(host.error(message)?);
+    }
+    host.field(row, &[key])
+}
 fn legacy_rows<H: BatchOrderHost>(
     host: &mut H,
     array: &H::Value,
@@ -200,7 +218,7 @@ fn legacy_rows<H: BatchOrderHost>(
     let mut rows = Vec::new();
     for i in 0..host.array_length(array)? {
         if let Some(row) = host.array_at(array, i)? {
-            let code = host.field(&row, &["code"])?;
+            let code = row_field(host, &row, "code")?;
             if host.truthy(&code) == failure {
                 rows.push(row);
             }
@@ -350,7 +368,7 @@ pub async fn place_order_batch<H: BatchOrderHost>(host: &mut H) -> Result<Vec<H:
                     };
                     let mut iter = host.iterator(successes)?;
                     while let Some(row) = host.next(&mut iter)? {
-                        let id = host.field(&row, &["orderId"])?;
+                        let id = row_field(host, &row, "orderId")?;
                         let id = if host.truthy(&id) {
                             id
                         } else {
@@ -366,7 +384,7 @@ pub async fn place_order_batch<H: BatchOrderHost>(host: &mut H) -> Result<Vec<H:
                     }
                     let mut iter = host.iterator(failures)?;
                     while let Some(row) = host.next(&mut iter)? {
-                        let msg = host.field(&row, &["errorMsg"])?;
+                        let msg = row_field(host, &row, "errorMsg")?;
                         let msg = if host.truthy(&msg) {
                             msg
                         } else {
@@ -376,7 +394,7 @@ pub async fn place_order_batch<H: BatchOrderHost>(host: &mut H) -> Result<Vec<H:
                             } else {
                                 let code = host.field(&row, &["errorCode"])?;
                                 let code = if host.nullish(&code) {
-                                    host.field(&row, &["code"])?
+                                    row_field(host, &row, "code")?
                                 } else {
                                     code
                                 };

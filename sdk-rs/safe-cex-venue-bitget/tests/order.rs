@@ -61,10 +61,10 @@ fn encoded_position(p: Position) -> Value {
         "positionMode":p.position_mode,"marginType":p.margin_type,
         "lastUpdate":encoded(p.last_update.unwrap())
     });
-    if let Some(info) = p.info {
+    if let Some(info) = p.info.into_value() {
         value["info"] = encode_json_numbers(&info);
     }
-    if let Some(margin) = p.margin_size {
+    if let Some(margin) = p.margin_size.into_value() {
         value["marginSize"] = encoded(margin);
     }
     value
@@ -84,16 +84,41 @@ fn omit_undefined(value: &Value) -> Value {
         _ => value.clone(),
     }
 }
-fn check_mapped_orders(oracle: &Value) {
+// Observe the native property state before JSON projection erases own undefined.
+// Walk every output/property: a successful first row cannot hide later rows.
+fn native_undefined_fields(order: &safe_cex_types::Order, expected: &Value, name: &Value) -> bool {
+    let mut found = false;
+    for (field, value) in expected.as_object().unwrap() {
+        if value.get("$undefined") != Some(&json!(true)) {
+            continue;
+        }
+        found = true;
+        let undefined = match field.as_str() {
+            "type" => order.r#type.is_undefined(),
+            "status" => order.status.is_undefined(),
+            "side" => order.side.is_undefined(),
+            "timeInForce" => order.time_in_force.is_undefined(),
+            "price" => order.price.is_undefined(),
+            other => panic!("unreviewed source own undefined field {other}: {name}"),
+        };
+        assert!(undefined, "native own undefined {field}: {name}");
+    }
+    found
+}
+fn check_mapped_orders(oracle: &Value, field_identity: bool) {
     use safe_cex_venue_bitget::orders::map_order;
     let mut accepted = 0;
     let mut refused = 0;
+    let mut visited = 0;
+    let mut source_success = 0;
+    let mut accepted_undefined = 0;
     for case in oracle["mapOrderReference"]
         .as_array()
         .unwrap()
         .iter()
         .chain(oracle["mapOrderCases"].as_array().unwrap())
     {
+        visited += 1;
         let input = decode(&omit_undefined(&case["input"]));
         let mut clock_calls = 0;
         let actual = map_order(
@@ -123,16 +148,18 @@ fn check_mapped_orders(oracle: &Value) {
             );
             continue;
         }
+        source_success += 1;
         let expected = case["result"]["value"].as_array().unwrap();
         // Test the actual shared type's accepted set. Replace only tagged numeric
         // scalars for this shape check; compare their original bits below.
-        let representable = expected.iter().all(|item| {
+        let mut representable = true;
+        for item in expected {
             let mut shape = decode(&omit_undefined(item));
             for field in ["price", "amount", "filled", "remaining", "lastUpdate"] {
                 shape[field] = json!(0);
             }
-            serde_json::from_value::<safe_cex_types::Order>(shape).is_ok()
-        });
+            representable &= serde_json::from_value::<safe_cex_types::Order>(shape).is_ok();
+        }
         if !representable {
             refused += 1;
             assert_eq!(
@@ -146,13 +173,24 @@ fn check_mapped_orders(oracle: &Value) {
             continue;
         }
         accepted += 1;
+        let actual = actual.unwrap_or_else(|e| panic!("mapOrder {}: {e:?}", case["name"]));
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "native mapOrder cardinality {}",
+            case["name"]
+        );
+        let mut own_undefined = false;
+        for (order, expected) in actual.iter().zip(expected) {
+            own_undefined |= native_undefined_fields(order, expected, &case["name"]);
+        }
+        accepted_undefined += usize::from(own_undefined);
         let actual: Vec<_> = actual
-            .unwrap_or_else(|e| panic!("mapOrder {}: {e:?}", case["name"]))
             .into_iter()
             .map(|order| {
                 let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
                 for (key, n) in [
-                    ("price", order.price),
+                    ("price", order.price.to_number()),
                     ("amount", order.amount),
                     ("filled", order.filled),
                     ("remaining", order.remaining),
@@ -170,6 +208,15 @@ fn check_mapped_orders(oracle: &Value) {
             case["name"]
         );
     }
+    assert_eq!(
+        (visited, source_success, accepted_undefined),
+        (
+            1327 + usize::from(field_identity),
+            1263 + usize::from(field_identity),
+            78
+        ),
+        "mapOrder source corpus and accepted own-undefined cases"
+    );
     assert!(
         accepted > 500 && refused > 100,
         "mapOrder must exercise successful and refused records: {accepted}/{refused}"
@@ -263,12 +310,16 @@ fn check_mapped_orders(oracle: &Value) {
         "CHOSEN mapOrder gateway does not observe owned info mutation"
     );
 }
-fn check_inverse_orders(oracle: &Value) {
+fn check_inverse_orders(oracle: &Value, field_identity: bool) {
     use safe_cex_venue_bitget::orders::map_inverse_order;
     let reference = &oracle["inverseOrder"];
     let mut accepted = 0;
     let mut refused = 0;
+    let mut visited = 0;
+    let mut source_success = 0;
+    let mut accepted_undefined = 0;
     for case in reference["cases"].as_array().unwrap() {
+        visited += 1;
         let name = case["name"].as_str().unwrap();
         let input = decode(&omit_undefined(&case["input"]));
         let mut calls = Vec::new();
@@ -307,18 +358,17 @@ fn check_inverse_orders(oracle: &Value) {
             );
             continue;
         }
-        let representable = case["result"]["value"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|item| {
-                let mut shape = decode(&omit_undefined(item));
-                for field in ["price", "amount", "filled", "remaining", "lastUpdate"] {
-                    shape[field] = json!(0);
-                }
-                shape["extra"]["remainingNative"] = json!(0);
-                serde_json::from_value::<safe_cex_types::Order>(shape).is_ok()
-            });
+        source_success += 1;
+        let expected = case["result"]["value"].as_array().unwrap();
+        let mut representable = true;
+        for item in expected {
+            let mut shape = decode(&omit_undefined(item));
+            for field in ["price", "amount", "filled", "remaining", "lastUpdate"] {
+                shape[field] = json!(0);
+            }
+            shape["extra"]["remainingNative"] = json!(0);
+            representable &= serde_json::from_value::<safe_cex_types::Order>(shape).is_ok();
+        }
         if !representable {
             refused += 1;
             assert_eq!(
@@ -331,13 +381,23 @@ fn check_inverse_orders(oracle: &Value) {
             continue;
         }
         accepted += 1;
+        let actual = actual.unwrap_or_else(|e| panic!("inverse mapOrder {name}: {e:?}"));
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "native inverse mapOrder cardinality {name}"
+        );
+        let mut own_undefined = false;
+        for (order, expected) in actual.iter().zip(expected) {
+            own_undefined |= native_undefined_fields(order, expected, &case["name"]);
+        }
+        accepted_undefined += usize::from(own_undefined);
         let mapped: Vec<_> = actual
-            .unwrap_or_else(|e| panic!("inverse mapOrder {name}: {e:?}"))
             .into_iter()
             .map(|order| {
                 let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
                 for (key, n) in [
-                    ("price", order.price),
+                    ("price", order.price.to_number()),
                     ("amount", order.amount),
                     ("filled", order.filled),
                     ("remaining", order.remaining),
@@ -356,6 +416,15 @@ fn check_inverse_orders(oracle: &Value) {
             "inverse mapOrder value {name}"
         );
     }
+    assert_eq!(
+        (visited, source_success, accepted_undefined),
+        (
+            1166 + usize::from(field_identity),
+            1095 + usize::from(field_identity),
+            100
+        ),
+        "inverse mapOrder source corpus and accepted own-undefined cases"
+    );
     assert!(
         accepted > 500 && refused > 100,
         "inverse mapOrder success/refusal inventory {accepted}/{refused}"
@@ -503,9 +572,21 @@ fn check_inverse_orders(oracle: &Value) {
         "CHOSEN inverse mapOrder legs do not share info"
     );
 }
-fn check(oracle: Value) {
-    check_mapped_orders(&oracle);
-    check_inverse_orders(&oracle);
+fn check(oracle: Value, field_identity: bool) {
+    for cases in [&oracle["mapOrderCases"], &oracle["inverseOrder"]["cases"]] {
+        assert_eq!(
+            cases
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|case| case["name"] == "field-identity:all")
+                .count(),
+            usize::from(field_identity),
+            "exact field-identity supplement admission"
+        );
+    }
+    check_mapped_orders(&oracle, field_identity);
+    check_inverse_orders(&oracle, field_identity);
     use safe_cex_venue_bitget::stream_positions::*;
     for (i, c) in oracle["payloadTimeCases"]
         .as_array()
@@ -514,7 +595,7 @@ fn check(oracle: Value) {
         .enumerate()
     {
         let mut position: Position=serde_json::from_value(json!({"id":"p","symbol":"BTCUSDT","side":"long","contracts":1,"entryPrice":1,"notional":1,"leverage":1,"unrealizedPnl":0,"liquidationPrice":0})).unwrap();
-        position.info = c.get("info").map(decode);
+        position.info = (c.get("info").map(decode)).into();
         let result = get_position_payload_update_time(&position)
             .map(encoded)
             .unwrap_or_else(|| json!({"$undefined":true}));
@@ -835,10 +916,20 @@ fn check(oracle: Value) {
     ] {
         let mut projected = baseline.clone();
         projected.as_object_mut().unwrap().remove(field);
-        assert!(
-            serde_json::from_value::<safe_cex_types::Order>(projected).is_err(),
-            "CHOSEN shared Order contract refuses omitted undefined {name}"
-        );
+        let decoded = serde_json::from_value::<safe_cex_types::Order>(projected);
+        if field == "id" {
+            assert!(decoded.is_err(), "shared Order still requires id");
+        } else {
+            let decoded = decoded.expect("optional enum accepts an omitted JSON field");
+            assert!(
+                match field {
+                    "status" => decoded.status.is_absent(),
+                    "type" => decoded.r#type.is_absent(),
+                    _ => unreachable!(),
+                },
+                "JSON omission decodes as absent: {name}"
+            );
+        }
     }
 
     for (i, c) in oracle["strategyOptsCases"]
@@ -851,7 +942,7 @@ fn check(oracle: Value) {
         input["price"] = json!(0);
         input["amount"] = json!(0);
         let mut order: safe_cex_types::Order = serde_json::from_value(input).unwrap();
-        order.price = number(&c["input"]["price"]);
+        order.price = (number(&c["input"]["price"])).into();
         order.amount = number(&c["input"]["amount"]);
         let opts = build_uta_strategy_place_opts_from_order(&order);
         let mut actual = serde_json::to_value(&opts).unwrap();
@@ -1608,7 +1699,10 @@ fn check(oracle: Value) {
 }
 #[test]
 fn frozen_order_decisions() {
-    check(serde_json::from_str(include_str!("order-oracle.json")).unwrap());
+    check(
+        serde_json::from_str(include_str!("order-oracle.json")).unwrap(),
+        false,
+    );
 }
 #[test]
 #[ignore = "requires Node and TypeScript"]
@@ -1626,7 +1720,7 @@ fn live_order_decisions() {
         String::from_utf8_lossy(&r.stderr)
     );
     let oracle: Value = serde_json::from_slice(&r.stdout).unwrap();
-    check(oracle.clone());
+    check(oracle.clone(), false);
     assert_eq!(
         oracle,
         serde_json::from_str::<Value>(include_str!("order-oracle.json")).unwrap(),
@@ -1848,5 +1942,5 @@ fn order_field_identity_supplement() {
             "order identity supplement inventory"
         );
     }
-    check(oracle);
+    check(oracle, true);
 }

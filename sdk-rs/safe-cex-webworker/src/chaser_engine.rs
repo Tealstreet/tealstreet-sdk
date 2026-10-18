@@ -4,15 +4,17 @@ use crate::{
     chaser::{ChaserOrderInstance, placement_filled},
     chaser_manager::{self, ChaserOrderManager, ChaserSupervisor},
     task_types::{CHASER_UNCONFIRMED_ORDER_STOP_REASON, ChaserCompleteEvent},
-    worker_ports::WorkerPortTimers,
 };
+use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::js_runtime::value::{Js, to_typed};
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_types::{
-    Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts, PositionSide,
+    ModelField, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts,
+    PositionSide,
 };
 use serde_json::Value;
 use std::{
@@ -74,10 +76,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
         Rc::new(Self { host, manager })
     }
     fn emit_error(instance: &ChaserOrderInstance, message: &str) -> Result<(), ExchangeError> {
-        instance
-            .exchange
-            .base()
-            .emit("error", Value::String(message.into()))
+        instance.exchange.base().emit(
+            "error",
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn cancel_input(instance: &ChaserOrderInstance, id: &str) -> ChaserCancel {
         let order = instance
@@ -467,8 +469,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
                             )
                             .await?;
                         if let Some(order) = order {
-                            if !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
-                            {
+                            if !matches!(
+                                order.status,
+                                ModelField::Value(OrderStatus::Closed | OrderStatus::Canceled)
+                            ) {
                                 ids = vec![order.id];
                             } else {
                                 instance.set_filled_amount(&order.id, placement_filled(&order));
@@ -575,10 +579,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
                     instance.options().borrow().symbol
                 );
                 chaser_manager::log(&message, &instance)?;
-                instance
-                    .exchange
-                    .base()
-                    .emit("warning", Value::String(message))?;
+                instance.exchange.base().emit(
+                    "warning",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                )?;
             }
             if instance.is_stopped() {
                 engine.cleanup_instance(instance).await?;
@@ -615,8 +619,8 @@ impl<H: ChaserHost> ChaserEngine<H> {
                     has_seen_orders: Cell::new(false),
                     missing_updates: Cell::new(0),
                     queued_check: Cell::new(false),
-                    last_orders_id: RefCell::new(serde_json::json!(-1)),
-                    last_positions_id: RefCell::new(serde_json::json!(-1)),
+                    last_orders_id: RefCell::new(Js::Number(-1.0)),
+                    last_positions_id: RefCell::new(Js::Number(-1.0)),
                     last_price_check: Cell::new(0.),
                 });
                 let dispose = monitor.clone();
@@ -652,10 +656,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
                     "Chaser for {} could not start - no order was placed",
                     instance.options().borrow().symbol
                 );
-                instance
-                    .exchange
-                    .base()
-                    .emit("warning", Value::String(message))?;
+                instance.exchange.base().emit(
+                    "warning",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                )?;
                 instance.mark_complete(Some("No order placed"));
             }
             engine.cleanup_instance(instance).await
@@ -699,8 +703,8 @@ struct ChaserMonitor<H: ChaserHost> {
     has_seen_orders: Cell<bool>,
     missing_updates: Cell<u32>,
     queued_check: Cell<bool>,
-    last_orders_id: RefCell<Value>,
-    last_positions_id: RefCell<Value>,
+    last_orders_id: RefCell<Js>,
+    last_positions_id: RefCell<Js>,
     last_price_check: Cell<f64>,
 }
 impl<H: ChaserHost> ChaserMonitor<H> {
@@ -792,7 +796,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
             let price = orders
                 .iter()
                 .find(|o| o.status == OrderStatus::Open)
-                .map(|o| o.price);
+                .and_then(|o| o.price.value().copied());
             let last = chaser_manager::find_best_price(&self.instance)?;
             let options = self.instance.options();
             let options = options.borrow().clone();
@@ -840,7 +844,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
     if monitor.instance.last_partial_fill_at()>0.&&monitor.engine.host.now_ms()-monitor.instance.last_partial_fill_at()<1000.{chaser_manager::log(&format!("hold steady: {}ms since last partial fill",num(monitor.engine.host.now_ms()-monitor.instance.last_partial_fill_at())),&monitor.instance)?;return Ok(())}
     if price==Some(last){return Ok(())} // Option preserves source undefined !== any numeric last.
     monitor.instance.increment_attempts();if monitor.instance.is_stopped(){monitor.cleanup();monitor.engine.cleanup_instance(monitor.instance.clone()).await?;return Ok(())}
-    let cancel:Vec<Order>=orders.into_iter().filter(|o|!matches!(o.status,OrderStatus::Closed|OrderStatus::Canceled)).collect();if !cancel.is_empty(){chaser_manager::log("cancelling orders",&monitor.instance)?;if let Err(e)=monitor.engine.host.construct_cancel(monitor.instance.exchange.clone(),cancel.into_iter().map(|o| ChaserCancel::Full(Box::new(o))).collect()).await{let message=if e.message.is_empty(){e.js_error_string()}else{e.message};let expected=message.contains("already canceled")||message.contains("already filled")||message.contains("never placed");if monitor.use_fills&&expected{chaser_manager::log(&format!("cancel failed (order may be filled): {message}"),&monitor.instance)?;}else{monitor.cleanup();ChaserEngine::<H>::emit_error(&monitor.instance,"Chaser failed to cancel orders, stopping")?;monitor.instance.mark_complete(Some("Failed to cancel orders"));chaser_manager::log("failed to cancel orders",&monitor.instance)?;return Err(ExchangeError::new("Failed to cancel orders"))}}}
+    let cancel:Vec<Order>=orders.into_iter().filter(|o|!matches!(o.status,ModelField::Value(OrderStatus::Closed|OrderStatus::Canceled))).collect();if !cancel.is_empty(){chaser_manager::log("cancelling orders",&monitor.instance)?;if let Err(e)=monitor.engine.host.construct_cancel(monitor.instance.exchange.clone(),cancel.into_iter().map(|o| ChaserCancel::Full(Box::new(o))).collect()).await{let message=if e.message.is_empty(){e.js_error_string()}else{e.message};let expected=message.contains("already canceled")||message.contains("already filled")||message.contains("never placed");if monitor.use_fills&&expected{chaser_manager::log(&format!("cancel failed (order may be filled): {message}"),&monitor.instance)?;}else{monitor.cleanup();ChaserEngine::<H>::emit_error(&monitor.instance,"Chaser failed to cancel orders, stopping")?;monitor.instance.mark_complete(Some("Failed to cancel orders"));chaser_manager::log("failed to cancel orders",&monitor.instance)?;return Err(ExchangeError::new("Failed to cancel orders"))}}}
     if monitor.use_fills{let reconcile:Result<(),ExchangeError>=async{let method=monitor.engine.host.fill_lookup(monitor.instance.exchange.clone()).ok_or_else(||ExchangeError::new("fill reconciliation is unavailable"))?;let fills=method(monitor.instance.exchange.clone(),monitor.instance.current_order_ids()).await?;for(id,n)in fills{chaser_manager::log(&format!("REST fills check: orderId={id}, filledAmount={}",num(n)),&monitor.instance)?;monitor.instance.set_filled_amount(&id,n);}if monitor.instance.is_stopped(){chaser_manager::log("fully filled after REST check - marking ourselves completed",&monitor.instance)?;monitor.cleanup();monitor.engine.cleanup_instance(monitor.instance.clone()).await?;}Ok(())}.await;
      if let Err(e)=reconcile{let message=format!("Chaser reconciliation failed after cancellation; stopped before replacement: {}",e.js_error_string());chaser_manager::log(&message,&monitor.instance)?;monitor.instance.mark_complete(Some("Failed to reconcile fills after cancellation"));ChaserEngine::<H>::emit_error(&monitor.instance,&message)?;monitor.engine.cleanup_instance(monitor.instance.clone()).await?;return Ok(())}
      if monitor.instance.is_stopped(){return Ok(())}
@@ -890,10 +894,10 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                     "Chaser for {} stopped: its order left the order book (filled or cancelled externally); any resting remainder was cancelled",
                     self.instance.options().borrow().symbol
                 );
-                self.instance
-                    .exchange
-                    .base()
-                    .emit("warning", Value::String(message))?;
+                self.instance.exchange.base().emit(
+                    "warning",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                )?;
                 self.cleanup();
                 return Ok(Some(self.engine.cleanup_instance(self.instance.clone())));
             }
@@ -1049,7 +1053,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
         );
         *self.price_timer.borrow_mut() = Some(timer);
     }
-    fn on_update(self: &Rc<Self>, data: &Value) -> ExchangeFuture<'static, ()> {
+    fn on_update(self: &Rc<Self>, data: &Js) -> ExchangeFuture<'static, ()> {
         let prefix: Result<Option<ExchangeFuture<'static, ()>>, ExchangeError> = (|| {
             if self.instance.is_stopped() {
                 chaser_manager::log(
@@ -1060,28 +1064,16 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                 self.cleanup();
                 return Ok(Some(self.engine.cleanup_instance(self.instance.clone())));
             }
-            let orders_id = data.get("updateIds").and_then(|v| v.get("orders")).cloned();
-            let order_update = orders_id
-                .as_ref()
-                .is_none_or(|id| !strict_id_equal(id, &self.last_orders_id.borrow()));
-            if let Some(id) = orders_id {
-                *self.last_orders_id.borrow_mut() = id;
-            }
-            let positions_id = data
-                .get("updateIds")
-                .and_then(|v| v.get("positions"))
-                .cloned();
-            let position_update = positions_id
-                .as_ref()
-                .is_none_or(|id| !strict_id_equal(id, &self.last_positions_id.borrow()));
-            if let Some(id) = positions_id {
-                *self.last_positions_id.borrow_mut() = id;
-            }
+            let ids = data.get("updateIds")?;
+            let orders_id = ids.get("orders")?;
+            let order_update = !orders_id.strict_equals(&self.last_orders_id.borrow());
+            *self.last_orders_id.borrow_mut() = orders_id;
+            let positions_id = ids.get("positions")?;
+            let position_update = !positions_id.strict_equals(&self.last_positions_id.borrow());
+            *self.last_positions_id.borrow_mut() = positions_id;
             let decode = || {
-                serde_json::from_value::<Vec<Order>>(
-                    data.get("orders").cloned().unwrap_or(Value::Null),
-                )
-                .map_err(|e| ExchangeError::new(e.to_string()))
+                to_typed::<Vec<Order>>(&data.get("orders")?)
+                    .map_err(|error| error.to_exchange_error())
             };
             if order_update || position_update {
                 self.clear_timer(&self.price_timer);
@@ -1103,28 +1095,27 @@ impl<H: ChaserHost> ChaserMonitor<H> {
             Ok(())
         })
     }
-    fn on_fill(self: &Rc<Self>, data: &Value) {
+    fn on_fill(self: &Rc<Self>, data: &Js) {
         let result: Result<(), ExchangeError> = (|| {
-            let Some(id) = data
-                .get("orderId")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-            else {
+            let id = data.get("orderId")?;
+            let Some(id) = id.as_str().filter(|id| !id.is_empty()) else {
                 return Ok(());
             };
-            if !self.instance.current_order_ids().iter().any(|i| i == id)
-                || data.get("symbol").and_then(Value::as_str)
-                    != Some(self.instance.options().borrow().symbol.as_str())
+            let id = String::from_utf16(id)
+                .map_err(|_| ExchangeError::new("fill orderId requires UTF-8"))?;
+            if !self.instance.current_order_ids().iter().any(|i| i == &id)
+                || !data
+                    .get("symbol")?
+                    .strict_equals(&Js::str(&self.instance.options().borrow().symbol))
             {
                 return Ok(());
             }
-            let amount = safe_cex_num::js_number(data.get("amount"))
-                .map_err(|e| ExchangeError::new(e.message))?;
+            let amount = data.get("amount")?.to_number()?;
             chaser_manager::log(
                 &format!("fill event received: orderId={id}, amount={}", num(amount)),
                 &self.instance,
             )?;
-            self.instance.add_fill_amount(id, amount);
+            self.instance.add_fill_amount(&id, amount);
             if self.instance.is_stopped() {
                 chaser_manager::log(
                     "fully filled via fill events - marking ourselves completed",
@@ -1156,17 +1147,5 @@ fn prime_future<T: 'static>(mut future: ExchangeFuture<'static, T>) -> ExchangeF
     {
         std::task::Poll::Ready(result) => Box::pin(async move { result }),
         std::task::Poll::Pending => future,
-    }
-}
-fn strict_id_equal(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Number(_), Value::Number(_)) => safe_cex_num::js_number(Some(a))
-            .ok()
-            .zip(safe_cex_num::js_number(Some(b)).ok())
-            .is_some_and(|(a, b)| a == b),
-        (Value::Null, Value::Null) => true,
-        (Value::String(a), Value::String(b)) => a == b,
-        (Value::Bool(a), Value::Bool(b)) => a == b,
-        _ => false,
     }
 }

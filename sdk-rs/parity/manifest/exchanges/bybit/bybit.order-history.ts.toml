@@ -8,7 +8,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::to_optional_number"
 status = "divergent"
-note = "CHOSEN: retained JSON object rows and UTF-8 strings exclude executable/getter inputs and lone UTF-16 surrogates (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). Direct native live-source assertions preserve coercion guards, signed zero, row field axes and lazy failures. Closed native enums explicitly refuse inherited prototype-table values; income strings refuse truthy nonstrings only when records are emitted. Fee overlay uses an owned captured closure and value clones instead of JavaScript object identity. Identical toNumber declarations share one Rust symbol. HTTP fetchers and exchange consumer composition remain pending."
+note = "Native js_runtime coercions and ordinary source-table lookup feed the real signed-client history binding. The maintained 25-row source corpus checks output values, numeric bits and lazy errors. CHOSEN existing public HistoricalOrder boundary: inherited required enum values, inherited optional objects and lone UTF-16 surrogates cannot be represented (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary); native mapped rows retain those values until projection; callable optional fields omit there exactly like JSON.stringify. Source-equivalent toNumber is shared with closed-PnL and income."
 
 [[symbol]]
 ts = "toNumber"
@@ -16,7 +16,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::to_number"
 status = "divergent"
-note = "CHOSEN: retained JSON object rows and UTF-8 strings exclude executable/getter inputs and lone UTF-16 surrogates (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). Direct native live-source assertions preserve coercion guards, signed zero, row field axes and lazy failures. Closed native enums explicitly refuse inherited prototype-table values; income strings refuse truthy nonstrings only when records are emitted. Fee overlay uses an owned captured closure and value clones instead of JavaScript object identity. Identical toNumber declarations share one Rust symbol. HTTP fetchers and exchange consumer composition remain pending."
+note = "Native js_runtime coercions and ordinary source-table lookup feed the real signed-client history binding. The maintained 25-row source corpus checks output values, numeric bits and lazy errors. CHOSEN existing public HistoricalOrder boundary: inherited required enum values, inherited optional objects and lone UTF-16 surrogates cannot be represented (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary); native mapped rows retain those values until projection; callable optional fields omit there exactly like JSON.stringify. Source-equivalent toNumber is shared with closed-PnL and income."
 
 [[symbol]]
 ts = "mapBybitHistoricalOrder"
@@ -24,4 +24,4 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::map_bybit_historical_order"
 status = "divergent"
-note = "CHOSEN: retained JSON object rows and UTF-8 strings exclude executable/getter inputs and lone UTF-16 surrogates (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). Direct native live-source assertions preserve coercion guards, signed zero, row field axes and lazy failures. Closed native enums explicitly refuse inherited prototype-table values; income strings refuse truthy nonstrings only when records are emitted. Fee overlay uses an owned captured closure and value clones instead of JavaScript object identity. Identical toNumber declarations share one Rust symbol. HTTP fetchers and exchange consumer composition remain pending."
+note = "Native js_runtime coercions and ordinary source-table lookup feed the real signed-client history binding. The maintained 25-row source corpus checks output values, numeric bits and lazy errors. CHOSEN existing public HistoricalOrder boundary: inherited required enum values, inherited optional objects and lone UTF-16 surrogates cannot be represented (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary); native mapped rows retain those values until projection; callable optional fields omit there exactly like JSON.stringify. Source-equivalent toNumber is shared with closed-PnL and income."

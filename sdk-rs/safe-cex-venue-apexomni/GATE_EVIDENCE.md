@@ -656,3 +656,323 @@ At a09c018f263e0b296920a65a453678625f798e2d the complete scoped supplement and c
 The original67-row finding cohort is now classified:10 behavior /57 rationale; this continuation closes53 original finding notes (1 behavior repair,52 rationale), leaving0 original FINDING notes. The73 original CHOSEN-text rows remain outside this audit. Manifest status movement is0; the independently expected census remains28 ported /140 divergent /0 pending,168 rows in16 files, stopped file index15. Static sub-agent verification at a09c018f26 returned MERGE after the taxonomy correction.
 
 After those measurements, origin0286f63437e4320e8c12886d5fef8fc6dfa2eac3 was merged at996e91123279d7b20b9bc738fb2f418a2a46fd06. The ApexOmni source/test/script and manifest trees are unchanged by that merge; shared/integration changes are not assumed behavior-equivalent. The93-test and120-control-attempt exits above cover a09c018f26 only and are NOT rerun or claimed as measured at the post-merge delivery SHA. Per the latest coordinator instruction, post-merge delivery measures ONLY cargo fmt --check and cargo build --workspace --locked --jobs2 at the exact handoff SHA; its separate receipt records both exits. Host clippy, wasm, wiring, layers and routing are centrally owned and NOT RUN by this lane at that SHA. No other runtime, historical, extractor-check, FFI, live-network or CI claim is added. No push, PR or self-merge.
+
+## Assembled Exchange/registry binding
+
+Measured after master dd0e266704 integration:
+
+-27 assembled tests pass:16 mandatory methods,2 listeners, caller ID, private
+  login/subscription/Pong, one legacy resend, repeated refusal, HTTP400 metadata,
+  write503 non-replay and two disposal continuations.
+- `binding-signature.cjs` executes actual source placeOrder and signContract with
+  the pinned real npm zkLink SDK. Its full URL-encoded body equals native: amount
+  1.2345/price100.127 at distinct0.001/0.01 steps become1.235/100.13, with exact
+  signature5212a2f9ea21406e5f25c046c509388bb7b25469400905119ba807a186ed93a2fc89f328a8883dcd3d1c8c6107158554c319bd784d5b7d9b26bebc7dfd610c01.
+  The harness reuses trading.cjs's source/compiler setup and substitutes real
+  SDK imports; it does not generate a native expected signature.
+-18 independent wrong Exchange/listener bodies each compile and fail their
+  named E2E; restored18 bound_ tests pass. Two precision operand swaps compile
+  and fail wire size/price assertions independently; restoration passes.
+- Native registry proof starts real HTTP/WS, signs/places, receives the placed
+  order through private WS and cancels it. A subscriber records the WS update
+  immediately so later REST snapshots cannot erase proof of delivery. HMAC uses
+  the source's base64-spelled UTF8 key and authenticates actual transmitted form
+  bytes. Native proof plus13 registry tests pass.
+- Removing the actual Apex table entry compiles and fails native construction
+  naming the missing Rust-constructed venue; restored native proof passes.
+- Global parity passes with0 findings (7459rows/17119public items). All new
+  binding helpers map to actual class/constructor assembly; imported SDK crypto
+  retains its separate primitive witnesses. No regenerated manifests.
+
+Controls are reproducible through the four scripts named in CLAUDE.md. Logs
+for this execution are /tmp/apex-{binding-controls,precision-controls,registry-controls,capability-controls}.txt.
+The source bodies' existing divergences remain; late-disposal refusal and owned
+book snapshots are explicitly priced. Six inherited methods genuinely reject in
+TypeScript; those are exact source behavior, not newly implemented endpoints.
+
+Final full-venue/oracle, host/wasm lint and post-master integration results are
+recorded in the PR validation text. No live credentials or external venue orders
+were used; P4 live verification remains separately parked on Sam.
+
+The shared-factory regression adds a real custom adapter to the test transport
+provider. Both initial signing and legacy resend preserve the callable adapter
+and serializer; the fixed20-second factory timeout remains independent of the
+venue receive window. Two compiled substitutions each lose one of these
+capabilities and fail the named adapter witness; restoration passes.
+
+Post-integration gates: full source oracle161 tests (72 exchange,7 protocol,9 pure,
+28 record,6 signer,7 signing,21 transaction,11 utility);27 assembled binding E2Es;
+native registry1+13; host all-targets Clippy for venue and registry; wasm library
+Clippy for venue; fmt; registry equivalence; layers88; global parity0. The source
+oracle retains the actual four-position late-disposal observation while asserting
+the chosen P4 native guard leaves the initial positions unchanged; other state
+axes still compare directly. Read-only extractor reports no ApexOmni drift; only
+Polymarket and registry.native metadata were stale at this integration base.
+The dispatch inventory updates only reviewed ApexOmni calls; public_data_only's
+base can_sign delegation is guarded against a future source canSign override.
+
+Final master refresh c537b291d4 (merge f10b86b3ec): source oracle161,
+assembled E2Es27, native HTTP/WS proof1 plus registry13, registry equivalence1,
+layers88, global parity0 (7459rows/17126public items), host/wasm strict Clippy and
+workspace fmt all pass. The live source override inventory passes1 and the
+cancellation inventory passes6 with its explicit exporter ignored. The full
+shared dispatch guard stops at AsterDEX base_dispose's unreviewed dispose
+call, so no full-workspace dispatch pass is claimed. Apex-only discovery was
+reviewed against its36 committed call sites and its sole guarded delegation;
+all other lanes' inventory rows remain unchanged. The compiled negative-control
+receipts precede this final master refresh; the positive suites above were rerun
+against the resulting shared dependencies.
+
+
+## Native hosted signing
+
+Source audit: generic Base signHttpRequest and Apex private auth support the
+shared browser relay; WS uses apexomni-base64 (base64-spelled secret as HMAC key).
+Source validate/place still initialize the L2 signer from omniKeySeed. Native
+HTTP/WS signing now shares the account capability; the API secret stays remote
+while the source-required Omni seed remains local for contract signing.
+
+The original compiled hosted native E2E fails the not-wired refusal, then passes.
+Five native loopback tests cover local and remote lifecycles, actual transmitted
+HTTP/WS HMAC, fractional placement/caller ID, account-name presence/absence,
+delayed auth-before-subscribe, HTTP refusal without unsigned requests and WS
+refusal/throw without private frames or an auth-invalid diagnostic.
+
+Four independent capability/ownership substitutions each compile and fail the
+named native assertion, then restore to pass (hosted-signing-controls.py). A
+stronger disposal witness retains the wrapper and disposes synchronously inside
+the signer's first poll. It compiled and failed before the post-poll disposal
+guard; after repair both ordinary and reentrant disposal close the signing
+future without private frames. Source detached Promises continue; this native
+P4 cancellation choice is explicit in the onOpen row.
+
+On master263d9a8c81 plus the hosted implementation, source oracle161, assembled27,
+native5 + registry14, layers88/registry equivalence, cancellation6 (one explicit
+exporter ignored), host/wasm strict Clippy, fmt, live TS override1 and global
+parity0 (7459 rows/17146 public items) pass. After the final disposal guard,
+native5, assembled27, host/wasm Clippy, fmt and parity0 pass again. The full
+shared dispatch guard remains blocked by Backpack's stale disposal evidence,
+owned by #213; none of that lane's rows are edited. Own36 call sites retain
+exact discovery after reviewing just the two constructor fingerprints.
+
+The shared form-string prerequisite is landed #232. Its actual-source remote
+adapter/Axios witness covers four string representations; original bridge fails
+and repaired bridge passes. Opaque encoded bytes still refuse before signing.
+
+
+## Twenty-six independently reviewed map-record owners (2026-10-17)
+
+Fresh native/default compiler proposals at master `68af3fa734` identify these
+26 previously unclassified concrete record decoders: public12, private8 and
+config6. The report is metadata for manual review, not executable contract
+input. Every declaration and full decoder body was reviewed against the actual
+public/private/index TypeScript interfaces. All 303 declared native fields,
+including inherited SymbolInfo fields, keep their types, declaration order,
+renames and default/presence/custom-passthrough attributes. Serialize, all output
+registrations and surrounding production bodies are unchanged. The ordinary
+function-local derived Fields schemas become private serde(remote) companions;
+the existing owner numeric capture and object guards remain.
+
+The original boundaries already rejected all 26 independently authored complete
+valid positional arrays. The original native baseline passes **26 tests / zero
+failed / zero ignored** on **494 cases through seven decoder routes**. The remote
+conversion passes the same suite. There are 248 positive direct-native-field
+observations and 246 negative field/shape cases; each owner has its own test.
+Native observations precede owner Serialize and cover every field, Option
+presence, nested nonempty collections and retained JSON leaves, 20 individually
+false required booleans and their omission refusals, unknown ignored fields,
+optional absence/present-null behavior and all 34 direct f64 fields with -0,
+binary64 rounding, subnormal and positive/negative overflow inputs. Opaque values
+stay within the existing retained JSON domain.
+
+The first draft test compile exhausted the default json! macro recursion depth;
+the observation output now constructs an ordinary Map from field/value pairs.
+That compile refusal is excluded from runtime proof. A formatting invocation
+with SDK-prefixed paths from the sdk-rs directory found no files and is also
+excluded; the corrected explicit pinned rustfmt and workspace check pass.
+
+Independent draft review verifies all 26 remote schemas equal their former
+Fields schemas after whitespace normalization, all surrounding production code
+is unchanged and all 494 fixture expectations/complete arrays match the reviewed
+source types, presence and bits. Actual production probes and isolated semantic
+controls are recorded separately once executed; no pending run counts as proof.
+
+
+The first production attempt refused all contracts before native observations:
+the expected native fields were nested below `fields` instead of the required
+top-level keys. No result from that refusal counts as successful production
+proof. Actual direct-native getters and independently authored expected fields
+now use the maintained top-level observation shape, and the lane runner
+preflights all actual owner contracts through maintained `contractFor` before
+compiling probes. The corrected fresh production run passes **26 actual runtime
+results / zero classifications / zero failed owners**, with **394 independently
+authored actual production cases** and complete compiler checks on all 26 private
+companions. Independent review of this correction is clean.
+
+Native all-target Clippy passes with warnings denied after replacing seven
+redundant test-only mapping closures with function pointers. The native harness
+now has fixed per-owner case/positive counts and an actual route counter:
+26 owners, 494 cases and 3458 decoder observations. Workspace format passes.
+Global structural verification passes **7459 rows / 17214 public Rust items**.
+Scoped invention verification retains the complete workspace resolution and
+passes **287 public Apex items**, preserving all 82 existing owned exemptions
+and adding none. Its temporary exemption input selects only the existing owned
+rows; the original full-exemption invocation reported unrelated foreign names
+outside the selected invention scope and is excluded. These parser checks reuse
+the maintained binary after unchanged Rust/Cargo/lock/config inputs were verified.
+
+
+`scripts/accepted-map-record-controls.py` completed all **26 isolated compiled
+controls**. Each removes only its exact owner's object wrapper, requires Cargo
+exit101 and its named failure containing the exact complete valid literal array,
+then restores all three original source files byte-for-byte and passes all26
+native tests. The final exact-source check and all26 native tests pass again.
+No sibling mutation is installed during any owner's control. Initial preflights
+refused rustfmt-wrapped calls and the CurrencyObject suffix inside
+PerpetualCurrencyObject; both happened before mutation and are excluded from
+negative evidence. The corrected anchors require the exact owner boundary and
+allow only formatting whitespace/trailing-comma spelling.
+
+Master `87c99c175c` integrates as `8edda0a135` without conflicts, retaining all
+master contract/policy shards, including merged #365. The actual Apex source,
+fixtures, production runner and independently authored observations
+are byte-identical to the checkpoint that completed the controls and production
+run. The 26 genuinely new Apex rows remain the only additions to their shard;
+no flat file, exemption or previously removed row is restored.
+
+
+Independent readiness review found a P2 in the maintenance controller: global
+byte replacement discarded the regex's owner boundary. The completed v3 run
+used unique old byte sequences for every owner, so each executed mutation was
+isolated. The controller now replaces only its exact matched span. A focused
+same-format CurrencyObject/PerpetualCurrencyObject fixture fails with the former
+global replacement and passes after the span fix; all three Python tests pass,
+including wrapped-call and missing/ambiguous-owner refusal cases. For all 26
+actual production owners, the fixed span selector's entire mutant bytes equal
+the mutant bytes executed in v3. Sources are unchanged; no hypothetical collision
+is counted as a native guard failure. Importing the controller for its pure test
+now performs no source write or Cargo invocation.
+
+Final integration readiness: full scoped ApexOmni tests pass **215 / zero failed /
+zero ignored**, across 13 target receipts including docs and all maintained live
+TypeScript oracles. Separate host and wasm32 all-target Clippy pass with warnings
+denied (12.30s and 37.04s). Fresh post-integration production passes **26 actual
+runtime results / zero classifications / zero failed owners** on the reviewed
+394-case production corpus; private companion checks run again. Frozen install,
+workspace format, global structural **7459 rows / 17214 public items** and scoped
+invention **287 Apex public items** with the same 82 existing exemptions all pass.
+CodeRabbit's manual review returned a rate limit; it did not execute a completed
+review. The other 103 originally censused owners, aliases, receiver policies,
+local functions, construction, features and wasm behavior remain independent
+obligations. No whole-venue completion is claimed.
+
+
+## Twenty-two transaction/order/signer map owners (2026-10-17)
+
+Starting from master `723da2dd14`, then fast-forwarding to `31917cde56` (including
+#374), all19 transaction structs plus CreateOrderOptionsObject,
+OrderResponseObject and TxEthSignature are individually reviewed against their
+actual TS declarations, enums/unions and complete native decoder bodies.
+Only their ordinary local Fields schemas become private Serde remote schemas.
+All167 declared fields keep their original types/order/rename/default/custom
+field decoder attributes. Surrounding enum, flag, helper, Serialize and output
+code is unchanged; the two undefined-only records remain independent obligations.
+Every prior master Apex contract remains exactly preserved as a JSON value;
+only22 genuinely new owner rows are appended.
+
+The original21-owner baseline passed, then the independently witnessed one-field
+Onchain record expanded this coherent cohort to22. The final original-boundary
+baseline and converted-boundary suite each pass **22 / zero failed / zero ignored**
+on **835 cases through seven decoder routes** (5845 actual decoder observations).
+Fixed per-owner cases/positive counts and actual route counters are enforced.
+Native expectations are525 positive all-field/presence/variant/bit observations
+and310 invalid field/shape cases. They include every direct enum tag, actual
+ISO8601 and auth-union branches, nonempty nested signature/transaction records,
+nullable null versus absence, optional booleans false, all numeric0|1 flags with
+negative-zero bits and wrong-value/type refusals, two independently varied fee
+rate tuple elements and wrong tuple lengths, and raw binary64 rounding,
+subnormal and positive/negative overflow tokens. Every owner has its literal
+complete valid Serde-order array; the existing object boundaries reject them.
+
+Fresh native/default actual production verification passes **22 runtime results /
+zero classifications / zero failed owners**, executing560 authored production
+cases. Each private companion's entire actual nonblanket compiler implementation
+set is inspected, including the exact returned owner identity/source span.
+ChangePubKeyOnchain uses the maintained ordinary observation path, which directly
+matches its only actual native field before the wire audit. This avoids an
+invented field or an exemption; its native unit witness still executes all seven
+routes. Native all-target Clippy passes with warnings denied (10.69s).
+Independent draft review checked all22 schemas, all835 native expectations,
+all560 production expectations and exact preservation of master26 contract rows:
+no findings.
+
+All22 isolated object-guard controls completed: each removed only that owner's
+outer object boundary, compiled, and failed its exact named complete-valid-array
+admission assertion at exit101. Each control restored all three source modules
+byte-for-byte and passed all22 native witnesses; the final restoration repeated
+the exact byte check and all22 tests. No compiler/tooling failure is evidence.
+The shared pure exact-span selector's three isolation regressions also pass.
+
+After merging master `41e20791f8` without conflicts, frozen install and format
+checks pass. The full scoped ApexOmni suite passes **237 / zero failed / zero
+ignored**, with14 target receipts including the maintained live TS oracles.
+Separate host and wasm all-target Clippy runs pass with warnings denied
+(11.55s /25.82s). Final fresh native/default production verification passes
+**22 actual runtime owners / zero classifications / zero failures**, including
+all560 authored production cases and complete actual companion inspection.
+
+The maintained invention gate passes globally (7459 manifest rows /17214 public
+Rust items) and with Apex-only public obligations (287 items), retaining exactly
+the same82 existing Apex exemptions and adding zero. The cached checker is
+reused only after checking its actual Rust/Cargo/lock/config inputs are identical
+to its build; the sole source-directory difference is CLAUDE documentation.
+Every existing master Apex contract is preserved exactly as a JSON value.
+
+CodeRabbit returned a review limit and did not complete a bot review. This
+classifies only the selected22 native/default decoder owners. Other owners,
+undefined-only records, functions, aliases, receiver policies, local helpers,
+construction, feature and wasm accepted behavior remain independent obligations.
+No whole-venue completion is claimed.
+
+
+## Twenty-three scalar/validation helper bodies (2026-10-17)
+
+The full actual signer-utils source and selected exchange/utility declarations
+were read along with every native body. Production bodies remain byte-identical;
+only cfg(test) witness wiring is appended. The cohort individually separates16
+raw-value admission/projection/coercion decoders from7 typed/non-decoder roles.
+Native witnesses pass23 /zero failed /zero ignored on634 independently authored
+cases, including prepared Undefined/BigInt/NaN/nonfinite/negative zero, exact
+error strings, range/type boundaries, private display projection, native RandomId
+variants, entropy/clock counts, fee Math callback inputs/errors and borrowed
+prefix-slice pointer identity. Their fixed census and actual comparison counts
+are checked. The16 decoder contracts contain549 independently authored cases;
+all prior master contract values are preserved.
+
+The initial test-adapter return-type build error and initial unused-adapter
+production compile failure are tooling failures and are excluded from proof.
+No expected outcome was changed in response to native output.
+
+All23 isolated semantic controls compiled and failed their exact named native
+assertion at exit101. The16 decoder controls also failed the selected production
+owner's actual output comparison. Each restoration passed all23 native tests;
+restored decoder runs additionally passed all16 production outputs and7 explicit
+classifications. The final restoration verified all three source modules exactly
+and repeated the native/production checks. Classification receipts for the seven
+non-decoders are not claimed as runtime decoder coverage.
+
+After merging master `a5284334d4` without conflicts, the full scoped suite passes
+**260 / zero failed / zero ignored**, across14 target receipts including live TS
+oracles. Host and wasm all-target Clippy pass with warnings denied (19.04s /
+43.97s). Final fresh native/default production verification passes **16 runtime
+results /7 classifications /zero failed owners**, covering549 authored decoder
+cases. Frozen install, format and the maintained structural gates pass:7459
+manifest rows /17214 public items globally;287 Apex public obligations with the
+same82 existing exemptions and zero new ones. Cached structural-checker reuse
+was checked against its actual Rust/Cargo/lock/config inputs; only documentation
+differed. All48 master Apex contract values are preserved, plus23 new rows.
+
+Independent draft review found no issues. CodeRabbit returned a review limit;
+that status is not evidence of a completed bot review. These results classify
+only the selected23 native/default bodies; remaining owners, aliases, receiver
+policies, locals, construction, feature and wasm accepted behavior stay open.

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bitget/bitget.api.ts"
-rust_files = [ "safe-cex-venue-bitget/src/api.rs", "safe-cex-venue-bitget/src/assembly.rs" ]
+rust_files = [ "safe-cex-venue-bitget/src/api.rs", "safe-cex-venue-bitget/src/assembly.rs", "safe-cex-venue-bitget/src/binding/hosts/assembly.rs" ]
 
 [[symbol]]
 ts = "isBitgetUtaStrategyOrderNotFound"
@@ -29,10 +29,10 @@ note = ""
 [[symbol]]
 ts = "isBitgetSignatureRejection"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bitget/src/binding/hosts/assembly.rs::is_bitget_signature_rejection"
+status = "ported"
+note = "Rename: safe-cex-venue-bitget/src/binding/hosts/assembly.rs::is_bitget_signature_rejection. Reads code before msg, uses shared live String coercion and preserves the short circuit. The native/source witness compares 22 primitive, array, BigInt, custom coercion, getter/error and UTF-16 outcomes. Request replay and stamping remain the separate createAPI/shared-client contract."
 
 [[symbol]]
 ts = "createAPI"
@@ -40,7 +40,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-bitget/src/assembly.rs::create_api", "safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Value", "safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Error" ]
 status = "ported"
-note = "Native client configuration, three retries under a lazily evaluated read-only-network-error or signature-rejection condition, request signing/query-only mutation/body copy with an already-serialized string body signed raw, signature resend before a once-only (WeakSet) response emission, owned request and async-response interceptors, silence/suppression emission and tunnel installation preserve source call order. Imported Axios/qs/HMAC/clock/transport operations are native host capabilities; fixtures test body/preimage separately, not a live HTTP adapter. Host value split: safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Value is the opaque JS value and safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Error the thrown-value carrier of the AssemblyHost capability this body consumes; they add no behavior."
+note = "Native client configuration, three retries under a lazily evaluated read-only-network-error or signature-rejection condition, request signing/query-only mutation/body copy with an already-serialized string body signed raw, signature resend before a once-only (WeakSet) response emission, owned request and async-response interceptors, silence/suppression emission and tunnel installation preserve source call order. Imported Axios/qs/HMAC/clock/transport operations are native host capabilities; fixtures test body/preimage separately, not a live HTTP adapter. Production runtime imports now use the shared signature-retry config key and shared client replay pipeline for non-2xx and resolved JSON-body refusals; binding E2Es cover all three families and a re-signed write. The separate isBitgetSignatureRejection row now uses shared string-hint coercion for custom String hooks as well as ordinary response data. Host value split: safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Value is the opaque JS value and safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Error the thrown-value carrier of the AssemblyHost capability this body consumes; they add no behavior."
 
 [[symbol]]
 ts = "toJsonString"

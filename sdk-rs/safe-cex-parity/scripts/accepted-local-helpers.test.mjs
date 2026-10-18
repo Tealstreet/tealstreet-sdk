@@ -1,10 +1,12 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
+import { loadContracts } from './accepted-contract-files.mjs';
 import fs from 'node:fs';
 import test from 'node:test';
 import { reviewedLocalHelper, requireNativeDecoderObservations } from './accepted-local-helpers.mjs';
 
-const helpers = JSON.parse(fs.readFileSync(new URL('../accepted-set/local-type-helpers.json', import.meta.url)));
-const contracts = JSON.parse(fs.readFileSync(new URL('../accepted-set/contracts.json', import.meta.url)));
+const helpers = loadPolicy('local-type-helpers');
+const contracts = loadContracts();
 const source = fs.readFileSync(new URL('../../safe-cex-types/src/ws_auth.rs', import.meta.url));
 const local = { label: 'safe-cex-types/src/ws_auth.rs::Wire', line: 170, column: 9 };
 const owners = [{ name: 'safe_cex_types::ws_auth::WsAuthResponse', deserialize: true }];

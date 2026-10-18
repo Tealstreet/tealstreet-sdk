@@ -103,6 +103,33 @@ pub(crate) fn schedule_reconciliation(rt: &Rt, order: Order) -> Result<(), Throw
     )
 }
 
+// ts: BybitSpotExchange#recordRecentlyPlacedOrder and BybitInverseExchange#recordRecentlyPlacedOrder
+pub(crate) fn record_variant_recently_placed_order(rt: &Rt, order: Js) -> Result<Js, Thrown> {
+    if order.get("type")?.strict_equals(&Js::str("market")) {
+        return Ok(Js::Undefined);
+    }
+    let now = rt
+        .global("virtualClock.getCurrentTimeMs")?
+        .call(Js::Undefined, vec![])?;
+    rt.this.get("recentlyPlacedOrders")?.call_method(
+        "set",
+        vec![
+            order.get("id")?,
+            Js::object(vec![("placedAt", now), ("order", order.clone())]),
+        ],
+    )?;
+    if rt
+        .this
+        .call_method("shouldUseLocalRestOrderLifecycleFallback", vec![])?
+        .truthy()
+    {
+        rt.this
+            .get("store")?
+            .call_method("addOrUpdateOrders", vec![Js::array(vec![order])])?;
+    }
+    Ok(Js::Undefined)
+}
+
 // ts: BybitExchange#recordRecentlyPlacedOrder
 pub(crate) fn record_recently_placed_order(rt: &Rt, order: &Js) -> Result<(), Thrown> {
     let venue = venue(rt)?;
@@ -187,23 +214,43 @@ pub(crate) fn recently_placed_orders(rt: &Rt) -> Js {
 // ts: BybitExchange#retireCancelledOrders
 pub(crate) fn retire_cancelled_orders(rt: &Rt, orders: &Js) -> Result<(), Thrown> {
     let venue = venue(rt)?;
-    let orders: Vec<Order> = to_typed(orders)?;
-    lifecycle::retire_cancelled_orders(
-        &venue.order_state,
-        order_list(orders),
-        || now(rt),
-        |id| mark_order_seen(rt, id),
-        || should_use_local_fallback(rt),
-        |ids| {
-            let ids = ids
-                .borrow()
-                .iter()
-                .map(|r| Js::object(vec![("id", Js::str(&r.borrow().id))]))
-                .collect();
-            rt.this
-                .get("store")?
-                .call_method("removeOrders", vec![Js::array(ids)])?;
-            Ok(())
-        },
-    )
+    // The source accepts Pick<Order, 'id' | 'symbol'>, including the snapshots
+    // produced by cancelSymbolOrders. No other Order fields are consumed here.
+    let orders = orders.array_values().unwrap_or_default();
+    if orders.is_empty() {
+        return Ok(());
+    }
+    let primary = matches!(
+        venue.base.name,
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
+    );
+    let retired_at = if primary { now(rt)? } else { 0. };
+    for order in &orders {
+        let id = order.get("id")?;
+        rt.this.call_method("markOrderSeen", vec![id.clone()])?;
+        if primary {
+            let symbol = order.get("symbol")?;
+            if symbol.truthy() {
+                venue.order_state.put_retired(
+                    crate::binding::host::text(&id)?,
+                    lifecycle::RetiredSymbol {
+                        symbol: crate::binding::host::text(&symbol)?,
+                        retired_at,
+                    },
+                );
+            }
+        }
+    }
+    if should_use_local_fallback(rt)? {
+        let ids = orders
+            .iter()
+            .map(|order| Ok(Js::object(vec![("id", order.get("id")?)])))
+            .collect::<Result<Vec<_>, Thrown>>()?;
+        rt.this
+            .get("store")?
+            .call_method("removeOrders", vec![Js::array(ids)])?;
+    }
+    Ok(())
 }

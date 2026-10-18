@@ -1,22 +1,22 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.ws-private.ts"
-rust_files = [ "safe-cex-venue-bybit/src/ws_private.rs", "safe-cex-venue-bybit/src/ws_private/protocol.rs", "safe-cex-venue-bybit/src/ws_private/local_auth.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/ws_private.rs", "safe-cex-venue-bybit/src/ws_private/protocol.rs", "safe-cex-venue-bybit/src/ws_private/local_auth.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs" ]
 
 [[symbol]]
 ts = "BybitPrivateWebsocket"
 kind = "class"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol", "safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::new" ]
+status = "divergent"
+note = "CHOSEN: PrivateProtocol is the native class carrier over core BaseWebSocket, with a weak exchange parent, explicit runtime/clock configuration, one per-instance incremental-fill tracker and auth retry state. Both production and constructor-witness factories call PrivateProtocol::new; they do not bypass its fresh cache. Source field/method bodies remain individually mapped. Native socket-pump E2Es construct primary and Demo, observe Store and fill events and assert independent cache state. Renamed Rust carrier: safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol; factory: safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::new."
 
 [[symbol]]
 ts = "BybitPrivateWebsocket#incrementalFills"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::new"
+status = "divergent"
+note = "CHOSEN: the source field initializer is composed in safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::new using the canonical safe-cex-store create_incremental_fills factory with its source default 500. Native closure/RefCell storage replaces a JS callable field, retaining per-socket cumulative state across messages. E2Es pin replay suppression, independent primary/Demo trackers and delta value/quantity pricing. A fresh-cache-per-frame compiled control fails those assertions. The shared helper owns decimal arithmetic; no venue-local algorithm is introduced."
 
 [[symbol]]
 ts = "BybitPrivateWebsocket.connectAndSubscribe"
@@ -45,10 +45,10 @@ note = "CHOSEN extracted sendReconnectSequence to safe-cex-venue-bybit/src/ws_pr
 [[symbol]]
 ts = "BybitPrivateWebsocket.onMessage"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::message"
+status = "divergent"
+note = "MIXED: production WsProtocol::on_message delegates to safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::message. Preserves disposal, receive/fallback/diagnostic order, shared JSON.parse with parse-only catch, topic stats and category gating, order/position dispatch, pong and bounded authRetries <= 3 reconnect starts. Source ignores execution/wallet topics; real socket-pump tests pin that behavior. 24 actual-source compositions execute the maintained handler, mapping, fill and Store bodies across all four option/inverse toggle combinations. CHOSEN: explicit SocketFrame/host ownership and core-owned reconnect operations replace browser MessageEvent/unowned promises; binary frames are ignored after receive/fallback tracking. Error messages and typed model/Store ingress retain the established sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. No constructor or Hyro session-gate claim follows for unfinished variants."
 
 [[symbol]]
 ts = "BybitPrivateWebsocket.ping"
@@ -61,26 +61,26 @@ note = "Extracted protocol operation to safe-cex-venue-bybit/src/ws_private.rs::
 [[symbol]]
 ts = "BybitPrivateWebsocket#rowsThisConnectionTrades"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::rows_this_connection_trades"
+status = "divergent"
+note = "CHOSEN: native retained Js arrays are projected to a bounded vector for the source filter, and the live parent tradesCategoryOf selector is invoked in row order after nullish symbol fallback and JS String conversion. Nonarrays become empty exactly as primary source. Dedicated Spot/Inverse dispatch deliberately bypasses this primary-only gate. All four account toggle combinations have native and actual-source receiver evidence. Renamed Rust target: safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::rows_this_connection_trades."
 
 [[symbol]]
 ts = "BybitPrivateWebsocket.handleOrderTopic"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_order_topic"
+status = "divergent"
+note = "MIXED: safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_order_topic invokes the variant receiver mapOrder, marks each mapped ID seen before the false-partial guard, uses canonical execution/incremental-fill helpers, emits delta fills before terminal Store publication and preserves terminal rejection ordering. Native E2Es pin parent/virtual rows, repeated and advancing fills, terminal statuses and snapshot-grace release; actual-source 24-case comparison includes the real mapping/helper/Store bodies. CHOSEN: typed Store rows/emitter payloads project source objects to owned snapshots under sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; JSON wire/model ingress and UTF-8 error text keep the established typed boundary. Dedicated inverse keeps source qty/value fill pricing; primary/Spot keep value/qty. No fabricated execution-topic subscription."
 
 [[symbol]]
 ts = "BybitPrivateWebsocket.handlePositionTopic"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_position_topic"
+status = "divergent"
+note = "CHOSEN: safe-cex-venue-bybit/src/ws_private/messages.rs::PrivateProtocol::handle_position_topic calls the live variant mapPosition, then the real Store facade. Primary/Demo use addOrUpdatePositions followed by syncBalanceUpnlFromPositions; dedicated inverse keeps source [position,position] update pairs and omits balance synchronization. Both assign the shared-clock websocket timestamp after Store publication. Native socket-pump and 24-case actual-source evidence covers linear/default filtering, enabled inverse/options, zero-contract updates and balance upnl. Closed typed models and owned Store snapshots retain sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; no unfinished variant constructor claim follows from this consumer."
 
 [[symbol]]
 ts = "BybitPrivateWebsocket#auth"

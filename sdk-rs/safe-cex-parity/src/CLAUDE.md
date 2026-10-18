@@ -46,6 +46,14 @@ share an ID with a production struct, so name membership alone is insufficient.
 and decoded manifests. Its disjoint structural groups are candidate repair
 families, not automatic rename, split or provenance authorizations.
 
+`parity-check --invention-crate <package>` requires explicit `--manifest` and
+`--exempt` inputs. It builds the complete maintained workspace index, preserving
+canonical local/shared reexport resolution and every mapping target, then narrows
+only public invention obligations to that package. Status, target resolution and
+source-provenance checks still apply to every supplied row. Global/default gates
+are unchanged; report/progress do not accept this scope. The split-mapping CLI
+fixture also requires unmapped-item and missing-provenance failures and restoration.
+
 **Progress shares report counters.** `parity:progress` builds the same source
 index and calls validated `report`, then formats its total, phase buckets and
 ten largest pending source files. It does not count symbols itself. Phase
@@ -68,7 +76,7 @@ constructors, free-function decoder candidates and custom trait methods, even
 without Deserialize. Raw-input functions remain candidates when they return unit
 and mutate an output argument. Generic bounds and local aliases participate in
 discovery. Unsupported trait receivers and uninstantiated decoder defaults fail
-closed unless `../accepted-set/receiver-traits.json` reviews them against a
+closed unless `../accepted-set/receiver-traits/<crate>.json` reviews them against a
 whole-source pin (`non-decoder` or `delegated` only). `PatchSource` counts as raw input. Owner-local compiler trait probes cover
 block-local declarations rustdoc omits. Nested functions and local Visitor/Seed
 helpers require explicit whole-source fingerprints; decoder helpers also name
@@ -84,7 +92,14 @@ module-scope `macro_rules!` is accepted only when every same-name definition in
 the target is unconditional and every arm transcribes without a declaration
 keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still
 reject local shadowing of trusted expression/derive/attribute names and
-namespaces. A separate
+namespaces. A target-wide token proof permits module-level `core` declarations only when
+every `core` identifier in every supplied source is another such declaration
+or an AST-proven value binding/reference, and the actual compiler `core` origin
+is authenticated. Only authenticated std `vec!` operands are parsed as expressions;
+other macro tokens remain opaque. Paths, imports, aliases,
+extern declarations, block-local modules, macro tokens and inactive cfg tokens
+revoke that proof. Every other source finding remains enforced.
+A separate
 source module walk rejects doc-dependent cfg predicates before rustdoc, including
 external-module inner attributes and raw identifiers; block-local external modules
 fail closed. The control runner pins test files, named tests and executed mutation
@@ -98,7 +113,7 @@ need positive witnesses and forbidden-input probes. Compiler failures never
 count as mutation-control success. `--inventory`, `--census`, and `--measure`
 are diagnostics; only the matrix command enforces the standing ratchet.
 
-Classify new owners in `../accepted-set/contracts.json` with TS/tooling evidence,
+Classify new owners in `../accepted-set/contracts/<compiler-crate>.json` with TS/tooling evidence,
 shape, positive JSON fixtures, and exact compiler entrypoint signatures. Free
 functions have explicit decoder/non-decoder classifications. Decoder adapters
 observe actual outputs, preserving fallback results and tagged non-finite values;
@@ -106,7 +121,32 @@ non-decoder receipts are counted separately. Total decoders cannot be validated
 by an is_ok-only adapter. A new
 raw decoder needs an adapter and positive witnesses; a typed constructor needs
 its reason. Record arrays use Serde's field order, not JSON map insertion order.
-The bounded `construction.json` policy classifies Clone/Copy on private-field
+Observed methods normally require distinct inputs and outputs. The two
+`Capture` serializer metadata constructors in `../accepted-set/constant-outputs/<crate>.json`
+and exact reviewed venue inherited refusals in `../accepted-set/inherited-constant-outputs/<crate>.json`
+may set `constantOutput: true`. Only individually installed GRVT, BreakoutProp,
+Bitget and the three exact Kucoin inherited-refusal policy records qualify; adding a package name alone grants no method
+permission. Their actual compiler package, API, body span,
+whole-source hash, native adapter and cases are pinned. Inherited refusals also
+pin the maintained TS base method lines, base/venue file hashes and native
+harness bytes. Distinct genuine inputs still execute and observe native Error
+identity/message, zero HTTP and unchanged Store/notification/runtime state.
+Every compiler-listed API remains in the complete owner contract; get_account
+and schedule_cancel behavior tests do not invent indexed entries or unit-input
+permissions. Unknown constant methods and changed adapters remain refused.
+The single reviewed `DirectTransport::ws_connection` native-method record in
+`constant-outputs/safe-cex-transport.json` also pins its actual compiler API,
+package, raw-input role, Rust span/hash, maintained TS callback and exact native
+adapter/cases. Distinct URL inputs observe the returned connection capability;
+both reviewed outputs are absent. No other transport method inherits permission.
+Three reviewed Kucoin Spot overrides may use native-method records for constant
+leverage `1` and unit-returning mode changes. They require the exact maintained
+TS override body and source hash, genuine native result/state witnesses and both
+executable fixture hashes. These overrides receive no inherited-error permission.
+Kucoin inherited refusals also require both the I/O harness and observer helper
+hashes. Missing reviewed records remain refused; package eligibility installs no
+contract or permission by itself.
+The bounded `construction/<crate>.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 
 `outstanding-defects.json` records owed defects with crate and agent owners,
@@ -143,3 +183,103 @@ invention diagnostics, restores exact bytes and requires the focused tests to
 pass. A second batch falsely claims explicitly unassigned capabilities and must
 fail both native ownership and canonical-remainder assertions. These are
 annotation checks, not fresh runtime behavior proofs.
+
+Two exact nongeneric function-pointer aliases (`RetryCondition` in Bitunix and
+`BlofinApiFactory` in Blofin) have reviewed compiler signatures in
+`../accepted-set/function-pointer-aliases/<crate>.json`. Their source identity, complete
+raw/expanded ASTs, every nested authenticated compiler root and selected workspace
+package are pinned. Native probes require invariant equality with independently
+authored Rust types and execute the ordinary alias Serde/conversion checks. This
+is capability classification, not callback execution or permission for other
+function pointers. Contracts cannot supply expected signatures or probe modes.
+
+The concrete WEEX `WeexKlineRow` protocol tuple has its own finite policy in
+`../scripts/accepted-weex-kline-alias.mjs`: all eleven ordered raw/expanded slots,
+eight repeated authenticated String roots and the sized invariant Rust type are
+pinned. Its native control observes every decoded slot and executes the ordinary
+Serde/conversion probes. Expanded-slot, native-identity and removed-policy
+controls must fail before restoration passes. This policy grants no permission
+to other tuples; callers cannot redirect its expected type, suffix or probe mode.
+
+
+Accepted contracts now live in one JSON file per compiler crate under
+`../accepted-set/contracts/`, for example `safe-cex-venue-okx.json` for
+`safe_cex_venue_okx::...`. The gate and review helper both use
+`scripts/accepted-contract-files.mjs`; imports needing the whole reviewed set
+must call `loadContracts()` rather than read a former monolithic file. Binary
+crate namespaces have their own files too. Directory loading rejects misplaced
+or duplicate owners, empty shards, unexpected files and symlink entries.
+Explicit `--contracts=<file.json>` fixture inputs remain supported; a directory
+is also accepted. Storage changes no contract classification or native proof.
+
+Eleven GRVT aliases use the existing reviewed fixed-instantiation registry in
+`../accepted-set/generic-aliases/<crate>.json`. Each pins its exact source, raw/expanded
+compiler targets, original generics (including defaults/lifetimes), canonical
+root and independently authored invariant Rust type. The selected arguments
+are explicit bool or bool/bool, and static lifetimes for three unsized FnMut
+capabilities; these scopes do not classify other instantiations or silently
+select a source generic default. AddedMarkets<bool> and JsResult<bool,bool> are
+actual decoders, not callback exemptions. Fields<bool> preserves its original
+static borrowed string keys: its reviewed type identity does not grant
+DeserializeOwned or bypass the existing borrowed-alias refusal. Decoder
+classifications and borrowed production-path coverage remain separate obligations.
+
+
+The transport provider's `TransportFuture<'static,bool>` and
+`RestFuture<'static,bool>` have separate finite identities in
+`../accepted-set/generic-aliases/<crate>.json`. Their exact raw/expanded compiler ASTs
+retain `Result<bool,TransportError>` and `Result<bool,RestFailure>` respectively,
+including the original lifetime/type parameters. The existing reviewed alias
+path emits invariant equality against independently authored native Rust types
+and runs ordinary Serde/conversion checks. This establishes the selected
+capability identities, not future polling, transport execution, other generic
+arguments or a decoder exemption; ordinary contract review remains required.
+
+
+The separate `secondary::RateLimitWrapper<'static>` registry entry retains its
+actual unsized `dyn Fn(Arc<dyn RestAdapter>)->Arc<dyn RestAdapter>` target. Its
+existing unsized alias path requires invariant native function/pointer type
+equality and ordinary Serde/conversion checks. The finite static capability
+identity does not execute its callback or classify other lifetimes.
+
+The Num output macro provider proof returns the exact `macro_export` attribute
+span only after validating its unconditional source route, canonical definition,
+export syntax and recipe. The driver covers that one attribute event alongside
+the existing exact definition event. The scope scanner still reports every
+export attribute; an unrelated exported macro in the same file remains refused.
+The registered numeric-output controls test both retained coverage and nearby
+position refusal. Provider native observations retain the parsed attribute span.
+
+Reviewed policy maps are split per crate under `../accepted-set/<table>/` and
+loaded through `scripts/accepted-policy-files.mjs::loadPolicy`. Existing compiler,
+source-pin and native evidence checks receive the same merged records. Keep the
+flat JSON maps deleted when merging older branches. See
+[`POLICY-FILES.md`](../accepted-set/POLICY-FILES.md) for table names, ownership,
+migration and complete cutover equality proof.
+
+
+The one exact GRVT `composition::Fields<bool>` borrowed map has a separate
+`shape: "borrowed-map"` route contract with the complete `borrowedRoutes`
+matrix from `scripts/accepted-grvt-fields.mjs`. Its existing fixed compiler
+identity is retained. Twelve immutable JSON texts each execute static text,
+static borrowed Value, and owned Value admission separately. Actual ordered
+keys and bool payloads are observed; text keys must retain their exact offsets
+and borrowed Value keys must point into the retained Value, outside the source
+text. Escaped text keys and nonempty owned Values refuse; an owned empty map
+admits. Every ordinary alternate trait detector still runs. The general borrowed
+AliasProbe guard and DeserializeOwned bound remain unchanged. The finite route
+policy cannot classify another alias, type argument, target, package or adapter;
+a reviewed consumer contract and all 36 route witnesses are still required.
+
+Six Hyperliquid Value/Error aliases retain their actual associated projections
+`<H as WsPingHost>::Value/Error`. Their finite generic-policy records select only
+`Realm` and independently expect its concrete `realm::value::Value`. Discovery
+authenticates the same-crate trait, Realm and Value compiler roots, the unique
+Realm implementation, its ownership links and actual associated binding before
+normalizing compiler IDs. The route checks exact raw/expanded targets, unbounded
+host parameters, source files and selected workspace package. Contracts cannot
+redirect the host or expected type. Native invariant equality and all ordinary
+Serde/conversion detectors remain required; these capability identities do not
+execute callbacks or classify other host instantiations. The compiled control
+renames only the copied concrete value owner while retaining its Value alias;
+all six native owner-identity receipts must fail before restoration passes.

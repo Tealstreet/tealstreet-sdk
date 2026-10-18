@@ -1,6 +1,10 @@
 //! Error-class, tuple and market-startup host traits for the imported startup
 //! helpers (`fetchCoreMetaAndAssetCtxsWithFallback` and its HIP-3 sibling).
-use super::{Realm, host_core::js, value::*};
+use super::{
+    Realm,
+    host_core::js,
+    value::{Kind, PropKey, Value},
+};
 use crate::{
     api_errors::{ApiErrorClass, ApiErrorHost},
     income::IncomeFuture,

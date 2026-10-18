@@ -1,4 +1,4 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use runtime::Runtime;
 use safe_cex_exchange::{
@@ -70,7 +70,7 @@ fn active_symbol_changes_match_live_filter_union_and_event_transitions() {
             Rc::new(move |_, symbols| {
                 captured
                     .borrow_mut()
-                    .push(json!({"event":"activeTickerSymbols:changed","symbols":symbols}));
+                    .push(json!({"event":"activeTickerSymbols:changed","symbols":safe_cex_exchange::js_runtime::value::to_json(symbols).unwrap()}));
                 Ok(())
             }),
         );
@@ -160,7 +160,7 @@ fn leverage_updates_match_source_batch_selection_and_native_numbers() {
             ("second", "BTC", if row["side"] == "long" { "short" } else { "long" })]
             .into_iter().map(|(id, symbol, side)| {
                 let mut position: Position = serde_json::from_value(json!({"id":id,"symbol":symbol,"side":side,"entryPrice":1,"notional":1,"leverage":1,"unrealizedPnl":0,"contracts":1,"liquidationPrice":0})).unwrap();
-                position.position_mode = row.get("mode").map(|v| serde_json::from_value(v.clone()).unwrap());
+                position.position_mode = row.get("mode").map(|v| serde_json::from_value(v.clone()).unwrap()).into();
                 position.leverage = from_bits(&row["old"]);
                 position.unrealized_pnl = f64::NAN;
                 position

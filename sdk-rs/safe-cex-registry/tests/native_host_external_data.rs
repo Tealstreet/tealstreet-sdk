@@ -138,6 +138,22 @@ fn kraken_starts_on_a_public_data_gateway_over_websocket() {
     ));
 }
 
+#[test]
+fn hyperliquid_starts_on_a_public_data_gateway_over_websocket() {
+    run_local(starts_on_gateway(
+        safe_cex_types::ExchangeName::Hyperliquid,
+        "hyperliquid",
+    ));
+}
+
+#[test]
+fn hyperliquidspot_starts_on_a_public_data_gateway_over_websocket() {
+    run_local(starts_on_gateway(
+        safe_cex_types::ExchangeName::Hyperliquidspot,
+        "hyperliquidspot",
+    ));
+}
+
 async fn starts_on_gateway(name: safe_cex_types::ExchangeName, exchange_id: &'static str) {
     let options = json!({"key":"","secret":"","publicDataOnly":true,
             "externalPublicData":{"type":"websocket","url":"ws://gateway.local/gateway","exchangeId":exchange_id}});

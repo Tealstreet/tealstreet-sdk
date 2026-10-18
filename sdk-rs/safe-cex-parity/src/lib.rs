@@ -945,10 +945,13 @@ fn run_output(report_only: bool, progress_only: bool) -> Result<()> {
         .to_path_buf();
     let mut manifest = None;
     let mut exempt = None;
+    let mut invention_crate = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--help" {
-            println!("Options: --workspace <sdk-rs> --manifest <directory> --exempt <file>");
+            println!(
+                "Options: --workspace <sdk-rs> --manifest <directory> --exempt <file> [--invention-crate <package>]"
+            );
             return Ok(());
         }
         let value = args.next().ok_or_else(|| format!("{arg}: missing path"))?;
@@ -956,11 +959,31 @@ fn run_output(report_only: bool, progress_only: bool) -> Result<()> {
             "--workspace" => workspace = PathBuf::from(value),
             "--manifest" => manifest = Some(PathBuf::from(value)),
             "--exempt" => exempt = Some(PathBuf::from(value)),
+            "--invention-crate" => invention_crate = Some(value),
             _ => return Err(format!("unknown option {arg}")),
         }
     }
+    if report_only && invention_crate.is_some() {
+        return Err("--invention-crate is supported only by parity-check".into());
+    }
+    if invention_crate.is_some() && (manifest.is_none() || exempt.is_none()) {
+        return Err("--invention-crate requires explicit --manifest and --exempt paths".into());
+    }
     let manifests = manifests(&manifest.unwrap_or_else(|| workspace.join("parity/manifest")))?;
-    let index = rust_index(&workspace)?;
+    let mut index = rust_index(&workspace)?;
+    if let Some(name) = invention_crate {
+        // Resolve reexports against the complete workspace before narrowing obligations.
+        // Keep index.all intact: every supplied mapping must still resolve normally.
+        let prefix = format!("{name}/");
+        if name.is_empty()
+            || name.contains(['/', '\\'])
+            || !index.all.iter().any(|id| id.starts_with(&prefix))
+        {
+            return Err(format!("--invention-crate: no indexed package {name}"));
+        }
+        index.public.retain(|id| id.starts_with(&prefix));
+        println!("parity: invention scope {name}; complete workspace resolution retained");
+    }
     let exemptions = exemptions(&exempt.unwrap_or_else(|| workspace.join("parity/exempt.toml")))?;
     if report_only {
         let validated = report(&manifests, &index, &exemptions)?;

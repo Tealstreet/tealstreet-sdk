@@ -1,7 +1,16 @@
 //! The JavaScript builtins the ported bodies call, installed on the intrinsic
 //! prototypes and the global object. Each follows its ECMAScript algorithm for
 //! the argument shapes the source uses.
-use super::{Realm, convert::Hint, promise::settle, regex::Pattern, value::*};
+use super::{
+    Realm,
+    convert::Hint,
+    promise::settle,
+    regex::Pattern,
+    value::{
+        FunctionData, IterSource, Kind, NativeConstruct, NativeFn, Obj, Prop, PropKey, Slot,
+        Thrown, Value,
+    },
+};
 use crate::spot_json::JsString;
 use std::{cell::RefCell, rc::Rc};
 

@@ -1,5 +1,9 @@
 //! Base JS host traits over the production realm.
-use super::{Realm, promise::ValueFuture, value::*};
+use super::{
+    Realm,
+    promise::ValueFuture,
+    value::{PropKey, Value},
+};
 use crate::{
     cache_orders::CacheOrdersHost,
     cross_cache::CrossCacheHost,
@@ -115,8 +119,8 @@ impl SpotAccountHost for Realm {
         Ok(v.is_array())
     }
     fn candle_binding(&mut self, v: &Value) -> Result<[Value; 6], Value> {
-        let s = self.array_slots(v, 6)?;
-        Ok(std::array::from_fn(|i| s[i].clone()))
+        let values = self.object_pattern(v, &["t", "o", "h", "l", "c", "v"])?;
+        Ok(std::array::from_fn(|index| values[index].clone()))
     }
     fn is_undefined(&self, v: &Value) -> bool {
         matches!(v, Value::Undefined)

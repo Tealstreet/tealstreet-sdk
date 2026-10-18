@@ -1,24 +1,31 @@
 //! Source Axios factory routing, using the same provider as the venue's sockets.
 use super::{Host, effective_config, rest_request, spawn};
-use crate::js_runtime::{
-    base_exchange::exchange_options,
-    value::{Js, Thrown, arg, to_json},
+use crate::{
+    exchange::BaseExchange,
+    http::{is_tealstreet_proxy_auth_failure_body, stringify_response_body},
+    js_runtime::{
+        base_exchange::exchange_options,
+        value::{Js, Thrown, arg, to_json},
+    },
 };
 use safe_cex_transport::{
     RestAdapterContext, RestAdapterVariant, RestTransportContext, TransportProvider,
 };
-use safe_cex_types::ExchangeName;
+use safe_cex_types::{ExchangeName, RequestOutcome};
+use serde_json::Value;
+use std::rc::{Rc, Weak};
 
-/// The routing portion of safeCexAxiosCreate: provider-selected baseURL, the
-/// source's fixed timeout, and proxy authorization before terminal signing.
-/// Venue request/response interceptors remain on the returned ordinary client.
+/// safeCexAxiosCreate: provider-selected baseURL, the source's fixed timeout,
+/// proxy authorization before terminal signing, and the factory's response
+/// interceptor ahead of the venue's own interceptors on the returned client.
 pub fn create(
     host: Host,
     provider: &dyn TransportProvider,
     config: Js,
     options: &Js,
-    exchange: ExchangeName,
+    owner: &Rc<BaseExchange>,
 ) -> Result<Js, Thrown> {
+    let exchange = owner.name().clone();
     let options = exchange_options(options)?;
     let request = rest_request(&config, false)?;
     let transport = provider
@@ -47,6 +54,7 @@ pub fn create(
         transport.base_url.as_deref().map_or(Js::Undefined, Js::str),
     )?;
     let client = super::create(host.clone(), defaults);
+    install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied)?;
     if transport.proxied
         && let Some(authorize) = transport.authorize
     {
@@ -74,6 +82,116 @@ pub fn create(
             .call_method("use", vec![interceptor])?;
     }
     Ok(client)
+}
+
+// ts: the safeCexAxiosCreate response interceptor's recordRequestOutcome and
+// proxy-failure `error` emission. Registered first, so venue interceptors see
+// the request afterwards, as in the source.
+fn install_outcome_interceptor(
+    client: &Js,
+    owner: Weak<BaseExchange>,
+    proxied: bool,
+) -> Result<(), Thrown> {
+    let fulfilled_owner = owner.clone();
+    let on_fulfilled = Js::function("recordResponseOutcome", move |_, args| {
+        let response = arg(&args, 0);
+        if let Some(owner) = fulfilled_owner.upgrade() {
+            record_outcome(&owner, &response, Some(&response));
+        }
+        Ok(response)
+    });
+    let on_rejected = Js::function("recordErrorOutcome", move |_, args| {
+        let error = arg(&args, 0);
+        if let Some(owner) = owner.upgrade() {
+            let response = optional(&error, "response")?;
+            let response = response.truthy().then_some(response);
+            record_outcome(&owner, &error, response.as_ref());
+            if proxied && let Some(response) = &response {
+                report_proxy_failure(&owner, response)?;
+            }
+        }
+        Err(Thrown::new(error))
+    });
+    client
+        .get("interceptors")?
+        .get("response")?
+        .call_method("use", vec![on_fulfilled, on_rejected])?;
+    Ok(())
+}
+
+fn optional(value: &Js, key: &str) -> Result<Js, Thrown> {
+    if value.is_object() {
+        value.get(key)
+    } else {
+        Ok(Js::Undefined)
+    }
+}
+
+fn status_of(response: &Js) -> Result<Option<f64>, Thrown> {
+    let status = response.get("status")?;
+    Ok(match status {
+        Js::Number(status) if status != 0.0 && !status.is_nan() => Some(status),
+        _ => None,
+    })
+}
+
+fn record_outcome(owner: &BaseExchange, context: &Js, response: Option<&Js>) {
+    // TS deliberately ignores counter failures so telemetry cannot fail a request.
+    let classify = || -> Result<Option<RequestOutcome>, Thrown> {
+        let config = optional(context, "config")?;
+        if optional(&config, "__tealstreetSigningCapture")?.truthy() {
+            return Ok(None);
+        }
+        Ok(Some(match response {
+            None => RequestOutcome::Network,
+            Some(response) => match status_of(response)? {
+                None => RequestOutcome::Other,
+                Some(429.0 | 418.0) => RequestOutcome::RateLimit,
+                Some(401.0 | 403.0) => RequestOutcome::Auth,
+                Some(status) if (200.0..300.0).contains(&status) => RequestOutcome::Ok,
+                Some(_) => RequestOutcome::Other,
+            },
+        }))
+    };
+    if let Ok(Some(outcome)) = classify() {
+        owner.store.record_request_outcome(outcome);
+    }
+}
+
+fn report_proxy_failure(owner: &BaseExchange, response: &Js) -> Result<(), Thrown> {
+    let Some(status) = status_of(response)? else {
+        return Ok(());
+    };
+    let data = response.get("data")?;
+    let body: Value = if data.is_undefined() {
+        Value::Null
+    } else {
+        to_json(&data)?
+    };
+    let source = if status == 401.0 || status == 403.0 {
+        if is_tealstreet_proxy_auth_failure_body(&body) {
+            "Tealstreet proxy auth failed"
+        } else {
+            "Upstream exchange auth failed via proxy"
+        }
+    } else if status >= 500.0 {
+        "Proxy server error"
+    } else {
+        return Ok(());
+    };
+    let text = if data.is_undefined() {
+        "undefined".to_owned()
+    } else {
+        stringify_response_body(&body)
+    };
+    let name = serde_json::to_value(&owner.name).expect("exchange name");
+    let name = name.as_str().expect("exchange name string");
+    let message = format!(
+        "[{name}] {source} ({}): {text}",
+        Js::Number(status).to_display()
+    );
+    owner.runtime.console("error", &message);
+    owner.emit("error", Js::str(&message)).map_err(Thrown::from)
 }
 
 fn same(left: &Js, right: &Js) -> Result<bool, Thrown> {

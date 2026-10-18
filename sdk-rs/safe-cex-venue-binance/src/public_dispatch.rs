@@ -23,12 +23,8 @@ impl Handler {
         match self {
             Self::List(v) => Ok(number(v.borrow().len() as f64)),
             Self::CoreList(v, _) => Ok(number(v.borrow().len() as f64)),
-            Self::Value(EventValue::Inherited(member)) => Ok(member
-                .length()
-                .map(|n| number(n as f64))
-                .unwrap_or(EventValue::Undefined)),
             Self::Value(v) if optional && v.nullish() => Ok(EventValue::Undefined),
-            Self::Value(v) => v.get("length"),
+            Self::Value(v) => v.read("length"),
         }
     }
     fn run(&self, events: EventValue, expression: &str) -> Result<(), Failure> {
@@ -159,7 +155,7 @@ pub fn dispatch_binance_message(
     let events = if matches!(json, EventValue::Array(_)) {
         json
     } else {
-        EventValue::Array(Rc::new(RefCell::new(vec![json])))
+        EventValue::array(vec![json])
     };
     if broadcast.length(true)?.truthy() {
         broadcast.run(events.clone(), "broadcast")?;

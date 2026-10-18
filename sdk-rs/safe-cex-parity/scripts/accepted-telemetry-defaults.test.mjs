@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const sourcePath = path.join(root, 'safe-cex-types/src/telemetry.rs');
 const original = fs.readFileSync(sourcePath, 'utf8');
 const traitName = 'safe_cex_types::telemetry::TelemetrySink';
-const classifications = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/default-traits.json')));
+const classifications = loadPolicy('default-traits');
 function cargo(args, env = {}) {
   const result = spawnSync('cargo', ['--color', 'never', ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, CARGO_BUILD_JOBS: '2', ...env } });
   assert.equal(result.status, 0, `telemetry preparation failed; compiler failures are not controls\n${result.stdout}\n${result.stderr}`);

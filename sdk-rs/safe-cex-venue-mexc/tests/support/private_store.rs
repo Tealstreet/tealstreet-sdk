@@ -83,7 +83,10 @@ impl Store for ObservedStore {
     ) -> Result<(), StoreMutationError> {
         Store::update_position(&self.inner, id, changes)
     }
-    fn update_positions(&self, updates: &[(String, ModelPatch)]) -> Result<(), StoreMutationError> {
+    fn update_positions(
+        &self,
+        updates: &[(Option<String>, ModelPatch)],
+    ) -> Result<(), StoreMutationError> {
         Store::update_positions(&self.inner, updates)
     }
     fn add_or_update_position(&self, position: Position) -> Result<(), StoreMutationError> {

@@ -12,8 +12,9 @@ use safe_cex_num::{
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{RestAdapter, RestRequest};
 use safe_cex_types::{
-    Balance, Candle, ExchangeName, ExchangeOptions, Market, MarketLimits, MarketLimitsAmount,
-    MarketLimitsLeverage, MarketPrecision, OHLCVOptions, Order, Position, Ticker, Timeframe,
+    AnyTimeframe, Balance, Candle, ExchangeName, ExchangeOptions, ExtendedTimeframe, Market,
+    MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision, OHLCVOptions, Order,
+    Position, SecondsTimeframe, Ticker, Timeframe,
 };
 use serde_json::{Value, json};
 use std::{
@@ -239,20 +240,35 @@ pub async fn fetch_markets<E: std::fmt::Display>(
         }
     }
 }
-fn timeframe(v: Timeframe) -> (&'static str, f64, char) {
+fn timeframe(v: &AnyTimeframe) -> (&'static str, f64, char) {
     match v {
-        Timeframe::M1 => ("1m", 1.0, 'm'),
-        Timeframe::M3 => ("3m", 3.0, 'm'),
-        Timeframe::M5 => ("5m", 5.0, 'm'),
-        Timeframe::M15 => ("15m", 15.0, 'm'),
-        Timeframe::M30 => ("30m", 30.0, 'm'),
-        Timeframe::H1 => ("1h", 1.0, 'h'),
-        Timeframe::H2 => ("2h", 2.0, 'h'),
-        Timeframe::H4 => ("4h", 4.0, 'h'),
-        Timeframe::H6 => ("6h", 6.0, 'h'),
-        Timeframe::H12 => ("12h", 12.0, 'h'),
-        Timeframe::D1 => ("1d", 1.0, 'd'),
-        Timeframe::W1 => ("1w", 1.0, 'w'),
+        AnyTimeframe::Variant1(Timeframe::M1) => ("1m", 1.0, 'm'),
+        AnyTimeframe::Variant1(Timeframe::M3) => ("3m", 3.0, 'm'),
+        AnyTimeframe::Variant1(Timeframe::M5) => ("5m", 5.0, 'm'),
+        AnyTimeframe::Variant1(Timeframe::M15) => ("15m", 15.0, 'm'),
+        AnyTimeframe::Variant1(Timeframe::M30) => ("30m", 30.0, 'm'),
+        AnyTimeframe::Variant1(Timeframe::H1) => ("1h", 1.0, 'h'),
+        AnyTimeframe::Variant1(Timeframe::H2) => ("2h", 2.0, 'h'),
+        AnyTimeframe::Variant1(Timeframe::H4) => ("4h", 4.0, 'h'),
+        AnyTimeframe::Variant1(Timeframe::H6) => ("6h", 6.0, 'h'),
+        AnyTimeframe::Variant1(Timeframe::H12) => ("12h", 12.0, 'h'),
+        AnyTimeframe::Variant1(Timeframe::D1) => ("1d", 1.0, 'd'),
+        AnyTimeframe::Variant1(Timeframe::W1) => ("1w", 1.0, 'w'),
+        AnyTimeframe::Variant0(SecondsTimeframe::S1) => ("1s", 1.0, 's'),
+        AnyTimeframe::Variant0(SecondsTimeframe::S5) => ("5s", 5.0, 's'),
+        AnyTimeframe::Variant0(SecondsTimeframe::S15) => ("15s", 15.0, 's'),
+        AnyTimeframe::Variant0(SecondsTimeframe::S30) => ("30s", 30.0, 's'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H3) => ("3h", 3.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H5) => ("5h", 5.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H7) => ("7h", 7.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H8) => ("8h", 8.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H9) => ("9h", 9.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H10) => ("10h", 10.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H11) => ("11h", 11.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::H24) => ("24h", 24.0, 'h'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::D2) => ("2d", 2.0, 'd'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::D3) => ("3d", 3.0, 'd'),
+        AnyTimeframe::Variant2(ExtendedTimeframe::MN1) => ("1M", 1.0, 'M'),
     }
 }
 fn truth_number(v: Option<f64>) -> Option<f64> {
@@ -274,7 +290,7 @@ pub async fn fetch_ohlcv<E: std::fmt::Display>(
     now: impl FnOnce() -> f64,
 ) -> Result<Vec<Candle>, ServiceError<E>> {
     let limit = math_min(truth_number(opts.limit).unwrap_or(1440.0), 1440.0);
-    let (interval, amount, unit) = timeframe(opts.interval);
+    let (interval, amount, unit) = timeframe(&opts.interval);
     let end = date_clip(truth_number(opts.to).unwrap_or_else(now));
     // UTC/fixed-offset calendar profile; local-zone DST is deliberately excluded.
     let start = if truth_number(opts.limit).is_none() && truth_number(opts.from).is_some() {
