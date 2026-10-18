@@ -521,3 +521,56 @@ fn websocket_version_prevents_late_rest_position_snapshot_overwrite() {
         "normal finally releases latch"
     );
 }
+
+#[test]
+fn public_escaped_surrogate_frame_retains_documented_family_refusal() {
+    let h = support::fixture(true, false);
+    seed(&h);
+    let socket = connect(&h, SocketSlot::Public);
+    socket.on_message(&SocketFrame::Text(r#"{"e":"24hrTicker","s":"BTCUSD_PERP","c":"50020.5","P":"-1.25","v":"9","q":"1","extra":"\ud800"}"#.into())).unwrap();
+    assert_eq!(
+        h.store.tickers()[0].last,
+        50000.,
+        "canonical family serde parser refuses escaped lone surrogate; source accepts and publishes50020.5"
+    );
+    frame(
+        &socket,
+        json!({"e":"24hrTicker","s":SYMBOL,"c":"50020.5","P":"-1.25","v":"9","q":"1","extra":"plain"}),
+    );
+    assert_eq!(
+        h.store.tickers()[0].last,
+        50020.5,
+        "same real binding accepts valid plain frame"
+    );
+}
+#[test]
+fn private_warning_prefix_preserves_native_surrogate_error_and_rejection() {
+    for method in ["connectAndSubscribe", "updateListenKey"] {
+        for structured in [false, true] {
+            let h = support::fixture(false, false);
+            let units = [0xd800];
+            let error = if structured {
+                let e = safe_cex_exchange::js_runtime::value::Thrown::error("Error", "");
+                e.value.set("message", Js::utf16(&units)).unwrap();
+                e
+            } else {
+                safe_cex_exchange::js_runtime::value::Thrown::new(Js::utf16(&units))
+            };
+            h.http.replies.borrow_mut().push_back(Err(error));
+            private_member(&h, method);
+            let prefix = if method == "connectAndSubscribe" {
+                "Binance COIN-M user data stream unavailable: "
+            } else {
+                "Binance COIN-M user data stream keepalive failed: "
+            };
+            let expected: Vec<u16> = prefix.encode_utf16().chain(units).collect();
+            assert!(
+                h.runtime.raw_consoles.borrow().iter().any(|v| v
+                    .as_str()
+                    .is_some_and(|units| units.as_ref() == expected.as_slice())),
+                "actual Base error console must retain warning units for {method}/Error={structured}; observed={:?}",
+                h.runtime.raw_consoles.borrow()
+            );
+        }
+    }
+}
