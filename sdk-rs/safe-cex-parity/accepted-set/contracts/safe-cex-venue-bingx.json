@@ -300,5 +300,176 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_bingx::public_stream::HandlerList": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_bingx::public_stream::MessageCallback",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "dyn_trait": {
+                                                        "traits": [
+                                                          {
+                                                            "trait": {
+                                                              "path": "core::ops::function::Fn",
+                                                              "args": {
+                                                                "parenthesized": {
+                                                                  "inputs": [
+                                                                    {
+                                                                      "borrowed_ref": {
+                                                                        "lifetime": null,
+                                                                        "is_mutable": false,
+                                                                        "type": {
+                                                                          "slice": {
+                                                                            "resolved_path": {
+                                                                              "path": "serde_json::value::Value",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  ],
+                                                                  "output": {
+                                                                    "resolved_path": {
+                                                                      "path": "core::result::Result",
+                                                                      "args": {
+                                                                        "angle_bracketed": {
+                                                                          "args": [
+                                                                            {
+                                                                              "type": {
+                                                                                "tuple": []
+                                                                              }
+                                                                            },
+                                                                            {
+                                                                              "type": {
+                                                                                "resolved_path": {
+                                                                                  "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                                  "args": null
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          ],
+                                                                          "constraints": []
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            "generic_params": []
+                                                          }
+                                                        ],
+                                                        "lifetime": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The live Rc<RefCell<Vec<MessageCallback>>> owns mutable native callback registrations; its callable elements consume parsed messages and it has no raw Deserialize input route. It is not an ordinary message decoder.",
+    "evidence": "binding::exchange::structural_alias_tests::native_callback_registry_keeps_live_lists_and_original_errors constructs the production BingxExchange, drives its actual public socket, observes captured-list append/replacement and payload identity, and propagates the original callback error/code referent. tests/handler-list-controls.py proves a production snapshot-list fault fails the native dispatch assertion before exact restoration."
   }
 }

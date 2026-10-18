@@ -286,3 +286,7 @@ impl Exchange for BingxExchange {
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/retained_info_native.rs"]
 mod retained_info_native;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "../../tests/support/handler_list_native.rs"]
+mod structural_alias_tests;

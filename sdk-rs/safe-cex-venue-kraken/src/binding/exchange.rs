@@ -1,5 +1,8 @@
 //! Production Kraken venues: the assembled class graph behind the typed Exchange trait.
 #[cfg(test)]
+#[path = "../../tests/support/accepted_additional_receivers.rs"]
+mod accepted_additional_receivers;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_api_receivers.rs"]
 mod accepted_api_receivers;
 #[cfg(test)]
