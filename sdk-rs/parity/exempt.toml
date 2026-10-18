@@ -7654,6 +7654,70 @@ rs = "safe-cex-venue-bybit/src/inverse_position.rs::PositionMappingError"
 reason = "Rust completion envelope separating the existing typed Position refusal from a Store access failure; native error propagation retains the Store origin."
 
 [[exempt]]
+rs = "safe-cex-exchange/src/native.rs::native_frame_receipts"
+reason = "Native replay diagnostic host observation: reads physical per-dial message/ping/pong/close counters without modifying frames. No TS business behavior is implemented. Native transport control-frame regression and controlled TLS replay validate the receipt boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::native_replay_runtime"
+reason = "Explicit isolated replay host selection with controlled Date/performance inputs; ordinary native runtimes retain real clocks. Native replay_clock and compiled native-account-replay tests exercise timer order, cancellation and isolation. This is test-host infrastructure, not an exchange-source parity claim."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::replay_checkpoint"
+reason = "Native replay host bridge to the existing source Promise checkpoint. It supplies a processing observation fence for diagnostic replay, with no corresponding maintained exchange operation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::replay_pending_jobs"
+reason = "Native replay diagnostic observation of unfinished source Promise jobs, excluding future timer jobs. Nonzero pending work prevents a processing-drain claim; no exchange-source semantics are replaced."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::ReplayClock"
+reason = "Native-only diagnostic host clock state for isolated deterministic replay. Production native accounts never select this host implicitly. The Rust replay_clock regression compares actual runtime timer callbacks and VirtualClock host readings."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::activate"
+reason = "Explicit diagnostic replay transition from fixed-clock real startup scheduling to manually driven timer deadlines. No TS exchange operation; the TS probe implements the equivalent host transition. Compiled addon tests cover activation and repeated-begin refusal."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::advance"
+reason = "Diagnostic host scheduler for recorded replay time, with monotonic validation, stable deadline/registration order and cancellation handling. Native replay_clock tests pin actual callback times; this does not claim to port a maintained exchange method."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/replay_clock.rs::elapsed"
+reason = "Native replay host elapsed-time observation used by addon diagnostic receipts. No exchange algorithm or TS source declaration; fixed/fractional time behavior is exercised through compiled replay tests."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::frame_drain_receipts"
+reason = "Read-only native parser-boundary instrumentation, per physical dial, for consumed/processed/failed handlers and completed close callbacks. No TS business method. The frame_receipts regression covers text, binary, failure, close and dial separation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::FrameDrainReceipt"
+reason = "Native diagnostic counter value crossing the replay receipt boundary, not a ported exchange model. Parser-boundary and controlled TLS regressions detect missing, duplicate and unfinished processing."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_exchange.rs::native_account_replay"
+reason = "Napi-only diagnostic replay control export. Ordinary accounts refuse it, and replay accounts require an isolated keyless host. Compiled native-account-replay tests cover the exported API; no TS production exchange method is claimed."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::native_account_replay_control"
+reason = "Native account host diagnostic dispatcher for explicit replay begin/advance/receipt requests. It observes parser and transport counts and source Promise work. No production exchange business operation or source parity mapping."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::open_native_account_with_replay"
+reason = "Explicit native account host constructor selecting diagnostic clocks only when requested by isolated keyless replay. The ordinary open_native_account path retains its existing host. Compiled addon tests verify live/replay isolation."
+
+[[exempt]]
+rs = "safe-cex-store/src/virtual_clock.rs::set_thread_host_time"
+reason = "Host-time injection seam for isolated native replay, analogous to supplying VirtualClock.now. It changes no offset/server-sync policy and defaults to real time. Native replay_clock regression checks Date rounding, fractional monotonic time and actual VirtualClock readings."
+
+[[exempt]]
+rs = "safe-cex-transport/src/native.rs::NativeFrameCounts"
+reason = "Native physical WebSocket reader diagnostic counters for replay drain validation, not a maintained exchange model. Native transport regression receives text, binary, ping, pong and close over a real loopback WebSocket and checks exact counts."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::frame_receipts_enabled"
+reason = "Explicit Rust replay-host instrumentation switch, default false. Ordinary hosts retain no per-dial parser history; only the diagnostic host enables consumed/processed receipts. No TS exchange tuning or source behavior is added. The frame_receipts and compiled replay regressions exercise the enabled path."
+
+[[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::with_retained_response"
 reason = "C3: native API-error construction glue attaches one existing RetainedJsonInput response to an origin wrapper while chaining the previous opaque cause. It neither parses nor duplicates a transport response authority. No standalone TypeScript declaration; actual Binance signed cancel and nearest-origin native tests exercise this boundary."
 
