@@ -136,6 +136,15 @@ This selected native/default scope does not cover other owners or the feature
 matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
 and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.
 
+The public `CancelOrderHandle` alias retains the strict map-only Order decoder
+through `Rc<RefCell<Order>>`. Its native decoder observations inspect fields,
+numeric bits, optional presence and shared-cell mutation before projection.
+The constructed `private_classes` test `native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symbols`
+holds both signed Futures DELETEs, then checks each successful category and the
+untouched symbol in the actual Store. PM/Spot do not use this handle alias.
+`scripts/cancel-order-handle-controls.py` breaks the live symbol filter, requires
+that compiled native assertion to fail and restores exact source bytes for GREEN.
+
 Spot order formatting consumes BaseExchange's client-ID resolution and final
 native-count assertion directly. Its market snapshot is cloned before errors
 can emit through the store. Preserve attached-order field inheritance, post-only

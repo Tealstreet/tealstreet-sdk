@@ -32,7 +32,7 @@ impl Http {
 impl RestAdapter for Http {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let path = request.url.split('?').next().unwrap().to_owned();
-        self.requests.lock().unwrap().push(request);
+        self.requests.lock().unwrap().push(request.clone());
         let (status, body) = self
             .routes
             .lock()
@@ -44,12 +44,31 @@ impl RestAdapter for Http {
             if self.held.load(Ordering::SeqCst) {
                 return Poll::Pending;
             }
-            Poll::Ready(Ok(RestResponse {
+            let response = RestResponse {
                 status,
                 reason: None,
                 headers: Default::default(),
                 body: RestResponseBody::Encoded(body.as_bytes().to_vec()),
-            }))
+            };
+            Poll::Ready(if (200..300).contains(&status) {
+                Ok(response)
+            } else {
+                Err(safe_cex_transport::RestFailure {
+                    code: Some(
+                        if status < 500 {
+                            "ERR_BAD_REQUEST"
+                        } else {
+                            "ERR_BAD_RESPONSE"
+                        }
+                        .into(),
+                    ),
+                    transport_error: None,
+                    message: format!("Request failed with status code {status}"),
+                    response: Some(Box::new(response)),
+                    request: Box::new(request.clone()),
+                    context: None,
+                })
+            })
         }))
     }
 }
@@ -174,6 +193,86 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
         safe_cex_types::OrderStatus::Canceled
     );
     owner.dispose().unwrap();
+}
+
+#[test]
+fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symbols() {
+    use safe_cex_types::{OrderStatus, OrderType};
+
+    for algo_status in [200, 500] {
+        let runtime = Rc::new(Runtime::default());
+        let http = Arc::new(Http::default());
+        http.response("/fapi/v1/allOpenOrders", 200, json!({}));
+        http.response(
+            "/fapi/v1/algoOpenOrders",
+            algo_status,
+            json!({"msg":"algo refused"}),
+        );
+        http.held.store(true, Ordering::SeqCst);
+        let owner = owner(http.clone(), runtime.clone());
+        let errors = events(&owner, "error");
+        let regular: safe_cex_types::Order =
+            safe_cex_exchange::js_runtime::value::to_typed(&order()).unwrap();
+        let mut algo = regular.clone();
+        algo.id = "algo-order".into();
+        algo.r#type = OrderType::StopLoss.into();
+        let mut sibling = regular.clone();
+        sibling.id = "other-symbol".into();
+        sibling.symbol = "ETHUSDT".into();
+        for row in [regular, algo, sibling] {
+            owner.base.store.add_or_update_order(row).unwrap();
+        }
+        let mut call = Box::pin(owner.invoke(Method::CancelSymbol, vec![string("BTCUSDT")]));
+        assert!(poll(&runtime, &mut call).is_pending());
+        assert_eq!(http.count("/fapi/v1/allOpenOrders"), 1);
+        assert_eq!(http.count("/fapi/v1/algoOpenOrders"), 1);
+        assert!(
+            owner
+                .base
+                .store
+                .orders()
+                .iter()
+                .all(|row| row.status == OrderStatus::Open)
+        );
+        for request in http.requests.lock().unwrap().iter() {
+            assert!(request.method.eq_ignore_ascii_case("DELETE"));
+            assert!(request.url.contains("symbol=BTCUSDT"));
+            assert!(request.url.contains("timestamp="));
+            assert!(request.url.contains("signature="));
+            assert!(!request.url.contains("ETHUSDT"));
+        }
+        http.held.store(false, Ordering::SeqCst);
+        let result = run(&runtime, call);
+        assert_eq!(result.is_ok(), algo_status == 200);
+        if let Err(error) = &result {
+            let native =
+                safe_cex_exchange::js_runtime::value::Thrown::from((**error).clone()).value;
+            let response = native.get("response").unwrap();
+            assert_eq!(numbers(&response.get("status").unwrap()), 500.0);
+            assert_eq!(
+                text(&response.get("data").unwrap().get("msg").unwrap()),
+                "algo refused"
+            );
+        }
+        let rows = owner.base.store.orders();
+        assert_eq!(rows.len(), 3);
+        for row in rows.iter() {
+            let expected =
+                if row.id == "other-symbol" || (row.id == "algo-order" && algo_status != 200) {
+                    OrderStatus::Open
+                } else {
+                    OrderStatus::Canceled
+                };
+            assert_eq!(
+                row.status, expected,
+                "cancel-symbol handle status for {}",
+                row.id
+            );
+        }
+        assert_eq!(errors.borrow().len(), 2 * usize::from(algo_status != 200));
+        drop(rows);
+        owner.dispose().unwrap();
+    }
 }
 
 #[test]
