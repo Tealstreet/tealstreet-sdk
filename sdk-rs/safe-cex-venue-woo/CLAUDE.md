@@ -4,6 +4,10 @@
 orderbook recovery port and its facade-only tests are retired after caller and
 constructed-runtime checks; the live legacy snapshot/delta/cleanup path remains.
 
+`ASYNC_WRAPPER_REVIEW.md` records the real class's eager public call boundary.
+The common wrappers call the existing member before constructing their waiter
+and await its original Promise; do not wrap that Promise in another spawn.
+
 The canonical spread, lifecycle for-of and array-pattern slots consume the shared
 iterator protocol. Spread retains native values and UTF-16 code points; loops
 observe collection mutation during the body. Array patterns advance only their

@@ -138,7 +138,10 @@ fn market(a: &Market, e: &Value) {
     num(a.precision.amount, &e["precision"]["amount"]);
     num(a.precision.price, &e["precision"]["price"]);
     num(a.limits.amount.min, &e["limits"]["amount"]["min"]);
-    num(a.limits.amount.max, &e["limits"]["amount"]["max"]);
+    num(
+        safe_cex_num::numeric_value_to_number(&a.limits.amount.max),
+        &e["limits"]["amount"]["max"],
+    );
     num(a.limits.leverage.min, &e["limits"]["leverage"]["min"]);
     num(a.limits.leverage.max, &e["limits"]["leverage"]["max"]);
     num(a.contract_size.unwrap(), &e["contractSize"]);

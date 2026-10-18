@@ -442,7 +442,10 @@ fn public_reads_assert_native_catalog_candles_and_query_bits_against_live_source
                     ("precision/amount", m.precision.amount),
                     ("precision/price", m.precision.price),
                     ("limits/amount/min", m.limits.amount.min),
-                    ("limits/amount/max", m.limits.amount.max),
+                    (
+                        "limits/amount/max",
+                        safe_cex_num::numeric_value_to_number(&m.limits.amount.max),
+                    ),
                     ("limits/leverage/min", m.limits.leverage.min),
                     ("limits/leverage/max", m.limits.leverage.max),
                     ("contractSize", m.contract_size.unwrap()),

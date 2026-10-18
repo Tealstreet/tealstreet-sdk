@@ -118,7 +118,7 @@ fn public_mapper_native_field_identity() {
                             "limits.amount.min",
                         ),
                         (
-                            value.limits.amount.max,
+                            safe_cex_num::numeric_value_to_number(&value.limits.amount.max),
                             &input["limits"]["amount"]["max"],
                             "limits.amount.max",
                         ),

@@ -51,7 +51,7 @@ fn market(symbol: &str, active: bool) -> Market {
             cost: None,
             amount: MarketLimitsAmount {
                 min: 1.0,
-                max: 10.0,
+                max: (10.0).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: 1.0,

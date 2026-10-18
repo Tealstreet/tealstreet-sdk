@@ -559,7 +559,7 @@ fn live_ts_numeric_coercion_and_user_signatures() {
         let result = action_hash(&action, None, &raw(case, "raw"));
         match result {
             Ok(hash) => assert_eq!(hash, case["hash"].as_str().unwrap()),
-            Err(error) => assert_eq!(error, case["error"].as_str().unwrap()),
+            Err(error) => assert_eq!(error.to_string(), case["error"].as_str().unwrap()),
         }
     }
     let cases = data["user"].as_array().unwrap();
@@ -970,7 +970,7 @@ fn sign_only_bigint_strings_are_rejected_but_blank_strings_hash_zero() {
         let action: Value = serde_json::from_str(r#"{"type":"scheduleCancel"}"#).unwrap();
         match action_hash(&action, None, &raw(case, "raw")) {
             Ok(hash) => assert_eq!(hash, case["hash"].as_str().unwrap()),
-            Err(error) => assert_eq!(error, case["error"].as_str().unwrap()),
+            Err(error) => assert_eq!(error.to_string(), case["error"].as_str().unwrap()),
         }
     }
 }
@@ -1453,32 +1453,35 @@ fn audit_split_surrogate_response_refuses_before_emitting_substituted_error() {
 }
 
 #[test]
-fn portable_crypto_errors_price_the_versioned_ethers_metadata_before_source_observation() {
+fn native_crypto_errors_retain_versioned_ethers_metadata_before_source_observation() {
     let mut completed = 0;
     for input in ["0xzz", "0x1", "12"] {
-        assert_eq!(
+        let expected = serde_json::json!({
+            "name":"TypeError",
+            "message":format!("invalid BytesLike value (argument=\"value\", value={}, code=INVALID_ARGUMENT, version=6.17.0)", serde_json::to_string(input).unwrap()),
+            "code":"INVALID_ARGUMENT", "argument":"value", "value":input,
+            "shortMessage":"invalid BytesLike value"
+        });
+        for error in [
             address_to_bytes(input).unwrap_err(),
-            "invalid BytesLike value",
-            "CRYPTO native stable address diagnostic"
-        );
-        assert_eq!(
             action_hash(&serde_json::json!({}), Some(input), &serde_json::json!(1)).unwrap_err(),
-            "invalid BytesLike value",
-            "CRYPTO native hash propagates stable diagnostic"
-        );
-        assert_eq!(
             sign_l1_action(
                 &format!("0x{}", "11".repeat(32)),
                 &serde_json::json!({}),
                 Some(input),
                 &serde_json::json!(1),
-                true
+                true,
             )
             .unwrap_err(),
-            "invalid BytesLike value",
-            "CRYPTO native sign propagates stable diagnostic"
-        );
-        completed += 3;
+        ] {
+            let actual =
+                safe_cex_exchange::js_runtime::value::to_json(&error.value().to_js()).unwrap();
+            assert_eq!(
+                actual, expected,
+                "native crypto error fields before any source observation"
+            );
+            completed += 1;
+        }
     }
     assert_eq!(completed, 9, "CRYPTO independent native error floor");
     let output = std::process::Command::new("node")
