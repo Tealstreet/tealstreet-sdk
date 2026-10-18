@@ -52,6 +52,7 @@ pub struct Runtime {
     pub reports: RefCell<Vec<String>>,
     pub report_contexts: RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>,
     pub logs: RefCell<Vec<String>>,
+    pub console_calls: RefCell<Vec<(String, Vec<safe_cex_exchange::js_runtime::value::Js>)>>,
     /// Optional deterministic entropy stream for session/identity race witnesses.
     pub random_sequence: Cell<Option<u64>>,
 }
@@ -118,6 +119,9 @@ impl ExchangeRuntime for Runtime {
         Box::new(Task(flag))
     }
     fn console_values(&self, level: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_calls
+            .borrow_mut()
+            .push((level.into(), message.to_vec()));
         let rendered = safe_cex_exchange::runtime::console_text(message);
         let message = rendered.as_str();
         self.logs.borrow_mut().push(format!("{level}: {message}"));

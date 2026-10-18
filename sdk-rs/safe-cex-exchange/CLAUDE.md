@@ -1933,3 +1933,10 @@ This accepted lifetime policy has one core override classification and no source
 super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
 `tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
 cleanup, while Backpack/BingX binding probes cover actual sockets/timers.
+
+`REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
+`JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
+materialization follows that source chain and the canonical retained response.
+Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
+signed requests before JSON. Original JS object identity remains an owned-tree residual.
+

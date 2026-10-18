@@ -88,7 +88,7 @@ kind = "function"
 layer = "mirror"
 rs = "safe-cex-venue-coinbase/src/utils.rs::pem_to_pkcs8_der"
 status = "divergent"
-note = "CHOSEN: uses the shared forgiving base64 decoder and returns a unit CoinbasePemDecodeError instead of platform DOMException name/message metadata to keep platform errors out of the pure Rust helper. Preserves first-marker-only removal, JS whitespace stripping, PKCS8 passthrough, SEC1 wrapping and malformed-input rejection; retaining platform metadata would require a richer error type."
+note = "CHOSEN: uses the shared forgiving base64 decoder and returns a unit CoinbasePemDecodeError instead of platform DOMException name/message metadata to keep platform errors out of the pure Rust helper. Preserves first-marker-only removal, JS whitespace stripping, PKCS8 passthrough, SEC1 wrapping and malformed-input rejection; retaining platform metadata would require a richer error type. FIX-audit: production CryptoHost invokes pem_to_pkcs8_der_with instead of the unit-error facade and now preserves maintained atob message branches, InvalidCharacterError name and original native codec cause. Eleven exact malformed PEM inputs reach both constructed variants through WS auth and validated REST placement in tests/exchange_binding.rs::divergence_pem_failure_reaches_real_ws_and_rest_bindings. Unit-facade metadata loss is outside production assembly; scripts/divergence-binding-controls.py requires compiled production RED and exact-restored GREEN. See DIVERGENCE_FIX_AUDIT.md."
 
 [[symbol]]
 ts = "getSigningKey"

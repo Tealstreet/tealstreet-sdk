@@ -34,6 +34,24 @@ fetches, 182 REST attempts, 61 outputs and nine logs. The other history/legacy
 corpora retain their original request/error-order floors; all 28 native numeric
 parameter cases now transmit, including seven previously refused NaN fields.
 
-Truthy non-string history error messages remain a separate OPEN repair using
-the canonical retained-response accessor; this query change does not claim to
-resolve that diagnostic row or the full sixty-row WOO audit.
+## Retained history diagnostics
+
+Both maintained catches (`woo.exchange.ts:1504` and `:1579`) pass
+`err?.response?.data?.message || err?.message` to BaseExchange.emitAndLogError
+and resolve an empty array. The native helper now selects the retained response
+message before converting it directly to the runtime value. Fallback uses the
+canonical error projection. There is no JSON or UTF8 message conversion.
+
+The constructed-class regression drives the real clients, signers and REST adapter
+for both public fills and internal trades. Thirteen profiles per method cover
+numbers, booleans, objects, arrays, nested message fields, isolated D800/DC00 units,
+and falsy or missing response messages. The reference executes the maintained
+catch blocks and BaseExchange reporter. Native event strings are compared as
+UTF16 units, with exactly one event, empty results and signed request counts.
+
+On master e059bc2008, both named tests compiled and failed: the numeric response
+rejected instead of resolving, and isolated surrogates became FFFD. The same
+26 profiles pass after the reporter cutover. The existing history/query corpora
+keep every source case and assertion; their error fixture now stores the response
+on RestFailure instead of the removed context-based response override. These diagnostics close one live defect in audit rows 19–20;
+parser/output obligations and the rest of the sixty-row audit remain open.

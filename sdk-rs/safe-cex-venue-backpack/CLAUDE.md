@@ -441,3 +441,10 @@ losing it preserves source continuations. Production private catches are silent;
 configured generic helper Results remain diagnostic inputs. Final native Drop
 silently tears down source and shared resources under the coordinator lifetime
 ruling. Existing alias, input/corpus and identity guards remain independent.
+
+`RoutedClient::clone` shares the configured primary and reader client owners. The
+construction policy records only Clone; it adds no decoder or receiver exemption.
+The native adapter witness checks both Rc counts, shared retry state, primary
+identity and real GET/write routing after the original handle is dropped. A
+compiled swapped-owner Clone control must fail that witness before exact restore.
+
