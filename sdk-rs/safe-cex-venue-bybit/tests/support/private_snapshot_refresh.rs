@@ -107,7 +107,7 @@ impl ExchangeRuntime for Runtime {
         self.tasks.borrow_mut().push(slot.clone());
         Box::new(RuntimeTask(slot))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "snapshot-debounce-test".into()
     }
@@ -117,7 +117,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
         panic!("unexpected raw exception in snapshot debounce runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {

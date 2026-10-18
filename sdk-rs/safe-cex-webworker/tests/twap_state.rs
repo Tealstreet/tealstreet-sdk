@@ -29,7 +29,7 @@ impl ExchangeRuntime for DrawRuntime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("state creation must not spawn")
     }
-    fn console(&self, _: &str, _: &str) {
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {
         panic!("state creation must not log")
     }
     fn unique_id(&self) -> String {
@@ -38,7 +38,11 @@ impl ExchangeRuntime for DrawRuntime {
     fn is_worker(&self) -> bool {
         true
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {
