@@ -5083,6 +5083,11 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
         .unwrap();
         let observed = owner.base.store.markets();
         assert_eq!(
+            observed.len(),
+            markets.len(),
+            "overlay preserves market count {venue:?}"
+        );
+        assert_eq!(
             observed[0].limits.leverage.max, 125.0,
             "the actual leverage future publishes its account-specific maximum {venue:?}"
         );

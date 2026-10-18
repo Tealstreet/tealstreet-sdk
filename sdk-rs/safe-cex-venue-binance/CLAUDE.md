@@ -554,3 +554,8 @@ zero and replacement generations before serialization. The separate
 updates independently, requires the named native assertion to fail, restores exact
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
+
+The account leverage aliases are native computation capabilities. The constructed
+Futures/PM overlay witness checks signed bracket requests, Store publication and
+unchanged market fields. `scripts/account-leverage-alias-contracts.mjs` measures
+their actual native traits with the maintained authenticated compiler context.
