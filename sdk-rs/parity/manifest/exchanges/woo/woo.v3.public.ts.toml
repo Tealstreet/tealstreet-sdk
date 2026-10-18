@@ -261,7 +261,7 @@ note = "Inert V3 public contract; not connected to live exchange routing and all
 [[symbol]]
 ts = "mapWooV3Candles"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_public.rs::map_woo_v3_candles"
-status = "divergent"
-note = "CHOSEN, ts-bug: NaN timestamps make the TS comparator nontransitive. Stable merge preserves finite timestamp order and ties, but deliberately chooses a deterministic NaN permutation rather than pinning a V8 implementation; Rust sort assumes total ordering. The live source witness pins [0,1,3,2] versus Rust [3,2,0,1]; upstream comparator changes require revisiting it. Strict decoders reject nonfinite timestamps, so this affects only host-constructed mapper inputs. Inert V3 public contract; not connected to live exchange routing and all migration gates remain false. Verified on JSON inputs against current TypeScript; Rust owned records and Results replace readonly objects and thrown Error messages. The duplicate test-only comparison/canonical adapter and its host operations are retired; this remaining native target keeps its separate contract."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: only audit tests and the test-only V3 comparison facade call this TS mapper; no production importer or constructed exchange path reaches it. Rust callers were oracle tests only. The unused mapper, nested sort, local-function policy row and exact native facade/control tail are retired. Archived source captures remain source-only; every other mapper/decoder assertion is retained. Kline declaration decoding remains independent. Actual signed legacy recent/proxy candle reads and maintained/native registration probes pass before and after removal; all-target compiler proves the Rust caller closure. FIX_AUDIT_LEDGER.md row 12 records the decision. No V3 route is enabled."

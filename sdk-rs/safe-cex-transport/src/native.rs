@@ -300,11 +300,12 @@ pub async fn connect_websocket(
     let (stream, _) =
         tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
             .await
-            .map_err(|e| {
-                TransportError::Network(NetworkFailure::from_code(
+            .map_err(|e| match e {
+                tokio_tungstenite::tungstenite::Error::Url(_) => host_error(&e),
+                _ => TransportError::Network(NetworkFailure::from_code(
                     format!("WebSocket {url}: {e}"),
                     Some("ECONNREFUSED".into()),
-                ))
+                )),
             })?;
     let (mut sink, mut source) = stream.split();
     let state = Rc::new(Cell::new(1));

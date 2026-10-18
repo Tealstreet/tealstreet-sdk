@@ -127,17 +127,32 @@ fn native_fields_and_bits() {
 fn surrogate_boundary() {
     for case in ORACLE["surrogates"].as_array().unwrap() {
         let raw = case["raw"].as_str().unwrap();
-        let refused = match case["name"].as_str().unwrap() {
-            "LOGIN_RESPONSE" => js_from_str::<LoginResponse>(raw).is_err(),
-            "USER_RESPONSE" => js_from_str::<UserResponse>(raw).is_err(),
-            "PORTFOLIO_RESPONSE" => js_from_str::<PortfolioResponse>(raw).is_err(),
-            "INSTRUMENTS_RESPONSE" => js_from_str::<InstrumentsResponse>(raw).is_err(),
-            "INSTRUMENT_DETAILS_RESPONSE" => js_from_str::<InstrumentDetailsResponse>(raw).is_err(),
-            "TICKER_RESPONSE" => js_from_str::<TickerResponse>(raw).is_err(),
-            "CANDLE_RESPONSE" => js_from_str::<CandleResponse>(raw).is_err(),
+        match case["name"].as_str().unwrap() {
+            "LOGIN_RESPONSE" => {
+                typed_utf16::assert_projection(raw, &js_from_str::<LoginResponse>(raw).unwrap())
+            }
+            "USER_RESPONSE" => {
+                typed_utf16::assert_projection(raw, &js_from_str::<UserResponse>(raw).unwrap())
+            }
+            "PORTFOLIO_RESPONSE" => {
+                typed_utf16::assert_projection(raw, &js_from_str::<PortfolioResponse>(raw).unwrap())
+            }
+            "INSTRUMENTS_RESPONSE" => typed_utf16::assert_projection(
+                raw,
+                &js_from_str::<InstrumentsResponse>(raw).unwrap(),
+            ),
+            "INSTRUMENT_DETAILS_RESPONSE" => typed_utf16::assert_projection(
+                raw,
+                &js_from_str::<InstrumentDetailsResponse>(raw).unwrap(),
+            ),
+            "TICKER_RESPONSE" => {
+                typed_utf16::assert_projection(raw, &js_from_str::<TickerResponse>(raw).unwrap())
+            }
+            "CANDLE_RESPONSE" => {
+                typed_utf16::assert_projection(raw, &js_from_str::<CandleResponse>(raw).unwrap())
+            }
             _ => panic!("type inventory"),
         };
-        assert!(refused, "shared_utf8_boundary: {}", case["name"]);
     }
 }
 #[test]
@@ -241,3 +256,6 @@ fn unknown_field_boundary() {
         dispatch(case);
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

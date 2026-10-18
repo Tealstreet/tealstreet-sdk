@@ -370,8 +370,34 @@ fn fill_history_routes_and_recovery_follow_live_source() {
                 "source query case{index}"
             );
         }
+        let logs: Vec<_> =
+            h.runtime
+                .console_calls
+                .borrow()
+                .iter()
+                .map(|(level, args)| {
+                    let message = match level.as_str() {
+                        "warn" => {
+                            assert_eq!(args.len(), 1, "console.warn arity case{index}");
+                            args.as_slice()
+                        }
+                        "warning" | "info" | "debug" | "error" => {
+                            assert_eq!(args.len(), 2, "BaseExchange.log arity case{index}");
+                            assert!(args[1].strict_equals(
+                                &safe_cex_exchange::js_runtime::value::Js::str(level)
+                            ));
+                            &args[..1]
+                        }
+                        _ => panic!("unexpected console channel {level} case{index}"),
+                    };
+                    format!(
+                        "{level}: {}",
+                        safe_cex_exchange::runtime::console_text(message)
+                    )
+                })
+                .collect();
         assert_eq!(
-            serde_json::to_value(h.runtime.logs.borrow().clone()).unwrap(),
+            serde_json::to_value(logs).unwrap(),
             case["logs"],
             "source diagnostics case{index}"
         );

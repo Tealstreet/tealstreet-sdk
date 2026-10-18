@@ -351,19 +351,16 @@ fn books_unicode_and_extras() {
                     }
                 }
             } else {
-                // Owned Value cannot represent lone UTF16 units; these are raw-only refusals.
+                let text = String::from_utf16_lossy(expected_units);
                 match record {
                     "OrderBooksResponse" => {
-                        assert!(serde_json::from_str::<OrderBooksResponse>(raw).is_err());
-                        assert!(js_from_str::<OrderBooksResponse>(raw).is_err());
+                        raw_unicode::<OrderBooksResponse>(raw, kind, keys, &text, record)
                     }
                     "OrderBookOrdersResponse" => {
-                        assert!(serde_json::from_str::<OrderBookOrdersResponse>(raw).is_err());
-                        assert!(js_from_str::<OrderBookOrdersResponse>(raw).is_err());
+                        raw_unicode::<OrderBookOrdersResponse>(raw, kind, keys, &text, record)
                     }
                     "OrderBookDetailsResponse" => {
-                        assert!(serde_json::from_str::<OrderBookDetailsResponse>(raw).is_err());
-                        assert!(js_from_str::<OrderBookDetailsResponse>(raw).is_err());
+                        raw_unicode::<OrderBookDetailsResponse>(raw, kind, keys, &text, record)
                     }
                     _ => panic!("unknown record"),
                 }
@@ -504,3 +501,29 @@ fn books_source_controls() {
         );
     }
 }
+
+fn raw_unicode<T: Native>(raw: &str, kind: &str, keys: &[Value], text: &str, record: &str) {
+    typed_utf16::retained(raw);
+    for native in [
+        serde_json::from_str::<T>(raw).unwrap(),
+        js_from_str::<T>(raw).unwrap(),
+    ] {
+        let observed = native.project();
+        if kind == "strings" {
+            typed_utf16::assert_projection(raw, &native);
+            assert_eq!(
+                at(&observed, keys).as_str(),
+                Some(text),
+                "BOOKS typed String native replacement"
+            );
+        } else {
+            assert_eq!(
+                observed,
+                expected(&bases()[record]),
+                "BOOKS unknown surrogate preserves native fields"
+            );
+        }
+    }
+}
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

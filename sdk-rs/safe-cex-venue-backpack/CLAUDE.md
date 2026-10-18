@@ -439,3 +439,10 @@ alias; callbacks and repair writes retain the original array identity. Terminal
 source fixtures may use their own scripted representation, but the native adapter
 never copies a live array into a second mutable collection. NativeValue::array
 returns the original Js and owned/prepared snapshots propagate property failures.
+
+
+`RoutedClient::clone` shares the configured primary and reader client owners. The
+construction policy records only Clone; it adds no decoder or receiver exemption.
+The native adapter witness checks both Rc counts, shared retry state, primary
+identity and real GET/write routing after the original handle is dropped. A
+compiled swapped-owner Clone control must fail that witness before exact restore.

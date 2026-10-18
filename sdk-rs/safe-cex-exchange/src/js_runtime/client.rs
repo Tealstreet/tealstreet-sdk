@@ -712,31 +712,44 @@ impl RestAdapter for JsRestAdapter {
                         .ok()
                         .filter(|r| !r.is_nullish())
                         .and_then(|r| rest_response(&r).ok());
-                    let code = optional(&thrown.value, "code").ok().and_then(|value| {
-                        if let Js::String(units) = value {
-                            Some(units)
-                        } else {
-                            None
-                        }
-                    });
                     let message = thrown.message();
-                    // RestFailure.code is the existing UTF-8 diagnostic view.
-                    // The owned cause is authoritative for the native string.
-                    let mut fields = vec![(
-                        "message",
-                        super::value::owned::OwnedJsValue::string(&message),
-                    )];
-                    if let Some(code) = &code {
-                        fields.push((
-                            "code",
-                            super::value::owned::OwnedJsValue::String(code.to_vec()),
-                        ));
-                    }
-                    let cause = super::value::owned::OwnedCallbackError::new(
-                        super::value::owned::OwnedJsValue::object(fields),
-                    );
+                    let capture = (|| -> Result<_, crate::runtime::ExchangeError> {
+                        let mut fields = Vec::new();
+                        for field in ["name", "message", "code", "stack", "cause", "isAxiosError"] {
+                            let value = optional(&thrown.value, field)?;
+                            if !value.is_undefined() || thrown.value.has_own(field) {
+                                fields.push((
+                                    field,
+                                    super::value::owned::OwnedJsValue::from_js(&value)?,
+                                ));
+                            }
+                        }
+                        if !fields.iter().any(|(field, _)| *field == "message") {
+                            fields.push((
+                                "message",
+                                super::value::owned::OwnedJsValue::string(&message),
+                            ));
+                        }
+                        Ok(super::value::owned::OwnedCallbackError::new(
+                            super::value::owned::OwnedJsValue::object(fields),
+                        ))
+                    })();
+                    let cause = capture.map_err(|error| RestFailure {
+                        code: None,
+                        message: error.message,
+                        transport_error: None,
+                        response: None,
+                        request: Box::new(request.clone()),
+                        context: Some(Box::new(serde_json::json!({"name": error.name}))),
+                    })?;
+                    let code = match cause.value().get("code") {
+                        Some(super::value::owned::OwnedJsValue::String(units)) => {
+                            Some(String::from_utf16_lossy(units))
+                        }
+                        _ => None,
+                    };
                     let failure = RestFailure {
-                        code: code.as_ref().map(|units| String::from_utf16_lossy(units)),
+                        code,
                         message,
                         transport_error: Some(Box::new(
                             safe_cex_transport::TransportError::Rejected(

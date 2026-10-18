@@ -167,17 +167,26 @@ impl Thrown {
         error
     }
     pub fn to_exchange_error(&self) -> ExchangeError {
+        let mut original = self.clone();
         let mut error = self.error_fields();
-        if !self.value.is_object() {
-            return error;
+        if self.value.is_object() {
+            let code = self
+                .value
+                .get("code")
+                .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
+            match code {
+                Ok(code) => error.code = code,
+                Err(cause) => {
+                    error = cause.error_fields();
+                    original = cause;
+                }
+            }
         }
-        let code = self
-            .value
-            .get("code")
-            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
-        match code {
-            Ok(code) => error.code = code,
-            Err(cause) => return cause.error_fields(),
+        if original.native.is_none() {
+            // The existing native slot records the diagnostic projection before
+            // adding its local origin. This is acyclic and needs no user reads.
+            original.native = Some(Rc::new(error.clone()));
+            error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(original));
         }
         error
     }
@@ -186,6 +195,24 @@ impl Thrown {
 impl fmt::Debug for Thrown {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Thrown({})", self.message())
+    }
+}
+
+impl fmt::Display for Thrown {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            self.native
+                .as_ref()
+                .map_or("native JavaScript throw", |error| error.message.as_str()),
+        )
+    }
+}
+
+impl std::error::Error for Thrown {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.native
+            .as_deref()
+            .map(|error| error as &(dyn std::error::Error + 'static))
     }
 }
 
@@ -211,30 +238,52 @@ impl From<ExchangeError> for Thrown {
                 return cause.clone();
             }
         }
-        let value = error_object(&error.name, &error.message);
-        if let Some(cause) = error.origin.as_ref().and_then(|origin| {
-            let original = origin.error();
-            if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
-                return Some(cause);
-            }
-            let failure = original.downcast_ref::<safe_cex_transport::RestFailure>()?;
-            let safe_cex_transport::TransportError::Rejected(origin) =
-                failure.transport_error.as_deref()?
-            else {
-                return None;
-            };
-            origin.error().downcast_ref::<owned::OwnedCallbackError>()
-        }) {
-            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
-                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
-                    && String::from_utf16(units).is_err()
-                    && String::from_utf16_lossy(units) == *projected
-                {
-                    value
-                        .set(field, Js::String(units.clone().into()))
-                        .expect("fresh error metadata property");
+        let mut source = std::error::Error::source(&error);
+        while let Some(cause) = source {
+            if let Some(original) = cause.downcast_ref::<Thrown>()
+                && let Some(snapshot) = &original.native
+                && error.retained_response_input().is_none()
+            {
+                let mut projection = error.clone();
+                projection.origin = snapshot.origin.clone();
+                if projection == **snapshot {
+                    return Self {
+                        value: original.value.clone(),
+                        native: Some(Rc::new(error)),
+                    };
                 }
             }
+            source = cause.source();
+        }
+        let value = error_object(&error.name, &error.message);
+        let mut source = std::error::Error::source(&error);
+        while let Some(original) = source {
+            if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
+                for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                    if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                        && String::from_utf16(units).is_err()
+                        && String::from_utf16_lossy(units) == *projected
+                    {
+                        value
+                            .set(field, Js::utf16(units))
+                            .expect("fresh error metadata property");
+                    }
+                }
+                for field in ["stack", "cause", "isAxiosError"] {
+                    if let Some(cell) = cause.value().get(field) {
+                        value
+                            .define(field, cell.to_js())
+                            .expect("fresh retained error property");
+                    }
+                }
+                break;
+            }
+            source = original.source();
+        }
+        if let Some(response) = error.retained_response_input() {
+            value
+                .define("response", from_retained_input(response))
+                .expect("fresh retained response property");
         }
         if let Some(code) = &error.code {
             value

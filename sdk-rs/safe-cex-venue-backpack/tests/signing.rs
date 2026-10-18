@@ -139,12 +139,12 @@ fn actual_typescript_signing_preimages() {
         json!([56320, 61, 49]),
         "source lone-surrogate key output"
     );
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<String>(
-            corpus["instructionUtf16"]["raw"].as_str().unwrap()
-        )
-        .is_err(),
-        "shared UTF8 instruction refusal"
+    typed_utf16::assert_projection(
+        corpus["instructionUtf16"]["raw"].as_str().unwrap(),
+        &(safe_cex_num::numeric_ingress::js_from_str::<String>(
+            corpus["instructionUtf16"]["raw"].as_str().unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     let expected: Vec<_> = "instruction=go"
         .encode_utf16()
@@ -167,3 +167,6 @@ fn actual_typescript_signing_preimages() {
         corpus["payload"].as_array().unwrap().len()
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

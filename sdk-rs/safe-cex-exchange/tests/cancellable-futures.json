@@ -1647,9 +1647,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "f3fc3b68349efef47408e988bde90a6e359fa8336dc2fd1a7c6d33ebd2e7d865",
+      "producer_sha256": "1c6dd113f273627dd963a5f7053763976272e78aee5b5c3e715739a53cea6815",
       "classification": "no-owned-latch",
-      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing. Reviewed retained string-code origin: after the same child await, synchronous owned metadata capture preserves UTF-16 units before publishing the settled rejection. No task, waiter, reservation or registration is added; the original rejection slot is still written only after settlement."
+      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing. Reviewed retained string-code origin: after the same child await, synchronous owned metadata capture preserves UTF-16 units before publishing the settled rejection. No task, waiter, reservation or registration is added; the original rejection slot is still written only after settlement. Reviewed complete retained REST diagnostics: name, stack, cause and Axios flags are captured synchronously after the same child await through the existing owned origin; no new async boundary, task or cancellation resource. Null-safe metadata reads and the existing primitive diagnostic projection remain synchronous within that same settled branch."
     },
     {
       "owner": "src/js_runtime/client.rs::JsRestAdapter::send",
@@ -1767,11 +1767,11 @@
       ],
       "producer_sha256": "f817e196a48d2508b97d7dd87717bbfc5b1786e2f6e0c7deb281d68104f72850",
       "classification": "guarded",
-      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: the obsolete yield/adopt helpers are removed; Driver/OwnedTasks and PromiseWait registration/Drop bodies remain unchanged. Canonical resolver jobs retain the existing runtime owner; scoped native observer-drop and host-discard witnesses pass. Reviewed #1082 replay diagnostics: the appended pending_non_timer read holds only synchronous immutable borrows; Driver/Task cleanup, queue registration and all existing producer bodies are unchanged.",
+      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: the obsolete yield/adopt helpers are removed; Driver/OwnedTasks and PromiseWait registration/Drop bodies remain unchanged. Canonical resolver jobs retain the existing runtime owner; scoped native observer-drop and host-discard witnesses pass. Reviewed #1082 replay diagnostics: the appended pending_non_timer read holds only synchronous immutable borrows; Driver/Task cleanup, queue registration and all existing producer bodies are unchanged. Reviewed replay receipt test-module cleanup: cfg(test) is explicit and imports are enumerated; production Jobs/Driver/Task bodies and cancellation ownership are byte-unchanged.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "75bf253c85fc61cd0f632a8684ab250a58a58b5f3d274377391ca6074954d5c0"
+          "sha256": "2047fd8eb9218bf97ef0891420d25894318aab5cc49bdbd9869e51a55b95b0b0"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1801,11 +1801,11 @@
       ],
       "producer_sha256": "9bebf021f3754b4f9996de1597b53217ef5e078f871bb932e0740a9679fea446",
       "classification": "guarded",
-      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: the obsolete yield/adopt helpers are removed; Driver/OwnedTasks and PromiseWait registration/Drop bodies remain unchanged. Canonical resolver jobs retain the existing runtime owner; scoped native observer-drop and host-discard witnesses pass. Reviewed #1082 replay diagnostics: the appended pending_non_timer read holds only synchronous immutable borrows; Driver/Task cleanup, queue registration and all existing producer bodies are unchanged.",
+      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: the obsolete yield/adopt helpers are removed; Driver/OwnedTasks and PromiseWait registration/Drop bodies remain unchanged. Canonical resolver jobs retain the existing runtime owner; scoped native observer-drop and host-discard witnesses pass. Reviewed #1082 replay diagnostics: the appended pending_non_timer read holds only synchronous immutable borrows; Driver/Task cleanup, queue registration and all existing producer bodies are unchanged. Reviewed replay receipt test-module cleanup: cfg(test) is explicit and imports are enumerated; production Jobs/Driver/Task bodies and cancellation ownership are byte-unchanged.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "75bf253c85fc61cd0f632a8684ab250a58a58b5f3d274377391ca6074954d5c0"
+          "sha256": "2047fd8eb9218bf97ef0891420d25894318aab5cc49bdbd9869e51a55b95b0b0"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1961,11 +1961,11 @@
       ],
       "producer_sha256": "98e5bd940513d99f2e30b169abe60ecfe207dad902214bbedac43fd46cffd6fd",
       "classification": "guarded",
-      "reason": "The queue eagerly polls the body with its actual readiness waker, then independently owns its continuation and settlement. Dropping the observer preserves execution; host driver discard releases polled and unpolled captures. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run. Reviewed #1082 replay diagnostics: the appended pending_non_timer read holds only synchronous immutable borrows; Driver/Task cleanup, queue registration and all existing producer bodies are unchanged.",
+      "reason": "The queue eagerly polls the body with its actual readiness waker, then independently owns its continuation and settlement. Dropping the observer preserves execution; host driver discard releases polled and unpolled captures. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run. Reviewed #1082 replay diagnostics: the appended pending_non_timer read holds only synchronous immutable borrows; Driver/Task cleanup, queue registration and all existing producer bodies are unchanged. Reviewed replay receipt test-module cleanup: cfg(test) is explicit and imports are enumerated; production Jobs/Driver/Task bodies and cancellation ownership are byte-unchanged.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "75bf253c85fc61cd0f632a8684ab250a58a58b5f3d274377391ca6074954d5c0"
+          "sha256": "2047fd8eb9218bf97ef0891420d25894318aab5cc49bdbd9869e51a55b95b0b0"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2246,9 +2246,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "fcd6922873b61c563bc6a67d6c9f7d6144cc95d72ee0727b1c938ef3c753cbd7",
+      "producer_sha256": "048f152c708663808a27251ceb0570e69f32485381015fe7cb57fce6f1abeb89",
       "classification": "no-owned-latch",
-      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged."
+      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged. Reviewed #1094: Network failure returns a closed NativeWsSocket carrying Error/Close for existing core-owned event dispatch; admission failures retain their typed origin. No task or reader/writer is started on failure; successful handshake ownership and cancellation are unchanged."
     },
     {
       "owner": "src/native.rs::NativeWsSocket as WsSocket::next_event",
@@ -2261,9 +2261,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "2e164f4f5dcb5c3d0ac44751a1eb718285c42ed2030d01f1023e8f9222d4e509",
+      "producer_sha256": "ac427e6f86432604fb627b0733da9289d98d8ae3cceefa4750bc7143d6139a8b",
       "classification": "no-owned-latch",
-      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future."
+      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future. Reviewed #1094: the failed-network variant returns ready Error then Close futures and an unregistered terminal pending future, with no Open, waiter, task or new cancellation latch. Successful socket reads and existing termination ownership are unchanged; real native HTTP400/invalid-URL coverage is ws_lifecycle::native_failed_upgrade_delivers_error_then_close_without_open."
     },
     {
       "owner": "src/native.rs::TokenTunnel as TunnelHost::spawn_local",
@@ -2530,13 +2530,13 @@
         "await",
         "await"
       ],
-      "producer_sha256": "957e996cb3e8468d93bf9bdc49d58e054c5a3e69a4885574ca497d31f02681bb",
+      "producer_sha256": "ab97219a3bcfe482abc63e1302235160a40ff1d049ae795d702319563a6171a7",
       "classification": "guarded",
       "reason": "The advancing latch is set only when this async future is polled; the immediately constructed Advancing Drop guard clears it on completion, error or in-flight cancellation. Waiter references are temporary and no RefCell borrow spans yield_now. Cancellation preserves already advanced time and leaves each sleep owned by its caller, which may finish or drop it before the next advance.",
       "source_dependencies": [
         {
           "file": "src/replay_clock.rs",
-          "sha256": "4cbf9d82cca30291687848b31232c24d5dd0b5dcc07c8f5bdb5a2b6714e8402b"
+          "sha256": "09c923b1e43d8e74470ed7acb7a4cee1456ee765ed282957793dc8f9a5a62676"
         }
       ],
       "witnesses": [
@@ -2565,7 +2565,7 @@
       "source_dependencies": [
         {
           "file": "src/replay_clock.rs",
-          "sha256": "4cbf9d82cca30291687848b31232c24d5dd0b5dcc07c8f5bdb5a2b6714e8402b"
+          "sha256": "09c923b1e43d8e74470ed7acb7a4cee1456ee765ed282957793dc8f9a5a62676"
         }
       ],
       "witnesses": [
@@ -2835,7 +2835,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6e6a7f277b118ccc3ba518d9599ba5e718d940720f7927a107513359433fe3d5"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2880,7 +2880,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6e6a7f277b118ccc3ba518d9599ba5e718d940720f7927a107513359433fe3d5"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2985,7 +2985,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6e6a7f277b118ccc3ba518d9599ba5e718d940720f7927a107513359433fe3d5"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -3029,7 +3029,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6e6a7f277b118ccc3ba518d9599ba5e718d940720f7927a107513359433fe3d5"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         }
       ],
       "guards": [
