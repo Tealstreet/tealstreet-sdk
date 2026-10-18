@@ -55,3 +55,11 @@ requires the full parity index, extractor check, all-features cancellation and
 override gates, plus fmt --check and all-target Clippy for Kraken and parity.
 Following aliases remain separate obligations; this cohort is not whole-Kraken
 accepted-inventory completion.
+
+The selected canonical replay reports four explicit classifications, zero failed
+owners and zero decoder runtime results. All four constructed-Scope witnesses
+and all four named compiled semantic controls pass after exact restoration,
+including a repeat after inheriting the replay-clock master merge. The full
+Kraken inventory clears these profiles and advances to `classes::BodyFuture`,
+which needs its own finite profile. Thirteen of the original 24 aliases remain;
+this result does not classify them or assert full Kraken inventory success.
