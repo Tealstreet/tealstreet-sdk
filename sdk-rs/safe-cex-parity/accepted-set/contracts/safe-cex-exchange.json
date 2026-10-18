@@ -11087,6 +11087,29 @@
                 {
                   "type": {
                     "resolved_path": {
+                      "path": "safe_cex_types::store_access::StoreReadError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Converts an already typed StoreReadError, retaining its opaque original cause and phase. No raw input is parsed. The canonical_native_store original-throw identity regression exercises the native conversion."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
                       "path": "safe_cex_store::notification::StoreMutationError",
                       "args": null
                     }
@@ -11432,29 +11455,6 @@
             }
           }
         ]
-      },
-      {
-        "api": {
-          "kind": "conversion",
-          "trait": "core::convert::From",
-          "args": {
-            "angle_bracketed": {
-              "args": [
-                {
-                  "type": {
-                    "resolved_path": {
-                      "path": "safe_cex_types::store_access::StoreReadError",
-                      "args": null
-                    }
-                  }
-                }
-              ],
-              "constraints": []
-            }
-          }
-        },
-        "input": "typed",
-        "reason": "Converts an already typed StoreReadError, retaining its opaque original cause and phase. No raw input is parsed. The canonical_native_store original-throw identity regression exercises the native conversion."
       }
     ]
   },
@@ -26687,6 +26687,29 @@
                 {
                   "type": {
                     "resolved_path": {
+                      "path": "safe_cex_types::store_access::StoreReadError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Converts an already typed StoreReadError, retaining its opaque original cause and phase. No raw input is parsed. The canonical_native_store original-throw identity regression exercises the native conversion."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
                       "path": "safe_cex_exchange::runtime::ExchangeError",
                       "args": null
                     }
@@ -26722,29 +26745,6 @@
         },
         "input": "typed",
         "reason": "Constructs from already typed native Js, ExchangeError or JsCoercionError values; no serialized representation is decoded by these exact conversions."
-      },
-      {
-        "api": {
-          "kind": "conversion",
-          "trait": "core::convert::From",
-          "args": {
-            "angle_bracketed": {
-              "args": [
-                {
-                  "type": {
-                    "resolved_path": {
-                      "path": "safe_cex_types::store_access::StoreReadError",
-                      "args": null
-                    }
-                  }
-                }
-              ],
-              "constraints": []
-            }
-          }
-        },
-        "input": "typed",
-        "reason": "Converts an already typed StoreReadError, retaining its opaque original cause and phase. No raw input is parsed. The canonical_native_store original-throw identity regression exercises the native conversion."
       }
     ]
   },
