@@ -12,7 +12,16 @@ import { verifiedMacroOrigins } from './accepted-macro-origins.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const specs = Object.fromEntries(Object.entries(loadPolicy('generic-aliases')).filter(([name]) => name.startsWith('safe_cex_venue_hyperliquid::')));
+const projectionNames = [
+  'safe_cex_venue_hyperliquid::private_class::PrivateValue',
+  'safe_cex_venue_hyperliquid::private_class::PrivateError',
+  'safe_cex_venue_hyperliquid::public_class::PublicValue',
+  'safe_cex_venue_hyperliquid::public_class::PublicError',
+  'safe_cex_venue_hyperliquid::core_exchange_class::ExchangeValue',
+  'safe_cex_venue_hyperliquid::core_exchange_class::ExchangeError',
+];
+const specs = Object.fromEntries(Object.entries(loadPolicy('generic-aliases')).filter(([name]) => projectionNames.includes(name)));
+assert.deepEqual(Object.keys(specs).sort(), [...projectionNames].sort(), 'all six reviewed associated projections remain selected');
 function command(binary, args) {
   const result = spawnSync(binary, args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, RUSTC_BOOTSTRAP: '1', CARGO_BUILD_JOBS: '1' } });
