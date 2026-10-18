@@ -733,3 +733,187 @@ fn native_signing_record_container_decodes_ordered_utf16_pairs() {
         );
     }
 }
+
+#[test]
+fn native_typed_container_aliases_keep_shared_cells() {
+    use safe_cex_num::JsJsonValue as J;
+    use safe_cex_venue_backpack::{
+        account_reads, api_factory, order_actions, orderbook_state as book, public_control,
+        public_listeners,
+    };
+    let failure: account_reads::ValidationFailure = Rc::new(RefCell::new(J::Number(f64::NAN)));
+    let other = failure.clone();
+    assert!(Rc::ptr_eq(&failure, &other));
+    assert!(matches!(*other.borrow(), J::Number(n) if n.is_nan()));
+    *failure.borrow_mut() = J::Undefined;
+    assert!(matches!(*other.borrow(), J::Undefined));
+
+    let headers: api_factory::Headers = Rc::new(RefCell::new(vec![
+        ("x-first".into(), J::Number(-0.0)),
+        ("x-next".into(), J::Undefined),
+    ]));
+    let other = headers.clone();
+    assert!(Rc::ptr_eq(&headers, &other));
+    assert_eq!(
+        other
+            .borrow()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>(),
+        ["x-first", "x-next"]
+    );
+    assert!(matches!(other.borrow()[0].1, J::Number(n) if n.to_bits()==(-0.0f64).to_bits()));
+    headers.borrow_mut().push(("x-last".into(), J::Bool(true)));
+    assert_eq!(other.borrow().len(), 3);
+
+    let request: order_actions::Request = vec![
+        ("price", order_actions::Field::Number(f64::NAN)),
+        ("text", order_actions::Field::Text(vec![0xd800])),
+        ("reduceOnly", order_actions::Field::Bool(true)),
+    ];
+    assert_eq!(
+        request.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+        ["price", "text", "reduceOnly"]
+    );
+    assert!(matches!(request[0].1, order_actions::Field::Number(n) if n.is_nan()));
+    assert!(matches!(&request[1].1, order_actions::Field::Text(v) if v==&[0xd800]));
+
+    let subscriptions: public_control::SubscriptionState =
+        Rc::new(RefCell::new(public_control::Subscriptions::default()));
+    let other = subscriptions.clone();
+    assert!(Rc::ptr_eq(&subscriptions, &other));
+    subscriptions.borrow_mut().insert(vec![0xd800]);
+    assert!(other.borrow().contains(&[0xd800]));
+    other.borrow_mut().remove(&[0xd800]);
+    assert!(subscriptions.borrow().values().is_empty());
+
+    let state: book::StateRef<bool, bool> = Rc::new(RefCell::new(book::create_order_book_state()));
+    let other = state.clone();
+    assert!(Rc::ptr_eq(&state, &other));
+    state.borrow_mut().updates.extend([true, false]);
+    state.borrow_mut().last_update_id = -0.0;
+    assert_eq!(other.borrow().updates, [true, false]);
+    assert_eq!(other.borrow().last_update_id.to_bits(), (-0.0f64).to_bits());
+    let handlers: book::TerminalHandlers<bool> = state.borrow().terminal_handlers.clone();
+    let other = handlers.clone();
+    assert!(Rc::ptr_eq(&handlers, &other));
+    let handler = Rc::new(true);
+    handlers.borrow_mut().insert(handler.clone());
+    assert!(Rc::ptr_eq(other.borrow().iter().next().unwrap(), &handler));
+    other.borrow_mut().remove(&handler);
+    assert!(handlers.borrow().is_empty());
+
+    let listener: public_listeners::State<bool> =
+        Rc::new(RefCell::new(book::create_order_book_state()));
+    let other = listener.clone();
+    assert!(Rc::ptr_eq(&listener, &other));
+    listener.borrow_mut().is_terminal = true;
+    assert!(other.borrow().is_terminal);
+    let calls = Rc::new(Cell::new(0));
+    let observed = calls.clone();
+    let terminal = Rc::new(public_listeners::Terminal {
+        call: Rc::new(move || {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    });
+    listener
+        .borrow()
+        .terminal_handlers
+        .borrow_mut()
+        .insert(terminal);
+    (other
+        .borrow()
+        .terminal_handlers
+        .borrow()
+        .iter()
+        .next()
+        .unwrap()
+        .call)()
+    .unwrap();
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn native_data_container_aliases_preserve_holes_keys_and_mutation() {
+    use safe_cex_types::{OrderBook, OrderBookOrders};
+    use safe_cex_venue_backpack::{
+        order_utils, orderbook_state, private_auth, public_control, public_listeners, rest_reads,
+        startup_recovery,
+    };
+    let text: public_control::JsString = vec![0xd800, 0xdc00, 0xdfff];
+    assert_eq!(text, [0xd800, 0xdc00, 0xdfff]);
+    let value = Native::object(vec![("nan", Native::Number(f64::NAN))]);
+    let requests: order_utils::BatchRequests<Native> = Rc::new(RefCell::new(vec![value.clone()]));
+    let other = requests.clone();
+    assert!(Rc::ptr_eq(&requests, &other));
+    assert!(other.borrow()[0].same_reference(&value));
+    requests.borrow_mut().push(Native::Undefined);
+    assert!(other.borrow()[1].is_undefined());
+    let map: startup_recovery::NativeMap<Native> = Rc::new(RefCell::new(vec![
+        (vec![0xd800], value.clone()),
+        (vec![0xd800], Native::Undefined),
+    ]));
+    let other = map.clone();
+    assert!(Rc::ptr_eq(&map, &other));
+    assert_eq!(
+        other
+            .borrow()
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>(),
+        [vec![0xd800], vec![0xd800]]
+    );
+    assert!(other.borrow()[0].1.same_reference(&value));
+    map.borrow_mut().pop();
+    assert_eq!(other.borrow().len(), 1);
+    let array: rest_reads::Array<Native> = Rc::new(RefCell::new(vec![
+        None,
+        Some(Native::Null),
+        Some(Native::Undefined),
+        Some(value.clone()),
+    ]));
+    let other = array.clone();
+    assert!(Rc::ptr_eq(&array, &other));
+    assert!(other.borrow()[0].is_none());
+    assert!(matches!(other.borrow()[1], Some(Native::Null)));
+    assert!(other.borrow()[2].as_ref().unwrap().is_undefined());
+    assert!(other.borrow()[3].as_ref().unwrap().same_reference(&value));
+    array.borrow_mut().pop();
+    assert_eq!(other.borrow().len(), 3);
+
+    let streams: public_control::Streams = Rc::new(RefCell::new(vec![None, Some(vec![0xd800])]));
+    let other = streams.clone();
+    assert!(Rc::ptr_eq(&streams, &other));
+    assert_eq!(other.borrow()[1], Some(vec![0xd800]));
+    streams.borrow_mut().push(Some(vec![97]));
+    assert_eq!(other.borrow().len(), 3);
+    let depth: orderbook_state::DepthLevels = Rc::new(RefCell::new(vec![[vec![0xd800], vec![49]]]));
+    let other = depth.clone();
+    assert!(Rc::ptr_eq(&depth, &other));
+    depth.borrow_mut()[0][1].push(50);
+    assert_eq!(other.borrow()[0], [vec![0xd800], vec![49, 50]]);
+    let signature: private_auth::AuthSignature =
+        Rc::new(RefCell::new([vec![0xd800], vec![], vec![97], vec![98]]));
+    let other = signature.clone();
+    assert!(Rc::ptr_eq(&signature, &other));
+    let snapshot = private_auth::AuthMessage::snapshot(&[], &signature);
+    signature.borrow_mut()[0].push(99);
+    assert_eq!(snapshot.signature[0], [0xd800]);
+    assert_eq!(other.borrow()[0], [0xd800, 99]);
+    let book: public_listeners::Book = Rc::new(RefCell::new(OrderBook {
+        bids: vec![OrderBookOrders {
+            price: f64::NAN,
+            amount: f64::INFINITY,
+            total: -0.0,
+        }],
+        asks: vec![],
+    }));
+    let other = book.clone();
+    assert!(Rc::ptr_eq(&book, &other));
+    assert!(other.borrow().bids[0].price.is_nan());
+    assert_eq!(other.borrow().bids[0].amount, f64::INFINITY);
+    assert_eq!(other.borrow().bids[0].total.to_bits(), (-0.0f64).to_bits());
+    book.borrow_mut().bids.clear();
+    assert!(other.borrow().bids.is_empty());
+}
