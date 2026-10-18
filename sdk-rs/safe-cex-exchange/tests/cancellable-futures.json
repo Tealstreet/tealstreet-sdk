@@ -2955,13 +2955,12 @@
     {
       "owner": "src/js_runtime/globals.rs::resolve_promise",
       "boundaries": [
-        "owned-or-host-spawn",
         "async-block"
       ],
-      "producer_sha256": "45c478b9cc71fca3bdd5e6a6009b836e9234b09e98eda493b04fdf0a1204e3b4",
+      "producer_sha256": "3281225f36ba1c41a6fa78d30c1ea44767a3ae3dfc159fed230b8a011d8f1928",
       "classification": "delegated",
-      "delegate": "ExchangeRuntime::spawn_local / native::NativeRuntime",
-      "reason": "The native runtime owns the queued thenable job independently of the returned Promise observer. Dropping its task handle does not cancel the job; the job carries the target promise until settlement or until source thenable code retains its resolvers. It installs no exchange/socket registry slot. The actual NativeRuntime constructor witness dropping_the_constructor_observer_does_not_cancel_its_thenable_job checks execution after observer drop."
+      "delegate": "src/js_runtime/jobs.rs::Jobs::spawn / OwnedTasks driver",
+      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup."
     },
     {
       "owner": "src/throttle.rs::ThrottleManager < T >::call",

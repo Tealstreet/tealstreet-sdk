@@ -380,7 +380,7 @@ fn resolve_promise(promise: promise::Promise, value: Js) {
         }
     };
     let runtime = promise.runtime();
-    runtime.spawn_local(Box::pin(async move {
+    super::jobs::for_runtime(&runtime).spawn(Box::pin(async move {
         let (resolve, reject, called) = promise_resolvers(promise.clone());
         if let Err(error) = then.call(value, vec![resolve, reject]) {
             if !called.replace(true) {

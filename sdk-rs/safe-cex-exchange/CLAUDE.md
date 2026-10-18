@@ -1229,7 +1229,8 @@ snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_t
 The shared Promise global is a native constructor with its existing static
 methods. It runs the executor synchronously with resolve/reject functions that
 share a first-call lock, including while adopting a pending value. Resolution
-reads a thenable's `then` synchronously and queues its invocation on the runtime;
+reads a thenable's `then` synchronously and queues its invocation in the same
+runtime FIFO as Promise reactions;
 self-resolution rejects and original thrown values survive. The native scheduler
 retains the queued job after observer drop. `tests/js_promise_constructor.rs`
 uses NativeRuntime/native HTTP hosting without replacement hosts and compares
