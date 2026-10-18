@@ -158,7 +158,7 @@ Venue code implements hooks that receive validated payloads; callers invoke the
 base entrypoints with ordinary `PlaceOrderOpts`. No venue constructs the private
 validated fields. This example runs as a crate doctest: it constructs the production Store and all
 five BaseExchange arguments, places one order and one native batch, and verifies
-a rejected batch sends nothing. The recording runtime implements all ten host
+a rejected batch sends nothing. The recording runtime implements the required host
 methods explicitly; its unused I/O paths panic rather than pretending to work.
 
 ```rust
@@ -167,6 +167,7 @@ use safe_cex_exchange::{
     client_order_id::{pattern_client_order_id_rule, ClientOrderIdRuleOverrides},
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedOrder, ValidatedBatch},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    js_runtime::value::Js,
 };
 use safe_cex_store::{store::DefaultStore, Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, PlaceOrderOpts};
@@ -183,12 +184,12 @@ impl ExchangeRuntime for RecordingRuntime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected detached task")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[Js]) {}
     fn unique_id(&self) -> String { "fixture-id".into() }
     fn is_worker(&self) -> bool { false }
     fn random(&self) -> f64 { 0.5 }
     fn report_exception(&self, error: &ExchangeError, _: &Value) { eprintln!("{}: {}", error.name, error.message); }
-    fn report_raw_exception(&self, _: &Value, _: &Value) { panic!("unexpected raw exception report") }
+    fn report_raw_exception(&self, _: &Js, _: &Value) { panic!("unexpected raw exception report") }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker request")
     }
@@ -1686,3 +1687,8 @@ references and return methods/getters/classes. These are core prerequisites;
 Hyperliquid still uses Realm until its atomic family cutover. The independent
 js-iterator-record-controls.py fault must compile, fail normal-close validation,
 restore exact bytes and pass the native/source cases.
+
+Source `new` operations use `Js::construct`, including top-level native venue
+factories and host-selected collection constructors. Ordinary host calls remain
+separate. Lighter SDK's captured URLSearchParams uses `ClientHost::construct` for
+both transaction submission paths; JSON stringify remains an ordinary call.

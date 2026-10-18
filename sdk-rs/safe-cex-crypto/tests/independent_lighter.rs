@@ -6,6 +6,8 @@ use safe_cex_crypto::lighter::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::Path};
+#[path = "support/lighter_source_pin.rs"]
+mod source_pin;
 const FIXTURE: &str = include_str!("fixtures/lighter/venue-signing-preimages.json");
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -45,6 +47,13 @@ fn independent_venue_artifact_and_sources_are_pinned() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for (file, digest) in corpus["sources"].as_object().unwrap() {
+        if pins
+            .get(file)
+            .is_some_and(|pin| pin.get("declarationsSha256").is_some())
+        {
+            source_pin::verify(file, None);
+            continue;
+        }
         let expected = pins.get(file).map_or(digest, |pin| &pin["currentSha256"]);
         assert_eq!(
             hex(&Sha256::digest(std::fs::read(root.join(file)).unwrap())),
@@ -52,6 +61,24 @@ fn independent_venue_artifact_and_sources_are_pinned() {
             "independent source drift: {file}"
         );
     }
+}
+#[test]
+fn reviewed_shared_declarations_admit_unrelated_types_and_reject_each_mutation() {
+    let result = source_pin::run("lighter-source-provenance-controls.cjs", &[]);
+    assert_eq!(result["unrelatedTypeEditsAccepted"], 2);
+    assert_eq!(
+        result["namedMutationFailures"],
+        serde_json::json!([
+            "OrderSide",
+            "OrderStatus",
+            "OrderStopTriggerType",
+            "OrderTimeInForce",
+            "OrderType"
+        ])
+    );
+    assert_eq!(result["missingPinRejected"], true);
+    assert_eq!(result["missingDeclarationRejected"], true);
+    assert_eq!(result["missingCapturedSourceRejected"], true);
 }
 #[test]
 fn every_independent_wasm_hash_and_signature_matches_rust() {

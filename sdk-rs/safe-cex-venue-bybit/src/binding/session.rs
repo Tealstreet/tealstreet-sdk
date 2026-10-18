@@ -153,7 +153,7 @@ impl SessionHost for Rt {
                     }
                 }
             }
-            "construct" => arg(&args, 0).call(Js::Undefined, args.into_iter().skip(1).collect()),
+            "construct" => arg(&args, 0).construct(args.into_iter().skip(1).collect(), None),
             "iterable spread" => Ok(Js::array(arg(&args, 0).iterable_values()?)),
             "Number.isFinite" => self
                 .shared

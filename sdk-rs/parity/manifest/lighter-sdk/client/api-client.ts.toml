@@ -126,9 +126,9 @@ note = "Original mutable type-table lookup, eager default expiration and all fiv
 ts = "LighterApiClient.sendRawTx"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-lighter-sdk/src/client_runtime.rs::send_raw_tx"
+rs = [ "safe-cex-lighter-sdk/src/client_runtime.rs::send_raw_tx", "safe-cex-lighter-sdk/src/client_runtime.rs::ClientHost::construct" ]
 status = "ported"
-note = "Current serializer/destructuring, captured URLSearchParams and Axios post before body.toString, eager dispatch, original awaited response and modern/legacy raw string selection, original transport/coercion/API errors and owned continuation. Exact target: safe-cex-lighter-sdk/src/client_runtime.rs::send_raw_tx."
+note = "Current serializer/destructuring, captured URLSearchParams and Axios post before body.toString, eager dispatch, original awaited response and modern/legacy raw string selection, original transport/coercion/API errors and owned continuation. Captured URLSearchParams is invoked by construction, separately from ordinary function application. Split member `safe-cex-lighter-sdk/src/client_runtime.rs::ClientHost::construct` - required source new-operation capability over the already selected constructor and arguments. Exact target: safe-cex-lighter-sdk/src/client_runtime.rs::send_raw_tx."
 
 [[symbol]]
 ts = "LighterApiClient.sendRawTxBatch"

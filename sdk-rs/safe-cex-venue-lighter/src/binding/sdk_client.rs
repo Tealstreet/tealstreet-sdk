@@ -232,6 +232,9 @@ impl ClientHost for SdkHost {
     fn call(&self, function: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
         function.call(Js::Undefined, args)
     }
+    fn construct(&self, constructor: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+        constructor.construct(args, None)
+    }
     fn call_method(&self, receiver: &Js, member: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         receiver.call_method(member, args)
     }
