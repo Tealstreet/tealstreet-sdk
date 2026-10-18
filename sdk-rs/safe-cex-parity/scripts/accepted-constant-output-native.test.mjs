@@ -225,7 +225,7 @@ async function probe(mode) {
     } });
   }
   const { runProbes } = await import(pathToFileURL(path.join(root,'safe-cex-parity/scripts/accepted-probes.mjs')));
-  const rows = runProbes(root, metadata, [{ package: pkg.name, target, types: found.types, locals: [] }], { [ownerName]: contract });
+  const rows = runProbes(root, metadata, [{ package: pkg.name, target, features: [], types: found.types, locals: [] }], { [ownerName]: contract });
   console.log('CONSTANT_EMITTER ' + JSON.stringify({ mode, count: hookState.count }));
   console.log('CONSTANT_NATIVE ' + JSON.stringify(rows));
   assert.equal(rows.length, 1);
@@ -281,7 +281,7 @@ async function directProbe(mode, selected) {
   const { runProbes } = await import(pathToFileURL(path.join(root, 'safe-cex-parity/scripts/accepted-probes.mjs')));
   let rows;
   try {
-    rows = runProbes(root, metadata, [{ package: pkg.name, target, types: found.types, locals: [] }], { [ownerName]: contract }, { target: selected, features: [], jobs: 1 });
+    rows = runProbes(root, metadata, [{ package: pkg.name, target, features: [], types: found.types, locals: [] }], { [ownerName]: contract }, { target: selected, features: [], jobs: 1 });
   } finally { fs.appendFileSync = append; }
   console.log('DIRECT_CONSTANT_NATIVE ' + JSON.stringify({ mode, selected, injected, rows }));
   assert.equal(injected, mode === 'drift' ? 1 : 0);

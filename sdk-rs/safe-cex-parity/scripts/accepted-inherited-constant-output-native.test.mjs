@@ -55,7 +55,7 @@ async function probe(mode) {
     } });
   }
   const { runProbes } = await import(pathToFileURL(path.join(root, 'safe-cex-parity/scripts/accepted-probes.mjs')));
-  const rows = runProbes(root, metadata, [{ package: pkg.name, target, types: found.types, locals: [] }], contracts, { target: 'native', features: [], jobs: 1 });
+  const rows = runProbes(root, metadata, [{ package: pkg.name, target, features: [], types: found.types, locals: [] }], contracts, { target: 'native', features: [], jobs: 1 });
   console.log('INHERITED_EMITTER ' + JSON.stringify(control));
   console.log('INHERITED_NATIVE ' + JSON.stringify(rows));
   assert.deepEqual(rows.map(row => row.name), [ownerName]);

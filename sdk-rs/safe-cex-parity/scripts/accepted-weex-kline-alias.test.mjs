@@ -105,7 +105,7 @@ async function nativeProbe(mode) {
   }});
   try {
     const {runProbes}=await import(pathToFileURL(path.join(root,'safe-cex-parity/scripts/accepted-probes.mjs')));
-    const rows=runProbes(root,metadata,[{package:pkg.name,target,types:[],publicAliases:aliases,externalTypeAliases,macroOrigins,locals:[]}],{[name]:contract(aliases[0])},{target:'native',features:[],jobs:1});
+    const rows=runProbes(root,metadata,[{package:pkg.name,target,features:artifacts.find(row=>row.package_id===pkg.id && row.target.name===target.name).features,types:[],publicAliases:aliases,externalTypeAliases,macroOrigins,locals:[]}],{[name]:contract(aliases[0])},{target:'native',features:[],jobs:1});
     console.log('WEEX_KLINE_NATIVE '+JSON.stringify({count:state.count,rows}));
     assert.equal(rows.length,1);assert.equal(rows[0].name,name);
     assert.deepEqual(rows[0].failures,[],'actual Weex tuple native identity slots and traits');
