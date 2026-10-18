@@ -1709,6 +1709,21 @@ fn startup_finishes_all_hip3_requests_under_fixed_and_advancing_native_clocks() 
                 safe_cex_exchange::native::replay_raw_tasks(&runtime)
             );
             started.unwrap().unwrap();
+            let elapsed =
+                safe_cex_exchange::runtime::ExchangeRuntime::monotonic_now_ms(runtime.as_ref());
+            if replay {
+                assert_eq!(
+                    elapsed.to_bits(),
+                    0.0f64.to_bits(),
+                    "timer reset leaves replay time fixed"
+                );
+            } else {
+                assert!(
+                    elapsed > 0.,
+                    "production monotonic clock advances during startup"
+                );
+            }
+
             assert_eq!(
                 f.routes.count("info:metaAndAssetCtxs"),
                 5,
@@ -1725,6 +1740,7 @@ fn startup_finishes_all_hip3_requests_under_fixed_and_advancing_native_clocks() 
                 f.host.reports.borrow()
             );
             f.exchange.dispose().unwrap();
+            safe_cex_store::virtual_clock::set_thread_host_time(None);
         }
     });
 }

@@ -145,7 +145,7 @@ impl TunnelHost for NoTunnel {
 #[derive(Default)]
 pub struct Host {
     #[cfg(not(target_arch = "wasm32"))]
-    pub native: Option<Rc<safe_cex_exchange::native::NativeRuntime>>,
+    native: Option<Rc<safe_cex_exchange::native::NativeRuntime>>,
     sleep_wakers: virtual_time::SleepWakers,
     pub now: Cell<f64>,
     jobs: RefCell<Vec<(Job, Arc<Flag>)>>,

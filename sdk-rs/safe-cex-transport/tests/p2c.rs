@@ -392,19 +392,6 @@ fn secondary_is_default_off_and_only_get_uses_secondary_credentials() {
         Some("https://read")
     );
 }
-#[derive(Default)]
-struct Clock(Mutex<u64>);
-impl RateLimitClock for Clock {
-    fn now_ms(&self) -> u64 {
-        *self.0.lock().unwrap()
-    }
-    fn sleep_ms(&self, milliseconds: u64) -> TransportFuture<'_, ()> {
-        Box::pin(async move {
-            *self.0.lock().unwrap() += milliseconds;
-            Ok(())
-        })
-    }
-}
 #[test]
 fn limiter_counts_failed_requests_and_secondary_limits_are_independent() {
     let venue = Arc::new(Venue::default());
