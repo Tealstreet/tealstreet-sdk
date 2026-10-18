@@ -7930,5 +7930,482 @@
         }
       }
     }
+  },
+  "safe_cex_venue_kraken::public_subscriptions::Topic": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        66,
+        84,
+        67,
+        47,
+        85,
+        83,
+        68
+      ],
+      [
+        0,
+        34,
+        92,
+        10
+      ],
+      [
+        55296,
+        65,
+        56320
+      ],
+      [
+        55357,
+        56832,
+        65535
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      7,
+      "BTC/USD",
+      {},
+      [
+        -1
+      ],
+      [
+        65536
+      ],
+      [
+        1.5
+      ],
+      [
+        true
+      ],
+      [
+        null
+      ],
+      [
+        []
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Topic is the actual Vec<u16> UTF-16 carrier in PublicSubscriptionHost. Its inherited Vec Deserialize admits arrays of u16 code units, including lone surrogates, and rejects non-arrays and invalid elements; it is not a JSON string decoder. scripts/topic-alias-contracts.mjs authenticates its actual compiler identity and executes native Serde/conversion probes. Native observation inspects each decoded code unit before JSON. tests/support/accepted_topic_alias.rs checks owned/qualified decoding and original physical Futures/Spot subscription wires against unchanged live TypeScript onOpen arrows selected by AST. The compiled old lossy topic consumer fails that named physical-wire witness; exact restored retained production passes. Other aliases remain independent.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "primitive": "u16"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "primitive": "u16"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok(units) => serde_json::Value::Array(units.iter().map(|unit| serde_json::Value::from(*unit as u64)).collect()), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            66,
+            84,
+            67,
+            47,
+            85,
+            83,
+            68
+          ],
+          "output": [
+            66,
+            84,
+            67,
+            47,
+            85,
+            83,
+            68
+          ]
+        },
+        {
+          "input": [
+            0,
+            34,
+            92,
+            10
+          ],
+          "output": [
+            0,
+            34,
+            92,
+            10
+          ]
+        },
+        {
+          "input": [
+            55296,
+            65,
+            56320
+          ],
+          "output": [
+            55296,
+            65,
+            56320
+          ]
+        },
+        {
+          "input": [
+            55357,
+            56832,
+            65535
+          ],
+          "output": [
+            55357,
+            56832,
+            65535
+          ]
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 7,
+          "output": null
+        },
+        {
+          "input": "BTC/USD",
+          "output": null
+        },
+        {
+          "input": {},
+          "output": null
+        },
+        {
+          "input": [
+            -1
+          ],
+          "output": null
+        },
+        {
+          "input": [
+            65536
+          ],
+          "output": null
+        },
+        {
+          "input": [
+            1.5
+          ],
+          "output": null
+        },
+        {
+          "input": [
+            true
+          ],
+          "output": null
+        },
+        {
+          "input": [
+            null
+          ],
+          "output": null
+        },
+        {
+          "input": [
+            []
+          ],
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kraken::binding::sockets::topic": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "topic",
+      "signature": {
+        "inputs": [
+          [
+            "t",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outgoing symbol encoding: copies an already typed slice of u16 code units into a retained Text cell for JSON wire serialization. It parses no text, validates no wire record and admits no raw input decoder. Native physical Futures/Spot wires preserve every original code unit; restoring the old lossy conversion makes both named tests fail.",
+    "evidence": "TOPIC_ALIAS_REVIEW.md reviews this specific outgoing helper and its compiler-confirmed API. scripts/topic-alias-contracts.mjs measures its exact role classification separately from the actual decoder alias. This role receipt is not an execution claim: tests/support/accepted_topic_alias.rs separately drives the actual constructed Scope, listener/reconnect/send members and physical wire against unchanged live TypeScript. scripts/topic-alias-controls.py requires both named compiled lossy-consumer failures and exact restored passes. No inbound decoder or other function is exempted."
+  },
+  "safe_cex_venue_kraken::binding::sockets::interval_json": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "interval_json",
+      "signature": {
+        "inputs": [
+          [
+            "interval",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::table_lookup::TableHit",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outgoing interval encoding: maps an existing typed TableHit to the prepared numeric cell, preserves the default and omits inherited function-valued prototype entries for JSON.stringify. No wire input or record is decoded. The actual constructed Spot OHLC subscription carries the mapped numeric interval to the physical socket and matches the live source.",
+    "evidence": "TOPIC_ALIAS_REVIEW.md reviews this specific outgoing helper and its compiler-confirmed API. scripts/topic-alias-contracts.mjs measures its exact role classification separately from the actual decoder alias. This role receipt is not an execution claim: tests/support/accepted_topic_alias.rs separately drives the actual constructed Scope, listener/reconnect/send members and physical wire against unchanged live TypeScript. scripts/topic-alias-controls.py requires both named compiled lossy-consumer failures and exact restored passes. No inbound decoder or other function is exempted."
+  },
+  "safe_cex_venue_kraken::binding::sockets::spot_frame": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "spot_frame",
+      "signature": {
+        "inputs": [
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": [
+                            {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "primitive": "u16"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outgoing envelope assembly: wraps source protocol method text and already prepared retained params under method/params in insertion order. The string parameter is an output protocol literal, not a raw decoder input. Actual constructed Spot ticker/book/OHLC and unsubscribe wires observe its fields, original UTF16 symbol and source JSON ordering.",
+    "evidence": "TOPIC_ALIAS_REVIEW.md reviews this specific outgoing helper and its compiler-confirmed API. scripts/topic-alias-contracts.mjs measures its exact role classification separately from the actual decoder alias. This role receipt is not an execution claim: tests/support/accepted_topic_alias.rs separately drives the actual constructed Scope, listener/reconnect/send members and physical wire against unchanged live TypeScript. scripts/topic-alias-controls.py requires both named compiled lossy-consumer failures and exact restored passes. No inbound decoder or other function is exempted."
+  },
+  "safe_cex_venue_kraken::binding::sockets::frame_json": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "frame_json",
+      "signature": {
+        "inputs": [
+          [
+            "frame",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kraken::book_listeners::Frame",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outgoing live-listener frame preparation: consumes the typed Frame<Js> prepared by the actual registered listener, performs its existing symbol ToString and builds retained subscription data for the physical WebSocket. It does not parse a message or construct an inbound model. Actual assembled Futures/Spot listenOrderBook and unsubscribe paths observe the resulting original symbol units on the physical wire.",
+    "evidence": "TOPIC_ALIAS_REVIEW.md reviews this specific outgoing helper and its compiler-confirmed API. scripts/topic-alias-contracts.mjs measures its exact role classification separately from the actual decoder alias. This role receipt is not an execution claim: tests/support/accepted_topic_alias.rs separately drives the actual constructed Scope, listener/reconnect/send members and physical wire against unchanged live TypeScript. scripts/topic-alias-controls.py requires both named compiled lossy-consumer failures and exact restored passes. No inbound decoder or other function is exempted."
   }
 }

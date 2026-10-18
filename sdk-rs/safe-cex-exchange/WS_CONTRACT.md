@@ -124,3 +124,12 @@ socket handle and delivers Error then Close(1006) through ordinary event dispatc
 so normal diagnostics and recovery run with existing generation/disposal guards.
 Constructor/admission failures remain distinct from transport failures. The production Aster and Bitunix host witnesses
 are in registry's `native_socket_error_dispatch` target.
+
+Socket preparation and dial entry now use the canonical eager Promise boundary
+inside the existing cancellation registry. The prefix runs before the venue
+connect callback returns; a ready host installs its socket immediately. Disposal
+still drops the actual pending preparation/dial body before the scheduler runs,
+and wakes its shared driver for cleanup. See the Bitget EAGER_DIAL_AUDIT.md for
+real Bitget/Backpack prefix probes and independent production controls. A native
+held handshake still needs a CONNECTING handle; that separate finding remains
+open and is not implied fixed by eager startup.

@@ -149,3 +149,17 @@ The accessor relocation is covered by the full production rust_index regression,
 which compiled and failed on the module-level macro. The opaque cancellation
 classification moves to error_prototype and retains the same boundary obligation;
 no indexer support exception or discovery exclusion was added.
+
+## Eager socket preparation
+
+The eager socket entry registers its actual preparation/dial body in the existing
+OwnedTasks slot before driving the same Driver through canonical start_eager.
+Cancellation removes the exact registration, drops pending I/O immediately and
+wakes that Driver for shared Promise-job reaping. It does not cancel the shared
+microtask scheduler. Deferred host tasks and their handle cancellation retain
+the existing launch path. New registry tests cover ready/inline completion,
+reentrant close, pending capture release, wake/reaping and producer host discard;
+existing preparation, generation, dial-disposal and guard Drop tests remain.
+Bitget secondary and Backpack public real bindings independently measure the
+ready dial prefix. The separate held-handshake CONNECTING representation stays
+open; see safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md.
