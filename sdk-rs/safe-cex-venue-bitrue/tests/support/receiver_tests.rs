@@ -435,3 +435,6 @@ fn composition_receiver_uses_live_factories_and_lexical_members() {
         (-0.0f64).to_bits()
     );
 }
+
+#[path = "public_aliases.rs"]
+mod public_aliases;

@@ -1008,3 +1008,9 @@ production-body controls in scripts/public-listener-function-controls.py, with
 named native failures and byte-exact restoration passes. The canonical scoped
 runner is scripts/public-listener-function-contracts.mjs; the seven existing
 alias reviews and separate Book decoder remain unchanged.
+
+Four unused ExchangeState forwarding methods are retired; source rows now map
+only to the canonical order_logic/request_weight helpers. The actual interceptor
+and post-only classifier bindings already call those helpers directly. Keep the
+native signed-client and batch-rejection canaries in DEAD_STATE_FORWARDER_REVIEW.md
+when changing either live binding. The complete State receipt remains separate.
