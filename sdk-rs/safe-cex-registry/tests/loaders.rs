@@ -99,18 +99,18 @@ fn every_loader_matches_source_and_retains_native_identity_and_timing() {
     let observations: Vec<Observation> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         observations.len(),
-        96,
+        98,
         "REGISTRY independent source entry floor"
     );
     assert_eq!(
         EXCHANGE_LOADERS.len(),
-        48,
+        49,
         "REGISTRY independent callable registration floor"
     );
     let descriptors = safe_cex_registry::registry::EXCHANGE_REGISTRY;
     assert_eq!(
         descriptors.len(),
-        48,
+        49,
         "REGISTRY independent descriptor floor"
     );
     let mut descriptors_compared = 0;
@@ -130,7 +130,7 @@ fn every_loader_matches_source_and_retains_native_identity_and_timing() {
         descriptors_compared += 1;
     }
     assert_eq!(
-        descriptors_compared, 48,
+        descriptors_compared, 49,
         "REGISTRY independent descriptor comparisons"
     );
     let mut compared = 0;
@@ -140,7 +140,7 @@ fn every_loader_matches_source_and_retains_native_identity_and_timing() {
                 .iter()
                 .filter(|row| row.native == native)
                 .count(),
-            48,
+            49,
             "REGISTRY independent per-platform source entry floor"
         );
         for (entry, source) in EXCHANGE_LOADERS
@@ -251,7 +251,7 @@ fn every_loader_matches_source_and_retains_native_identity_and_timing() {
         }
     }
     assert_eq!(
-        compared, 96,
+        compared, 98,
         "REGISTRY independently expected executed entries"
     );
 }
