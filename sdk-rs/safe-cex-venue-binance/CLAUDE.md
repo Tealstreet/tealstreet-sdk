@@ -719,3 +719,10 @@ flat query, then checks one retained book through live updates and cleanup.
 the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
+
+The snapshot rejection fixture settles rejected HTTP through `RestFailure`, not
+a fulfilled response with status 400. Its exact Base-formatted emitter assertion
+distinguishes transport rejection from malformed fulfilled-body validation.
+`scripts/snapshot-rejection-fixture-control.py` compiles the old fulfilled fixture,
+requires that assertion to fail and restores the genuine rejection path. This is
+a fixture-semantics check, separate from the two production continuation controls.
