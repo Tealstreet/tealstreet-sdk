@@ -253,29 +253,34 @@ impl From<ExchangeError> for Thrown {
             source = cause.source();
         }
         let value = error_object(&error.name, &error.message);
-        if let Some(cause) = error.origin.as_ref().and_then(|origin| {
-            let original = origin.error();
+        let mut source = std::error::Error::source(&error);
+        while let Some(original) = source {
             if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
-                return Some(cause);
-            }
-            let failure = original.downcast_ref::<safe_cex_transport::RestFailure>()?;
-            let safe_cex_transport::TransportError::Rejected(origin) =
-                failure.transport_error.as_deref()?
-            else {
-                return None;
-            };
-            origin.error().downcast_ref::<owned::OwnedCallbackError>()
-        }) {
-            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
-                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
-                    && String::from_utf16(units).is_err()
-                    && String::from_utf16_lossy(units) == *projected
-                {
-                    value
-                        .set(field, Js::String(units.clone().into()))
-                        .expect("fresh error metadata property");
+                for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                    if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                        && String::from_utf16(units).is_err()
+                        && String::from_utf16_lossy(units) == *projected
+                    {
+                        value
+                            .set(field, Js::utf16(units))
+                            .expect("fresh error metadata property");
+                    }
                 }
+                for field in ["stack", "cause", "isAxiosError"] {
+                    if let Some(cell) = cause.value().get(field) {
+                        value
+                            .define(field, cell.to_js())
+                            .expect("fresh retained error property");
+                    }
+                }
+                break;
             }
+            source = original.source();
+        }
+        if let Some(response) = error.retained_response_input() {
+            value
+                .define("response", from_retained_input(response))
+                .expect("fresh retained response property");
         }
         if let Some(code) = &error.code {
             value

@@ -1931,3 +1931,9 @@ prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
 boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
+
+`REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
+`JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
+materialization follows that source chain and the canonical retained response.
+Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
+signed requests before JSON. Original JS object identity remains an owned-tree residual.
