@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { deserialize } from 'node:v8';
 
@@ -22,6 +23,15 @@ for (const group of [before, after]) {
     assert.equal(report.rustRevision, group[0].rustRevision);
     assert.equal(report.nativeDrainVerified, true);
     assert.equal(report.comparisonsProvisional, false);
+    for (const implementation of ['ts', 'rust']) {
+      for (const [channel, comparison] of Object.entries(report.repeatability[implementation])) {
+        assert.equal(comparison.status, 'PASS', implementation + ' repeated ' + channel);
+      }
+    }
+    for (const [channel, comparison] of Object.entries(report.parity)) {
+      if (group === before && ['combined', 'store', 'store:socketHealth'].includes(channel)) continue;
+      assert.equal(comparison.status, 'PASS', 'source parity ' + channel);
+    }
     assert(report.capture.topics.markPriceUpdate > 0);
   }
 }
@@ -58,7 +68,10 @@ let healthRecords = 0,
 function healthDelta(control, candidate, path) {
   if (/^\$\.(?:state|outputs\.\d+\.data)\.socketHealth$/.test(path) && candidate && typeof candidate === 'object') {
     healthRecords++;
+    assert.equal(Object.getPrototypeOf(candidate), Object.getPrototypeOf(control), path + ' health prototype');
     const keys = Object.keys(candidate);
+    assert.deepStrictEqual(Reflect.ownKeys(candidate), keys, path + ' health own properties');
+    assert.deepStrictEqual(Reflect.ownKeys(control), Object.keys(control), path + ' control health own properties');
     if (keys.some((key) => optionalHealth.includes(key))) {
       assert.deepStrictEqual(keys, sourceHealthOrder, path + ' source property order');
     }
@@ -92,8 +105,16 @@ function healthDelta(control, candidate, path) {
   assert.deepStrictEqual(Reflect.ownKeys(candidate), Reflect.ownKeys(control), path + ' own properties/order');
   for (const key of Reflect.ownKeys(control)) healthDelta(control[key], candidate[key], path + '.' + String(key));
 }
-const controlOutput = deserialize(readFileSync(baseline[0].fixture));
-const candidateOutput = deserialize(readFileSync(candidate[0].fixture));
+function assertOwnOrder(expected, actual, path) {
+  if (!expected || typeof expected !== 'object') return;
+  const keys = Reflect.ownKeys(expected);
+  assert.deepStrictEqual(Reflect.ownKeys(actual), keys, path + ' own property order');
+  for (const key of keys) assertOwnOrder(expected[key], actual[key], path + '.' + String(key));
+}
+const controlBytes = readFileSync(baseline[0].fixture);
+const candidateBytes = readFileSync(candidate[0].fixture);
+const controlOutput = deserialize(controlBytes);
+const candidateOutput = deserialize(candidateBytes);
 healthDelta(controlOutput, candidateOutput, '$');
 assert(healthRecords > 0 && undefinedAdditions > 0, 'The recorded tape must observe the intended health delta');
 for (const run of [...baseline, ...candidate]) {
@@ -102,11 +123,20 @@ for (const run of [...baseline, ...candidate]) {
   assert.equal(run.receipt.inputHash, baseline[0].receipt.inputHash);
   assert.equal(run.receipt.applicationDrainVerified, true);
   assert.equal(run.receipt.nativeTransportVerified, true);
+  const expected = baseline.includes(run) ? controlOutput : candidateOutput;
+  const bytes = readFileSync(run.fixture);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), run.outputHash, run.label + ' retained fixture hash');
+  assert(
+    bytes.equals(baseline.includes(run) ? controlBytes : candidateBytes),
+    run.label + ' complete retained V8 bytes must repeat within its side',
+  );
+  const actual = deserialize(bytes);
   assert.deepStrictEqual(
-    deserialize(readFileSync(run.fixture)),
-    baseline.includes(run) ? controlOutput : candidateOutput,
+    actual,
+    expected,
     run.label + ' complete retained output/state must repeat within its side without normalization',
   );
+  assertOwnOrder(expected, actual, run.label);
 }
 for (const report of reports) {
   for (const run of report.runs) {
