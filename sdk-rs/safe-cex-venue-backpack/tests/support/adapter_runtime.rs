@@ -99,7 +99,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((f, c.clone()));
         Box::new(Task(c))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -109,7 +109,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.375
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, _: &Value) {
@@ -170,13 +174,14 @@ pub struct Wire {
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
         self.requests.lock().unwrap().push(r.clone());
-        let body = self
-            .bodies
-            .lock()
-            .unwrap()
-            .get(&r.url)
-            .cloned()
-            .unwrap_or(RestResponseBody::Untransformed(json!({"id":"native-id"})));
+        let body = self.bodies.lock().unwrap().get(&r.url).cloned().unwrap_or(
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    json!({"id":"native-id"}),
+                )
+                .unwrap(),
+            ),
+        );
         Box::pin(async move {
             Ok(RestResponse {
                 status: 200,

@@ -657,7 +657,9 @@ impl Host {
                 let venue = host.venue()?;
                 let (body, config) = if method == "post" {
                     (
-                        Some(RestBody::Untransformed(to_json(&arg(&a, 1))?)),
+                        Some(RestBody::Untransformed(
+                            safe_cex_exchange::js_runtime::value::to_retained_input(&arg(&a, 1))?,
+                        )),
                         arg(&a, 2),
                     )
                 } else {

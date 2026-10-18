@@ -103,7 +103,9 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((f, c.clone()));
         Box::new(Task(c))
     }
-    fn console(&self, _: &str, message: &str) {
+    fn console_values(&self, _: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.console.borrow_mut().push(message.into());
     }
     fn unique_id(&self) -> String {
@@ -115,7 +117,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         self.random_values.borrow_mut().pop_front().unwrap_or(0.375)
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, _: &Value) {
@@ -235,21 +237,15 @@ impl RestAdapter for Wire {
                 status,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(data),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap(),
+                ),
             })
         })
     }
 }
-pub fn fixture(
-    options: Value,
-) -> (
-    Rc<safe_cex_venue_asterdex::native_exchange::AsterDEXExchange>,
-    Rc<Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
-    Arc<Wire>,
-) {
-    use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
-    let runtime = Rc::new(Runtime {
+pub fn runtime_fixture() -> Rc<Runtime> {
+    Rc::new(Runtime {
         sleep_wakers: virtual_time::SleepWakers::default(),
         now: Rc::new(Cell::new(1700000000000.0)),
         jobs: RefCell::default(),
@@ -260,7 +256,18 @@ pub fn fixture(
         urls: RefCell::default(),
         sockets: RefCell::default(),
         http_options: RefCell::default(),
-    });
+    })
+}
+pub fn fixture(
+    options: Value,
+) -> (
+    Rc<safe_cex_venue_asterdex::native_exchange::AsterDEXExchange>,
+    Rc<Runtime>,
+    Rc<safe_cex_store::store::DefaultStore>,
+    Arc<Wire>,
+) {
+    use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
+    let runtime = runtime_fixture();
     #[expect(clippy::arc_with_non_send_sync)]
     let wire = Arc::new(Wire::default());
     let store = Rc::new(safe_cex_store::store::DefaultStore::new());

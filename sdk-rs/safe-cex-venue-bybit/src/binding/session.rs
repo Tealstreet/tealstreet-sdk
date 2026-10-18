@@ -483,13 +483,36 @@ impl crate::variant_account_refresh::AccountRefreshHost for Rt {
 
 impl crate::spot_exchange_reads::SpotExchangeHost for Rt {
     fn destructure(&self, value: Js, skip: usize, count: usize) -> Result<Vec<Js>, Thrown> {
-        // These bindings consume wire arrays (candle tuples and split strings).
-        let values = value.array_values().ok_or_else(|| {
-            Thrown::type_error(&format!("{} is not iterable", value.to_display()))
-        })?;
-        Ok((skip..skip + count)
-            .map(|index| values.get(index).cloned().unwrap_or(Js::Undefined))
-            .collect())
+        let iterator = value.iterator()?;
+        let next = iterator.get("next")?;
+        let mut done = false;
+        let mut values = Vec::with_capacity(count);
+        for index in 0..skip + count {
+            let value = if done {
+                Js::Undefined
+            } else {
+                let step = next.call(iterator.clone(), vec![])?;
+                if !step.is_object() {
+                    return Err(Thrown::type_error("Iterator result is not an object"));
+                }
+                done = step.get("done")?.truthy();
+                if done || index < skip {
+                    Js::Undefined
+                } else {
+                    step.get("value")?
+                }
+            };
+            if index >= skip {
+                values.push(value);
+            }
+        }
+        if !done {
+            let close = iterator.get("return")?;
+            if !close.is_nullish() && !close.call(iterator.clone(), vec![])?.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+        }
+        Ok(values)
     }
     fn for_each<F>(&self, method: Js, mut body: F) -> Result<(), Thrown>
     where

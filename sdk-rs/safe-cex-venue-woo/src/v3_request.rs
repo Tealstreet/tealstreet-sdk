@@ -161,7 +161,10 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3PreparedRequest {
 
 // ts: serializeQuery
 pub fn serialize_query(query: Option<&Value>) -> Result<String, String> {
-    crate::api::sorted_query(query.unwrap_or(&Value::Null), true)
+    crate::api::sorted_query(
+        &safe_cex_exchange::js_runtime::value::from_json(query.unwrap_or(&Value::Null)),
+        true,
+    )
 }
 
 // ts: prepareWooV3Request

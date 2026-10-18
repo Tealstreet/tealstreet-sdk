@@ -96,7 +96,9 @@ impl ExchangeRuntime for Runtime {
         }
         Box::new(Task(job))
     }
-    fn console(&self, level: &str, message: &str) {
+    fn console_values(&self, level: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.console
             .borrow_mut()
             .push((level.into(), message.into()));
@@ -110,7 +112,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -276,7 +282,7 @@ impl HttpHost for Host {
     fn note_response(&self, response: &RestResponse, _: &RestRequest) {
         self.responses
             .borrow_mut()
-            .push(response.body.clone().into_data());
+            .push(response.body.clone().into_data().into_value().unwrap());
     }
     fn note_success(&self, _: &ExchangeName, _: &RestResponse) {}
     fn note_failure(&self, _: &ExchangeName, _: &HttpFailure) {

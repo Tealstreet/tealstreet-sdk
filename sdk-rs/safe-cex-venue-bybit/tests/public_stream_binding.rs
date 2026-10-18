@@ -797,3 +797,23 @@ fn disconnected_candle_watchdog_uses_existing_transport_reconnect() {
     cleanup().unwrap();
     h.venue().dispose().unwrap();
 }
+
+#[path = "support/ticker_coercion_binding.rs"]
+mod ticker_coercion_binding;
+
+#[test]
+fn production_ticker_coercion_primary_matches_constructed_typescript() {
+    ticker_coercion_binding::run(ExchangeName::Bybit, "bybit", 176);
+}
+#[test]
+fn production_ticker_coercion_demo_matches_constructed_typescript() {
+    ticker_coercion_binding::run(ExchangeName::Bybitdemo, "bybitdemo", 176);
+}
+#[test]
+fn production_ticker_coercion_inverse_matches_constructed_typescript() {
+    ticker_coercion_binding::run(ExchangeName::Bybitinverse, "bybitinverse", 88);
+}
+#[test]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    ticker_coercion_binding::run(ExchangeName::Bybitspot, "bybitspot", 88);
+}

@@ -93,8 +93,8 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 if !value.is_string() {
                     return Ok(value);
                 }
-                Ok(safe_cex_exchange::js_runtime::value::from_json(
-                    &safe_cex_transport::how::big_int_as_string_json_parse(&value.to_display()),
+                Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+                    safe_cex_transport::how::big_int_as_string_json_parse(&value.to_display()),
                 ))
             }))
         },
@@ -179,7 +179,9 @@ fn install_retry(h: &Host, client: &Js) -> Result<(), Thrown> {
                                 status: status.unwrap_or(0.0) as u16,
                                 reason: None,
                                 headers: Default::default(),
-                                body: RestResponseBody::Untransformed(serde_json::Value::Null),
+                                body: RestResponseBody::Untransformed(
+                                    safe_cex_types::retained_json::RetainedJsonInput::Null,
+                                ),
                             })
                         }),
                         request: Box::default(),

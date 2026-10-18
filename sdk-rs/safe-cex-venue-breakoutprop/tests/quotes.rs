@@ -173,7 +173,7 @@ fn actual_quote_reads() {
                 };
                 trace
                     .borrow_mut()
-                    .push(json!({"method":r.method,"url":r.url,"body":body}));
+                    .push(json!({"method":r.method,"url":r.url,"body":body.into_value().unwrap()}));
                 ready(
                     if ["http", "empty-msg", "object-msg", "logger"].contains(&name) {
                         Err(original.clone())
@@ -388,7 +388,7 @@ fn quote_symbols_owned_input() {
             let Some(RestBody::Untransformed(body)) = r.body else {
                 panic!("body")
             };
-            *posted.borrow_mut() = body["symbols"].clone();
+            *posted.borrow_mut() = body.into_value().unwrap()["symbols"].clone();
             ready(Ok(js_from_str("{\"events\":[]}").unwrap()))
         },
         &store,

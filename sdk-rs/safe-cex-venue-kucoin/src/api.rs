@@ -4,7 +4,7 @@ use safe_cex_crypto::{Encoding, SigningOptions, sign_payload};
 use safe_cex_exchange::http::{
     HttpClient, HttpClientOptions, install_transport_adapter, safe_cex_axios_create,
 };
-use safe_cex_num::{JsJsonValue, js_json_stringify, js_number_string, js_truthy};
+use safe_cex_num::{JsJsonValue, js_number_string, js_truthy};
 use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestAdapterVariant, RestFailure, RestFuture, RestRequest, RestResponse,
@@ -286,10 +286,11 @@ impl Attempt {
             .transpose()
             .map_err(|e| e.to_string())?;
         // A replayed config carries the body Axios already serialized: sign those bytes.
-        let body = if let Some(serde_json::Value::String(text)) = body {
-            text.clone()
-        } else if body.is_some_and(|body| js_truthy(Some(body))) {
-            js_json_stringify(&JsJsonValue::from(body.unwrap().clone()))
+        let body = if let Some(safe_cex_types::retained_json::RetainedJsonInput::Text(text)) = body
+        {
+            String::from_utf16(text).map_err(|error| error.to_string())?
+        } else if body.is_some_and(safe_cex_num::js_retained_truthy) {
+            safe_cex_num::js_retained_json_stringify(body.unwrap())
                 .map_err(|e| e.to_string())?
                 .unwrap_or_default()
         } else {

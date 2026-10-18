@@ -77,8 +77,9 @@ fn encoded_rate_classifier_parses_once_at_the_actual_prepare_callsite() {
         let clock = Arc::new(Clock::default());
         let limiter = Rc::new(RateLimiter::new(clock.clone(), 1200., 60000.));
         let api = client(limiter.clone());
-        let mut request =
-            api.build_request(if i == 2 { "/exchange" } else { "/info" }, &Value::Null);
+        let mut request = api
+            .build_request(if i == 2 { "/exchange" } else { "/info" }, &Value::Null)
+            .unwrap();
         request.body = Some(RestBody::Encoded(raw.as_bytes().to_vec()));
         let prepared = ready(api.prepare_request(request, i == 8)).unwrap();
         ready(limiter.wait_for_token(1.)).unwrap();
@@ -134,7 +135,7 @@ fn telemetry_receives_the_original_native_request_data_variant() {
                         .push((message.to_owned(), context.cloned()))
                 }),
             );
-        let mut request = api.build_request("/exchange", &input);
+        let mut request = api.build_request("/exchange", &input).unwrap();
         if i >= 2 {
             request.body = Some(RestBody::Encoded(
                 input.as_str().unwrap().as_bytes().to_vec(),
@@ -148,7 +149,10 @@ fn telemetry_receives_the_original_native_request_data_variant() {
                     reason: None,
                     headers: Default::default(),
                     body: RestResponseBody::Untransformed(
-                        json!({"status":"err","response":"venue rejected"}),
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"status":"err","response":"venue rejected"}),
+                        )
+                        .unwrap(),
                     ),
                 },
                 false,
@@ -282,7 +286,7 @@ fn cancel_by_cloid_weight_reaches_real_http_prepare_for_raw_and_value_bodies() {
         } else {
             action
         };
-        ready(api.prepare_request(api.build_request("/exchange", &body), false)).unwrap();
+        ready(api.prepare_request(api.build_request("/exchange", &body).unwrap(), false)).unwrap();
         ready(limiter.wait_for_token(1.0)).unwrap();
         assert_eq!(
             clock.now.load(Ordering::SeqCst),
