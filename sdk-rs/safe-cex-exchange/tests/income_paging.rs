@@ -1,5 +1,11 @@
+#[path = "support/runtime.rs"]
+mod runtime;
 use safe_cex_exchange::{
     income_paging::*,
+    js_runtime::{
+        globals::stringify_json,
+        value::{Js, Thrown, error_object},
+    },
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_types::{IncomeCategory, IncomeRecord};
@@ -12,16 +18,20 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-fn ready<T>(future: impl Future<Output = T>) -> T {
+fn ready<T>(runtime: &runtime::Runtime, future: impl Future<Output = T>) -> T {
     let mut future = std::pin::pin!(future);
-    match future
-        .as_mut()
-        .poll(&mut Context::from_waker(Waker::noop()))
-    {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("income paging unexpectedly pending"),
+    for _ in 0..128 {
+        if let Poll::Ready(value) = future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            return value;
+        }
+        runtime.advance(0);
     }
+    panic!("income paging unexpectedly pending");
 }
+
 fn number(value: &Value) -> f64 {
     f64::from_bits(
         u64::from_str_radix(
@@ -196,32 +206,37 @@ fn live_shared_income_pager() {
             chunk_delay_ms: opts.get("chunkDelayMs").map(number),
             max_pages_per_chunk: opts.get("maxPagesPerChunk").map(number),
         };
-        let pages = case["pages"].as_array().unwrap();
-        let index = Cell::new(0);
-        let trace = RefCell::new(Vec::new());
-        let mut fetch = |params: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-            trace
+        let pages = case["pages"].as_array().unwrap().clone();
+        let expected_pages = pages.len();
+        let runtime = Rc::new(runtime::Runtime::default());
+        let index = Rc::new(Cell::new(0));
+        let trace = Rc::new(RefCell::new(Vec::new()));
+        let index_fetch = index.clone();
+        let fetch_trace = trace.clone();
+        let name_owned = name.to_owned();
+        let fetch = move |params: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+            fetch_trace
                 .borrow_mut()
-                .push(serde_json::json!({"fetch":index.get()}));
+                .push(serde_json::json!({"fetch":index_fetch.get()}));
             let page = pages
-                .get(index.get())
+                .get(index_fetch.get())
                 .expect("PAGER issued unexpected extra request");
-            index.set(index.get() + 1);
+            index_fetch.set(index_fetch.get() + 1);
             let expected = &page["params"];
             assert_eq!(
                 bits(params.start_time),
                 bits(number(&expected["startTime"])),
-                "PAGER request startTime {name}"
+                "PAGER request startTime {name_owned}"
             );
             assert_eq!(
                 bits(params.end_time),
                 bits(number(&expected["endTime"])),
-                "PAGER request endTime {name}"
+                "PAGER request endTime {name_owned}"
             );
             assert_eq!(
                 bits(params.limit),
                 bits(number(&expected["limit"])),
-                "PAGER request limit {name}"
+                "PAGER request limit {name_owned}"
             );
             let result = if page["error"] == true {
                 Err(ExchangeError::new("source fetch failure"))
@@ -235,8 +250,9 @@ fn live_shared_income_pager() {
             };
             Box::pin(async move { result })
         };
-        let mut delay = |ms: f64| -> ExchangeFuture<'_, ()> {
-            trace
+        let delay_trace = trace.clone();
+        let delay = move |ms: f64| -> ExchangeFuture<'_, ()> {
+            delay_trace
                 .borrow_mut()
                 .push(serde_json::json!({"delay":{"numberBits":format!("{:016x}",bits(ms))}}));
             assert_eq!(
@@ -246,10 +262,14 @@ fn live_shared_income_pager() {
             );
             Box::pin(async { Ok(()) })
         };
-        let result = ready(paginate_income_range(&mut fetch, options, &mut delay)).unwrap();
+        let result = ready(
+            &runtime,
+            paginate_income_range(runtime.clone(), Box::new(fetch), options, Box::new(delay)),
+        )
+        .unwrap();
         assert_eq!(
             index.get(),
-            pages.len(),
+            expected_pages,
             "PAGER consumed all source requests {name}"
         );
         assert_eq!(
@@ -344,40 +364,77 @@ fn options() -> IncomeRangeOptions {
     }
 }
 #[test]
-fn income_pager_delay_failure_and_cancellation() {
-    let events = RefCell::new(vec![]);
-    let mut fetch = |params: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+fn income_pager_delay_failure_and_runtime_ownership() {
+    let runtime = Rc::new(runtime::Runtime::default());
+    let events = Rc::new(RefCell::new(vec![]));
+    let fetch_events = events.clone();
+    let fetch = move |params: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
         assert!(
-            events.borrow().is_empty(),
+            fetch_events.borrow().is_empty(),
             "PAGER no fetch after rejected chunk delay"
         );
-        events
+        fetch_events
             .borrow_mut()
             .push(format!("fetch:{}", params.start_time));
         Box::pin(async { Ok(vec![]) })
     };
-    let cause = ExchangeError::new("delay original");
-    let metadata = std::ptr::from_ref(cause.metadata.as_ref());
+    let source = timing_source_profiles();
+    assert_eq!(source["delay"]["same"], true);
+    let code = Js::object(vec![
+        ("zero", Js::Number(-0.0)),
+        ("nan", Js::Number(f64::from_bits(0x7ff8_0000_0000_0042))),
+        ("text", Js::utf16(&[0xd800])),
+    ]);
+    let original = error_object("RangeError", "delay original");
+    original.set("code", code.clone()).unwrap();
+    let cause = Thrown::new(original.clone()).to_exchange_error();
+    let expected = cause.clone();
     let mut cause = Some(cause);
-    let mut delay = |ms: f64| -> ExchangeFuture<'_, ()> {
+    let delay_events = events.clone();
+    let delay = move |ms: f64| -> ExchangeFuture<'_, ()> {
         assert_eq!(
             ms.to_bits(),
             (-3.5_f64).to_bits(),
             "PAGER delay is native f64"
         );
-        events.borrow_mut().push("delay".into());
+        delay_events.borrow_mut().push("delay".into());
         let cause = cause.take().expect("delay invoked once");
         Box::pin(async move { Err(cause) })
     };
-    let error = ready(paginate_income_range(&mut fetch, options(), &mut delay)).unwrap_err();
+    let error = ready(
+        &runtime,
+        paginate_income_range(runtime.clone(), Box::new(fetch), options(), Box::new(delay)),
+    )
+    .unwrap_err();
     assert_eq!(
         *events.borrow(),
         vec!["fetch:-0", "delay"],
         "PAGER delay failure precedes next request"
     );
+    assert_eq!(error, expected, "PAGER complete delay metadata");
+    assert_eq!(error.name, source["delay"]["name"]);
+    assert_eq!(error.message, source["delay"]["message"]);
+    let recovered = Thrown::from(error);
     assert!(
-        metadata == std::ptr::from_ref(error.metadata.as_ref()),
-        "PAGER original delay failure identity"
+        recovered.value.strict_equals(&original),
+        "PAGER original delay cause identity"
+    );
+    assert!(recovered.value.get("code").unwrap().strict_equals(&code));
+    assert_eq!(
+        code.get("zero").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert_eq!(
+        code.get("nan").unwrap().as_f64().unwrap().to_bits(),
+        0x7ff8_0000_0000_0042
+    );
+    assert_eq!(
+        code.get("text").unwrap().as_str().unwrap().as_ref(),
+        &[0xd800]
+    );
+    assert_eq!(
+        String::from_utf16(&stringify_json(&recovered.value).unwrap().unwrap()).unwrap(),
+        source["delay"]["json"]
     );
     struct Pending(Rc<Cell<bool>>);
     impl Drop for Pending {
@@ -392,12 +449,17 @@ fn income_pager_delay_failure_and_cancellation() {
         }
     }
     let dropped = Rc::new(Cell::new(false));
-    let mut fetch = |_: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-        Box::pin(Pending(dropped.clone()))
+    let pending_dropped = dropped.clone();
+    let fetch = move |_: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        Box::pin(Pending(pending_dropped.clone()))
     };
-    let mut delay =
-        |_: f64| -> ExchangeFuture<'_, ()> { panic!("PAGER pending fetch cannot delay") };
-    let mut future = Box::pin(paginate_income_range(&mut fetch, options(), &mut delay));
+    let delay = |_: f64| -> ExchangeFuture<'_, ()> { panic!("PAGER pending fetch cannot delay") };
+    let mut future = Box::pin(paginate_income_range(
+        runtime.clone(),
+        Box::new(fetch),
+        options(),
+        Box::new(delay),
+    ));
     assert!(
         future
             .as_mut()
@@ -405,7 +467,15 @@ fn income_pager_delay_failure_and_cancellation() {
             .is_pending()
     );
     drop(future);
-    assert!(dropped.get(), "PAGER caller drop cancels owned fetch");
+    assert!(
+        !dropped.get(),
+        "PAGER waiter drop retains runtime-owned fetch"
+    );
+    runtime.tasks.borrow_mut().clear();
+    assert!(
+        dropped.get(),
+        "PAGER runtime shutdown releases active fetch"
+    );
 }
 
 #[test]
@@ -418,17 +488,20 @@ fn pager_starts_first_fetch_before_first_poll() {
         (1.0, 5.0, 0),
         (1.0, f64::NAN, 0),
     ] {
-        let calls = Cell::new(0);
-        let mut fetch = |params: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-            calls.set(calls.get() + 1);
+        let runtime = Rc::new(runtime::Runtime::default());
+        let calls = Rc::new(Cell::new(0));
+        let fetch_calls = calls.clone();
+        let fetch = move |params: IncomePageParams| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+            fetch_calls.set(fetch_calls.get() + 1);
             assert_eq!(params.start_time, 1.0, "PAGER native eager start");
             assert_eq!(params.end_time, 5.0, "PAGER native eager end");
             assert_eq!(params.limit, 7.0, "PAGER native eager limit");
             Box::pin(std::future::pending())
         };
-        let mut delay = |_| -> ExchangeFuture<'_, ()> { panic!("no eager delay") };
+        let delay = |_| -> ExchangeFuture<'_, ()> { panic!("no eager delay") };
         let future = paginate_income_range(
-            &mut fetch,
+            runtime.clone(),
+            Box::new(fetch),
             IncomeRangeOptions {
                 start_time: start,
                 end_time: 5.0,
@@ -437,7 +510,7 @@ fn pager_starts_first_fetch_before_first_poll() {
                 chunk_delay_ms: None,
                 max_pages_per_chunk: Some(budget),
             },
-            &mut delay,
+            Box::new(delay),
         );
         assert_eq!(
             calls.get(),
@@ -451,4 +524,120 @@ fn pager_starts_first_fetch_before_first_poll() {
             "PAGER native drop never repeats eager fetch"
         );
     }
+}
+
+fn timing_source_profiles() -> Value {
+    let output = Command::new("node")
+        .arg("-e")
+        .arg(r#"
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const exports = {};
+const delayCause = new RangeError('delay original');
+delayCause.code = {zero:-0,nan:NaN,text:'\ud800'};
+vm.runInNewContext(ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText, {exports,setTimeout(){throw delayCause;}});
+(async () => {
+  const trace = [];
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  exports.paginateIncomeRange(async () => {
+    const call = ++calls;
+    trace.push(`fetch:${call}`);
+    if (call === 1) await held;
+    trace.push(`done:${call}`);
+    return [];
+  }, {startTime:0,endTime:2,chunkMs:1,pageLimit:1});
+  const before = trace.slice();
+  release();
+  for (let i=0;i<16;i++) await Promise.resolve();
+  let rejected;
+  try { await exports.paginateIncomeRange(async () => [], {startTime:0,endTime:2,chunkMs:1,pageLimit:1,chunkDelayMs:1}); }
+  catch (error) { rejected = error; }
+  if (rejected !== delayCause) throw new Error('source replaced delay cause');
+  process.stdout.write(JSON.stringify({before,after:trace,delay:{same:rejected===delayCause,name:rejected.name,message:rejected.message,json:JSON.stringify(rejected)}}));
+})().catch(error => { console.error(error); process.exitCode=1; });
+"#)
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/safe-cex/src/exchanges/income-paging.ts"))
+        .output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn pager_continues_after_discarding_an_unpolled_waiter() {
+    let source = timing_source_profiles();
+    assert_eq!(source["before"], serde_json::json!(["fetch:1"]));
+    assert_eq!(
+        source["after"],
+        serde_json::json!(["fetch:1", "done:1", "fetch:2", "done:2"])
+    );
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let trace = Rc::new(RefCell::new(Vec::new()));
+        let (release, held) = tokio::sync::oneshot::channel::<()>();
+        let held = Rc::new(RefCell::new(Some(held)));
+        let fetch = {
+            let trace = trace.clone();
+            let calls = Cell::new(0);
+            move |_: IncomePageParams| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
+                calls.set(calls.get() + 1);
+                let call = calls.get();
+                trace.borrow_mut().push(format!("fetch:{call}"));
+                let trace = trace.clone();
+                let held = held.borrow_mut().take();
+                Box::pin(async move {
+                    if let Some(held) = held {
+                        held.await.expect("source releases first page");
+                    }
+                    trace.borrow_mut().push(format!("done:{call}"));
+                    Ok(vec![])
+                })
+            }
+        };
+        let delay = |_| -> ExchangeFuture<'static, ()> {
+            panic!("no chunk delay");
+        };
+        let waiter = paginate_income_range(
+            safe_cex_exchange::native::native_runtime(),
+            Box::new(fetch),
+            IncomeRangeOptions {
+                start_time: 0.0,
+                end_time: 2.0,
+                chunk_ms: 1.0,
+                page_limit: 1.0,
+                chunk_delay_ms: None,
+                max_pages_per_chunk: None,
+            },
+            Box::new(delay),
+        );
+        assert_eq!(serde_json::json!(*trace.borrow()), source["before"]);
+        drop(waiter);
+        release
+            .send(())
+            .expect("runtime retains first page receiver after waiter drop");
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            serde_json::json!(*trace.borrow()),
+            source["after"],
+            "PAGER_DETACHED runtime owns remaining pages"
+        );
+        assert_eq!(
+            Rc::strong_count(&trace),
+            1,
+            "PAGER settled walk releases callback captures"
+        );
+    });
 }

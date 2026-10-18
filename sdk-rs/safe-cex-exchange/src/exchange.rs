@@ -2095,22 +2095,26 @@ impl BaseExchange {
             completed: completed.clone(),
         };
         let sleep = self.runtime.sleep(10000);
-        let task = self.runtime.spawn_local(Box::pin(async move {
-            let result = sleep.await;
-            guard.release();
-            if result.is_err() {
-                return;
-            }
-            let _ = owner.with_base(|exchange| {
-                if let Err(error) = exchange.audit_socket_health() {
-                    exchange
-                        .runtime
-                        .report_exception(&error, &json!({"operation":"socket watchdog"}).into());
+        let task = self.runtime.spawn_classified(
+            crate::runtime::RuntimeTaskKind::Timer,
+            Box::pin(async move {
+                let result = sleep.await;
+                guard.release();
+                if result.is_err() {
                     return;
                 }
-                exchange.start_watchdog();
-            });
-        }));
+                let _ = owner.with_base(|exchange| {
+                    if let Err(error) = exchange.audit_socket_health() {
+                        exchange.runtime.report_exception(
+                            &error,
+                            &json!({"operation":"socket watchdog"}).into(),
+                        );
+                        return;
+                    }
+                    exchange.start_watchdog();
+                });
+            }),
+        );
         if !completed.get() && self.watchdog_generation.get() == generation && !self.is_disposed() {
             *self.watchdog.borrow_mut() = Some(task);
         } else {

@@ -36,8 +36,7 @@ test('recorded Binance frames preserve combined Store/event order across eight f
       child.once('close', resolve);
     });
     // Existing qualified metadata differences can make streams.mjs exit 1.
-    // They do not excuse incomplete parser/Jobs receipts or native order diffs.
-    // General raw-runtime-task classification is outside these legacy receipts.
+    // They do not excuse incomplete parser/Jobs/raw-task receipts or native order diffs.
     assert.ok(code === 0 || code === 1, log);
     const report = JSON.parse(readFileSync(output));
     assert.equal(report.nativeDrainVerified, true, log);
@@ -52,6 +51,9 @@ test('recorded Binance frames preserve combined Store/event order across eight f
     for (const result of report.runs.filter((entry) => entry.implementation === 'rust')) {
       assert.equal(result.receipt.delivered, 12);
       assert.equal(result.receipt.dropped, 0);
+      assert.equal(result.receipt.processed.rawTasks.version, 1);
+      assert.equal(result.receipt.processed.rawTasks.blocking, 0);
+      assert.equal(result.receipt.processed.rawTasks.unknown, 0);
       const { outputs } = deserialize(readFileSync(result.fixture));
       assert.deepEqual(outputs.map((entry) => entry.kind), source.outputs.map((entry) => entry.kind), 'combined channel order matches the maintained worker');
       expected ??= outputs;

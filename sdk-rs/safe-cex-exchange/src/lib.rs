@@ -29,6 +29,8 @@ pub mod snapshots;
 pub mod socket_lifecycle;
 pub mod store_delivery;
 pub mod store_payload;
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+mod task_receipts;
 pub mod throttle;
 pub mod websocket;
 pub mod worker;
