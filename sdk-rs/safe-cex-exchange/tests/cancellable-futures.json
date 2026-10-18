@@ -1920,9 +1920,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "e0b560a8c7d4d07d5841039553d881a9ae8d3738a3ac5c2f0a65646f33da4837",
+      "producer_sha256": "7876f3df01a4b6b92ef58d845802e7513ff290bace15f9aebfc54b6a2a07796f",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to the existing Promise/Jobs owner; no exchange in-flight slot or shared borrow spans an await. The serial repair adds one awaited input before the existing callback-result await, for eight syntactic async boundaries. Each serial invocation retains its original input/callback/receiver and local output; the scope privately roots the module while exported functions capture it weakly. Canonical Promise.resolve owns thenable jobs through the existing FIFO driver. Existing throttle timer ownership remains delegated to Scope.set_timeout/clear_timeout. Native installed-package and module-release witnesses verify settlement, escaped exports and absence of scope/module cycles. Reviewed ccxt import registration adds only synchronous native functions/constants; existing future creators, async boundaries, owner latches and cancellation delegation remain unchanged. BigNumber now registers explicit synchronous call and construct bodies over the same decimal conversion; neither captures a scope, starts work or changes any async boundary or cancellation owner. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run. Reviewed Store cutover: uniq/uniqBy pass the original native collection to the shared reached-slot algorithm; installed async ownership and task handling are unchanged."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to the existing Promise/Jobs owner; no exchange in-flight slot or shared borrow spans an await. The serial repair adds one awaited input before the existing callback-result await, for eight syntactic async boundaries. Each serial invocation retains its original input/callback/receiver and local output; the scope privately roots the module while exported functions capture it weakly. Canonical Promise.resolve owns thenable jobs through the existing FIFO driver. Existing throttle timer ownership remains delegated to Scope.set_timeout/clear_timeout. Native installed-package and module-release witnesses verify settlement, escaped exports and absence of scope/module cycles. Reviewed ccxt import registration adds only synchronous native functions/constants; existing future creators, async boundaries, owner latches and cancellation delegation remain unchanged. BigNumber now registers explicit synchronous call and construct bodies over the same decimal conversion; neither captures a scope, starts work or changes any async boundary or cancellation owner. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run. Reviewed Store cutover: uniq/uniqBy pass the original native collection to the shared reached-slot algorithm; installed async ownership and task handling are unchanged. Canonical array review: list snapshots now propagate property failures before creating async work; the existing Promise captures, async boundary inventory, timer owner and task cancellation remain unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
@@ -2096,10 +2096,10 @@
       "boundaries": [
         "async-block"
       ],
-      "producer_sha256": "737dba9702a507f78ec48ca97f2c8f44d647d9602f03a85c2e291a4a55d61fe1",
+      "producer_sha256": "742ca7e0b02ef698ffa876f32004e1aed692dfe3478d3f6d3c11f33d8a424383",
       "classification": "delegated",
       "delegate": "src/websocket.rs::BaseWebSocket::start_prepared_websocket",
-      "reason": "The retained header provider executes inside the existing core-owned dial preparation. A thrown auth error prevents dial; generation/disposal guards and cancellation remain owned by start_prepared_websocket/spawn_owned_kind. ws_options witnesses source dial inputs, rejected preparation and real native upgrade headers."
+      "reason": "The retained header provider executes inside the existing core-owned dial preparation. A thrown auth error prevents dial; generation/disposal guards and cancellation remain owned by start_prepared_websocket/spawn_owned_kind. ws_options witnesses source dial inputs, rejected preparation and real native upgrade headers. Canonical array review: protocol-list property failures propagate before the delegated dial is constructed; preparation, task ownership and cancellation are unchanged."
     },
     {
       "owner": "src/js_runtime/value.rs::Js as fmt :: Debug::fmt",
@@ -2117,9 +2117,9 @@
         "opaque-macro-review",
         "opaque-macro-review"
       ],
-      "producer_sha256": "ef1cb21876349ceb29f12be82bb148129577d178a22a9e9eb5615d14d81b41b5",
+      "producer_sha256": "f466e7768373c0e3c335cd58425267949917f4f6729459306c353793261f5529",
       "classification": "immediate",
-      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added. Reviewed well-known SymbolIterator arm: the additional write! only formats the fixed Symbol(Symbol.iterator) text synchronously; no task, waiter, future or cancellation latch is constructed. Reviewed accessor storage: the tuple-to-named-field match still formats only the fixed accessor marker; it neither invokes getters nor creates asynchronous work."
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added. Reviewed well-known SymbolIterator arm: the additional write! only formats the fixed Symbol(Symbol.iterator) text synchronously; no task, waiter, future or cancellation latch is constructed. Reviewed accessor storage: the tuple-to-named-field match still formats only the fixed accessor marker; it neither invokes getters nor creates asynchronous work. Canonical array review: Debug reads only the canonical length slot without invoking index getters or retaining borrows; formatting remains synchronous with no future or shared latch."
     },
     {
       "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",
@@ -3155,6 +3155,15 @@
           "sha256": "ff7bef6c6106d063dc067182dc075edb641899c55068454c5c2beb262a899ba8"
         }
       ]
+    },
+    {
+      "owner": "src/js_runtime/value/array.rs::prototype",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "9b86e8afebe40b5322dc4d3f8109a4c110c0c35bc072c0b86650e87fb338afdf",
+      "classification": "immediate",
+      "reason": "Reviewed std thread_local! expansion: PROTOTYPES owns only weak realm/ArrayData references in a synchronous RefCell registry. Prototype allocation and descriptor installation are synchronous; registered method closures invoke canonical array operations only when called. No future, host task, timer, shared waiter or cancellation latch is created by this allocator. Native array descriptor/alias/coercion tests cover the resulting owner."
     }
   ]
 }

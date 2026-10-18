@@ -57,17 +57,19 @@ pub(super) fn capture(
         }
         Js::BigInt(value) => Input::Text(value.to_string().encode_utf16().collect()),
         Js::String(value) => Input::Text(value.to_vec()),
-        Js::Array(values) => Input::Array(
-            values
-                .borrow()
-                .iter()
-                .map(|value| {
-                    value.as_ref().map_or(Ok(Input::Null), |value| {
-                        capture(value, depth + 1, present_fields, data_only)
-                    })
-                })
-                .collect::<Result<_, _>>()?,
-        ),
+        Js::Array(values) => {
+            let length = values.len();
+            let mut out = Vec::new();
+            for index in 0..length {
+                out.push(capture(
+                    &value.get(&index.to_string())?,
+                    depth + 1,
+                    present_fields,
+                    data_only,
+                )?);
+            }
+            Input::Array(out)
+        }
         Js::Builtin(reference) if reference.is_callable() => Input::Null,
         Js::Object(_) | Js::Builtin(_) => {
             let mut fields = vec![];

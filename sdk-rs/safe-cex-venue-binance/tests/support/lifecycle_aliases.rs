@@ -144,7 +144,7 @@ fn native_text(value: &EventValue, key: &str) -> String {
 }
 fn rows(value: EventValue) -> Vec<EventValue> {
     match value {
-        EventValue::Array(rows) => array_values(&rows),
+        EventValue::Array(rows) => array_values(&rows).expect("fixture array reads"),
         other => panic!("expected native rows: {other:?}"),
     }
 }

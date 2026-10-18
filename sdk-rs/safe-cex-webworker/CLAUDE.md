@@ -701,3 +701,9 @@ The ticker baseline corpus includes four nullable-index actions in addition to
 its original 354 comparisons. Actual maintained worker execution observes an
 updated null baseline without a packed null value; null-to-number emits the
 numeric index delta. This preserves the source typeof-number filter.
+
+The browser DATA materializer retains array holes plus enumerable named string
+properties from the canonical ArrayData owner. It caches the destination array
+before evaluating children/getters, preserving cycles and repeated references.
+The worker_data_host example compares the actual Wasm result and structuredClone
+for hole/undefined distinction, named getter receiver, aliases and numeric bits.

@@ -6,7 +6,7 @@ use safe_cex_exchange::js_runtime::{
     value::{Js, Thrown},
 };
 use serde_json::{Value, json};
-use std::{cell::Cell, cell::RefCell, process::Command, rc::Rc};
+use std::{cell::Cell, process::Command, rc::Rc};
 
 #[test]
 fn constructed_backpack_trigger_repair_preserves_native_getter_rejection() {
@@ -57,7 +57,7 @@ fn constructed_backpack_trigger_repair_preserves_native_getter_rejection() {
         let before = wire.requests.lock().unwrap().len();
         let error = support::ready(
             &runtime,
-            owner.fix_trigger_orders_without_trigger_by(Rc::new(RefCell::new(vec![Some(row)]))),
+            owner.fix_trigger_orders_without_trigger_by(Js::array(vec![row])),
         )
         .unwrap_err();
         let returned = Thrown::from(error).value;

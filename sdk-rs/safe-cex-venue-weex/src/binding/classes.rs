@@ -485,7 +485,7 @@ fn dispatch(mut h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown
                 match name {
                     "cancelOrders" => {
                         let orders = first
-                            .array_values()
+                            .array_values()?
                             .ok_or_else(|| Thrown::type_error("orders is not iterable"))?;
                         a::cancel_orders(&h, &action, &orders).await?;
                     }
