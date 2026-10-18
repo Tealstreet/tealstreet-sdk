@@ -278,8 +278,7 @@ fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
             let amount = order.get("amount")?;
             let partial = !amount.strict_equals(&Js::Number(0.));
             let position_index = if primary {
-                let order_json = to_json(&order)?.as_object().cloned().unwrap_or_default();
-                get_order_position_idx(&rt, order_json).await?
+                get_order_position_idx(&rt, order.clone()).await?
             } else {
                 await_js(
                     &rt.exchange_runtime(),

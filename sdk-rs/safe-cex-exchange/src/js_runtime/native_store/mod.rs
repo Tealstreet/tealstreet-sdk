@@ -14,7 +14,7 @@ use safe_cex_types::{
     StoreReadPhase, StoreSubscriber, StoreUpdateIds, Ticker, retained_json,
 };
 use serde_json::Value;
-use std::rc::Rc;
+use std::{cell::OnceCell, rc::Rc};
 
 fn property(error: Thrown) -> StoreReadError {
     StoreReadError::new(StoreReadPhase::Property, Rc::new(error))
@@ -116,7 +116,7 @@ fn admitted_patch<T: serde::de::DeserializeOwned + serde::Serialize + Clone + Pa
 pub fn facade(store: Rc<dyn Store>) -> Result<Js, Thrown> {
     let graph = store
         .native_owner()
-        .downcast::<graph::Graph>()
+        .downcast::<NativeOwner>()
         .map_err(|_| Thrown::type_error("Store does not expose the canonical native owner"))?;
     graph.facade()
 }
@@ -171,7 +171,7 @@ pub fn update_balance_and_loaded(
     })?;
     let owner = store
         .native_owner()
-        .downcast::<graph::Graph>()
+        .downcast::<NativeOwner>()
         .map_err(|_| {
             property(Thrown::type_error(
                 "Store does not expose the canonical native owner",
@@ -181,12 +181,33 @@ pub fn update_balance_and_loaded(
         ("balance", (*value).clone()),
         ("loaded", encode(loaded)?),
     ]);
-    owner.update(&changes, false).map_err(mutation_error)
+    owner.graph.update(&changes, false).map_err(mutation_error)
 }
 
-/// A clone retains the same owner; rows and dictionaries never retain this owner.
+// This capability retains the facade outside Graph. The facade's resource and
+// methods capture only Graph, so neither can retain this cache or create a cycle.
+struct NativeOwner {
+    graph: Rc<graph::Graph>,
+    facade: OnceCell<Js>,
+}
+
+impl NativeOwner {
+    fn facade(&self) -> Result<Js, Thrown> {
+        if let Some(value) = self.facade.get() {
+            return Ok(value.clone());
+        }
+        // Facade construction installs descriptors without invoking user code.
+        // Failed construction leaves the cell empty and the original error visible.
+        let value = self.graph.facade()?;
+        let _ = self.facade.set(value.clone());
+        Ok(value)
+    }
+}
+
+/// The Store and its capability share one graph; rows never retain the owner.
 pub struct DefaultStore {
     graph: Rc<graph::Graph>,
+    owner: Rc<NativeOwner>,
     pub now: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>,
 }
 
@@ -194,7 +215,11 @@ impl Default for DefaultStore {
     fn default() -> Self {
         let graph = Rc::new(graph::Graph::new());
         let now = graph.now.borrow().clone();
-        Self { graph, now }
+        let owner = Rc::new(NativeOwner {
+            graph: graph.clone(),
+            facade: OnceCell::new(),
+        });
+        Self { graph, owner, now }
     }
 }
 
@@ -218,7 +243,7 @@ impl DefaultStore {
 
     pub fn facade(&self) -> Result<Js, Thrown> {
         self.prepare();
-        self.graph.facade()
+        self.owner.facade()
     }
 
     pub fn subscribe(
@@ -315,7 +340,7 @@ impl DefaultStore {
 impl Store for DefaultStore {
     fn native_owner(&self) -> Rc<dyn std::any::Any> {
         self.prepare();
-        self.graph.clone()
+        self.owner.clone()
     }
     fn update(&self, changes: StoreUpdate, from_worker: bool) -> Result<(), StoreMutationError> {
         self.invoke("update", vec![encode(&changes)?, Js::Bool(from_worker)])

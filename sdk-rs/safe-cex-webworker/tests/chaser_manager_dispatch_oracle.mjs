@@ -7,7 +7,41 @@ function source(path){const ast=ts.createSourceFile(path,fs.readFileSync(new URL
 const types=ts.createSourceFile('types',fs.readFileSync(new URL('types.ts',root),'utf8'),ts.ScriptTarget.Latest,true);
 const enums=types.statements.filter(n=>ts.isEnumDeclaration(n)&&['OrderSide','PositionSide','OrderStatus'].includes(n.name.text)).map(n=>n.getText(types).replace('export ','')).join('\n');
 let currentId='id';const context=vm.createContext({Date:{now:()=>0},nanoid:()=>currentId,structuredClone});
-vm.runInContext(ts.transpileModule(enums+'\n'+['utils/clone.ts','webworker/chaserOrder/ChaserOrderOptions.ts','webworker/chaserOrder/ChaserOrderInstance.ts','webworker/chaserOrder/ChaserOrderManager.ts'].map(source).join('\n')+'\nglobalThis.Instance=ChaserOrderInstance;globalThis.Manager=ChaserOrderManager;globalThis.Singleton=chaserOrderManagerInstance;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+const program=ts.transpileModule(enums+'\n'+['utils/clone.ts','webworker/chaserOrder/ChaserOrderOptions.ts','webworker/chaserOrder/ChaserOrderInstance.ts','webworker/chaserOrder/ChaserOrderManager.ts'].map(source).join('\n')+'\nglobalThis.Instance=ChaserOrderInstance;globalThis.Manager=ChaserOrderManager;globalThis.Singleton=chaserOrderManagerInstance;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+vm.runInContext(program,context);
+
+if(process.argv.includes('--composition')){
+ const managerAst=ts.createSourceFile('manager',fs.readFileSync(new URL('webworker/chaserOrder/ChaserOrderManager.ts',root),'utf8'),ts.ScriptTarget.Latest,true);
+ const declaration=managerAst.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='ChaserOrderManager');
+ assert.equal(declaration.members.filter(ts.isConstructorDeclaration).length,0,'MANAGER source has no constructor effects');
+ const fields=declaration.members.filter(ts.isPropertyDeclaration);
+ assert.equal(fields.length,1,'MANAGER source instance-field count');
+ assert.equal(fields[0].name.getText(managerAst),'_chaserOrderInstances');
+ assert.ok(ts.isArrayLiteralExpression(fields[0].initializer));
+ assert.equal(fields[0].initializer.elements.length,0,'MANAGER source empty field initializer');
+ const bits=value=>{const view=new DataView(new ArrayBuffer(8));view.setFloat64(0,value);return view.getBigUint64(0).toString(16).padStart(16,'0');};
+ const singleton=context.Singleton, list=singleton.instances, fresh=new context.Manager();
+ let externalCalls=0;
+ const isolated=vm.createContext({Date:{now:()=>{externalCalls++;return 0;}},nanoid:()=>{externalCalls++;return 'unused';},structuredClone});
+ vm.runInContext(program,isolated);
+ assert.equal(externalCalls,0,'MANAGER source construction has no external effects');
+ const events=[], exchange={name:'bybit',store:{positions:[],orders:[]},emitter:{emit:(...args)=>events.push(args)}};
+ currentId='composition';
+ const instance=new context.Instance(exchange,{symbol:'BTC',size:3,side:'buy',maxAttempts:10,delay:100});
+ instance.markComplete('user');
+ const empty=list.length===0;
+ singleton.add(instance);
+ const prefix={count:list.length,sameInstance:list[0]===instance,logs:events.filter(([name])=>name==='log').length};
+ for(let n=0;n<32;n++)await Promise.resolve();
+ assert.equal(events.length,2,'MANAGER source real engine effect count');
+ const completed=events.find(([name])=>name==='chaser:complete')[1];
+ const composition={empty,sameManager:context.Singleton===singleton,sameList:context.Singleton.instances===list,independent:fresh!==singleton&&fresh.instances!==list&&fresh.instances.length===0,isolated:isolated.Singleton!==singleton&&isolated.Singleton.instances!==list&&isolated.Singleton.instances.length===0,externalCalls,prefix,remaining:list.length,complete:{id:completed.id,symbol:completed.symbol,side:completed.side,reduceOnly:completed.reduceOnly,sizeBits:bits(completed.size),filledBits:bits(completed.filled),stopReason:completed.stopReason},logs:events.filter(([name])=>name==='log').map(([,message])=>message)};
+ assert.equal(completed.size,3);
+ assert.equal(completed.filled,0);
+ process.stdout.write(JSON.stringify(composition));
+ process.exit(0);
+}
+
 const ErrorClass=vm.runInContext('Error',context),error=m=>new ErrorClass(m);
 function fixture(){const manager=new context.Manager(),events=[],settings={process:'ok',released:true,cleanupError:false};let release,cleanupHook;
  function venue(){const exchange={name:'bybit',store:{orders:[],positions:[]},hooks:{},emitter:{emit(e,m){events.push(['emit',e,m]);exchange.hooks[e]?.(m);}}};return exchange;}

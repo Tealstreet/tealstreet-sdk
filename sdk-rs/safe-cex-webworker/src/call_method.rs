@@ -8,7 +8,9 @@ use crate::{
 use safe_cex_exchange::throttle::ThrottleManager;
 use safe_cex_exchange::throttle::symbol_metadata_throttler;
 use safe_cex_exchange::{
+    eager::start_eager,
     exchange::Exchange,
+    js_runtime::promise::await_js,
     js_runtime::value::{Js, from_typed},
     runtime::{ExchangeError, ExchangeFuture},
 };
@@ -73,6 +75,16 @@ fn encode<T: Serialize>(result: T) -> Result<Option<Js>, ExchangeError> {
         .map(Some)
         .map_err(|e| e.to_exchange_error())
 }
+async fn source_await<T>(
+    runtime: &Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
+    future: ExchangeFuture<'_, T>,
+) -> Result<T, ExchangeError> {
+    let result = future.await;
+    await_js(runtime, Js::Undefined)
+        .await
+        .map_err(|e| e.to_exchange_error())?;
+    result
+}
 impl CallMethodHandler {
     pub fn new(
         exchange: Rc<dyn Exchange>,
@@ -106,7 +118,8 @@ impl CallMethodHandler {
             runtime: self.exchange.base().runtime.clone(),
         };
         let handler = self.clone();
-        Box::pin(async move {
+        let runtime = self.exchange.base().runtime.clone();
+        let task = start_eager(&runtime, async move {
             let known = matches!(
                 method.as_str(),
                 "setLeverage"
@@ -171,6 +184,15 @@ impl CallMethodHandler {
                     }
                 }
             }
+            Ok(())
+        });
+        Box::pin(async move {
+            if let Err(error) = task.await {
+                runtime.report_exception(
+                    &error,
+                    &json!({"operation":"worker call continuation"}).into(),
+                );
+            }
         })
     }
     fn execute<'a>(&'a self, method: &'a str, args: &'a [Value]) -> ExchangeFuture<'a, Option<Js>> {
@@ -178,9 +200,11 @@ impl CallMethodHandler {
             let venue = self.exchange.as_ref();
             match method {
                 "setLeverage" => {
-                    venue
-                        .set_leverage(arg(args, 0)?, arg(args, 1)?, arg(args, 2)?)
-                        .await?;
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.set_leverage(arg(args, 0)?, arg(args, 1)?, arg(args, 2)?),
+                    )
+                    .await?;
                     Ok(None)
                 }
                 "scheduleCancel" => {
@@ -189,7 +213,8 @@ impl CallMethodHandler {
                         .map(|value| serde_json::from_value(value.clone()))
                         .transpose()
                         .map_err(|e| ExchangeError::new(e.to_string()))?;
-                    venue.schedule_cancel(time).await?;
+                    source_await(&self.exchange.base().runtime, venue.schedule_cancel(time))
+                        .await?;
                     Ok(None)
                 }
                 "updateSymbolMetadata" => {
@@ -197,22 +222,30 @@ impl CallMethodHandler {
                     Ok(Some(Js::Null))
                 }
                 "changeMarginType" => {
-                    venue
-                        .change_margin_type(arg(args, 0)?, arg(args, 1)?)
-                        .await?;
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.change_margin_type(arg(args, 0)?, arg(args, 1)?),
+                    )
+                    .await?;
                     Ok(None)
                 }
                 "changePositionMode" => {
-                    venue
-                        .change_position_mode(arg(args, 0)?, arg(args, 1)?)
-                        .await?;
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.change_position_mode(arg(args, 0)?, arg(args, 1)?),
+                    )
+                    .await?;
                     Ok(None)
                 }
                 "fetchLastLogsFromWebsockets" => {
                     encode(venue.base().fetch_last_logs_from_websockets())
                 }
                 "fetchAndSetPrivateSnapshot" => {
-                    venue.fetch_and_set_private_snapshot(1).await?;
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_and_set_private_snapshot(1),
+                    )
+                    .await?;
                     Ok(None)
                 }
                 "reconnect" => {
@@ -220,12 +253,34 @@ impl CallMethodHandler {
                     Ok(Some(Js::Null))
                 }
                 "recoverAfterOffline" => Ok(Some(Js::Bool(venue.recover_after_offline()?))),
-                "fetchOHLCV" => encode(venue.fetch_ohlcv(arg(args, 0)?).await?),
-                "fetchHistoricalFills" => {
-                    encode(venue.fetch_historical_fills(arg(args, 0)?).await?)
-                }
-                "fetchOrders" => encode(venue.fetch_orders(arg(args, 0)?).await?),
-                "fetchAndSetOrders" => encode(venue.fetch_and_set_orders(arg(args, 0)?).await?),
+                "fetchOHLCV" => encode(
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_ohlcv(arg(args, 0)?),
+                    )
+                    .await?,
+                ),
+                "fetchHistoricalFills" => encode(
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_historical_fills(arg(args, 0)?),
+                    )
+                    .await?,
+                ),
+                "fetchOrders" => encode(
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_orders(arg(args, 0)?),
+                    )
+                    .await?,
+                ),
+                "fetchAndSetOrders" => encode(
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_and_set_orders(arg(args, 0)?),
+                    )
+                    .await?,
+                ),
                 "removeOrders" => {
                     let orders: Vec<Value> = arg(args, 0)?;
                     let ids: Result<Vec<_>, _> = orders
@@ -239,17 +294,42 @@ impl CallMethodHandler {
                         })
                         .collect();
                     venue.base().remove_orders(&ids?)?;
+                    await_js(&self.exchange.base().runtime, Js::Undefined)
+                        .await
+                        .map_err(|e| e.to_exchange_error())?;
                     Ok(Some(Js::Null))
                 }
-                "fetchHistoricalOrders" => {
-                    encode(venue.fetch_historical_orders(arg(args, 0)?).await?)
-                }
-                "fetchClosedPnl" => encode(venue.fetch_closed_pnl(arg(args, 0)?).await?),
-                "fetchIncomeHistory" => encode(venue.fetch_income_history(arg(args, 0)?).await?),
+                "fetchHistoricalOrders" => encode(
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_historical_orders(arg(args, 0)?),
+                    )
+                    .await?,
+                ),
+                "fetchClosedPnl" => encode(
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_closed_pnl(arg(args, 0)?),
+                    )
+                    .await?,
+                ),
+                "fetchIncomeHistory" => encode(
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_income_history(arg(args, 0)?),
+                    )
+                    .await?,
+                ),
                 "fetchIncomeHistoryRange" => encode(
-                    venue
-                        .fetch_income_history_range(arg(args, 0)?, arg(args, 1)?, arg(args, 2)?)
-                        .await?,
+                    source_await(
+                        &self.exchange.base().runtime,
+                        venue.fetch_income_history_range(
+                            arg(args, 0)?,
+                            arg(args, 1)?,
+                            arg(args, 2)?,
+                        ),
+                    )
+                    .await?,
                 ),
                 _ => unreachable!("handle_call_method checked the dispatch set"),
             }
@@ -264,7 +344,7 @@ impl CallMethodHandler {
         let method = data["method"].as_str().unwrap_or("").to_owned();
         let args = data["args"].as_array().cloned().unwrap_or_default();
         let task = self.handle_call_method(request_id, method, args);
-        self.exchange.base().runtime.spawn_local(task);
+        drop(task);
     }
     pub fn dispose(&self) {
         self.symbol_metadata_throttler.clear();

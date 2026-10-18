@@ -29,6 +29,13 @@ Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
 
+The native owner retains one lazily constructed facade. Repeated facade requests
+reuse the same object and methods, including custom descriptors across reset;
+state dictionaries still publish their normal replacement generations. The cache
+belongs to the owner capability, while the facade captures only the graph. A
+retained facade or method therefore survives Store drop without retaining its
+cache owner, and the last handle releases the graph without a reference cycle.
+
 Native snapshots retain their own undefined properties; JSON serialization is a
 separate boundary. Retained config reads keep absence distinct from an own
 undefined or null value. Source `for` loops recheck live input lengths, while
@@ -2044,3 +2051,17 @@ hosts; it does not cover arbitrary external Tokio tasks or transport internals.
 The public probe requires the versioned raw receipt and refuses older addons.
 Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
 the private wake-race witness checks the pre-repoll fence.
+
+
+`js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+natural-run detection, minrun, binary insertion, stack collapse, directional merges
+and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
+retain source comparisons and the first failure. The 4096-case real Node
+differential checks native result identities, comparison counts, pair-trace hashes
+and random-comparator state, alongside the constructed Paradex ticker corpus.
+Do not replace this with Rust slice sorting or a differently scheduled merge.
+
+The differential rejects other Node versions: inconsistent comparator ordering is
+engine-dependent. Array sort compacts defined values before TimSort, then writes
+undefined values and deletes remaining holes; four native/Node profiles pin the
+comparator schedule as well as sparse output.
