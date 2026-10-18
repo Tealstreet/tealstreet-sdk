@@ -64,3 +64,44 @@ for (const asynchronous of [false, true]) {
     });
   });
 }
+
+for (const [label, stack] of [
+  ['original', 'signer origin\n    at deviceSign (device-signer.js:12:3)'],
+  ['UTF16', 'signer\ud800\0\udc00'],
+  ['undefined', undefined], ['null', null], ['Infinity', Infinity],
+  ['negative zero', -0], ['BigInt', 9007199254740993n],
+  ['structured', { frame: '\ud800', state: undefined, retry: Infinity }],
+]) {
+  for (const asynchronous of [false, true]) {
+    test(`hosted signer ${asynchronous ? 'rejection' : 'throw'} retains original ${label} stack`, async t => {
+      const requests = [];
+      const server = createServer((request, response) => {
+        requests.push(request.url);
+        response.writeHead(500).end();
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      let id;
+      t.after(async () => {
+        try { if (id !== undefined) await native.nativeAccountClose(id); }
+        finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+      });
+      const failure = Object.assign(new Error('Remote signer unavailable'), {
+        name: 'SignerStackError', stack, code: 'SIGNER_STACK_PROOF',
+      });
+      const sign = asynchronous ? async () => { throw failure; } : () => { throw failure; };
+      id = await native.nativeAccountOpen({ exchange: 'binance', options: {
+        key: 'hosted-key', secret: '', overrideProxyUrl: `http://127.0.0.1:${server.address().port}`,
+      }, accountName: 'hosted-account' }, () => {}, () => {}, sign);
+      await assert.rejects(native.nativeAccountCallMethod(id, 'getAccount', []), error => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.name, failure.name);
+        assert.equal(error.message, failure.message);
+        assert.equal(error.code, failure.code);
+        assert.ok(Object.hasOwn(error, 'stack'), 'the worker envelope includes stack even when undefined');
+        assert.deepEqual(error.stack, stack, 'preserve the signer stack instead of creating an addon stack');
+        return true;
+      });
+      assert.deepEqual(requests, [], 'failed signing sends no venue request');
+    });
+  }
+}
