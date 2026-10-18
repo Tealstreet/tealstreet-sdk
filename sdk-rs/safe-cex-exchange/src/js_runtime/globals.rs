@@ -875,13 +875,9 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let console = |severity: &'static str| {
         let rt = rt.clone();
         Js::function(severity, move |_, a| {
-            let mut parts = Vec::with_capacity(a.len());
-            for value in &a {
-                parts.push(String::from_utf16_lossy(&value.to_js_string()?));
-            }
             scope_of(&rt)?
                 .exchange_runtime()
-                .console(severity, &parts.join(" "));
+                .console_values(severity, &a);
             Ok(Js::Undefined)
         })
     };

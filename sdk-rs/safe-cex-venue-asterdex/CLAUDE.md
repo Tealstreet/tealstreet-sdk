@@ -58,6 +58,9 @@ native mutations must fail named assertions before a passing gate is evidence.
 accepted-contract batch against actual TS and production Rust. Its compiled
 controls and remaining scope are recorded in ACCEPTED_CONTRACT_REVIEW.md.
 
+`STREAM_CONTRACT_REVIEW.md` describes the nineteen stream-function contracts,
+their actual-source/native observations and grouped production-body controls.
+
 `BUILDER_CONTRACT_REVIEW.md` records twelve additional builder contracts and
 their source/native witnesses. The selected runner and six compiled controls
 retain the separate obligations of lexical ordinary `Wire` decoders.
