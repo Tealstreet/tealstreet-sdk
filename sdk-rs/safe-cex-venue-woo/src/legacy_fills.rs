@@ -1,4 +1,5 @@
 //! Legacy history query names; these deliberately differ from V3.
+use safe_cex_types::retained_json::RetainedJsonInput;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq)]
 pub struct WooLegacyFillsQuery {
@@ -108,8 +109,8 @@ fn native_params(params: WooLegacyFillsParams) -> safe_cex_types::QueryValue {
 pub async fn fetch_legacy_transaction_history_rows(
     adapter: &dyn safe_cex_transport::RestAdapter,
     query: &WooLegacyFillsQuery,
-) -> Result<Vec<serde_json::Value>, safe_cex_transport::RestFailure> {
-    use safe_cex_transport::{RestFailure, RestRequest};
+) -> Result<Vec<RetainedJsonInput>, safe_cex_transport::RestFailure> {
+    use safe_cex_transport::RestRequest;
     let mut candidates: Vec<Option<String>> = query
         .symbol
         .as_deref()
@@ -144,9 +145,6 @@ pub async fn fetch_legacy_transaction_history_rows(
                     }
                     native => native,
                 };
-                let data = data
-                    .into_value()
-                    .map_err(|error| RestFailure::pre_transmit(error.to_string(), request))?;
                 let rows = crate::response::parse_transaction_rows_from_response(&data);
                 if !rows.is_empty() {
                     return Ok(rows.to_vec());

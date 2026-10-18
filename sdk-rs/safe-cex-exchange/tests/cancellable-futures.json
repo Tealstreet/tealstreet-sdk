@@ -1692,9 +1692,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "3bfc58247c50f7c67d3974ce4846402c330de18748d3bd40798f761e58621c12",
+      "producer_sha256": "4f6fcf74e4492c13965bf5f1065c8c325422de741a731b6d5e25e902b2319506",
       "classification": "no-owned-latch",
-      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership. Reviewed hosted-string ingress retains synchronous typed data provenance before the same signing/send child await; this adds no registration, task or shared owner. Reviewed retained signer rejection projection is synchronous after the existing transport await; its owned error value introduces no task, latch, registration or borrow across suspension."
+      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership. Reviewed hosted-string ingress retains synchronous typed data provenance before the same signing/send child await; this adds no registration, task or shared owner. Reviewed retained signer rejection projection is synchronous after the existing transport await; its owned error value introduces no task, latch, registration or borrow across suspension. Reviewed owned-error retry recovery: canonical ExchangeError-to-Thrown materialization and effective request config attachment are synchronous after the same adapter await. The request/adapter futures remain caller-owned; no new task, timer, waiter, registration or latch is introduced."
     },
     {
       "owner": "src/js_runtime/client.rs::chain_step",
@@ -2283,62 +2283,50 @@
         "future-signature",
         "future-return",
         "async-block",
+        "async-block",
         "await"
       ],
-      "producer_sha256": "ff38922dc0411b12052b8f44766b17af7496935a9a5858d8458d072cd30e54e8",
-      "classification": "no-owned-latch",
-      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged. Reviewed #1094: Network failure returns a closed NativeWsSocket carrying Error/Close for existing core-owned event dispatch; admission failures retain their typed origin. No task or reader/writer is started on failure; successful handshake ownership and cancellation are unchanged. Ordinary socket futures bypass the replay-only observer wrapper; diagnostic observation flags add no task or owner."
-    },
-    {
-      "owner": "src/native.rs::NativeRuntime::spawn_observed",
-      "boundaries": [
-        "future-signature"
-      ],
-      "producer_sha256": "6e159386092579c76fda0d80715eb2e25b76ea8c00e11442dcd77854c51d9333",
-      "classification": "guarded",
-      "reason": "A pre-spawn Registration removes its diagnostic entry on HostTask drop, including cancellation before first poll. It owns no task body/account; LocalTask keeps existing Tokio abort semantics. Reviewed diagnostic source Location capture: stores only static source coordinates, never the future, runtime or callback arguments; task/drop ownership is unchanged.",
-      "guards": [
-        {
-          "type": "Registration",
-          "file": "src/task_receipts.rs"
-        }
-      ],
-      "witnesses": [
-        "tests/raw_task_receipts.rs::unknown_and_finite_work_block_even_when_awaiting_future_timers",
-        "tests/raw_task_receipts.rs::timer_wakeup_and_pending_callback_block_until_completion"
-      ],
-      "source_dependencies": [
-        {
-          "file": "src/task_receipts.rs",
-          "sha256": "91be6c94e2d5c029d41d34b281248d38d6a7b413d112711582d691b539f94ee4"
-        }
-      ]
+      "producer_sha256": "eb245aa05c492369429d22c89d8d819e04dbcc648973bfc606f0875882ab1f9d",
+      "classification": "delegated",
+      "delegate": "native_ws_socket / NativeWsSocket::Drop / OwnedTasks::start_eager",
+      "reason": "Constructor admission precedes handle construction. The dial future returns the stable CONNECTING handle without awaiting the physical upgrade; native_ws_socket registers and eagerly starts the one prepared transport handshake. The socket registry owns cancellation, and handle Drop/terminate synchronously cancels it. Replay counters are retained only after successful handshake and never retain the socket. Network failures remain the existing Error then Close1006 event path; admission Host errors retain their typed origin."
     },
     {
       "owner": "src/native.rs::NativeWsSocket as WsSocket::next_event",
       "boundaries": [
         "future-signature",
         "future-return",
-        "poll-fn"
-      ],
-      "producer_sha256": "a0caa00743305573a2bbb7a66a4b87ca0a8e431781e368c9ab6a6603bea4cccf",
-      "classification": "no-owned-latch",
-      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future. Reviewed #1094: the failed-network variant returns ready Error then Close futures and an unregistered terminal pending future, with no Open, waiter, task or new cancellation latch. Successful socket reads and existing termination ownership are unchanged; real native HTTP400/invalid-URL coverage is ws_lifecycle::native_failed_upgrade_delivers_error_then_close_without_open. Reviewed raw-task receipt instrumentation: diagnostic classification/pending-leaf observations add no scheduling turn; existing producer ownership, cancellation guards and cleanup remain. Native unpolled cancellation and pending timer/socket tests execute the registration lifetime. Ordinary socket futures bypass the replay-only observer wrapper; diagnostic observation flags add no task or owner."
-    },
-    {
-      "owner": "src/native.rs::NativeWsSocket::next_native_event",
-      "boundaries": [
-        "future-signature",
-        "future-return",
-        "async-block",
         "async-block",
         "await",
+        "poll-fn",
+        "await",
+        "poll-fn",
         "await",
         "await"
       ],
-      "producer_sha256": "09f9aa17b97d80d4005253269027afdea0274407d396109ca1b830c931e48552",
-      "classification": "no-owned-latch",
-      "reason": "Extracted unchanged socket receive future owns its socket clone and existing receive waiter; drop abandons the waiter, without installing a new shared latch."
+      "producer_sha256": "f9002285b942ff83985f8de0d235d4d2ff7450fca9ad2630dd38bd81727ff145",
+      "classification": "guarded",
+      "reason": "Per-future Waiters::Registration is created before boxing and releases the exact event waker on waiter drop without cancelling the socket-owned handshake. State reads release their borrow before registration replacement can reenter close. Completion, close and terminate wake registrations after state mutation. Termination suppresses queued or pending events; a receiving future drops its receive/native handle when woken after termination. The existing failed-network Error/Close1006 path has no Open and remains terminal after Close. Reviewed raw-task integration: only an actually pending NativeSocket receive marks SocketReader waiting; CONNECTING remains blocking. No extra task, waiter or cancellation ownership is introduced.",
+      "guards": [
+        {
+          "file": "src/waiters.rs",
+          "type": "Registration"
+        }
+      ],
+      "witnesses": [
+        "src/native_connecting_tests.rs::native_connecting_waiter_drop_releases_registration_without_canceling_dial",
+        "src/native_connecting_tests.rs::native_connecting_waker_replacement_can_reenter_close"
+      ],
+      "source_dependencies": [
+        {
+          "file": "src/native.rs",
+          "sha256": "b26b24eb820c4a2d5055c6f3449c7d7f55d5be9a3998823c72abcd14fa578a2a"
+        },
+        {
+          "file": "src/waiters.rs",
+          "sha256": "8effe46cde1640e62fa0807d03d77c16b723ec0e5d933474583ecc2ec5e2e0fb"
+        }
+      ]
     },
     {
       "owner": "src/native.rs::TokenTunnel as TunnelHost::spawn_local",
@@ -3179,6 +3167,69 @@
       "classification": "delegated",
       "delegate": "src/exchange.rs::Exchange::fetch_and_set_private_snapshot",
       "reason": "Weak WS bridge resolves the concrete venue then delegates the snapshot; it owns no second task or resync latch."
+    },
+    {
+      "owner": "src/native.rs::native_ws_socket",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "2342a113514189c08327faef04a85bf150a844d0b3ce30613ca423c9f6c3a0c5",
+      "classification": "guarded",
+      "reason": "The native CONNECTING socket owns an OwnedTasks registry before canonical eager start. The registry owns the actual prepared handshake future; its completion holds only Weak state and never the socket/registry. NativeWsSocket Drop/terminate cancels the registry and suppresses queued failure events, while close during CONNECTING cancels I/O and wakes the existing Error/Close1006 path. OwnedTasks Drop is the independent fallback for I/O cancellation. Dropping only an event waiter leaves the handshake alive.",
+      "guards": [
+        {
+          "file": "src/native.rs",
+          "type": "NativeWsSocket"
+        },
+        {
+          "file": "src/owned_tasks.rs",
+          "type": "OwnedTasks"
+        }
+      ],
+      "witnesses": [
+        "src/native_connecting_tests.rs::native_connecting_owner_drop_cancels_handshake_with_live_event_waiter",
+        "src/native_connecting_tests.rs::native_connecting_waiter_drop_releases_registration_without_canceling_dial"
+      ],
+      "source_dependencies": [
+        {
+          "file": "src/native.rs",
+          "sha256": "b26b24eb820c4a2d5055c6f3449c7d7f55d5be9a3998823c72abcd14fa578a2a"
+        },
+        {
+          "file": "src/owned_tasks.rs",
+          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+        },
+        {
+          "file": "src/eager.rs",
+          "sha256": "ff7bef6c6106d063dc067182dc075edb641899c55068454c5c2beb262a899ba8"
+        }
+      ]
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime::spawn_observed",
+      "boundaries": [
+        "future-signature"
+      ],
+      "producer_sha256": "6e159386092579c76fda0d80715eb2e25b76ea8c00e11442dcd77854c51d9333",
+      "classification": "guarded",
+      "reason": "A pre-spawn Registration removes its diagnostic entry on HostTask drop, including cancellation before first poll. It owns no task body/account; LocalTask keeps existing Tokio abort semantics. Reviewed diagnostic source Location capture: stores only static source coordinates, never the future, runtime or callback arguments; task/drop ownership is unchanged.",
+      "guards": [
+        {
+          "type": "Registration",
+          "file": "src/task_receipts.rs"
+        }
+      ],
+      "witnesses": [
+        "tests/raw_task_receipts.rs::unknown_and_finite_work_block_even_when_awaiting_future_timers",
+        "tests/raw_task_receipts.rs::timer_wakeup_and_pending_callback_block_until_completion"
+      ],
+      "source_dependencies": [
+        {
+          "file": "src/task_receipts.rs",
+          "sha256": "91be6c94e2d5c029d41d34b281248d38d6a7b413d112711582d691b539f94ee4"
+        }
+      ]
     }
   ]
 }

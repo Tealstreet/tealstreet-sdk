@@ -1,4 +1,6 @@
-use safe_cex_types::{ExecutionPositionSide, OrderSide, PositionSide};
+use safe_cex_types::{
+    ExecutionPositionSide, OrderSide, PositionSide, retained_json::RetainedJsonInput as Input,
+};
 use safe_cex_venue_woo::transaction::parse_transaction_history_row;
 use serde_json::{Value, json};
 use std::process::Command;
@@ -9,14 +11,20 @@ fn bits(value: f64) -> Value {
 fn optional<T>(value: Option<T>, encode: impl FnOnce(T) -> Value) -> Value {
     value.map_or_else(|| json!({"$undefined":true}), encode)
 }
-fn pack(value: &Value) -> Value {
+fn pack(value: &Input) -> Value {
     match value {
-        Value::Number(_) => bits(safe_cex_num::js_number(Some(value)).unwrap()),
-        Value::Array(values) => Value::Array(values.iter().map(pack).collect()),
-        Value::Object(values) => {
-            Value::Object(values.iter().map(|(k, v)| (k.clone(), pack(v))).collect())
-        }
-        value => value.clone(),
+        Input::Float(_) | Input::Lexeme(_) => bits(value.as_f64().unwrap()),
+        Input::Array(values) => Value::Array(values.iter().map(pack).collect()),
+        Input::Object(values) => Value::Object(
+            values
+                .iter()
+                .map(|(k, v)| (String::from_utf16(k).unwrap(), pack(v)))
+                .collect(),
+        ),
+        Input::Text(units) => json!(String::from_utf16(units).unwrap()),
+        Input::Bool(value) => json!(value),
+        Input::Null => Value::Null,
+        Input::Undefined => json!({"$undefined":true}),
     }
 }
 #[test]
@@ -46,8 +54,7 @@ fn transaction_native_fields_match_actual_source() {
             .get(index)
             .expect("TRANSACTION independently required case");
         let input = safe_cex_transport::how::json_parse(case["raw"].as_str().unwrap());
-        let actual =
-            parse_transaction_history_row(input.into_value().unwrap().as_object().unwrap());
+        let actual = parse_transaction_history_row(&input);
         if let Some(error) = case.get("error") {
             classes[0] += 1;
             assert_eq!(
@@ -148,13 +155,13 @@ fn transaction_native_fields_match_actual_source() {
         "TRANSACTION native field comparison total"
     );
     let mut input = json!({"symbol":"PERP_BTC_USDT","side":"BUY","price":17.125,"quantity":3.75,"timestamp":1700000000123i64,"feeAsset":{"label":"before"}});
-    let row = parse_transaction_history_row(input.as_object().unwrap())
+    let row = parse_transaction_history_row(&Input::from(input.clone()))
         .unwrap()
         .unwrap();
     input["feeAsset"]["label"] = json!("after");
     assert_eq!(
         row.commission_asset.as_ref().unwrap(),
-        &capture["alias"]["before"],
+        &Input::from(capture["alias"]["before"].clone()),
         "TRANSACTION owned asset snapshot"
     );
     assert_eq!(

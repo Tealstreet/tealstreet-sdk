@@ -6,6 +6,9 @@ Error snapshot excludes the self-reference under decision 2; existing owned
 metadata preserves diagnostics, extra/config data and nearest-response authority.
 Executable config capabilities retain the owned-data boundary. Constructed Aster
 and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+The typed REST host recovers owned callback errors through the canonical
+ExchangeError-to-Thrown conversion and attaches the effective request config.
+The Bitget owned-transport regression pins retry eligibility after that boundary.
 
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
@@ -1918,9 +1921,14 @@ eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
 `js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
-and the Vec<Market> info boundary. Its optional recorded-payload probe measures
-parse and typed decode separately; `tests/large_payload_source.mjs` captures
+and the Vec<Market> info boundary. `tests/large_payload_source.mjs` captures
 maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Use `cargo run --release -p safe-cex-exchange --features native --example
+large_payload_decode` with LARGE_PAYLOAD_MANIFEST and LARGE_PAYLOAD_OUTPUT to
+measure the same recorded probe with the production allocator. The test binary
+has a counting allocator and must not supply production CPU ratios. Report CPU
+medians and spread from at least three interleaved control/candidate runs;
+input restoration and complete output observations stay outside timed phases.
 Native observation files encode UTF-16, own undefined and f64 bits explicitly so
 before/after byte comparisons do not hide lossy JSON projections.
 

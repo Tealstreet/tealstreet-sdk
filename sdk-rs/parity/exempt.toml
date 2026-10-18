@@ -7764,3 +7764,7 @@ reason = "Native ABI for the existing TS Store.subscribe data argument: required
 [[exempt]]
 rs = "safe-cex-exchange/src/store_delivery.rs::StoreUpdateThrottle::new_with_argument"
 reason = "Native host capability: the one shared lodash throttle retains its argument generically, allowing account delivery to carry the actual Js state until invocation. Existing StoreFrame new delegates to the same constructor/algorithm. The native argument burst test verifies one leading read, no intermediate reads, latest-state trailing delivery and cancellation."
+
+[[exempt]]
+rs = "safe-cex-transport/src/native.rs::prepare_websocket"
+reason = "Native host capability: synchronously validates physical WebSocket constructor inputs and returns the one owned handshake future shared by connect_websocket and NativeRuntime's CONNECTING bridge. There is no maintained SDK declaration for the platform WebSocket constructor or native TCP/TLS handshake. This splits the existing terminal algorithm without adding a venue scheduler; registry native_connecting_socket real upgrades and source Bitget/BaseWebSocket witnesses cover admission, stable handle identity, send/close, cancellation and frames."

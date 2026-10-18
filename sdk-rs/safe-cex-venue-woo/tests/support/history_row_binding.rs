@@ -111,3 +111,102 @@ fn assert_rows(primitives: bool) {
         );
     }
 }
+
+#[test]
+fn history_ignores_unread_utf16_and_preserves_selected_number_coercion() {
+    use safe_cex_exchange::js_runtime::value::from_retained_input;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/history-row-source.cjs"
+        ))
+        .arg("--retained")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 64);
+    for case in cases {
+        let path = "/v3/trade/transactionHistory";
+        let raw = case["raw"].as_str().unwrap();
+        let legacy = case["legacy"].as_bool().unwrap();
+        let mut data = Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
+        if case["ownUndefined"] == true {
+            let row_path = match case["shape"].as_str().unwrap() {
+                "nestedRows" => data.get_mut("data").unwrap().get_mut("rows").unwrap(),
+                "rows" => data.get_mut("rows").unwrap(),
+                "nestedArray" => data.get_mut("data").unwrap(),
+                _ => &mut data,
+            };
+            row_path.as_array_mut().unwrap()[1]
+                .as_object_mut()
+                .unwrap()
+                .push(("executedPrice".encode_utf16().collect(), Input::Undefined));
+        }
+        let h = harness(ExchangeName::Woo, options(), |http| {
+            if legacy {
+                http.ok("GET", path, json!({"rows":[]}));
+            }
+            http.route_native(
+                "GET",
+                if legacy { "/v1/client/trades" } else { path },
+                200.0,
+                from_retained_input(data),
+            );
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let sink = errors.clone();
+        h.venue().base().on(
+            "error",
+            Rc::new(move |_, value| {
+                sink.borrow_mut().push(value.to_display());
+                Ok(())
+            }),
+        );
+        let value = h
+            .exchange
+            .rt
+            .this
+            .call_method(
+                case["method"].as_str().unwrap(),
+                vec![Js::object(vec![("symbol", Js::str("BTCUSDT"))])],
+            )
+            .unwrap();
+        let runtime = h.exchange.rt.exchange_runtime();
+        let actual = h
+            .drive(Box::pin(async move {
+                await_js(&runtime, value)
+                    .await
+                    .map_err(|e| e.to_exchange_error())
+            }))
+            .unwrap();
+        assert_eq!(
+            observe(&actual),
+            case["rows"],
+            "retained signed history {case}"
+        );
+        assert!(
+            errors.borrow().is_empty(),
+            "unread metadata must not report: {:?}",
+            errors.borrow()
+        );
+        let calls = h
+            .http
+            .calls(if legacy { "/v1/client/trades" } else { path });
+        assert_eq!(calls.len(), 1, "no metadata-induced fallback");
+        if legacy {
+            assert_eq!(h.http.calls(path).len(), 5);
+        }
+        assert!(
+            !calls[0].headers["x-api-signature"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}

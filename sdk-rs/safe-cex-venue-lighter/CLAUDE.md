@@ -475,3 +475,8 @@ requires named failures followed by exact restoration.
 
 `SOURCE_CORPUS_PIN_REVIEW.md` reviews the eighteen source-provenance guards
 following unrelated type-only additions to the shared TypeScript types barrel.
+
+The fourteen TransactionClient get/submit methods have a real-constructor timing
+proof in `TRANSACTION_TIMING_AUDIT.md`. Keep live JS inputs until the nonce await
+settles, retain the batch iterator, and preserve receiver dispatch for submits.
+The typed FIFO promise family is already eager; do not wrap it in a second driver.
