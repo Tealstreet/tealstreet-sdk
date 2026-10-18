@@ -27,3 +27,28 @@ instrumentation, never copies of their bodies. scripts/exchange-bridge-controls.
 runs three independent compiled semantic faults, requires the corresponding named
 runtime receipt to fail while siblings pass, then restores exact production bytes
 and requires all three receipts to pass. Execution receipts belong in PR validation.
+
+Run the maintained measurement from sdk-rs (the separate target directory keeps
+rustdoc/probe artifacts apart from ordinary native tests):
+
+```sh
+RUSTC_BOOTSTRAP=1 CARGO_BUILD_JOBS=1 \
+CARGO_TARGET_DIR="$PWD/target/accepted-inventory" \
+node safe-cex-parity/scripts/accepted-set.mjs \
+  --package=safe-cex-venue-binance --jobs=1 --measure \
+  --owner=exchange_classes::failure \
+  --owner=exchange_classes::json_value \
+  --owner=exchange_classes::typed
+python3 safe-cex-venue-binance/scripts/exchange-bridge-controls.py
+```
+
+The controls also accept `--only=failure,json_value,typed` subsets for replay;
+every measurement still runs all three owners and requires sibling receipts to
+stay green. Compiler errors never satisfy a mutation control.
+
+Executed validation: canonical missing-classification RED for all three owners;
+GREEN3/23 with no classification-only receipts. Each diagnostic, JSON-carrier
+and typed-result body fault compiled, failed exactly its named owner with both
+siblings green, and passed all three after exact source restoration. The final
+source file was byte-identical to the committed production file. Failed compiler
+attempts were rejected by the control runner and are not part of these receipts.
