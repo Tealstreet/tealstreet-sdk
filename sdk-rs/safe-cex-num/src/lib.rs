@@ -667,6 +667,7 @@ pub mod order;
 pub mod order_policy;
 pub mod sizing;
 pub use coercion::{
+    js_retained_number, js_retained_string, js_retained_parse_float,
     JsCoercionError, JsNumberObject, JsPrimitive, js_number, js_number_object, js_number_primitive,
     js_string, js_to_number, js_to_number_object, js_truthy, parse_float, parse_int,
 };

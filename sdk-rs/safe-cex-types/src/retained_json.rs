@@ -428,6 +428,18 @@ impl RetainedJsonInput {
             _ => None,
         }
     }
+    pub fn as_array(&self) -> Option<&[Self]> {
+        match self { Self::Array(values) => Some(values), _ => None }
+    }
+
+    pub fn is_nullish(&self) -> bool {
+        matches!(self, Self::Null | Self::Undefined)
+    }
+
+    pub fn text_equals(&self, expected: &str) -> bool {
+        self.as_text().is_some_and(|units| units.iter().copied().eq(expected.encode_utf16()))
+    }
+
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Float(value) => Some(*value),
