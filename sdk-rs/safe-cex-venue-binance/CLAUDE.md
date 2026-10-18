@@ -57,6 +57,15 @@ Default cargo tests remain hermetic.
 
 ## Integration boundaries
 
+Futures and PM keep `market_websocket` nested under the public socket, as the
+maintained TS constructors do. The parent owns its connection, candle listeners
+and disposal; it is not an exchange-level `PublicSecondary` socket. Registering
+it there incorrectly merges market handler stats and health timestamps into the
+top-level public group. The production addon regression
+`native-binance-nested-socket.test.mjs` replays four recorded frames through both
+TLS sockets and checks worker-delivered stats and the public timestamp while
+requiring nested candle delivery to remain live.
+
 The native API factory attaches the constructed exchange's canonical Store to
 every shared HTTP client, including the public no-proxy client. The shared
 factory observer owns outcome classification and silent counter increments;
