@@ -2246,9 +2246,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "fcd6922873b61c563bc6a67d6c9f7d6144cc95d72ee0727b1c938ef3c753cbd7",
+      "producer_sha256": "8aff9b3a5f6271b5efcb61c1e743ba5081425c080a1e37a58946b8afbbf8f6ae",
       "classification": "no-owned-latch",
-      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged."
+      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged. Reviewed #1094: the dial error projection retains its existing typed transport origin; no await, socket/task owner, guard or cancellation boundary changes."
     },
     {
       "owner": "src/native.rs::NativeWsSocket as WsSocket::next_event",
@@ -2787,10 +2787,10 @@
         "await",
         "await"
       ],
-      "producer_sha256": "b06fb61429e7a2d0bbcc168f05d4fc00f668e1fd8309b7939463fd63fd3558bc",
+      "producer_sha256": "bf77191d6c863092ff61fbd7f8546ac04b85ee48e0c4f99440dc59812722cc37",
       "classification": "delegated",
       "delegate": "WsRuntime::dial / BaseWebSocket::start_managed_relay / BaseWebSocket::spawn_owned_kind",
-      "reason": "The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. Reviewed #1082: opt-in per-dial history is appended synchronously; received_transport_close wraps the original close dispatch with counters and releases every receipt borrow before callbacks. All existing async boundaries and generation/task guards remain unchanged."
+      "reason": "The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. Reviewed #1082: opt-in per-dial history is appended synchronously; received_transport_close wraps the original close dispatch with counters and releases every receipt borrow before callbacks. All existing async boundaries and generation/task guards remain unchanged. Reviewed #1094: only typed network failures synchronously report error then abnormal close; constructor failures still propagate. Disposal/generation are checked before delivery and again after callbacks; no new await, task owner or guard is introduced."
     },
     {
       "owner": "src/websocket.rs::BaseWebSocket::reconnect_base",
@@ -2835,7 +2835,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "e55c4ee6a5d3f2dd723238fd8ae04b92dc9620cb87d44291ea710767792eaaf3"
+          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2880,7 +2880,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "e55c4ee6a5d3f2dd723238fd8ae04b92dc9620cb87d44291ea710767792eaaf3"
+          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2985,7 +2985,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "e55c4ee6a5d3f2dd723238fd8ae04b92dc9620cb87d44291ea710767792eaaf3"
+          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -3029,7 +3029,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "e55c4ee6a5d3f2dd723238fd8ae04b92dc9620cb87d44291ea710767792eaaf3"
+          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
         }
       ],
       "guards": [
