@@ -156,7 +156,8 @@ fn actual_history_read_reports_the_callback_error_and_returns_no_rows() {
     h.venue().base().on(
         "error",
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.as_str().unwrap().to_owned());
+            sink.borrow_mut()
+                .push(String::from_utf16(data.as_str().unwrap().as_ref()).unwrap());
             Ok(())
         }),
     );

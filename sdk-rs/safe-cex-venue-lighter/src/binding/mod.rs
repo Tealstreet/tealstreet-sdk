@@ -12,3 +12,7 @@ mod socket_globals;
 mod value;
 mod ws_private;
 mod ws_public;
+
+#[cfg(test)]
+#[path = "../../../test-support/virtual_time.rs"]
+mod test_time;

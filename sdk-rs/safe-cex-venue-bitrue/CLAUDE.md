@@ -223,3 +223,26 @@ matching the API's `virtualClock.getCurrentTimeMs()`. `PrivateHost::now` remains
 raw for the private order-event `Date.now()` fallback. Registry
 `native_host_bitrue_clock` proves the distinction with a 90-second server offset
 and independently verifies the HMAC on a real native signed account request.
+
+Public depth rows use the shared iterator protocol for the source two-entry
+array pattern, including early close after two entries. Numeric-keyed objects
+and scalar rows must not be published as books. The constructed raw-socket
+regression compares actual source refusals and verifies a later valid snapshot
+still reaches its callback; it does not claim an async rejection diagnostic sink.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` exercises
+32 field-independent cases through the constructed venue's actual socket and
+DefaultStore. Null, numeric/prefix/NaN strings, objects, overflow, signed zero and
+false arrive beside good rows as consecutive single-row protocol frames. The
+maintained TS exchange and actual TS DefaultStore produce the comparison values;
+eleven native number fields are checked before JSON. The shared ticker census
+records the witness; `parity/scripts/ticker-native-controls.py bitrue` compiles
+a production binding fault, requires the named assertion, restores and reruns.
+
+The constructed public candle witness compares all six native fields against
+maintained `mapKline` with installed Day.js, including Singapore wall-clock time,
+subsecond precision, epoch zero, invalid-date NaN and signed zero. Both the real
+socket witness and an independent installed-library probe fail on master without
+`utcOffset` and pass with the shared #453 implementation. Callback cleanup is
+observed; typed Candle still has its separately declared retained-object limits.

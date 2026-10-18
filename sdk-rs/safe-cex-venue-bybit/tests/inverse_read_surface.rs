@@ -759,9 +759,11 @@ impl Host for Harness {
                 }
                 self.all(values)
             }
-            "inverse-pnl" | "inverse-coin" | "inverse-null-market" => {
-                api::dispatch(self, code, args)
-            }
+            "inverse-pnl" | "inverse-coin" | "inverse-null-market" => api::dispatch(
+                self,
+                api::Callback::from_name(code).expect("source callback selector"),
+                args,
+            ),
             "v" => {
                 let key = String::from_utf16(&js(&args[1])).unwrap();
                 let real = get(&args[0], &key);

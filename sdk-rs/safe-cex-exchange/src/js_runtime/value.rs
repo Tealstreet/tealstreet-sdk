@@ -1,5 +1,8 @@
 //! Native JS value model handed to host-trait-generic ported venue bodies.
 //! Strings are UTF-16, arrays keep holes, objects keep own-key order and accessors.
+pub mod owned;
+pub use owned::OwnedJsValue;
+
 use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
@@ -112,16 +115,13 @@ impl Thrown {
     }
     pub fn to_exchange_error(&self) -> ExchangeError {
         let mut error = self.error_fields();
-        if self.native.is_some() || !self.value.is_object() {
+        if !self.value.is_object() {
             return error;
         }
-        let code = self.value.get("code").and_then(|code| {
-            if code.is_undefined() {
-                Ok(None)
-            } else {
-                to_json(&code).map(Some)
-            }
-        });
+        let code = self
+            .value
+            .get("code")
+            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
         match code {
             Ok(code) => error.code = code,
             Err(cause) => return cause.error_fields(),
@@ -139,6 +139,30 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(failure) = error.origin.as_ref().and_then(|origin| {
+            origin
+                .error()
+                .downcast_ref::<safe_cex_transport::RestFailure>()
+        }) && let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            failure.transport_error.as_deref()
+            && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
+        {
+            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                    && String::from_utf16(units).is_err()
+                    && String::from_utf16_lossy(units) == *projected
+                {
+                    value
+                        .set(field, Js::String(units.clone().into()))
+                        .expect("fresh error metadata property");
+                }
+            }
+        }
+        if let Some(code) = &error.code {
+            value
+                .define("code", code.clone())
+                .expect("fresh error code property");
+        }
         Self {
             value,
             native: Some(Rc::new(error)),
@@ -1146,6 +1170,34 @@ impl Js {
             }
         }
     }
+    /// Object.getOwnPropertyNames: own string keys, enumerable or not, in
+    /// OrdinaryOwnPropertyKeys order; array and string `length` follows the indices.
+    pub fn own_property_names(&self) -> Result<Vec<Str>, Thrown> {
+        Ok(match self {
+            Js::Array(_) | Js::String(_) => {
+                let mut keys = self.own_keys();
+                keys.push(utf16("length"));
+                keys
+            }
+            Js::Object(o) => {
+                let keys: Vec<Str> = o.props.borrow().keys().cloned().collect();
+                let mut indexed: Vec<(usize, Str)> = keys
+                    .iter()
+                    .filter_map(|k| array_index(k).map(|i| (i, k.clone())))
+                    .collect();
+                indexed.sort_by_key(|(i, _)| *i);
+                let mut out: Vec<Str> = indexed.into_iter().map(|(_, k)| k).collect();
+                out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
+                out
+            }
+            Js::Function(_) | Js::Builtin(_) => {
+                return Err(Thrown::type_error(
+                    "Object.getOwnPropertyNames does not model function or intrinsic keys",
+                ));
+            }
+            _ => vec![],
+        })
+    }
     /// Object spread / Object.assign source read: own enumerable values in key order.
     pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
         self.own_keys()
@@ -1326,7 +1378,7 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
 pub fn to_retained_input(
     value: &Js,
 ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, Thrown> {
-    typed::capture(value, 0, false)
+    typed::capture(value, 0, false, true)
 }
 /// Restore the canonical retained data carrier without a JSON roundtrip.
 pub fn from_retained_input(value: safe_cex_types::retained_json::RetainedJsonInput) -> Js {

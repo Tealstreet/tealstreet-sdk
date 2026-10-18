@@ -36,7 +36,10 @@ impl RestAdapter for Adapter {
             assert_eq!(request.url, "/v5/order/create", "submission endpoint");
             let payload = body
                 .untransformed()
-                .expect("submission must preserve unsigned structured payload");
+                .expect("submission must preserve unsigned structured payload")
+                .clone()
+                .into_value()
+                .unwrap();
             if payload["fail"] == true {
                 let mut failure = safe_cex_transport::RestFailure::pre_transmit(
                     "transport failure".into(),
@@ -400,7 +403,8 @@ fn constructor_clients_and_sockets_follow_actual_source() {
                 .unwrap()
                 .untransformed()
                 .unwrap(),
-            &json!({"fail":true})
+            &safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"fail":true}))
+                .unwrap()
         );
         let weak = Rc::downgrade(&venue);
         venue.dispose().unwrap();
@@ -829,6 +833,7 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
                 let listener = venue.base().on(
                     "error",
                     Rc::new(move |_, data| {
+                        let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
                         observed.borrow_mut().push(
                             data.as_str()
                                 .unwrap()
@@ -838,7 +843,9 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
                         );
                         if fail {
                             let mut error = ExchangeError::new("reporter failure");
-                            error.code = Some("REPORTER_SENTINEL".into());
+                            error.code = Some(safe_cex_exchange::js_runtime::value::Js::str(
+                                "REPORTER_SENTINEL",
+                            ));
                             Err(error)
                         } else {
                             Ok(())
@@ -871,7 +878,9 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
                             "settlement rejection identity case {case_index}"
                         );
                         assert_eq!(
-                            error.code.as_ref().and_then(Value::as_str),
+                            observed_error_code(&error.code)
+                                .as_ref()
+                                .and_then(Value::as_str),
                             case["original"]
                                 .as_bool()
                                 .unwrap()
@@ -1665,4 +1674,12 @@ fn opposite_position_matches_source_signed_contracts() {
         serde_json::from_str::<Value>(fixture["surrogate"]["input"].as_str().unwrap()).is_err(),
         "OPPOSITE UTF8 input refusal"
     );
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
+    })
 }

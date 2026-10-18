@@ -27,8 +27,9 @@ import type { ScriptFn, ScriptMeta, ScriptRecord } from '@tealstreet/script-api-
 
 import { logger } from './logger';
 import { HELLO_TEMPLATE, TSCONFIG_TEMPLATE, TYPES_TEMPLATE } from '@tealstreet/script-authoring/src/scripts-templates';
+import { BRAND } from './brand';
 
-const CONFIG_DIR = path.join(os.homedir(), '.tealstreet');
+const CONFIG_DIR = path.join(os.homedir(), BRAND.configDirName);
 export const SCRIPTS_DIR = path.join(CONFIG_DIR, 'scripts');
 const TYPES_FILE = path.join(SCRIPTS_DIR, 'types.d.ts');
 const TSCONFIG_FILE = path.join(SCRIPTS_DIR, 'tsconfig.json');

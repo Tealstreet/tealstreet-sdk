@@ -1,4 +1,10 @@
 {
+  "safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed js_runtime/value/owned.rs: the private field holds an already captured OwnedJsValue diagnostic tree. Derived Clone recursively copies its owned strings, arrays and object fields without sharing mutable JS referents or creating validation/retry authority. js_runtime::owned_callback_error_clone_preserves_independent_native_metadata observes distinct array storage and retained name/message, NaN payload bits, signed zero, own Undefined and lone UTF-16 units after dropping the original. Actual registry/napi signer-rejection tests independently exercise the production captured diagnostic. Public construction, JS capture refusal and inbound typed decoding retain their separate obligations; no Copy or decoder exemption is granted."
+  },
   "safe_cex_exchange::exchange::SharedExchangeOptions": {
     "traits": [
       "core::clone::Clone"
@@ -70,5 +76,11 @@
       "core::clone::Clone"
     ],
     "reason": "Reviewed library.rs::Decimal: derived Clone copies its owned BigInt coefficient and i64 scale for reusable bignumber arithmetic. The private fields carry numeric value data, no consumed nonce, validation witness or task authority. This classifies duplication only; parse/format/arithmetic behavior retains its separate inventory and tests."
+  },
+  "safe_cex_exchange::js_runtime::library::DayjsState": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed js_runtime/library.rs::DayjsState: Clone duplicates the wall-clock, utc and local-offset scalar fields and shallow-clones the optional Js offset. The source utc plugin can retain a raw offset value, so reference-valued offsets retain their existing identity; this is not a deep-copy claim. Each dayjs operation constructs a new facade from this reusable state, with no new task, registry or one-use validation authority. tests/js_builtins.rs compares installed-dayjs offset coercions and 420 chains. This private construction classification is not a decoder-domain claim."
   }
 }

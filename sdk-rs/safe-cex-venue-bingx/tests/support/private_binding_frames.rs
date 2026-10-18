@@ -59,6 +59,7 @@ fn private_fill_frame_closes_the_order_and_emits_the_fill() {
     h.exchange.base().on(
         "fill",
         Rc::new(move |_, fill| {
+            let fill = safe_cex_exchange::js_runtime::value::to_json(fill).unwrap();
             capture.borrow_mut().push(fill.clone());
             Ok(())
         }),
@@ -84,9 +85,9 @@ fn private_fill_frame_closes_the_order_and_emits_the_fill() {
 
 #[test]
 fn private_position_frame_commits_before_the_delayed_rest_heal() {
-    use std::{cell::Cell, rc::Rc};
+    use std::rc::Rc;
     let h = started_private_fixture();
-    let gate = Rc::new(Cell::new(false));
+    let gate = Rc::new(support::Release::default());
     *h.http.held_request.borrow_mut() = Some(("GET".into(), POSITIONS.into(), gate));
     private_frame(
         &h,
@@ -133,6 +134,7 @@ fn refused_market_row_emits_its_value_and_returns_empty_fresh_markets() {
     h.exchange.base().on(
         "error",
         Rc::new(move |_, error| {
+            let error = safe_cex_exchange::js_runtime::value::to_json(error).unwrap();
             capture.borrow_mut().push(error.clone());
             Ok(())
         }),

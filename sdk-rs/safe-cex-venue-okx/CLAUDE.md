@@ -180,3 +180,11 @@ inherited price/amount values participate and primitive updates throw before HTT
 `tests/support/amendment_binding.rs` compares eight real assembled-binding scenes
 with actual source: regular/conditional amendments, inherited/own-shadowed/absent
 fields and primitive rejection, including exact signed payloads and errors.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` covers 88 cases / 264 frames per global/EU live/demo constructor across all five ticker/valuation channels. Only the first row of each source channel frame is applied.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.

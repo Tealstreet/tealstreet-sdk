@@ -79,7 +79,7 @@ impl ExchangeRuntime for Runtime {
         }
         Box::new(Task(job))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "native-notification".into()
     }
@@ -89,7 +89,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -248,7 +252,9 @@ impl Fixture {
         );
         let mut original = ExchangeError::new("socket health subscriber failed");
         original.name = "RangeError".into();
-        original.code = Some(json!("native-health"));
+        original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "native-health"
+        )));
         original.store_subscriber_ids = vec![41, 73];
         let cause: Rc<dyn Error> = Rc::new(original);
         let failure = StoreSubscriberError::new("subscriber wrapper").with_cause(cause.clone());
@@ -616,7 +622,7 @@ fn native_case(input: Input) -> Value {
             "native report preserves original error message"
         );
         assert_eq!(
-            error.code,
+            observed_error_code(&error.code),
             Some(json!("native-health")),
             "native report preserves original metadata"
         );
@@ -635,7 +641,7 @@ fn native_case(input: Input) -> Value {
             "native report retains original opaque cause pointer"
         );
     }
-    json!({"trace":*h.parent.trace.borrow(),"closeDelta":h.socket.diagnostics().on_close_count,"health":Store::socket_health(h.store.as_ref()).map(|v|v.clone()),"book":{"updates":book.updates,"isSnapshotLoaded":book.is_snapshot_loaded},"hasOpened":opened.get(),"resyncOrdersOnOpen":resync.get(),"failure":errors.first().map(|e|json!({"name":e.name,"message":e.message,"code":e.code})),"settlement":if !sends {None} else if errors.is_empty() {Some("resolved")} else {Some("rejected")}})
+    json!({"trace":*h.parent.trace.borrow(),"closeDelta":h.socket.diagnostics().on_close_count,"health":Store::socket_health(h.store.as_ref()).map(|v|v.clone()),"book":{"updates":book.updates,"isSnapshotLoaded":book.is_snapshot_loaded},"hasOpened":opened.get(),"resyncOrdersOnOpen":resync.get(),"failure":errors.first().map(|e|json!({"name":e.name,"message":e.message,"code":observed_error_code(&e.code)})),"settlement":if !sends {None} else if errors.is_empty() {Some("resolved")} else {Some("rejected")}})
 }
 #[test]
 #[ignore = "mandatory live source oracle: yarn venue-oracle:binance"]
@@ -950,7 +956,9 @@ fn public_open_family_continues_after_background_notification_failure() {
 fn nested_store_cause_native() {
     let mut original = ExchangeError::new("nested health failure");
     original.name = "RangeError".into();
-    original.code = Some(json!("nested-health"));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "nested-health"
+    )));
     let original: Rc<dyn Error> = Rc::new(original);
     let first_store = DefaultStore::new();
     let first_cause = StoreSubscriberError::new("first wrapper").with_cause(original.clone());
@@ -984,7 +992,7 @@ fn nested_store_cause_native() {
         "native nested Store preserves original error name"
     );
     assert_eq!(
-        second.code,
+        observed_error_code(&second.code),
         Some(json!("nested-health")),
         "native nested Store preserves original metadata"
     );
@@ -1006,4 +1014,17 @@ fn nested_store_cause_native() {
 #[test]
 fn nested_store_boundaries_retain_the_original_opaque_cause() {
     nested_store_cause_native();
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

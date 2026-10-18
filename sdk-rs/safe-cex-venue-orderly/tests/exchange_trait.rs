@@ -1,9 +1,81 @@
 //! Constructed production Orderly family over scripted HTTP and shared sockets.
 #[path = "support/exchange_runtime.rs"]
 mod support;
-use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::{
+    exchange::Exchange,
+    js_runtime::value::{Js, from_json},
+};
 use serde_json::json;
 use support::drive;
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let corpus = ticker_coercion::source("orderly");
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 120);
+    ticker_coercion::assert_case_counts(cases, 120, 54);
+    for name in private_topic_names() {
+        let (venue, rt, store, wire) = support::fixture_for(
+            name.clone(),
+            json!({
+                "key":"fixture-key", "secret":"11111111111111111111111111111111", "applicationId":"fixture-account"
+            }),
+        );
+        script(&wire);
+        drive(&rt, venue.start()).unwrap();
+        for _ in 0..16 {
+            rt.pump();
+        }
+        let socket = rt
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("private"))
+            .unwrap()
+            .1
+            .clone();
+        for case in cases {
+            Store::update(
+                store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(ticker_coercion::seed("orderly")),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            rt.console.borrow_mut().clear();
+            rt.errors.borrow_mut().clear();
+            for frame in case["frames"].as_array().unwrap() {
+                socket.events.borrow_mut().push_back(
+                    safe_cex_exchange::websocket::WsEvent::Message(
+                        safe_cex_transport::socket::SocketFrame::Text(
+                            frame.as_str().unwrap().into(),
+                        ),
+                    ),
+                );
+                for _ in 0..8 {
+                    rt.pump();
+                }
+            }
+            ticker_coercion::assert_native(&store.tickers(), case);
+            let reports = rt
+                .errors
+                .borrow()
+                .iter()
+                .chain(rt.console.borrow().iter())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n");
+            ticker_coercion::assert_refusals(&reports, case);
+        }
+        venue.dispose().unwrap();
+    }
+}
 
 #[test]
 fn public_books_and_candles_reach_each_family_binding() {
@@ -337,7 +409,14 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
         .unwrap()
         .clone();
     assert_eq!(
-        request.body.unwrap().untransformed().unwrap()["leverage"]
+        request
+            .body
+            .unwrap()
+            .untransformed()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap()["leverage"]
             .as_f64()
             .unwrap()
             .to_bits(),
@@ -370,7 +449,15 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
         .find(|r| r.method == "post" && r.url == "/v1/order")
         .unwrap()
         .clone();
-    let body = request.body.as_ref().unwrap().untransformed().unwrap();
+    let body = request
+        .body
+        .as_ref()
+        .unwrap()
+        .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
+        .unwrap();
     assert_eq!(body["client_order_id"], json!("caller-order-12"));
     assert_eq!(body["margin_mode"], json!("ISOLATED"));
     assert_eq!(body["order_tag"], json!("TEALSTREET"));
@@ -636,7 +723,15 @@ fn each_family_constructor_preserves_its_source_order_tag_and_normalized_key() {
             .unwrap()
             .clone();
         assert_eq!(
-            request.body.as_ref().unwrap().untransformed().unwrap()["order_tag"],
+            request
+                .body
+                .as_ref()
+                .unwrap()
+                .untransformed()
+                .unwrap()
+                .clone()
+                .into_value()
+                .unwrap()["order_tag"],
             json!(tag),
             "{name:?} source subclass"
         );
@@ -686,7 +781,7 @@ fn disposal_updates_the_shared_flag_and_preserves_source_listeners() {
     );
     venue
         .base()
-        .emit("fill", json!({"source":"disposal witness"}))
+        .emit("fill", from_json(&json!({"source":"disposal witness"})))
         .unwrap();
     assert_eq!(calls.get(), 1, "source disposal retains emitter listeners");
 }
@@ -752,7 +847,7 @@ fn trait_cancel_symbol_attempts_algo_after_a_normal_cancel_failure() {
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0]
-            .to_string()
+            .to_display()
             .contains("normal cancellation denied")
     );
 }
@@ -866,10 +961,18 @@ fn private_partial_execution_updates_store_and_emits_fill_for_name(
     assert_eq!(actual.filled, 0.5);
     assert_eq!(actual.remaining, 1.5);
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"].as_f64(), Some(778.0));
-    assert_eq!(fills.borrow()[0]["symbol"], "BTCUSDC");
-    assert_eq!(fills.borrow()[0]["price"].as_f64(), Some(101.5));
-    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(0.5));
+    assert_eq!(fills.borrow()[0].get("id").unwrap().as_f64(), Some(778.0));
+    assert!(
+        fills.borrow()[0]
+            .get("symbol")
+            .unwrap()
+            .strict_equals(&Js::str("BTCUSDC"))
+    );
+    assert_eq!(
+        fills.borrow()[0].get("price").unwrap().as_f64(),
+        Some(101.5)
+    );
+    assert_eq!(fills.borrow()[0].get("amount").unwrap().as_f64(), Some(0.5));
     drop(orders);
     venue.dispose().unwrap();
 }
@@ -975,7 +1078,15 @@ fn trait_set_all_leverage_updates_account_once_and_clamps_without_positions() {
     let requests = wire.requests.borrow();
     assert_eq!(requests.len(), 3);
     for (request, leverage) in requests.iter().zip([20.0, 100.0, 1.0]) {
-        let payload = request.body.as_ref().unwrap().untransformed().unwrap();
+        let payload = request
+            .body
+            .as_ref()
+            .unwrap()
+            .untransformed()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap();
         assert_eq!(payload["leverage"].as_f64(), Some(leverage));
         assert_eq!(payload["margin_mode"], "CROSS");
         assert!(payload.get("symbol").is_none());
@@ -1019,7 +1130,7 @@ fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0]
-            .to_string()
+            .to_display()
             .contains("account leverage denied")
     );
     wire.responses
@@ -1031,6 +1142,38 @@ fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
         2,
         "failed write did not advance the account leverage cache"
     );
+}
+
+#[test]
+fn fetch_ohlcv_returns_source_rows_reversed_oldest_first() {
+    // orderly.exchange.ts:617-641 maps newest-first rows then returns `candles.reverse()`.
+    let (venue, rt, _, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    wire.responses.borrow_mut().insert(
+        "/v1/kline".into(),
+        json!({"success":true,"data":{"rows":[
+            {"start_timestamp":1700000120000u64,"open":103,"high":105,"low":102,"close":104,"volume":3},
+            {"start_timestamp":1700000060000u64,"open":102,"high":104,"low":101,"close":103,"volume":2},
+            {"start_timestamp":1700000000000u64,"open":101,"high":103,"low":100,"close":102,"volume":1}
+        ]}}),
+    );
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol":"BTCUSDC","interval":"1m","limit":3})).unwrap();
+    let candles = drive(&rt, venue.fetch_ohlcv(opts)).expect("fetchOHLCV binding");
+    assert_eq!(
+        serde_json::to_value(&candles).unwrap(),
+        json!([
+            {"timestamp":1700000000.0,"open":101.0,"high":103.0,"low":100.0,"close":102.0,"volume":1.0},
+            {"timestamp":1700000060.0,"open":102.0,"high":104.0,"low":101.0,"close":103.0,"volume":2.0},
+            {"timestamp":1700000120.0,"open":103.0,"high":105.0,"low":102.0,"close":104.0,"volume":3.0}
+        ])
+    );
+    let request = wire.requests.borrow().last().unwrap().url.clone();
+    assert!(request.starts_with("/v1/kline?"), "{request}");
+    assert!(request.contains("symbol=PERP_BTC_USDC"), "{request}");
+    venue.dispose().unwrap();
 }
 
 #[test]

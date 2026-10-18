@@ -978,6 +978,47 @@ fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
     h.venue().dispose().unwrap();
 }
 
+/// A market whose 5-unit max splits 10.05 into lots with a 0.05 tail under the 0.1 minimum.
+fn lot_market(http: &Http) {
+    let mut row = perp_row();
+    row["supported_size_decimals"] = json!(2);
+    row["min_base_amount"] = json!("0.1");
+    row["order_quote_limit"] = json!("5");
+    http.ok(
+        "GET",
+        DETAILS,
+        json!({"code": 200, "order_book_details": [row]}),
+    );
+    lighter(http);
+}
+
+#[test]
+fn place_order_merges_a_sub_minimum_trailing_lot_into_the_previous_lot() {
+    let h = harness(ExchangeName::Lighter, options(), lot_market);
+    loaded(&h);
+    let before = h.http.count();
+    let ids = h
+        .drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({"amount": 10.05}))),
+        ))
+        .expect("placeOrder");
+    let txs = sent_txs(&h, before);
+    let amounts: Vec<&Value> = txs.iter().map(|(_, info)| &info["BaseAmount"]).collect();
+    assert_eq!(
+        amounts,
+        vec![&json!(333), &json!(333), &json!(338)],
+        "TS lots [3.33, 3.33, 3.33, 0.05] pop the tail into [3.33, 3.33, 3.38]"
+    );
+    assert!(txs.iter().all(|(tx_type, _)| tx_type == "14"));
+    let sent_ids: Vec<String> = txs
+        .iter()
+        .map(|(_, info)| info["ClientOrderIndex"].to_string())
+        .collect();
+    assert_eq!(ids, sent_ids);
+}
+
 fn private_account_frame_for_deployment(name: ExchangeName) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
@@ -1026,7 +1067,12 @@ fn private_account_frame_for_deployment(name: ExchangeName) {
         "private position uses real venue mapper and Store"
     );
     assert_eq!(
-        *fills.borrow(),
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Lighter fill fixture"),
         vec![json!({"id":"888","side":"buy","symbol":"BTC","price":49000.0,"amount":0.1})],
         "private trade produces source fill payload"
     );
@@ -1103,7 +1149,38 @@ fn private_fill_timestamp_types_match_the_maintained_handler() {
                 fill[field] = json!(fill[field].as_f64().unwrap());
             }
         }
-        assert_eq!(*fills.borrow(), expected, "real private frame: {case}");
+        let actual = fills.borrow();
+        assert_eq!(actual.len(), expected.len(), "real private frame: {case}");
+        for (actual, expected) in actual.iter().zip(&expected) {
+            let fields = expected.as_object().expect("source fill object");
+            assert_eq!(actual.own_keys().len(), fields.len());
+            for (key, expected) in fields {
+                assert!(actual.has_own(key), "source fill key {key}: {case}");
+                let value = actual.get(key).unwrap();
+                match expected {
+                    Value::Number(number) => {
+                        let safe_cex_exchange::js_runtime::value::Js::Number(number_actual) = value
+                        else {
+                            panic!("native fill Number {key}: {case}");
+                        };
+                        assert_eq!(number_actual.to_bits(), number.as_f64().unwrap().to_bits());
+                    }
+                    Value::String(text) => assert!(
+                        value.strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(text))
+                    ),
+                    _ => panic!("unexpected source fill field {key}: {case}"),
+                }
+            }
+        }
+        assert_eq!(
+            actual
+                .iter()
+                .map(safe_cex_exchange::js_runtime::value::to_json)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            expected,
+            "real private frame: {case}"
+        );
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),
@@ -1182,4 +1259,49 @@ process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
             );
         }
     }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("lighter");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 1240);
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    let reports = h.runtime.reports.borrow().len();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("lighter")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert_eq!(
+        h.runtime.reports.borrow().len(),
+        reports,
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
 }

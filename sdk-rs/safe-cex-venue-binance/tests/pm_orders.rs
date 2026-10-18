@@ -22,7 +22,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected task")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "test-id".into()
     }
@@ -32,7 +32,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -201,6 +205,10 @@ fn run_cases(precision_supplement: bool) {
         base.on_args(
             "error",
             Rc::new(move |_, message| {
+                let message: Vec<serde_json::Value> = message
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 capture.borrow_mut().push(serde_json::json!(message));
                 Ok(())
             }),

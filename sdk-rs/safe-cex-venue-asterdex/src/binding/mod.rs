@@ -54,17 +54,15 @@ pub(crate) fn scope(weak: &Weak<Shared>, this: Js) -> Result<Rt, Thrown> {
     })
 }
 pub(crate) fn error(error: ExchangeError) -> Thrown {
-    let value = safe_cex_exchange::js_runtime::value::error_object(&error.name, &error.message);
-    if let Some(response) = &error.response {
-        let _ = value.define(
+    let response = error.response.clone();
+    let thrown = Thrown::from(error);
+    if let Some(response) = &response {
+        let _ = thrown.value.define(
             "response",
             safe_cex_exchange::js_runtime::value::from_json(response),
         );
     }
-    Thrown {
-        value,
-        native: Some(Rc::new(error)),
-    }
+    thrown
 }
 pub(crate) fn text(value: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&value.to_js_string()?))

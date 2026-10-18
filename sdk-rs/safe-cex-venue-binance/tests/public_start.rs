@@ -18,7 +18,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected task")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "test-id".into()
     }
@@ -28,7 +28,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -83,6 +87,10 @@ fn public_start_matches_live_source() {
         base.on_args(
             "log",
             Rc::new(move |_, v| {
+                let v: Vec<serde_json::Value> = v
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 captured.borrow_mut().push(serde_json::json!(v));
                 log_events.borrow_mut().push("log");
                 if action == "loaded" {
@@ -229,7 +237,9 @@ fn startup_preserves_notification_identity_and_log_failure_order() {
         second();
 
         let mut sentinel = ExchangeError::new("log sentinel");
-        sentinel.code = Some(json!("log-code"));
+        sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "log-code"
+        )));
         let failure = sentinel.clone();
         base.on("log", Rc::new(move |_, _| Err(failure.clone())));
         let calls = second_calls.clone();
@@ -274,7 +284,9 @@ fn startup_box_retains_cause_beyond_structural_subscriber_ids() {
                 ExchangeSettings::default(),
             );
             let mut original = ExchangeError::new("original callback");
-            original.code = Some(json!("callback-code"));
+            original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "callback-code"
+            )));
             original.store_subscriber_ids = vec![41, 73];
             let cause: Rc<dyn Error> = if recovered {
                 Rc::new(original.clone())
@@ -321,7 +333,8 @@ fn startup_box_retains_cause_beyond_structural_subscriber_ids() {
             );
             if recovered {
                 assert_eq!(
-                    converted.code, original.code,
+                    observed_error_code(&converted.code),
+                    observed_error_code(&original.code),
                     "recovered callback metadata retained"
                 );
                 assert_eq!(converted.message, original.message);
@@ -353,4 +366,17 @@ fn startup_box_retains_cause_beyond_structural_subscriber_ids() {
             unsubscribe();
         }
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

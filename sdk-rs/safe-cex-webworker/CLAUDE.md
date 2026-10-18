@@ -24,6 +24,12 @@ CallMethod results and OHLCV DATA posts use required WorkerDataPost with existin
 runtime Js, alongside separate native book and Error capabilities. DATA envelopes
 have no Serialize implementation; browser materialization retains native numbers
 and own undefined before postMessage. No default or JSON adapter is supplied.
+Native Error DATA retains its intrinsic prototype and hidden message/stack/cause
+properties before post, including UTF-16 message units. The real Wasm witness
+compares TypeError descriptors and structured clone with the host JS engine.
+Error DATA materialization ignores custom enumerable fields without invoking
+their getters; cause is retained only as an own data property. Standard
+name/message/stack reads stay observable, matching native Error structured clone.
 
 The CLI executor is injected and owns its emitted handled results; the handler
 never manufactures success from a resolved void future. Missing/rejected executors
@@ -407,6 +413,12 @@ and fail named acceptance/presence assertions. Separate compiled legacy decoders
 accept each deep input and fail the named depth-refusal assertion, pinning the
 new acceptance narrowing rather than presuming the old decoder refused it.
 
+Carrier regressions compare original native numeric bits and real shared JS
+stringify with maintained source output before using finite JSON trace adapters.
+Notification error recovery preserves all original metadata and the original
+cause reference while appending the actual fanout subscriber ID; those two
+provenance additions must be included in the expected complete metadata.
+
 Store notification failures remain separate from numeric patch failures. The
 five concrete calls in four worker paths are inventoried in STORE_NOTIFICATION_AUDIT.md:
 position refresh has full and partial calls, leverage has one batch, removeOrders
@@ -670,4 +682,15 @@ Command dispatch rejects missing, null and primitive payloads before looking up
 or calling its executor; arrays retain the source object admission. Position
 failure replies use JavaScript Error string rules for empty names and messages.
 
+The exchange event bridge consumes `WorkerDataPost` directly: fill is one native
+value, and log/error events retain their variadic argument array. Assembly hosts
+must supply `post_event(WorkerDataPayload)`; ordinary JSON control payloads keep
+their separate `post_payload` capability. Do not serialize native emitter values
+before invoking the required DATA post.
+
 OHLCV fetch and subscription requests decode the shared AnyTimeframe interval. The exact 27 source literals are checked against the live type AST; both real handlers forward every interval, and native listeners must deliver each candle. Monthly, extended and seconds intervals must never disappear at worker decoding.
+
+Constructed AsterDEX private-frame/worker emitter witnesses live in
+`../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
+The venue retains private facade tests without importing the worker crate. Both paths preserve
+variadic event arguments; the real fill bridge retains Infinity and object identity.

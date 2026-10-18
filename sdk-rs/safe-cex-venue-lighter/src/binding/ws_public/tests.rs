@@ -30,8 +30,10 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
+
+use super::super::test_time::{SleepWakers, WakeSignal};
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
@@ -69,6 +71,7 @@ impl WsSocket for Io {
 struct Runtime {
     now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
+    sleepers: SleepWakers,
     sockets: RefCell<Vec<Rc<Io>>>,
     dials: RefCell<Vec<String>>,
 }
@@ -80,12 +83,14 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     fn pump(&self) {
+        let signal = Arc::new(WakeSignal::default());
+        let waker = signal.waker();
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -101,13 +106,15 @@ impl Runtime {
             }
             let spawned = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !spawned {
+            self.sleepers.wake_due(self.now.get());
+            if !progressed && !spawned && !signal.take() {
                 return;
             }
         }
     }
     fn advance(&self, ms: f64) {
         self.now.set(self.now.get() + ms);
+        self.sleepers.wake_due(self.now.get());
         self.pump();
     }
     fn socket(&self) -> Rc<Io> {
@@ -128,10 +135,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleep_waker = self.sleepers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleep_waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -141,7 +150,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -151,7 +160,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.25
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {}
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
     fn report_exception(&self, error: &ExchangeError, context: &Value) {
         panic!("unexpected exception {context}: {}", error.message);
     }

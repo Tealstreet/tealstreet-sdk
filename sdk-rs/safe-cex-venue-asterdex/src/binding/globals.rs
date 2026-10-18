@@ -144,9 +144,11 @@ pub(super) fn build(weak: Weak<Shared>) -> Js {
                 status: response.get("status")?.to_number()? as u16,
                 reason: None,
                 headers: Default::default(),
-                body: safe_cex_transport::RestResponseBody::Untransformed(to_json(
-                    &response.get("data")?,
-                )?),
+                body: safe_cex_transport::RestResponseBody::Untransformed(
+                    safe_cex_exchange::js_runtime::value::to_retained_input(
+                        &response.get("data")?,
+                    )?,
+                ),
             }))
         };
         let code = thrown.get("code")?;

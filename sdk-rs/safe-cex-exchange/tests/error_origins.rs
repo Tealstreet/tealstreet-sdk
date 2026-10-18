@@ -133,7 +133,12 @@ fn shared_rest_conversion_retains_typed_request_response_and_transport() {
         status: 503,
         reason: Some("Fixture Unavailable".into()),
         headers: std::collections::BTreeMap::from([("x-fixture".into(), "response-13".into())]),
-        body: RestResponseBody::Transformed(json!({"message":"response detail","marker":84})),
+        body: RestResponseBody::Transformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"message":"response detail","marker":84}),
+            )
+            .unwrap(),
+        ),
     }));
     let error = ExchangeError::from(failure);
     // Native originating values precede any JSON metadata projection.
@@ -185,7 +190,11 @@ fn shared_rest_conversion_retains_typed_request_response_and_transport() {
     let RestResponseBody::Transformed(body) = &response.body else {
         panic!("REST native response phase")
     };
-    assert_eq!(body["marker"], 84, "REST native response body");
+    assert_eq!(
+        body.clone().into_value().unwrap()["marker"],
+        84,
+        "REST native response body"
+    );
     assert_eq!(
         retained.code.as_deref(),
         Some("ORIGIN_CODE"),
@@ -233,7 +242,10 @@ fn shared_rest_conversion_retains_typed_request_response_and_transport() {
         "REST origin Debug omits retained request payload"
     );
     assert_eq!(
-        error.code,
+        error
+            .code
+            .as_ref()
+            .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap()),
         Some(json!("ORIGIN_CODE")),
         "REST metadata code view"
     );
@@ -267,7 +279,9 @@ fn shared_store_conversion_keeps_non_notification_origin_and_recovered_core_orig
     );
     let mut original = ExchangeError::new("earlier core failure");
     original.name = "RangeError".into();
-    original.code = Some(serde_json::json!(42));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+        &serde_json::json!(42),
+    ));
     original.origin = Some(ExchangeErrorOrigin::new(ListenerOrigin {
         code: 197,
         live: Rc::new(Cell::new(13)),
@@ -303,4 +317,174 @@ fn shared_store_conversion_keeps_non_notification_origin_and_recovered_core_orig
         std::ptr::eq(retained_core.source().unwrap(), original.source().unwrap()),
         "recovered core keeps earlier origin through source chain"
     );
+}
+
+#[test]
+fn rest_error_json_view_keeps_exact_native_body_in_original_failure() {
+    use safe_cex_transport::{
+        NetworkFailure, RestFailure, RestRequest, RestResponse, RestResponseBody, TransportError,
+    };
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let nan_bits = 0x7ff8_0000_0000_0042;
+    let mut failure = RestFailure::from_transport(
+        TransportError::Network(NetworkFailure::from_code("retained body".into(), None)),
+        RestRequest::default(),
+    );
+    failure.response = Some(Box::new(RestResponse {
+        status: 502,
+        reason: None,
+        headers: Default::default(),
+        body: RestResponseBody::Transformed(Input::Object(vec![
+            (
+                "nan".encode_utf16().collect(),
+                Input::Float(f64::from_bits(nan_bits)),
+            ),
+            ("zero".encode_utf16().collect(), Input::Float(-0.0)),
+            ("own".encode_utf16().collect(), Input::Undefined),
+            (vec![0xd800], Input::Text(vec![0xd801])),
+        ])),
+    }));
+    let error = ExchangeError::from(failure);
+    let cloned = error.clone();
+    assert!(
+        std::ptr::eq(
+            error.origin.as_ref().unwrap().error(),
+            cloned.origin.as_ref().unwrap().error()
+        ),
+        "retained body origin identity survives cloning"
+    );
+    let retained = error
+        .origin
+        .as_ref()
+        .unwrap()
+        .error()
+        .downcast_ref::<RestFailure>()
+        .unwrap();
+    let RestResponseBody::Transformed(Input::Object(fields)) =
+        &retained.response.as_ref().unwrap().body
+    else {
+        panic!("retained body native transform phase")
+    };
+    assert_eq!(fields.len(), 4, "retained body keeps every own key");
+    let Input::Float(nan) = fields[0].1 else {
+        panic!("native NaN")
+    };
+    assert_eq!(nan.to_bits(), nan_bits, "retained body exact NaN payload");
+    let Input::Float(zero) = fields[1].1 else {
+        panic!("native signed zero")
+    };
+    assert_eq!(
+        zero.to_bits(),
+        (-0.0_f64).to_bits(),
+        "retained body exact zero sign"
+    );
+    assert_eq!(
+        fields[2].1,
+        Input::Undefined,
+        "retained body owns undefined"
+    );
+    assert_eq!(
+        fields[3],
+        (vec![0xd800], Input::Text(vec![0xd801])),
+        "retained body exact key and value units"
+    );
+    let view = &error.response.as_ref().unwrap()["data"];
+    assert!(
+        view["nan"].is_null(),
+        "legacy JSON view projects nonfinite to null"
+    );
+    assert_eq!(view["zero"], 0, "legacy JSON view projects zero sign");
+    assert!(
+        view.get("own").is_none(),
+        "legacy JSON view omits undefined"
+    );
+    assert_eq!(
+        view["\u{fffd}"], "\u{fffd}",
+        "legacy JSON view replaces lone surrogates"
+    );
+}
+
+#[test]
+fn retained_callback_rest_origin_keeps_code_response_context_and_request() {
+    use safe_cex_exchange::js_runtime::value::{
+        Js,
+        owned::{OwnedCallbackError, OwnedJsValue},
+    };
+    use safe_cex_transport::{
+        RestFailure, RestRequest, RestResponse, RestResponseBody, TransportError,
+        provider::TransportErrorOrigin,
+    };
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    use serde_json::json;
+
+    let code = vec![69, 82, 82, 95, 0xd800, 120];
+    let cause = OwnedCallbackError::new(OwnedJsValue::object([
+        ("name", OwnedJsValue::string("AxiosError")),
+        ("message", OwnedJsValue::string("native rejection")),
+        ("code", OwnedJsValue::String(code.clone())),
+    ]));
+    let body = Input::Object(vec![
+        ("own".encode_utf16().collect(), Input::Undefined),
+        (vec![0xd800], Input::Text(vec![0xdc00, 120])),
+        ("zero".encode_utf16().collect(), Input::Float(-0.0)),
+    ]);
+    let mut failure = RestFailure::from_transport(
+        TransportError::Rejected(TransportErrorOrigin::new(cause)),
+        RestRequest {
+            method: "post".into(),
+            url: "/native-rejection".into(),
+            headers: indexmap::IndexMap::from([("X-Fixture".into(), "native-request".into())]),
+            ..Default::default()
+        },
+    );
+    failure.context = Some(Box::new(json!({"phase":"read","marker":42})));
+    failure.response = Some(Box::new(RestResponse {
+        status: 503,
+        reason: Some("Unavailable".into()),
+        headers: std::collections::BTreeMap::from([(
+            "x-response".into(),
+            "native-response".into(),
+        )]),
+        body: RestResponseBody::Untransformed(body),
+    }));
+    let error = ExchangeError::from(failure);
+    assert_eq!(error.name, "AxiosError");
+    assert_eq!(error.message, "native rejection");
+    let Some(Js::String(actual)) = &error.code else {
+        panic!("native string code");
+    };
+    assert_eq!(actual.as_ref(), code, "retained cause exact code units");
+    assert_eq!(
+        error.context.as_ref(),
+        Some(&json!({"phase":"read","marker":42})),
+        "retained cause keeps context view"
+    );
+    let view = error
+        .response
+        .as_ref()
+        .expect("retained cause keeps response view");
+    assert_eq!(view["status"], 503);
+    assert_eq!(view["statusText"], "Unavailable");
+    assert_eq!(view["headers"]["x-response"], "native-response");
+    assert_eq!(view["data"]["zero"], 0.0);
+    let origin = error
+        .source()
+        .unwrap()
+        .downcast_ref::<RestFailure>()
+        .unwrap();
+    assert_eq!(origin.request.method, "post");
+    assert_eq!(origin.request.url, "/native-rejection");
+    assert_eq!(origin.request.headers["X-Fixture"], "native-request");
+    assert_eq!(origin.context.as_deref(), error.context.as_ref());
+    let RestResponseBody::Untransformed(Input::Object(fields)) =
+        &origin.response.as_ref().unwrap().body
+    else {
+        panic!("original response body phase");
+    };
+    assert!(matches!(fields[0].1, Input::Undefined));
+    assert_eq!(fields[1], (vec![0xd800], Input::Text(vec![0xdc00, 120])));
+    let Input::Float(zero) = fields[2].1 else {
+        panic!("native zero");
+    };
+    assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
 }

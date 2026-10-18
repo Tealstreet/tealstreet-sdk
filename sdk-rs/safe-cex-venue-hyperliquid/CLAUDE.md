@@ -299,6 +299,13 @@ outside the object's borrow. The scripted legacy-account test covers user,
 vault, agent and subAccount roles against both native options and privacy checks.
 Native identity strings retain the shared scalar-Unicode boundary.
 
+The native emitter regression keeps shared Js arguments through its observations,
+checks binary64 bits and listener reference identity, then compares the actual
+shared JS stringify output with the maintained BaseExchange emitter/log source.
+Serde's numeric token representation is not a JS wire-output assertion. Original
+Realm object aliases still cross the existing DTO snapshot bridge; the approved
+shared-Js consolidation owns its independent mutation-visibility regression.
+
 Declared realm choices: promise reactions run as runtime tasks, not a V8
 microtask queue; store reads are snapshots (writes go through Store methods);
 the cross cache is per realm and memory-only (no BroadcastChannel or
@@ -381,6 +388,12 @@ checks the transmitted action/signature, and requires its nonce to reflect a
 90-second server correction. The binding schedule-cancel fixture uses a deadline
 relative to that synced clock; the fractional Date nonce regression stays raw.
 
+ApiClient.build_request uses the effective safeCexAxiosCreate timeout of20_000ms
+before read-retry classification. extra.recvWindow remains account configuration;
+it must not become a per-request timeout override. The native registry timeout
+witness verifies terminal deadlines and signed HTTP; the Node info-read witness
+requires a delayed real response to arrive before method acknowledgement.
+
 The unused hyperliquidspot.api factory/interceptors and their fake HTTP fixtures
 are removed. Source Spot construction imports the perp API, as does the native
 binding; the Spot API module has only a TS test consumer and no package export.
@@ -407,3 +420,11 @@ stripping; order-type limit objects and undefined fields retain their identities
 The separate prepared signing API keeps its documented typed snapshot boundary.
 The actual constructed Exchange placement regression and native/source import
 matrix cover this adapter; no shared body or Realm carrier migration is implied.
+
+The constructed native ticker census tests in `binding` and `spot_binding`
+compare all Ticker numbers, including optional midPrice, with the maintained
+constructed TS exchanges and real DefaultStores. Futures covers eight mids
+and sixteen compressed fast-context frames; Spot covers eight mids frames.
+Malformed input sits between distinct good rows, with finite Store resets.
+The shared control runner misroutes midPrice independently in both live socket
+bodies and requires compiled native failures followed by exact-restored passes.

@@ -115,7 +115,7 @@ pub(crate) fn thrown(error: ExchangeError) -> Thrown {
         let _ = value.define("response", from_json(response));
     }
     if let Some(code) = &error.code {
-        let _ = value.define("code", from_json(code));
+        let _ = value.define("code", code.clone());
     }
     Thrown {
         value,
@@ -341,14 +341,7 @@ impl Host {
             }),
             ("emitAndLogError", |h, a| {
                 let error = arg(&a, 0);
-                let input = match &error {
-                    Js::Undefined => ExchangeErrorInput::Missing,
-                    Js::String(s) => ExchangeErrorInput::Message(String::from_utf16_lossy(s)),
-                    Js::Object(o) if o.class == "Error" => ExchangeErrorInput::Error(Box::new(
-                        Thrown::new(error.clone()).to_exchange_error(),
-                    )),
-                    other => ExchangeErrorInput::Raw(to_json(other)?),
-                };
+                let input = ExchangeErrorInput::Raw(error);
                 h.venue()?.base.emit_and_log_error(input, None, None)?;
                 Ok(Js::Undefined)
             }),
@@ -664,7 +657,9 @@ impl Host {
                 let venue = host.venue()?;
                 let (body, config) = if method == "post" {
                     (
-                        Some(RestBody::Untransformed(to_json(&arg(&a, 1))?)),
+                        Some(RestBody::Untransformed(
+                            safe_cex_exchange::js_runtime::value::to_retained_input(&arg(&a, 1))?,
+                        )),
                         arg(&a, 2),
                     )
                 } else {
@@ -974,7 +969,9 @@ impl ExchangeRuntimeHost for Host {
         from_json(&types::REVERSE_POSITION_MODE).get_key(&mode.to_js_string()?)
     }
     fn promise_all(&self, values: Vec<Js>) -> Result<Rc<Pending>, Thrown> {
-        Ok(Pending::of(Box::pin(promise::all(values))))
+        Ok(Pending::of(Box::pin(
+            promise::all(&self.runtime, values).wait(),
+        )))
     }
     fn for_of(&self, value: Js, visitor: &mut Iteration<'_, Js, Thrown>) -> Result<(), Thrown> {
         // This opaque typed settings view has no JS object protocol. Preserve

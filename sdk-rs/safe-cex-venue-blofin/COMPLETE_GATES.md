@@ -51,9 +51,12 @@ in this venue scope. This is not a green Rust-parity claim or workspace build.
   private transient-status projection permits reconciliation of normal terminal
   rows while preserving original raw info; standalone mapOrders remains unchanged.
   Partial→filled/canceled/effective/order_failed fixtures assert retained native
-  Closed/Canceled and Store status inside fill callbacks. Nonregressing dedupe,
-  terminal deletion after emission, repeated terminal fills, emitter failure,
-  contract NaN and strict timestamp threshold/floor have decoded native assertions.
+  Closed/Canceled and Store status inside fill callbacks. Fills go through the
+  shared `create_incremental_fills` with cumulative filledSize and
+  filledSize×averagePrice, as the source does: repeat, regression and a replayed
+  filled frame emit nothing, each partial carries its own price without float
+  noise, and a non-finite filledSize is skipped. Emitter failure, contract NaN
+  and strict timestamp threshold/floor have decoded native assertions.
 - **CHOSEN handleAccountTopic:** info is an owned copy. Source caller mutation
   changes stored info100→999; native retains100. Free/total use current used/upnl.
 - **CHOSEN private class:** static concrete handlers; source runtime replacement
@@ -74,7 +77,7 @@ The oracle executes the maintained **exchange and private classes**, actual
 createAPI initializer and inherited getTickInterval method. Its public socket is
 an intentional venue forwarding spy. Native composition owns the actual public
 facade, whose source body parity was covered in the prior public-stream slice.
-This is **not** proof that all3 maintained classes execute together. Class70/16
+This is **not** proof that all3 maintained classes execute together. Class71/16
 member inventories are surface floors; runtime enumeration stops at66 source
 cases and the explicit native composition/reentry/lifetime probes. Existing
 per-function manifests retain their prior specific divergence classifications.
@@ -132,3 +135,25 @@ three inherited position-adapter findings. Commands/exits/raw logs are in
 Clean static preservation review is bound to0ec1 in
 `complete-evidence/final-review.json`; reviewer ran no gates and excluded evidence
 documents. The final evidence-only commit changes no gate inputs.
+
+## Partial-fill refresh
+
+The production `native_ping_latency` regression starts `BlofinNativeExchange`,
+loads its market through REST, then sends six orders frames through the private
+socket. Native emitter values assert four execution prices (100, 101.8, 103,
+106), exact base quantities, order identity and timestamps. An older frame and
+a terminal replay emit nothing; no JSON projection grades native numbers.
+
+Current-master control `6b2050d0f7323cd9f42b62c8cf731f4df05dd784` substituted
+only the production private-topic handler: it compiled, then the named test
+failed with five fills rather than four. Exact restoration passed. The scoped
+TypeScript partial-fill regression independently failed against that master's
+source handler and passed after exact restoration. These fresh controls do not
+relabel the historical complete-slice controls above.
+
+The refreshed branch also passes both touched TypeScript test files (35 tests),
+the maintained-source `complete::orders_native` comparison, production TS ESLint,
+scoped native Clippy, the all-features production cancellation inventory, and
+parity (7,465 rows / 16,639 public Rust items). The extractor reports zero
+manifest updates, additions or orphaned symbols. Cargo runs from `sdk-rs` with
+one job, using its pinned toolchain.

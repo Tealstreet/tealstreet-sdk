@@ -356,13 +356,17 @@ impl BybitExchange {
             } else {
                 "livenet"
             };
-            let origin = crate::types::HYROTRADER_SIMULATOR_URL[network]
-                .as_str()
-                .unwrap_or_default();
+            let (label, rest, _) = crate::hyro_configuration::get_configured_urls(&options);
+            let origin = rest[network].as_str().unwrap_or_default();
             if origin.is_empty() {
-                return Err(ExchangeError::new(
-                    "HyroTrader simulator REST URL is not configured",
-                ));
+                let hint = if crate::hyro_configuration::hyrotrader_mode(&options) == "production" {
+                    " Set NEXT_PUBLIC_HYROTRADER_PROD_REST_URL, or NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL while v1 is simulator-backed."
+                } else {
+                    ""
+                };
+                return Err(ExchangeError::new(format!(
+                    "HyroTrader {label} REST URL is not configured.{hint}"
+                )));
             }
             Some(origin.to_owned())
         } else {
@@ -419,8 +423,14 @@ impl BybitExchange {
             store::facade(store.clone()),
             |this| {
                 // bybitdemo.exchange.ts initializes this field after super().
-                if matches!(name, ExchangeName::Bybitdemo | ExchangeName::Hyrotrader) {
+                if name == ExchangeName::Bybitdemo {
                     this.define("isDemo", Js::Bool(true))?;
+                }
+                if name == ExchangeName::Hyrotrader {
+                    this.define(
+                        "isDemo",
+                        Js::Bool(crate::hyro_configuration::hyrotrader_mode(&options) == "demo"),
+                    )?;
                 }
                 // bybitspot.exchange.ts initializes its own isSpot field.
                 if name == ExchangeName::Bybitspot {

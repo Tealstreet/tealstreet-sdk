@@ -409,8 +409,12 @@ const HyrotraderMetadata: ExchangeMetadata = {
   darkLogo: '/static/exchanges/logos/HYROTRADER/logo.svg',
   refLink: undefined,
   refImage: '/static/exchanges/logos/HYROTRADER/full-white.svg',
-  enabled: true,
+  enabled: false,
   enabledInDev: true,
+  // Keep preview/prod dark until the private REST/WS path has either Hyro HTTPS
+  // origins or a Tealstreet relay. Local dev can still test the simulator
+  // directly over plain HTTP.
+  enableInPreview: false,
   forbidCors: false,
   enforceWsTunnel: false,
   supportsTunnel: false,
@@ -501,6 +505,22 @@ const BinanceMetadata: ExchangeMetadata = {
     positions: true,
     balance: true,
   },
+};
+
+const BinanceInverseMetadata: ExchangeMetadata = {
+  ...BinanceMetadata,
+  exchangeName: 'binanceinverse' as ExchangeName,
+  prettyName: 'Binance Inverse',
+  defaultQuote: 'USD',
+  // Keep COIN-M hidden until credentialed livenet/testnet validation covers
+  // private state, order placement, and inverse sizing end-to-end.
+  enabled: false,
+  enabledInDev: true,
+  enableInPreview: false,
+  supportedOnMobile: false,
+  latencyDomain: 'dapi.binance.com',
+  supportsTestnet: false,
+  requiresTickersForMarketsLoaded: true,
 };
 
 const BinancePMMetadata: ExchangeMetadata = {
@@ -2262,6 +2282,7 @@ export const exchangeMetadata: {
   bybitspot: BybitSpotMetadata,
   bybitinverse: BybitInverseMetadata,
   binance: BinanceMetadata,
+  binanceinverse: BinanceInverseMetadata,
   binancepm: BinancePMMetadata,
   binancespot: BinanceSpotMetadata,
   bitget: BitgetMetadata,
