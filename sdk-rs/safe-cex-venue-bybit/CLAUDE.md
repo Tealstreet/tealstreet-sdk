@@ -938,3 +938,10 @@ response normalization, `emitAndLogError` and typed error rematerialization.
 Position-mode failure extras also retain raw message units while the source
 continues with its `oneway` placement fallback. Runtime report contexts remain
 canonical retained inputs through the terminal reporting capability.
+
+The three no-socket send/subscribe rejection-timing rows now have a real native
+reconciliation witness in `tests/detached_reconnect_native.rs`: constructed
+primary/demo exchanges, actual Store notification and native stderr reporting.
+Its compiled core controls distinguish synchronous caller rejection from a
+detached report and require both continuation and reporting. This closes stale
+notification timing notes; it does not change the public SDK wrapper family.

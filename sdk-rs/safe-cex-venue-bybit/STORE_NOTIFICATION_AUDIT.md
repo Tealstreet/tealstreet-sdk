@@ -170,7 +170,7 @@ The fallback socket witness retains response metadata without an ExchangeError
 cause; the recovered witness preserves its existing inner ID chain.
 
 
-## Reconnect timing observation after notification cutover
+## Historical reconnect timing observation after notification cutover
 
 The source witness now composes the actual public subscribe, private subscribe,
 sendWithLog and diagnostic helper with the existing actual Store/base method chain.
@@ -217,3 +217,26 @@ No generation guard, local task registry, or invented core API is substituted.
 ## Production ticker callback consumption
 
 The extracted ticker handler retained `StoreMutationError`, but the production `PublicProtocol::register_handlers` callback still replaced it with a message-only `ExchangeError`. The native-registry regression in `tests/native_host_bybit.rs` now exercises the four actual Bybit-family constructors and the registered ticker callback, asserting the committed update, skipped later subscriber, original error name/response/cause and appended subscriber-ID chain. The callback uses the existing canonical Store-error conversion. `scripts/ticker-event-fixtures.mjs` also asserts that each maintained TS ticker method propagates the exact subscriber error after committing the patch.
+
+## Current native reconnect timing reconciliation
+
+The three send/subscribe findings above described an older core. Current
+`BaseWebSocket::send` already catches an unawaited reconnect rejection and routes
+it to the runtime reporter after the send stack returns. No second reconnect
+algorithm or venue wrapper is needed. The old direct-error table is historical.
+
+`tests/detached_reconnect_native.rs` constructs primary and demo BybitExchange
+with NativeRuntime, NativeHttpHost, reqwest and the production socket protocols.
+The clock adapter delegates directly to that runtime, as the registry host does.
+With a throwing DefaultStore subscriber, public subscribe completes both chunks,
+private subscribe and the diagnostic caller return, health is committed and the
+second subscriber is skipped. Four detached errors reach the actual native stderr
+reporter. Both no-socket heartbeat paths avoid reconnect. Unsubscribe callbacks
+run before normal venue disposal. The Node source witness is executed unchanged.
+
+The compiled controls restore synchronous propagation at the core send boundary
+or replace terminal rejection reporting with an ordinary console message. Each
+must fail the unchanged native observer; exact source restoration passes. This
+is a reconciliation of an existing repair, not a new production timing change.
+NativeRuntime disables optional diagnostics; enabled diagnostic payload and error
+identity/ID-chain observations remain in the existing source and native tests.
