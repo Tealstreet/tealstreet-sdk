@@ -6,6 +6,55 @@ use safe_cex_exchange::{
 use std::{cell::RefCell, rc::Rc};
 
 #[test]
+fn dropping_advance_releases_its_latch_and_keeps_waiters_cancellable() {
+    use std::{
+        cell::Cell,
+        future::Future,
+        task::{Context, Waker},
+    };
+    let host = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&host, async {
+        let runtime = native_replay_runtime(1_800_000_000_000.0);
+        let clock = runtime.replay_clock.as_ref().unwrap();
+        safe_cex_exchange::replay_clock::activate(clock).unwrap();
+        let sleep = runtime.sleep(100);
+        let mut advancing = Box::pin(safe_cex_exchange::replay_clock::advance(clock, 200.0));
+        // The registered sleep has not been polled: advance waits for its
+        // completion after marking it ready, so cancellation occurs in-flight.
+        assert!(
+            advancing
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        assert_eq!(safe_cex_exchange::replay_clock::elapsed(clock), 100.0);
+        drop(advancing);
+        let completed = Rc::new(Cell::new(false));
+        let observed = completed.clone();
+        let task = runtime.spawn_local(Box::pin(async move {
+            sleep.await.unwrap();
+            observed.set(true);
+        }));
+        // A dropped advance must release the advancing flag; the same timer
+        // remains owned by its caller and can finish on a subsequent advance.
+        safe_cex_exchange::replay_clock::advance(clock, 200.0)
+            .await
+            .unwrap();
+        assert!(completed.get());
+        task.cancel();
+        let unpolled = runtime.sleep(100);
+        drop(unpolled);
+        safe_cex_exchange::replay_clock::advance(clock, 400.0)
+            .await
+            .unwrap();
+        safe_cex_store::virtual_clock::set_thread_host_time(None);
+    });
+}
+
+#[test]
 fn controlled_clock_drives_actual_native_timers_and_virtual_clock_in_order() {
     let host = tokio::runtime::Builder::new_current_thread()
         .enable_all()
