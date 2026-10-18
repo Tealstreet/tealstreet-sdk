@@ -121,9 +121,9 @@ test('the actual 30-second startup deadline logs visibly and resolves false', { 
   assert.equal(event.data[1].sentryData.tags.worker_error_phase, 'startup');
   assert.equal(event.data[1].sendToSentry, true);
   assert.equal(event.data[1].suppressConsoleLog, false);
-  const fullPosts = () => h.stores.filter(store => Object.hasOwn(store, 'orders') && Object.hasOwn(store, 'positions')).length;
+  const fullPosts = () => h.stores.filter(store => ['markets', 'tickers', 'orders', 'positions'].every(key => Object.hasOwn(store, key))).length;
   const count = fullPosts();
-  h.release();
+  h.release(['tickers']);
   await delay(350);
   assert.equal(fullPosts(), count, 'timed-out startup must not force a late full Store snapshot');
 });
