@@ -212,6 +212,7 @@ fn fixture(
     base.on(
         "error",
         Rc::new(move |_, v| {
+            let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
             events.borrow_mut().push(v.as_str().unwrap().into());
             Ok(())
         }),

@@ -67,7 +67,7 @@ impl AccountFetch {
             // inventing a JS Error object identity at the native boundary.
             let mut error = ExchangeError::new(failure.message);
             error.is_axios_error = true;
-            error.code = failure.code.map(Value::String);
+            error.code = failure.code.map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
             error.context = failure.context.map(|context| *context);
             error.method = Some(failure.request.method);
             error.url = Some(failure.request.url);

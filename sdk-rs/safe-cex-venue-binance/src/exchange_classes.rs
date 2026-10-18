@@ -1313,7 +1313,7 @@ impl crate::order_batches::BatchBindings for Context {
         Ok(Rc::new(|rejection| {
             let value = match rejection {
                 crate::order_batches::Rejection::Error(error) => {
-                    json!({"response":error.response,"code":error.metadata.code,"message":error.message})
+                    json!({"response":error.response,"code":error.metadata.code.as_ref().map(safe_cex_exchange::js_runtime::value::to_json).transpose().map_err(|e| Rc::new(e.to_exchange_error()))?,"message":error.message})
                 }
                 crate::order_batches::Rejection::Row(row) => json_value(&row)?,
             };
@@ -2046,9 +2046,7 @@ impl PrivateParent for ExchangeState {
         }))
     }
     fn fill(&self, payload: EventValue) -> Result<(), Failure> {
-        self.base
-            .emit("fill", json_value(&payload)?)
-            .map_err(Rc::new)
+        self.base.emit("fill", payload).map_err(Rc::new)
     }
     fn asset_price(&self, asset: &EventValue) -> Result<f64, Failure> {
         Ok(self.asset_price(&asset.text()?))
@@ -2181,7 +2179,10 @@ impl WsParent for ExchangeState {
         self.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.base.emit(event, json!(message))
+        self.base.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.base.sync_socket_health_to_store()

@@ -82,6 +82,7 @@ fn actual_order_results_retain_nonfinite_native_numbers() {
         )
         .await
         .unwrap_err();
+        let error = support::boundary_json(error);
         assert_eq!(error["message"], "Market BTCUSDT not found");
         native_account_call(account.clone(), "fetchAndSetOrders".into(), vec![])
             .await

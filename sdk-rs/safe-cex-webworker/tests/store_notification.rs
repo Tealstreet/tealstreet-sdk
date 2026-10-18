@@ -224,7 +224,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                 });
                 let mut error = ExchangeError::new("subscriber failed");
                 error.name = name.into();
-                error.code = Some(json!(197));
+                error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197)));
                 error.stack = Some("native-stack".into());
                 error.context = Some(json!({"origin":"first listener"}));
                 error.store_subscriber_ids = vec![401];
@@ -320,7 +320,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                                 "NOTIFICATION native error name"
                             );
                             assert_eq!(
-                                recovered.code, error.code,
+                                recovered.metadata, error.metadata,
                                 "NOTIFICATION native error code"
                             );
                             assert_eq!(

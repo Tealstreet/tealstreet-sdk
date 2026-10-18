@@ -51,3 +51,120 @@ pub fn post_worker_data(post: js_sys::Function) -> Result<(), JsValue> {
     })
     .map_err(|e| js_sys::Error::new(&e.message).into())
 }
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn post_worker_error_data(post: js_sys::Function) -> Result<(), JsValue> {
+    use safe_cex_exchange::{
+        js_runtime::value::{Js, Thrown},
+        runtime::ExchangeError,
+    };
+    use safe_cex_webworker::{
+        data_post::{WorkerDataPayload, WorkerDataPost},
+        payload::StoreWorkerOp,
+    };
+    use std::rc::Rc;
+    let host = WorkerDataPost::for_browser(Rc::new(move |payload| {
+        post.call1(&JsValue::UNDEFINED, payload)
+            .map(|_| ())
+            .map_err(|error| ExchangeError::new(format!("native post failed: {error:?}")))
+    }));
+    let error = Thrown::error("AxiosError", "retained event error").value;
+    error
+        .define(
+            "stack",
+            Js::str("original event stack\n    at source-event"),
+        )
+        .unwrap();
+    error.define("code", Js::Number(f64::INFINITY)).unwrap();
+    let typed_error = Thrown::type_error("typed event").value;
+    let message: Vec<u16> = [0xd800]
+        .into_iter()
+        .chain("typed event".encode_utf16())
+        .collect();
+    typed_error.set("message", Js::utf16(&message)).unwrap();
+    typed_error
+        .define("stack", Js::str("original typed stack"))
+        .unwrap();
+    host.send(WorkerDataPayload {
+        op: StoreWorkerOp::Error,
+        data: Js::array(vec![
+            Js::str("failed"),
+            Js::object(vec![(
+                "sentryData",
+                Js::object(vec![("error", error), ("typedError", typed_error)]),
+            )]),
+        ]),
+    })
+    .map_err(|error| js_sys::Error::new(&error.message).into())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn post_worker_error_getter_data(post: js_sys::Function) -> Result<u32, JsValue> {
+    use safe_cex_exchange::{
+        js_runtime::value::{Js, Thrown},
+        runtime::ExchangeError,
+    };
+    use safe_cex_webworker::{
+        data_post::{WorkerDataPayload, WorkerDataPost},
+        payload::StoreWorkerOp,
+    };
+    use std::{cell::Cell, rc::Rc};
+    let reads = Rc::new(Cell::new(0));
+    let host = WorkerDataPost::for_browser(Rc::new(move |payload| {
+        post.call1(&JsValue::UNDEFINED, payload)
+            .map(|_| ())
+            .map_err(|error| ExchangeError::new(format!("native post failed: {error:?}")))
+    }));
+    let errors = ["Error", "TypeError", "SyntaxError", "RangeError"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let error = Thrown::error(name, "getter must stay unread").value;
+            let count = reads.clone();
+            error.define_accessor(
+                "code",
+                Some(Rc::new(move |_| {
+                    count.set(count.get() + 1);
+                    Err(Thrown::type_error("custom Error getter was read"))
+                })),
+                None,
+            );
+            if index == 1 {
+                let count = reads.clone();
+                error.define_accessor(
+                    "cause",
+                    Some(Rc::new(move |_| {
+                        count.set(count.get() + 1);
+                        Err(Thrown::type_error("accessor Error cause was read"))
+                    })),
+                    None,
+                );
+            } else if index == 2 {
+                error
+                    .define(
+                        "cause",
+                        Js::object(vec![
+                            ("reason", Js::str("linked")),
+                            ("value", Js::Number(f64::INFINITY)),
+                        ]),
+                    )
+                    .unwrap();
+            }
+            error
+                .define(
+                    "custom",
+                    Js::function("uncloneable custom", |_, _| Ok(Js::Undefined)),
+                )
+                .unwrap();
+            error
+        })
+        .collect();
+    host.send(WorkerDataPayload {
+        op: StoreWorkerOp::Error,
+        data: Js::array(errors),
+    })
+    .map_err(|error| js_sys::Error::new(&error.message))?;
+    Ok(reads.get())
+}
