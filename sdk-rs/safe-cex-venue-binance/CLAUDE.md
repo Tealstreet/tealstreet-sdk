@@ -897,6 +897,12 @@ parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the type
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
 
+The five `order_batches` function contracts distinguish static endpoint and native
+POST-forwarding roles from executed dense-array, iterable-guard and ID outputs.
+`ORDER_BATCH_CONTRACT_REVIEW.md` documents their finite native profiles, actual
+signed bulk-placement witness, compiled controls and canonical scoped measure.
+Keep the three existing callable alias records and their separate evidence.
+
 The exchange assembly's legacy JSON error port forwards the selected raw value
 to BaseExchange. Do not String-coerce it first: Base distinguishes strings,
 falsy values, objects and primitives when formatting and reporting an error.
