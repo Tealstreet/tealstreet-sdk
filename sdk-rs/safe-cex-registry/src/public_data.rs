@@ -8,10 +8,10 @@ pub fn get_candle_subscription_key(symbol: &str, interval: &str) -> String {
 pub fn parse_candle_subscription_key(key: &str) -> (String, String) {
     match key.rfind(':') {
         Some(separator) => (key[..separator].into(), key[separator + 1..].into()),
-        // ts: parseCandleSubscriptionKey uses UTF-16 slice(0,-1); malformed astral keys are declared divergent.
-        None => (
-            key[..key.char_indices().next_back().map_or(0, |(i, _)| i)].into(),
-            key.into(),
-        ),
+        None => {
+            let mut units: Vec<_> = key.encode_utf16().collect();
+            units.pop();
+            (String::from_utf16_lossy(&units), key.into())
+        }
     }
 }
