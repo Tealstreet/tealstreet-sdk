@@ -58,7 +58,7 @@ async function probe(index, mutate) {
   } });
   try {
     const { runProbes } = await import(pathToFileURL(path.join(root, 'safe-cex-parity/scripts/accepted-probes.mjs')));
-    const rows = runProbes(root, metadata, [{ package: pkg.name, target, types: [], publicAliases: aliases, externalTypeAliases, macroOrigins, locals: [] }], { [name]: contract }, { target: 'native', features: [], jobs: 1 });
+    const rows = runProbes(root, metadata, [{ package: pkg.name, target, features: [], types: [], publicAliases: aliases, externalTypeAliases, macroOrigins, locals: [] }], { [name]: contract }, { target: 'native', features: [], jobs: 1 });
     console.log('POINTER_NATIVE ' + JSON.stringify({ count: state.count, rows }));
     assert.equal(rows.length, 1);
     assert.equal(rows[0].name, name);

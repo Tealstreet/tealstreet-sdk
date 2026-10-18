@@ -31,7 +31,7 @@ function probe(reviewedSourceSha) {
   const found = inventory(doc, { onlyDefaultTraits: [traitName], defaultTraits: reviewed, readSource: file => fs.readFileSync(path.resolve(root, file)) });
   assert.deepEqual(found.scope, { onlyDefaultTraits: [traitName] });
   assert.deepEqual(found.defaultWitnesses[0].methods.map(method => method.name), ['capture_exception', 'event']);
-  const receipts = runProbes(root, metadata, [{ package: member.name, target, ...found, locals: [] }], {});
+  const receipts = runProbes(root, metadata, [{ package: member.name, target, ...found, features: [], locals: [] }], {});
   assert.deepEqual(receipts.map(row => row.name), [traitName]);
   assert.equal(receipts[0].classificationOnly, false, 'defaults must execute rather than receive a non-decoder skip');
   assert.deepEqual(receipts[0].failures, [], JSON.stringify(receipts));

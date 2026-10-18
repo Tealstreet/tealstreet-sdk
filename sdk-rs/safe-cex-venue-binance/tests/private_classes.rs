@@ -5501,6 +5501,10 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
 }
 
 #[cfg(feature = "native")]
+#[path = "support/private_action_key_binding.rs"]
+mod private_action_key_binding;
+
+#[cfg(feature = "native")]
 #[path = "support/snapshot_future_binding.rs"]
 mod snapshot_future_binding;
 
@@ -5783,3 +5787,7 @@ fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
         owner.dispose().unwrap();
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/private_owner_binding.rs"]
+mod private_owner_binding;
