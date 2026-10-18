@@ -7654,7 +7654,6 @@ rs = "safe-cex-venue-bybit/src/inverse_position.rs::PositionMappingError"
 reason = "Rust completion envelope separating the existing typed Position refusal from a Store access failure; native error propagation retains the Store origin."
 
 [[exempt]]
-<<<<<<< HEAD
 rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::has_property"
 reason = "Existing canonical native HasProperty engine operation exposed to the Lighter host, replacing its per-variant property/prototype replica. It checks presence without evaluating getters; no TS exported declaration corresponds to this Rust embedding capability. Native Array/Node for-in, inherited-index and callback witnesses cover the reached property path."
 
@@ -7709,7 +7708,8 @@ reason = "Checked native Set capability for Backpack REST order repair, replacin
 [[exempt]]
 rs = "safe-cex-venue-binance/src/private_event_value.rs::array_element"
 reason = "C3 native HasProperty/Get helper over the canonical EventArray alias, replacing direct mutable-Vec presence reads in existing Binance callback bodies. No TS exported helper is invented. Private/public class source fixtures retain native holes, row references and original field effects; shared native/Node array controls cover inherited Get and refusal semantics."
-=======
+
+[[exempt]]
 rs = "safe-cex-exchange/src/native.rs::native_frame_receipts"
 reason = "Native replay diagnostic host observation: reads physical per-dial message/ping/pong/close counters without modifying frames. No TS business behavior is implemented. Native transport control-frame regression and controlled TLS replay validate the receipt boundary."
 
@@ -7772,7 +7772,6 @@ reason = "Native physical WebSocket reader diagnostic counters for replay drain 
 [[exempt]]
 rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::frame_receipts_enabled"
 reason = "Explicit Rust replay-host instrumentation switch, default false. Ordinary hosts retain no per-dial parser history; only the diagnostic host enables consumed/processed receipts. No TS exchange tuning or source behavior is added. The frame_receipts and compiled replay regressions exercise the enabled path."
->>>>>>> 4abd3fe9c6
 
 [[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::with_retained_response"
