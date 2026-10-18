@@ -116,7 +116,7 @@ fn legacy_prototype_setter_preserves_receiver_null_shadow_and_resource() {
         expected["legacy"],
         "OBJECT_PROTOTYPE legacy setter uses original receiver and preserves ordinary own fields"
     );
-    let null_object = Js::object(vec![("label", Js::str("null_object"))]);
+    let null_object = Js::object(vec![("label", Js::str("null"))]);
     null_object.set("__proto__", Js::Null).unwrap();
     let mut row = json!({"read":null_object.get("__proto__").unwrap().type_of(),"coercion":kind(null_object.to_js_string().map(Js::String)),"own":null_object.has_own("__proto__")});
     null_object.set("__proto__", Js::Number(17.)).unwrap();
@@ -124,7 +124,7 @@ fn legacy_prototype_setter_preserves_receiver_null_shadow_and_resource() {
     row["valueAfterSet"] = json!(null_object.get("__proto__").unwrap().to_display());
     assert_eq!(
         row, expected["nullPrototype"],
-        "OBJECT_PROTOTYPE null_object is distinct from allocator default"
+        "OBJECT_PROTOTYPE null is distinct from allocator default"
     );
     let parent = Js::object(vec![]);
     let child = Js::object(vec![]);

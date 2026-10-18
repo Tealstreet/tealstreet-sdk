@@ -218,7 +218,7 @@ fn string_hint_observes_source_order_live_methods_and_native_utf16() {
             "only-valueof" => second(Js::Number(81.0)),
             "null-prototype" => {
                 if let Js::Object(o) = &value {
-                    *o.proto.borrow_mut() = Some(Js::Null);
+                    *o.proto.borrow_mut() = None;
                 }
             }
             "function-hook" => first(Js::str("function-hook")),

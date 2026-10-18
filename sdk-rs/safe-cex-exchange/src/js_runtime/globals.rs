@@ -597,137 +597,158 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             ("from", Js::function("from", |_, a| array_from(&a))),
         ]),
     );
-    def(
-        "Object",
-        Js::object(vec![
-            (
-                "freeze",
-                Js::function("freeze", |_, args| arg(&args, 0).freeze()),
-            ),
-            (
-                "preventExtensions",
-                Js::function("preventExtensions", |_, args| {
-                    arg(&args, 0).prevent_extensions()
-                }),
-            ),
-            (
-                "isExtensible",
-                Js::function("isExtensible", |_, args| {
-                    Ok(Js::Bool(arg(&args, 0).is_extensible()?))
-                }),
-            ),
-            (
-                "isFrozen",
-                Js::function("isFrozen", |_, args| {
-                    Ok(Js::Bool(arg(&args, 0).is_frozen()?))
-                }),
-            ),
-            (
-                "getOwnPropertyDescriptor",
-                Js::function("getOwnPropertyDescriptor", |_, args| {
-                    let target = arg(&args, 0);
-                    if target.is_nullish() {
-                        return Err(Thrown::type_error(
-                            "Cannot convert undefined or null to object",
-                        ));
+    let object = Js::object(vec![
+        (
+            "setPrototypeOf",
+            Js::function("setPrototypeOf", |_, args| {
+                arg(&args, 0).set_prototype(arg(&args, 1))
+            }),
+        ),
+        (
+            "freeze",
+            Js::function("freeze", |_, args| arg(&args, 0).freeze()),
+        ),
+        (
+            "preventExtensions",
+            Js::function("preventExtensions", |_, args| {
+                arg(&args, 0).prevent_extensions()
+            }),
+        ),
+        (
+            "isExtensible",
+            Js::function("isExtensible", |_, args| {
+                Ok(Js::Bool(arg(&args, 0).is_extensible()?))
+            }),
+        ),
+        (
+            "isFrozen",
+            Js::function("isFrozen", |_, args| {
+                Ok(Js::Bool(arg(&args, 0).is_frozen()?))
+            }),
+        ),
+        (
+            "getOwnPropertyDescriptor",
+            Js::function("getOwnPropertyDescriptor", |_, args| {
+                let target = arg(&args, 0);
+                if target.is_nullish() {
+                    return Err(Thrown::type_error(
+                        "Cannot convert undefined or null to object",
+                    ));
+                }
+                let key = arg(&args, 1).to_js_string()?;
+                target.own_property_descriptor(&key)
+            }),
+        ),
+        (
+            "defineProperty",
+            Js::function("defineProperty", |_, a| {
+                let target = arg(&a, 0);
+                if !matches!(target, Js::Object(_) | Js::Function(_)) {
+                    return Err(Thrown::type_error(
+                        "Object.defineProperty target must be an ordinary object or function",
+                    ));
+                }
+                let key = arg(&a, 1).to_js_string()?;
+                target.define_property(&key, &arg(&a, 2))?;
+                Ok(target)
+            }),
+        ),
+        (
+            "keys",
+            Js::function("keys", |_, a| {
+                let v = arg(&a, 0);
+                if v.is_nullish() {
+                    return Err(Thrown::type_error(
+                        "Cannot convert undefined or null to object",
+                    ));
+                }
+                Ok(Js::array(
+                    v.own_keys().into_iter().map(Js::String).collect(),
+                ))
+            }),
+        ),
+        (
+            "getOwnPropertyNames",
+            Js::function("getOwnPropertyNames", |_, a| {
+                let v = arg(&a, 0);
+                if v.is_nullish() {
+                    return Err(Thrown::type_error(
+                        "Cannot convert undefined or null to object",
+                    ));
+                }
+                Ok(Js::array(
+                    v.own_property_names()?
+                        .into_iter()
+                        .map(Js::String)
+                        .collect(),
+                ))
+            }),
+        ),
+        (
+            "values",
+            Js::function("values", |_, a| {
+                let v = arg(&a, 0);
+                if v.is_nullish() {
+                    return Err(Thrown::type_error(
+                        "Cannot convert undefined or null to object",
+                    ));
+                }
+                Ok(Js::array(
+                    v.own_entries()?.into_iter().map(|(_, v)| v).collect(),
+                ))
+            }),
+        ),
+        (
+            "entries",
+            Js::function("entries", |_, a| {
+                let v = arg(&a, 0);
+                if v.is_nullish() {
+                    return Err(Thrown::type_error(
+                        "Cannot convert undefined or null to object",
+                    ));
+                }
+                Ok(Js::array(
+                    v.own_entries()?
+                        .into_iter()
+                        .map(|(k, v)| Js::array(vec![Js::String(k), v]))
+                        .collect(),
+                ))
+            }),
+        ),
+        (
+            "assign",
+            Js::function("assign", |_, a| {
+                let target = arg(&a, 0);
+                for source in a.iter().skip(1) {
+                    if source.is_nullish() {
+                        continue;
                     }
-                    let key = arg(&args, 1).to_js_string()?;
-                    target.own_property_descriptor(&key)
-                }),
-            ),
-            (
-                "defineProperty",
-                Js::function("defineProperty", |_, a| {
-                    let target = arg(&a, 0);
-                    if !matches!(target, Js::Object(_) | Js::Function(_)) {
-                        return Err(Thrown::type_error(
-                            "Object.defineProperty target must be an ordinary object or function",
-                        ));
+                    for (k, v) in source.own_entries()? {
+                        target.set_key(&k, v)?;
                     }
-                    let key = arg(&a, 1).to_js_string()?;
-                    target.define_property(&key, &arg(&a, 2))?;
-                    Ok(target)
-                }),
-            ),
-            (
-                "keys",
-                Js::function("keys", |_, a| {
-                    let v = arg(&a, 0);
-                    if v.is_nullish() {
-                        return Err(Thrown::type_error(
-                            "Cannot convert undefined or null to object",
-                        ));
-                    }
-                    Ok(Js::array(
-                        v.own_keys().into_iter().map(Js::String).collect(),
-                    ))
-                }),
-            ),
-            (
-                "getOwnPropertyNames",
-                Js::function("getOwnPropertyNames", |_, a| {
-                    let v = arg(&a, 0);
-                    if v.is_nullish() {
-                        return Err(Thrown::type_error(
-                            "Cannot convert undefined or null to object",
-                        ));
-                    }
-                    Ok(Js::array(
-                        v.own_property_names()?
-                            .into_iter()
-                            .map(Js::String)
-                            .collect(),
-                    ))
-                }),
-            ),
-            (
-                "values",
-                Js::function("values", |_, a| {
-                    let v = arg(&a, 0);
-                    if v.is_nullish() {
-                        return Err(Thrown::type_error(
-                            "Cannot convert undefined or null to object",
-                        ));
-                    }
-                    Ok(Js::array(
-                        v.own_entries()?.into_iter().map(|(_, v)| v).collect(),
-                    ))
-                }),
-            ),
-            (
-                "entries",
-                Js::function("entries", |_, a| {
-                    let v = arg(&a, 0);
-                    if v.is_nullish() {
-                        return Err(Thrown::type_error(
-                            "Cannot convert undefined or null to object",
-                        ));
-                    }
-                    Ok(Js::array(
-                        v.own_entries()?
-                            .into_iter()
-                            .map(|(k, v)| Js::array(vec![Js::String(k), v]))
-                            .collect(),
-                    ))
-                }),
-            ),
-            (
-                "assign",
-                Js::function("assign", |_, a| {
-                    let target = arg(&a, 0);
-                    for source in a.iter().skip(1) {
-                        if source.is_nullish() {
-                            continue;
-                        }
-                        for (k, v) in source.own_entries()? {
-                            target.set_key(&k, v)?;
-                        }
-                    }
-                    Ok(target)
-                }),
-            ),
-        ]),
-    );
+                }
+                Ok(target)
+            }),
+        ),
+    ]);
+    object
+        .define_property(
+            &super::value::utf16("prototype"),
+            &Js::object(vec![
+                (
+                    "value",
+                    Js::Builtin(
+                        safe_cex_num::PrototypeRealm::current()
+                            .reference(safe_cex_num::ProtoMember::Prototype),
+                    ),
+                ),
+                ("writable", Js::Bool(false)),
+                ("enumerable", Js::Bool(false)),
+                ("configurable", Js::Bool(false)),
+            ]),
+        )
+        .expect("new Object intrinsic prototype descriptor");
+    def("Object", object);
     def(
         "JSON",
         Js::object(vec![
