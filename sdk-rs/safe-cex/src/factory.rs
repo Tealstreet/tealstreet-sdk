@@ -5,11 +5,11 @@ use crate::options_patch::{
 use indexmap::IndexMap;
 use safe_cex_exchange::{
     eager::start_eager,
-    native_store::DefaultStore,
     js_runtime::{
         promise::{self, Promise},
         value::{Js, Thrown},
     },
+    native_store::DefaultStore,
     runtime::{ExchangeError, ExchangeRuntime},
 };
 use safe_cex_store::{Store, virtual_clock::VirtualClock};
