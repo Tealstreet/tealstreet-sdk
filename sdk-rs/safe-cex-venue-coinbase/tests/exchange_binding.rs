@@ -1194,10 +1194,17 @@ fn divergence_pem_failure_reaches_real_ws_and_rest_bindings() {
                     h.exchange.base().place_order(h.exchange.as_ref(), place()),
                 ))
                 .unwrap_err();
+            let variant = if name == ExchangeName::Coinbase {
+                "coinbase"
+            } else {
+                "coinbasespot"
+            };
+            let rest = &case["rest"][variant];
+            assert_eq!(error.name, rest["name"].as_str().unwrap());
             assert_eq!(
                 error.message,
-                case["message"].as_str().unwrap(),
-                "{name:?}/{payload:?}: source PEM error visible at actual REST placement"
+                rest["message"].as_str().unwrap(),
+                "{name:?}/{payload:?}: source factory-enhanced PEM error at actual REST placement"
             );
             assert!(
                 h.http.requests.borrow().is_empty(),

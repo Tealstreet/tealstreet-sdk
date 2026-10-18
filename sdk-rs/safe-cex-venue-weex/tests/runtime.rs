@@ -1,3 +1,6 @@
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
+#[allow(dead_code)]
+mod pager_runtime;
 use safe_cex_exchange::{income_paging::IncomePageParams, runtime::ExchangeError};
 use safe_cex_types::IncomeRecord;
 use safe_cex_venue_weex::{
@@ -117,7 +120,7 @@ struct Error {
     value: V,
     name: &'static str,
 }
-type H = RefCell<State>;
+type H = Rc<RefCell<State>>;
 type F<'a, T = V> = Pin<Box<dyn Future<Output = Result<T, Error>> + 'a>>;
 struct State {
     input: V,
@@ -523,6 +526,21 @@ fn rt() -> &'static l::WeexLifecycleRuntime<H, V, Error> {
         },
     }
 }
+fn settle_range(
+    runtime: &pager_runtime::Runtime,
+    mut future: safe_cex_exchange::runtime::ExchangeFuture<'static, Vec<IncomeRecord>>,
+) -> Result<Vec<IncomeRecord>, ExchangeError> {
+    for _ in 0..128 {
+        if let Poll::Ready(result) = future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            return result;
+        }
+        runtime.advance(0);
+    }
+    panic!("WEEX range did not settle");
+}
 fn block_on<T>(mut f: Pin<Box<dyn Future<Output = T> + '_>>) -> T {
     let w = Waker::noop().clone();
     loop {
@@ -871,7 +889,7 @@ fn run(row: &Json) -> V {
             ("orders", V::Bool(false)),
         ]),
     )]);
-    let h = RefCell::new(State {
+    let h = Rc::new(RefCell::new(State {
         input: captured_input,
         instance: object(vec![]),
         store: store.clone(),
@@ -886,7 +904,7 @@ fn run(row: &Json) -> V {
         creates: vec![],
         callbacks: vec![],
         page: 0,
-    });
+    }));
     let name = String::from_utf16_lossy(&units(&input(&h, "method")));
     let mut initial = V::Undefined;
     let auth = object(vec![
@@ -962,15 +980,17 @@ fn run(row: &Json) -> V {
                 object(vec![("kind", text("private"))]),
             );
             if name == "fetchIncomeHistoryRange" {
+                let pager_runtime = Rc::new(pager_runtime::Runtime::default());
                 let future = i::fetch_income_history_range(
-                    &h,
+                    Rc::new(h.clone()),
                     range_rt(),
+                    pager_runtime.clone(),
                     numeric(&h, &input(&h, "start")).unwrap(),
                     numeric(&h, &input(&h, "end")).unwrap(),
                     input(&h, "incomeType"),
                 );
                 initial = snapshot(&h);
-                block_on(future)
+                settle_range(&pager_runtime, future)
                     .map(|records| {
                         let expected = decode(&row["expected"]);
                         let source_records = raw(&expected, "result");
@@ -1198,7 +1218,7 @@ fn replay_signing_uses_already_serialized_body_bytes() {
             "zero"
         ]
     );
-    let h = RefCell::new(State {
+    let h = Rc::new(RefCell::new(State {
         input: V::Undefined,
         instance: object(vec![]),
         store: object(vec![]),
@@ -1213,7 +1233,7 @@ fn replay_signing_uses_already_serialized_body_bytes() {
         creates: vec![],
         callbacks: vec![],
         page: 0,
-    });
+    }));
     let options = object(vec![
         ("key", text("k")),
         ("secret", text("s")),

@@ -1,5 +1,5 @@
 use crate::exchange::Exchange;
-use crate::runtime::{ExchangeRuntime, ExchangeTask};
+use crate::runtime::{ExchangeRuntime, ExchangeTask, RuntimeTaskKind};
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
@@ -105,19 +105,22 @@ impl<T: 'static> ThrottleManager<T> {
             id: timer,
             settled: settled.clone(),
         };
-        let task = self.runtime.spawn_local(Box::pin(async move {
-            let _guard = guard;
-            if sleep.await.is_err() {
-                return;
-            }
-            if let Some(manager) = weak.upgrade() {
-                if let Some(args) = tail {
-                    manager.invoke(args);
+        let task = self.runtime.spawn_classified(
+            RuntimeTaskKind::Timer,
+            Box::pin(async move {
+                let _guard = guard;
+                if sleep.await.is_err() {
+                    return;
                 }
-                // ts-bug: an older tail can delete a newer leading call's entry.
-                manager.entries.borrow_mut().remove(&timer_key);
-            }
-        }));
+                if let Some(manager) = weak.upgrade() {
+                    if let Some(args) = tail {
+                        manager.invoke(args);
+                    }
+                    // ts-bug: an older tail can delete a newer leading call's entry.
+                    manager.entries.borrow_mut().remove(&timer_key);
+                }
+            }),
+        );
         if settled.get() {
             return;
         }

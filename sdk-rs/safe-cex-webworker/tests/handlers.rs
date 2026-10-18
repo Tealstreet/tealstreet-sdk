@@ -94,21 +94,23 @@ fn position() -> Position {
 }
 #[test]
 fn full_empty_refresh_clears_omitted_positions_but_scoped_empty_is_partial() {
-    let (venue, _, store) = venue();
+    let (venue, runtime, store) = venue();
     let messages = Rc::new(RefCell::new(Vec::new()));
     let sink = messages.clone();
     let handler =
         UpdatePositionsHandler::new(venue, Rc::new(move |msg| sink.borrow_mut().push(msg)));
     store.data.borrow_mut().positions = vec![position()];
-    ready(handler.handle_update_positions("scoped".into(), Some(vec!["BTC".into()])));
+    drop(handler.handle_update_positions("scoped".into(), Some(vec!["BTC".into()])));
+    runtime.advance(100_000);
     assert_eq!(store.data.borrow().positions.len(), 1);
-    ready(handler.handle_update_positions("all".into(), None));
+    drop(handler.handle_update_positions("all".into(), None));
+    runtime.advance(100_000);
     assert!(store.data.borrow().positions.is_empty());
     assert_eq!(messages.borrow().len(), 2);
     assert_eq!(messages.borrow()[1].data.as_ref().unwrap()["success"], true);
 }
 #[test]
-fn position_cancellation_releases_owned_slot_and_settles_only_its_waiter() {
+fn position_waiter_drop_keeps_owned_slot_until_request_finishes() {
     let (venue, runtime, _) = venue();
     venue.delay.set(100);
     let messages = Rc::new(RefCell::new(Vec::new()));
@@ -124,15 +126,16 @@ fn position_cancellation_releases_owned_slot_and_settles_only_its_waiter() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
-    ready(handler.handle_update_positions("joined".into(), None));
+    drop(handler.handle_update_positions("joined".into(), None));
     drop(request);
     venue.delay.set(0);
-    runtime.advance(100_010);
-    ready(handler.handle_update_positions("retry".into(), None));
+    runtime.advance(100_100);
+    drop(handler.handle_update_positions("retry".into(), None));
+    runtime.advance(100_100);
     assert_eq!(venue.fetches.borrow().len(), 2);
     assert_eq!(
-        messages.borrow()[1].data.as_ref().unwrap()["reason"],
-        "Worker request cancelled"
+        messages.borrow()[1].data.as_ref().unwrap()["requestId"],
+        "dropped"
     );
     assert_eq!(messages.borrow()[2].data.as_ref().unwrap()["success"], true);
 }
@@ -893,7 +896,7 @@ fn position_failure_reason_uses_javascript_error_string_for_empty_fields() {
         ("", "failed", "failed"),
         ("TypeError", "failed", "TypeError: failed"),
     ] {
-        let (venue, _, _) = venue();
+        let (venue, runtime, _) = venue();
         let mut error = ExchangeError::new(message);
         error.name = name.into();
         *venue.failure.borrow_mut() = Some(error);
@@ -901,7 +904,8 @@ fn position_failure_reason_uses_javascript_error_string_for_empty_fields() {
         let sink = messages.clone();
         let handler =
             UpdatePositionsHandler::new(venue, Rc::new(move |msg| sink.borrow_mut().push(msg)));
-        ready(handler.handle_update_positions("string-error".into(), None));
+        drop(handler.handle_update_positions("string-error".into(), None));
+        runtime.advance(100_000);
         let messages = messages.borrow();
         let data = messages.last().unwrap().data.as_ref().unwrap();
         assert_eq!(data["success"], false);
