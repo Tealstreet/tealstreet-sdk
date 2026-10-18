@@ -230,8 +230,10 @@ constructs the production TypeScript `DefaultStore`, commits the market cap
 before the first subscriber throws, skips the second subscriber, catches that
 error, then commits fallback leverage before the same subscriber throws again.
 The Rust witness asserts the same market commit, caught failure and fallback
-update. `updateSymbolMetadata` still needs a throw witness through its wrapper.
-The same gap is noted separately on both already-divergent order snapshot
+update. `updateSymbolMetadata` now has constructed-wrapper throwing-subscriber witnesses:
+the public-only commit runs before return, while ready private HTTP retains its
+await checkpoint and the second original subscriber failure after fallback.
+The remaining gap is noted separately on both already-divergent order snapshot
 writers, `fetchAndSetOrders` and `fetchAndSetRegularOrders`: Rust now propagates
 StoreMutationError after commit, but per-method Rust throwing-subscriber
 witnesses are still needed. Their existing alias-choice findings remain
@@ -408,3 +410,14 @@ example and Node runner documented above.
 Market fetches retain configured response data through tradability filtering and
 normalization; raw info never takes a JSON projection. The constructed fetch/Store
 regression observes opaque UTF-16, nonfinite bits, signed zero and own Undefined.
+
+The metadata/leverage native family uses shared `eager::start_eager`: the public
+fallback notifies Store before returning its waiter, while even an immediately
+ready private HTTP response resumes after the source await checkpoint. The owned
+continuation shares the existing symbol-settings map and survives waiter drop.
+`exchange_binding::{typed,unit}` creates its existing host-owned MethodObserver
+synchronously and only boxes the result waiter; do not spawn a second method.
+The login signer also uses the shared eager boundary instead of manual first-poll
+code. Other direct typed readers retain their separate timing audit obligations.
+The constructed `exchange_trait` eager tests hold/release real terminal REST
+responses and observe production Store commits, throws and cancel/replace order.

@@ -35,8 +35,8 @@ impl ExchangeRuntime for ReportingRuntime {
     fn sleep(&self, _: u64) -> ExchangeFuture<'static, ()> {
         panic!("unexpected sleep")
     }
-    fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        panic!("unexpected spawn")
+    fn spawn_local(&self, work: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
+        unit_tasks::spawn(work)
     }
     fn console_values(&self, severity: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {
         self.trace.borrow_mut().push(severity.into());
@@ -214,11 +214,9 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                 }),
             );
             let result = match method {
-                "positions" => {
-                    futures::executor::block_on(exchange.fetch_positions(None)).map(|_| ())
-                }
-                "validate" => futures::executor::block_on(exchange.validate_account()).map(|_| ()),
-                "account" => futures::executor::block_on(exchange.get_account()).map(|_| ()),
+                "positions" => unit_tasks::drive(exchange.fetch_positions(None)).map(|_| ()),
+                "validate" => unit_tasks::drive(exchange.validate_account()).map(|_| ()),
+                "account" => unit_tasks::drive(exchange.get_account()).map(|_| ()),
                 _ => unreachable!(),
             };
             assert!(

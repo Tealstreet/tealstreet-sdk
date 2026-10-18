@@ -1147,11 +1147,11 @@ fn real_trait_candles_propagate_original_http_failure() {
         ))
         .expect_err("source rethrows the candle refusal");
     assert_eq!(
-        error.response.as_ref().unwrap()["status"].as_f64(),
+        error.response_json_view().as_ref().unwrap()["status"].as_f64(),
         Some(400.0)
     );
     assert_eq!(
-        error.response.as_ref().unwrap()["data"]["msg"],
+        error.response_json_view().as_ref().unwrap()["data"]["msg"],
         "candle refusal"
     );
     assert_eq!(error.config.as_ref().unwrap()["url"], "marketdata");

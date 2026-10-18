@@ -7644,3 +7644,15 @@ reason = "Native physical WebSocket reader diagnostic counters for replay drain 
 [[exempt]]
 rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::frame_receipts_enabled"
 reason = "Explicit Rust replay-host instrumentation switch, default false. Ordinary hosts retain no per-dial parser history; only the diagnostic host enables consumed/processed receipts. No TS exchange tuning or source behavior is added. The frame_receipts and compiled replay regressions exercise the enabled path."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::with_retained_response"
+reason = "C3: native API-error construction glue attaches one existing RetainedJsonInput response to an origin wrapper while chaining the previous opaque cause. It neither parses nor duplicates a transport response authority. No standalone TypeScript declaration; actual Binance signed cancel and nearest-origin native tests exercise this boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::retained_response_input"
+reason = "C3: reads the nearest retained response origin deterministically, using the original RestFailure for transport errors and the same canonical RetainedJsonInput for API-created errors. It exposes no JSON cache or new value tree; native cause-chain and signed Binance error emission tests cover it. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::response_json_view"
+reason = "C3: explicit computed decision-5 Rust model/report boundary over retained_response_input. Reuses the existing lossy JSON projection without storing its result or mutating the original response. No standalone TypeScript declaration; raw consumers use retained_response_input."

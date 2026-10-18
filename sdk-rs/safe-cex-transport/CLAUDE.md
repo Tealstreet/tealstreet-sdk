@@ -75,8 +75,9 @@ parser results and remote signer `.data` use the canonical `RetainedJsonInput`.
 Text and object keys retain UTF-16; native numbers, own undefined and phase
 provenance survive until the actual JSON wire boundary. Typed model consumers
 use an explicit fallible `into_value` view, never a silent substitute. The core
-legacy Error response view is deliberately lossy while its original RestFailure
-retains the complete native body.
+Error response JSON view is computed only at explicit model/report boundaries;
+ExchangeError stores no JSON response cache. Its original RestFailure retains the
+complete native body, and signature predicates consume retained input directly.
 
 HOW diagnostic redaction matches ASCII sensitive substrings directly over UTF-16
 key units, with the source regex's case-insensitive, non-Unicode semantics. A lone

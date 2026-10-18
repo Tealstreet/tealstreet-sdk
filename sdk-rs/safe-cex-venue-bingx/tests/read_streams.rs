@@ -53,6 +53,16 @@ fn ready<F: Future>(f: F) -> F::Output {
     }
     panic!("fixture did not settle in 1000 polls")
 }
+fn ready_on<F: Future>(host: &Host, f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    for _ in 0..1000 {
+        host.pump();
+        if let Poll::Ready(value) = f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            return value;
+        }
+    }
+    panic!("fixture runtime did not settle in 1000 turns")
+}
 fn number(n: f64) -> Value {
     json!({"number":if n.is_nan(){"NaN".into()}else{format!("{:016x}",n.to_bits())}})
 }
@@ -123,6 +133,18 @@ struct Host {
 impl Host {
     fn call(&self, v: Value) {
         self.calls.borrow_mut().push(v);
+    }
+    fn pump(&self) {
+        let tasks = std::mem::take(&mut *self.tasks.borrow_mut());
+        for mut task in tasks {
+            if task
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+            {
+                self.tasks.borrow_mut().push(task);
+            }
+        }
     }
     fn run_timers(&self) {
         let callbacks = self
@@ -390,7 +412,7 @@ impl ReadTransport for Transport {
         };
         let result = if input["reject"] == which {
             let mut e = ExchangeError::new("network cause");
-            e.response = Some(json!({"data":{"msg":"wire denied"}}));
+            e = e.with_retained_response((json!({"data":{"msg":"wire denied"}})).into());
             Err(e)
         } else {
             let value = match which {
@@ -649,8 +671,11 @@ fn invoke(
             }),
         )
         .map(|()| json!({"undefined":true})),
-        "tick" => ready(history.tick(js_value_as_f64(&input["count"]).unwrap()))
-            .map(|()| json!({"undefined":true})),
+        "tick" => ready_on(
+            host,
+            history.tick(js_value_as_f64(&input["count"]).unwrap()),
+        )
+        .map(|()| json!({"undefined":true})),
         "dispose" => dispose_exchange(
             || {
                 host.call(json!({"op":"baseDispose"}));
@@ -991,7 +1016,7 @@ fn polling_owner_release_is_visible() {
         "BINGX-RS source retained callback executes next count"
     );
     let (h, s, _, host) = fixture(corpus()["cases"][32]["input"].clone());
-    ready(h.tick(1.0)).unwrap();
+    ready_on(&host, h.tick(1.0)).unwrap();
     let callback = host.loops.borrow_mut().remove(0);
     drop(h);
     drop(s);

@@ -305,20 +305,29 @@ async fn three<E>(
     })
     .await
 }
-pub async fn fetch_orders_with_retry<E: std::fmt::Display>(
+pub async fn fetch_orders_with_retry<'a, E: std::fmt::Display>(
     retries: f64,
     store: &dyn Store,
-    xhr: &dyn RestAdapter,
     host: &OrderReadHost<'_, E>,
+    fetch_families: &dyn Fn() -> [OrdersFuture<'a, E>; 3],
 ) -> Result<Vec<Order>, ServiceError<E>> {
     let mut last = None;
     let mut attempt = 1.0;
     while attempt <= retries {
-        let outcome=async{
-   let orders=three(fetch_normal_orders(store,xhr,host),fetch_algo_orders(store,xhr,host),fetch_trigger_orders(store,xhr,host)).await?;
-   let orders=add_inline_tpsl_fallback_orders(&orders,host.now).map_err(ServiceError::Coercion)?;
-   if orders.is_empty()&&!store.orders().is_empty(){log(host.service,"Warning: fetchOrders returned empty but store had orders. Could be valid or API issue.")?;}Ok(orders)
-  }.await;
+        let outcome = async {
+            let [normal, algo, trigger] = fetch_families();
+            let orders = three(normal, algo, trigger).await?;
+            let orders = add_inline_tpsl_fallback_orders(&orders, host.now)
+                .map_err(ServiceError::Coercion)?;
+            if orders.is_empty() && !store.orders().is_empty() {
+                log(
+                    host.service,
+                    "Warning: fetchOrders returned empty but store had orders. Could be valid or API issue.",
+                )?;
+            }
+            Ok(orders)
+        }
+        .await;
         match outcome {
             Ok(orders) => return Ok(orders),
             Err(e) => {
@@ -352,13 +361,13 @@ pub async fn fetch_orders_with_retry<E: std::fmt::Display>(
     emit(host.service, Some(&Value::String(text)))?;
     Ok(store.orders().to_vec())
 }
-pub async fn fetch_orders<E: std::fmt::Display>(
+pub async fn fetch_orders<'a, E: std::fmt::Display>(
     _symbols: Option<&[String]>,
     store: &dyn Store,
-    xhr: &dyn RestAdapter,
     host: &OrderReadHost<'_, E>,
+    fetch_families: &dyn Fn() -> [OrdersFuture<'a, E>; 3],
 ) -> Result<Vec<Order>, ServiceError<E>> {
-    fetch_orders_with_retry(3.0, store, xhr, host).await
+    fetch_orders_with_retry(3.0, store, host, fetch_families).await
 }
 pub async fn fetch_historical_orders<E: std::fmt::Display>(
     opts: Option<&OrderHistoryOptions>,
