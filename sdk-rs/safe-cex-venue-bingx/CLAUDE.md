@@ -300,3 +300,8 @@ refresh/recovery and full silent teardown on final exchange-handle drop.
 requires named failures, restores exact source bytes and replays GREEN. Run it
 serially with no concurrent source edits or Cargo commands. Always run the full
 workspace parity index before marking a PR READY. See DIVERGENCE_TIMING_AUDIT.md.
+
+Final native Drop now enters shared `safe_cex_exchange::native_final_drop`, retaining
+its existing explicit dispose and host-timer cleanup closure. The shared lifetime
+primitive completes base cleanup even if that closure fails; the existing real
+refresh/recovery/socket/Store-error teardown probes remain mandatory.

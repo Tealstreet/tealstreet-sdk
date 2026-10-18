@@ -55,3 +55,24 @@ rejected instead of resolving, and isolated surrogates became FFFD. The same
 keep every source case and assertion; their error fixture now stores the response
 on RestFailure instead of the removed context-based response override. These diagnostics close one live defect in audit rows 19–20;
 parser/output obligations and the rest of the sixty-row audit remain open.
+
+## History page row admission
+
+`woo.exchange.ts:472–476` calls the shared `v(row, 'symbol')` before any row
+validation. `utils/get-key.ts:8–13` returns undefined for null and missing array
+properties, but throws the original `in`-operator diagnostic for primitives.
+The old Rust object-only guard discarded the entire result for a null/array row
+and replaced primitive diagnostics with `history parser requires an object row`.
+
+`history_row_tests::` reaches both configured history methods through the real
+signed HTTP adapter. Fourteen source/native profiles place null, empty/nonempty
+arrays, empty objects, numbers, booleans and strings before a valid fill. The
+maintained TS methods and parser supply the expected rows and diagnostics; the
+native observer checks exact own keys, number bits (including negative-zero fee),
+report text/count and one signed request. Both named tests compiled and failed on
+master e059bc2008 before the shared get-key admission was used.
+
+Rows 19/20 stay OPEN: this bounded repair does not clear the retained row/string,
+option, parser-member or output representation obligations. The retained reporter
+repair is covered by #1089. No existing corpus case or assertion is
+removed, and the full public-history API is unchanged.
