@@ -42,7 +42,10 @@ fn request(config: &Js) -> Result<RestRequest, Thrown> {
             .then(|| to_json(&params))
             .transpose()?,
         body: (!data.is_undefined())
-            .then(|| to_json(&data).map(RestBody::Untransformed))
+            .then(|| {
+                safe_cex_exchange::js_runtime::value::to_retained_input(&data)
+                    .map(RestBody::Untransformed)
+            })
             .transpose()?,
         ..Default::default()
     })

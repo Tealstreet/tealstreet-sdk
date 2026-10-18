@@ -46,7 +46,6 @@ assert.equal(frames.length,0);
 
 #[test]
 fn shared_json_parser_contract_includes_corruption_null_and_number_rounding() {
-    use safe_cex_transport::how::{big_int_as_string_json_parse, json_parse};
     use serde_json::{Value, json};
     let corrupt = r#"{"text":"x:1234567890123456,"}"#;
     assert_eq!(big_int_as_string_json_parse(corrupt), Value::Null);
@@ -91,4 +90,18 @@ assert.deepEqual(sent,['first']);assert.deepEqual(events,['open']);
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn big_int_as_string_json_parse(text: &str) -> serde_json::Value {
+    safe_cex_transport::RestResponseBody::Transformed(
+        safe_cex_transport::how::big_int_as_string_json_parse(text),
+    )
+    .json_value()
+    .unwrap()
+}
+
+fn json_parse(text: &str) -> serde_json::Value {
+    safe_cex_transport::RestResponseBody::Transformed(safe_cex_transport::how::json_parse(text))
+        .json_value()
+        .unwrap()
 }

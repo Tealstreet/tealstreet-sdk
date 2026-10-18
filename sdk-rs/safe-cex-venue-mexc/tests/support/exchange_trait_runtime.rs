@@ -213,7 +213,7 @@ impl RestAdapter for Wire {
         // Record the body as the wire text the transport's JSON.stringify sends.
         let body = match &r.body {
             Some(RestBody::Untransformed(value)) => {
-                let text = safe_cex_num::js_json_stringify(&value.clone().into())
+                let text = safe_cex_num::js_retained_json_stringify(value)
                     .unwrap()
                     .unwrap();
                 serde_json::from_str(&text).unwrap()
@@ -234,7 +234,9 @@ impl RestAdapter for Wire {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(response),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(response).unwrap(),
+                ),
             })
         })
     }

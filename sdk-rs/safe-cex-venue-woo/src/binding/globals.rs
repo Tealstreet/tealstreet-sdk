@@ -4,7 +4,7 @@
 use super::{
     client,
     rt::{Rt, Shared},
-    value::{Js, Thrown, arg, from_json, from_typed, to_json, to_typed},
+    value::{Js, Thrown, arg, from_typed, to_typed},
 };
 use crate::constants;
 use safe_cex_exchange::js_runtime::{
@@ -100,7 +100,7 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 Js::object(vec![(
                     "serialize",
                     Js::function("serialize", |_, a| {
-                        crate::api::sorted_query(&to_json(&arg(&a, 0))?, false)
+                        crate::api::sorted_query(&arg(&a, 0), false)
                             .map(|q| Js::str(&q))
                             .map_err(|e| Thrown::error("Error", &e))
                     }),
@@ -140,13 +140,8 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
     }
     let runtime = rt.shared.runtime.clone();
     let interceptor = Js::function("", move |_, a| {
-        // Keep Axios callables outside signing's JSON view.
-        let original = arg(&a, 0);
-        let callables = ["paramsSerializer", "adapter"]
-            .map(|key| original.get(key).map(|value| (key, value)))
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
-        let config = to_json(&original)?;
+        // Native shallow config copies preserve callable and data identities.
+        let config = arg(&a, 0);
         // BaseExchange injects executable signer handles into these live options.
         let remote = options.get("remoteSigner")?.truthy();
         let typed = typed.clone();
@@ -164,12 +159,6 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 )
                 .await
                 .map_err(|e| Thrown::error("Error", &e))?;
-                let next = from_json(&next);
-                for (key, value) in callables {
-                    if !value.is_undefined() {
-                        next.set(key, value)?;
-                    }
-                }
                 Ok(next)
             }),
         )))
