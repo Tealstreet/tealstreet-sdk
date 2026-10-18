@@ -38,7 +38,7 @@ fn describe(payload: Option<&Value>) -> String {
 
 pub(crate) fn native_shape(payload: &Js) -> Str {
     if let Js::Array(rows) = payload {
-        return format!("array({})", rows.borrow().len())
+        return format!("array({})", rows.len())
             .encode_utf16()
             .collect::<Vec<_>>()
             .into();

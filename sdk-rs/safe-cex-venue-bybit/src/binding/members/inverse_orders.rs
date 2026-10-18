@@ -49,32 +49,12 @@ async fn post(rt: &Rt, endpoint: &str, payload: Js) -> Result<Js, Thrown> {
 }
 fn items(value: &Js) -> Result<Vec<Js>, Thrown> {
     value
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))
 }
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(rt, "placeOrder", place_order)?;
-    method(rt, "getStopOrderPositionIdx", |rt, a| {
-        let opts = arg(&a, 0).spread_object()?;
-        opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>())?;
-        Ok(rt.clone().spawn(Box::pin(async move {
-            let index = await_js(
-                &rt.exchange_runtime(),
-                rt.this.call_method("getOrderPositionIdx", vec![opts])?,
-            )
-            .await?;
-            Ok(if index.strict_equals(&Js::Number(0.)) {
-                Js::Number(0.)
-            } else if index.strict_equals(&Js::Number(1.)) {
-                Js::Number(2.)
-            } else if index.strict_equals(&Js::Number(2.)) {
-                Js::Number(1.)
-            } else {
-                Js::Undefined
-            })
-        })))
-    })?;
     method(rt, "placeStopLossOrTakeProfit", |rt, a| {
         Ok(rt.clone().spawn(Box::pin(async move {
             trading_stop(&rt, arg(&a, 0), false).await

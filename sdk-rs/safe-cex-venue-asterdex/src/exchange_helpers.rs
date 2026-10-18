@@ -711,13 +711,17 @@ pub fn transform_order_book(bids: &[(String, String)], asks: &[(String, String)]
                 total: 0.0,
             })
             .collect();
-        levels.sort_by(|left, right| {
-            let order = left
-                .price
-                .partial_cmp(&right.price)
-                .unwrap_or(std::cmp::Ordering::Equal);
-            if descending { order.reverse() } else { order }
-        });
+        safe_cex_exchange::js_runtime::sorting::stable_sort(&mut levels, |left, right| {
+            let difference = if descending {
+                right.price - left.price
+            } else {
+                left.price - right.price
+            };
+            Ok(difference
+                .partial_cmp(&0.0)
+                .unwrap_or(std::cmp::Ordering::Equal))
+        })
+        .expect("numeric order-book comparisons cannot throw");
         let mut total = 0.0;
         for level in &mut levels {
             total += level.price * level.amount;

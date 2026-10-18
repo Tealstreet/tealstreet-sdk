@@ -58,7 +58,7 @@ console.log(JSON.stringify(rows));
             let args=row["input"].as_array().unwrap().iter().map(|value|index(value.as_str().unwrap())).collect();
             let result=array.call_method("slice",args).unwrap();
             let Js::Array(cells)=result else {panic!("slice returns an array");};
-            let slots:Vec<Value>=cells.borrow().iter().map(|slot|json!({"own":slot.is_some(),"value":slot.as_ref().unwrap_or(&Js::Undefined).to_display()})).collect();
+            let slots:Vec<Value>=Js::Array(cells).array_items().unwrap().unwrap().iter().map(|slot|json!({"own":slot.is_some(),"value":slot.as_ref().unwrap_or(&Js::Undefined).to_display()})).collect();
             assert_eq!(json!(slots),row["slots"],"SLICE source bounds {} sparse={}",row["input"],row["sparse"]);
         }
     });

@@ -25,4 +25,24 @@ const reprice=fixture('grvt');reprice.ex.fetchFillsForOrderIds=async()=>new Map(
 const unavailable=fixture('grvt');unavailable.replies.push(['o']);await unavailable.m.processInstance(unavailable.i);unavailable.notify([order('o',99)],1,1);await flush();assert.equal(unavailable.places.length,1);assert.equal(unavailable.cancels.length,2);assert.equal(unavailable.completes.length,1);const unavailableReason=unavailable.i.state.stopReason;assert.equal(unavailableReason,'Failed to reconcile fills after cancellation');
 const fill=fixture('grvt');fill.replies.push(['o']);await fill.m.processInstance(fill.i);for(const [orderId,symbol]of[['other','BTC'],['o','OTHER']]){fill.ex.emitter.emit('fill',{orderId,symbol,amount:3});assert.equal(fill.i.filledSize,0);}fill.ex.emitter.emit('fill',{orderId:'o',symbol:'BTC',amount:3});assert.equal(fill.i.isStopped,true);assert.equal(fill.i.currentOrderIds.length,0);await flush();assert.equal(fill.completes.length,1);assert.equal(fill.completes[0].filled,3);const fillReason=fill.i.state.stopReason;
 const strict=fixture('grvt');strict.replies.push(['o']);await strict.m.processInstance(strict.i);for(const id of[1,'1',null]){strict.notify([order('o')],id,1);assert.equal(strict.i.pendingOrdersUpdate,true);await flush();}strict.notify([order('o')],null,1);assert.equal(strict.i.pendingOrdersUpdate,false);strict.i.markComplete('user');await strict.m.cleanupInstance(strict.i);
-process.stdout.write(JSON.stringify({repriceEvents,unavailableReason,fillReason,retryEvents,lostEvents,ceilings,infiniteAmount,cleanupEvent,emptyRestFilled,monitorEvents:monitor.events,monitorReason:monitor.i.state.stopReason}));
+const timing=[];
+for(const method of ['placement','completion'])for(const mode of ['ready','noop','error','held-drop']){
+ const f=fixture(method==='completion'?'bybitdemo':'bybit');let release;
+ if(method==='placement'){
+  f.ex.placeOrder=options=>{f.places.push(options);return mode==='held-drop'?new Promise(r=>release=()=>r(['o'])):mode==='error'?Promise.reject(new Error('placement failed')):Promise.resolve(['o']);};
+  if(mode==='noop')f.i.markComplete('user');
+  if(mode==='error')f.stopOnSleep=true;
+ }else if(mode!=='noop'){
+  f.i.options.clientId='awaited';f.i.currentOrderIds=['o'];
+  f.ex.fetchFillsForOrderIds=()=>mode==='held-drop'?new Promise(r=>release=()=>r(new Map([['o',1]]))):mode==='error'?Promise.reject(new Error('fills failed')):Promise.resolve(new Map([['o',1]]));
+ }
+ const snapshot=()=>({places:f.places.length,cancels:f.cancels.length,completes:f.completes.length,filled:String(f.i.filledSize),stopped:f.i.isStopped,events:[...f.events]});
+ const promise=method==='placement'?f.m.tryPlaceOrders(f.i):f.m.emitComplete(f.i);
+ const returned=snapshot(),continuation=['returned'];let outcome;
+ promise.then(value=>{outcome=method==='placement'?Array.from(value):null;continuation.push('fulfilled');},e=>{outcome=String(e);continuation.push('rejected');});
+ assert.deepEqual(continuation,['returned']);
+ if(mode==='held-drop'){if(method==='placement')f.i.markComplete('user');release();}
+ await flush();assert.deepEqual(continuation,['returned','fulfilled']);
+ timing.push({method,mode,returned,final:snapshot(),outcome,continuation});
+}
+process.stdout.write(JSON.stringify({timing,repriceEvents,unavailableReason,fillReason,retryEvents,lostEvents,ceilings,infiniteAmount,cleanupEvent,emptyRestFilled,monitorEvents:monitor.events,monitorReason:monitor.i.state.stopReason}));

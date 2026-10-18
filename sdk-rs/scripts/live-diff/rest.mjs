@@ -166,7 +166,7 @@ async function session(implementation, label, capture = false) {
     child.kill();
     await proxy.close();
   };
-  const result = { implementation, label, records, diagnostics, call, close, atMs: 0, operationIndex: 0 };
+  const result = { implementation, label, records, diagnostics, timings: [], call, close, atMs: 0, operationIndex: 0 };
   sessions.push(result);
   return result;
 }
@@ -188,7 +188,9 @@ async function invoke(s, spec) {
       };
     }
   }
+  const started = performance.now();
   const reply = await driveOperation(s, spec, { realtimeClock });
+  s.timings.push({ method: spec.method, wallMs: performance.now() - started });
   return { ...reply, records: cleanRecords(s.records.slice(start)) };
 }
 const valueOnly = ({ records, clock, ...value }) => value;
@@ -234,6 +236,7 @@ async function saveRun(s, results) {
     hash: hash(bytes),
     requests: cleanRecords(s.records),
     diagnostics: s.diagnostics,
+    timings: s.timings,
   });
   return results;
 }

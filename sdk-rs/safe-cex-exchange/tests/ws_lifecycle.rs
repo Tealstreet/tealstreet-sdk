@@ -307,7 +307,12 @@ fn any_healthy_public_socket_wins_and_durable_diagnostics_survive_recovery() {
     b.track_last_received().unwrap();
     b.record_close_diagnostics(Some(1013), false);
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap().unwrap();
+    let health = store
+        .socket_health()
+        .unwrap()
+        .unwrap()
+        .into_value()
+        .unwrap();
     assert_eq!(health["publicHealthy"], true);
     assert_eq!(health["publicInitialized"], true);
     assert_eq!(health["publicCloseCode"].as_f64(), Some(1013.0));
@@ -434,6 +439,8 @@ fn replacing_socket_clears_old_optional_close_and_message_evidence() {
             .socket_health()
             .unwrap()
             .unwrap()
+            .into_value()
+            .unwrap()
             .get("publicCloseCode")
             .is_some()
     );
@@ -442,13 +449,20 @@ fn replacing_socket_clears_old_optional_close_and_message_evidence() {
             .socket_health()
             .unwrap()
             .unwrap()
+            .into_value()
+            .unwrap()
             .get("publicLastMessage")
             .is_some()
     );
     let fresh = socket(&venue, &runtime, 2);
     venue.base().set_socket(SocketSlot::Public, Some(fresh));
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap().unwrap();
+    let health = store
+        .socket_health()
+        .unwrap()
+        .unwrap()
+        .into_value()
+        .unwrap();
     assert!(health.get("publicCloseCode").is_none());
     assert!(health.get("publicLastMessage").is_none());
     assert_eq!(health["publicCloseCountTotal"].as_f64(), Some(0.0));
@@ -593,17 +607,25 @@ fn cleared_socket_diagnostics_preserve_retained_key_order() {
     store
         .update(
             safe_cex_store::StoreUpdate {
-                socket_health: Some(json!({
-                    "first":1,"publicLastMessage":2,"second":3,"privateLastMessage":4,
-                    "third":5,"publicCloseCode":6,"fourth":7,"privateCloseCode":8,"last":9
-                })),
+                socket_health: Some(
+                    json!({
+                        "first":1,"publicLastMessage":2,"second":3,"privateLastMessage":4,
+                        "third":5,"publicCloseCode":6,"fourth":7,"privateCloseCode":8,"last":9
+                    })
+                    .into(),
+                ),
                 ..Default::default()
             },
             false,
         )
         .unwrap();
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap().unwrap();
+    let health = store
+        .socket_health()
+        .unwrap()
+        .unwrap()
+        .into_value()
+        .unwrap();
     let retained: Vec<_> = health
         .as_object()
         .unwrap()
@@ -1009,7 +1031,12 @@ mod js_sockets {
             panic!("Blob.arrayBuffer returns a Promise")
         };
         let buffer = buffer.result().unwrap().unwrap();
-        let bytes = buffer.get("bytes").unwrap().array_values().unwrap();
+        let bytes = buffer
+            .get("bytes")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(
             bytes
                 .iter()
@@ -1021,6 +1048,7 @@ mod js_sockets {
         let Js::Promise(text) = received[0].call_method("text", vec![]).unwrap() else {
             panic!("Blob.text returns a Promise")
         };
+        assert_eq!(bytes.len(), 4);
         assert_eq!(
             text.result().unwrap().unwrap().to_display(),
             "\0��A",

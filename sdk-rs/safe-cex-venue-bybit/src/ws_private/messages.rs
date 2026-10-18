@@ -152,7 +152,7 @@ impl PrivateProtocol {
             parent.base().name,
             ExchangeName::Bybitspot | ExchangeName::Bybitinverse
         );
-        let Some(rows) = rows.array_values() else {
+        let Some(rows) = rows.array_values()? else {
             return if dedicated {
                 Err(Thrown::type_error("data.forEach is not a function"))
             } else {
@@ -189,7 +189,7 @@ impl PrivateProtocol {
         for order in rows {
             let orders = this.call_method("mapOrder", vec![order.clone()])?;
             for mapped in orders
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("orders is not iterable"))?
             {
                 this.call_method("markOrderSeen", vec![mapped.get("id")?])?;
@@ -250,7 +250,7 @@ impl PrivateProtocol {
                 } else {
                     OrderStatus::Canceled
                 })?;
-                for mapped in orders.array_values().unwrap_or_default() {
+                for mapped in orders.array_values()?.unwrap_or_default() {
                     mapped.set("status", next.clone())?;
                 }
                 this.get("store")?

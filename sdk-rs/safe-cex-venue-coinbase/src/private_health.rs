@@ -1,6 +1,6 @@
 //! Private-stream health updates shared by Coinbase exchange handlers.
 use crate::portfolios_balances::{PortfolioFailure, PortfolioThrown};
-use safe_cex_store::{Store, StoreMutationError, StoreUpdate};
+use safe_cex_store::{Store, StoreMutationError};
 use serde_json::{Map, Value};
 use std::{cell::Cell, rc::Rc};
 
@@ -54,21 +54,12 @@ impl CoinbasePrivateUserStreamHealth {
         self.last_message_at.set(now_ms);
         self.has_warned_degraded.set(false);
 
-        // TypeScript spreads an own property with value `undefined`, which clears
-        // the serialized field. JSON Value has no undefined, so compose the same
-        // update with the shared Store read and replacement operations.
-        let mut socket_health = store
-            .socket_health()?
-            .and_then(|current| current.as_object().cloned())
-            .unwrap_or_default();
-        socket_health.shift_remove("privateDegradedReason");
-        store.update(
-            StoreUpdate {
-                socket_health: Some(Value::Object(socket_health)),
-                ..StoreUpdate::default()
-            },
-            false,
-        )
+        store.update_socket_health(&safe_cex_types::retained_json::RetainedJsonInput::Object(
+            vec![(
+                "privateDegradedReason".encode_utf16().collect(),
+                safe_cex_types::retained_json::RetainedJsonInput::Undefined,
+            )],
+        ))
     }
 
     // ts: CoinbaseExchange.markPrivateUserStreamDegraded
@@ -87,7 +78,7 @@ impl CoinbasePrivateUserStreamHealth {
             Value::String(reason.to_owned()),
         );
         store
-            .update_socket_health(&update)
+            .update_socket_health(&Value::Object(update).into())
             .map_err(|error| Rc::new(PortfolioThrown::from(error)))?;
         log(reason, "warning")?;
         if force_toast && !self.has_warned_degraded.get() {

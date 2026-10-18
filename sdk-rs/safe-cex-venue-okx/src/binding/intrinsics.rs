@@ -16,7 +16,7 @@ fn text(v: &Js) -> Result<String, Thrown> {
 }
 
 fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
-    v.array_values()
+    v.array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
 }
 
@@ -59,8 +59,8 @@ fn sort_desc(array: &Js, key: &str) -> Result<Js, Thrown> {
         }
     });
     let sorted: Vec<Js> = keyed.into_iter().map(|(_, v)| v).collect();
-    if let Js::Array(cells) = array {
-        *cells.borrow_mut() = sorted.iter().cloned().map(Some).collect();
+    for (index, value) in sorted.iter().enumerate() {
+        array.set(&index.to_string(), value.clone())?;
     }
     Ok(array.clone())
 }

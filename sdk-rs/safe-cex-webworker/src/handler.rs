@@ -274,8 +274,19 @@ impl BaseHandler {
                 "publicReconnectPaused",
                 "privateReconnectPaused",
             ] {
-                if let Some(value) = source.get(key) {
-                    health.insert(key.into(), value.clone());
+                if let Some(value) = source.get(key).filter(|value| {
+                    !matches!(
+                        value,
+                        safe_cex_types::retained_json::RetainedJsonInput::Undefined
+                    )
+                }) {
+                    health.insert(
+                        key.into(),
+                        value
+                            .clone()
+                            .into_value()
+                            .map_err(|error| ExchangeError::new(error.to_string()))?,
+                    );
                 }
             }
         }

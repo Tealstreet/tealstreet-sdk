@@ -703,3 +703,32 @@ The ticker baseline corpus includes four nullable-index actions in addition to
 its original 354 comparisons. Actual maintained worker execution observes an
 updated null baseline without a packed null value; null-to-number emits the
 numeric index delta. This preserves the source typeof-number filter.
+
+TWAP resume/terminate keep their synchronous state/timer prefix and return the
+canonical eager Promise waiter, so even ready/no-op/error results yield before
+an awaiting caller continues. Posting failures preserve earlier state commits
+and stop later cleanup/removal; tests compare actual source instances before
+polling as well as after settlement.
+
+Chaser placement/completion use the canonical eager Promise driver. Caller waiter
+abandonment cannot cancel late-placement cleanup or fill reconciliation. Typed
+leaf results cross source await checkpoints before logs, retries, fills or events;
+ready, failed, no-op and held results are compared with the actual TS manager.
+
+CallMethod dispatch starts through the canonical eager driver at either entry.
+Ready venue futures yield at the source await before replying; synchronous cases
+reply during entry. Dropping a caller waiter leaves the operation and reply owned
+by the runtime. Runtime teardown keeps the existing guarded cancellation report.
+
+Chaser module composition is scoped per host thread, matching independent worker
+module realms. Eager TS construction and lazy native construction only allocate
+an empty live list. The composition witness binds the singleton to the actual
+ChaserEngine and compares registration, cleanup and completion with maintained
+source; terminal host capabilities remain required. This accepts composition,
+not the separately tracked state, carrier, startup or method timing findings.
+
+Worker startup and session listeners own their continuations through canonical
+start_eager. Clock, import, venue-start and startup-race typed results yield at
+their source await boundaries. Discarding a caller waiter cannot cancel startup
+or failed-worker table cleanup; token/disposal suppression and retained startup
+losers remain unchanged. Raw session/config admission is a separate audit row.

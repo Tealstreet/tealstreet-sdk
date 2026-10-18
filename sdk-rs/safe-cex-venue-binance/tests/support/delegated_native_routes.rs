@@ -81,7 +81,13 @@ fn production_native_historical_positions_keeps_symbol_scoped_fold() {
 }
 
 fn assert_signed_history_fold(result: EventValue, http: &HistoryHttp) {
-    assert!(result.array_values().unwrap().is_empty());
+    assert!(
+        result
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()
+            .is_empty()
+    );
     let requests = http.requests.lock().unwrap();
     assert!(!requests.is_empty(), "real signed income HTTP must execute");
     assert!(

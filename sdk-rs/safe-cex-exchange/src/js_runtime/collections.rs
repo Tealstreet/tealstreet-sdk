@@ -155,69 +155,32 @@ pub(crate) fn iterator_next_method(brand: &'static str) -> Js {
 }
 
 pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
-    if let Js::Object(data) = value {
-        if let Some(prop) = data.symbol_iterator.borrow().clone() {
-            return match prop {
+    iterator_method_receiver(value, value)
+}
+fn iterator_method_receiver(value: &Js, receiver: &Js) -> Result<Js, Thrown> {
+    if let Some(slot) = value.symbol_iterator_slot() {
+        let property = slot.borrow().clone();
+        if let Some(property) = property {
+            return match property {
                 Prop::Data(value) | Prop::DataDescriptor { value, .. } => Ok(value),
-                Prop::Accessor { get: Some(get), .. } => get.call(value.clone(), vec![]),
+                Prop::Accessor { get: Some(get), .. } => get.call(receiver.clone(), vec![]),
                 Prop::Accessor { get: None, .. } => Ok(Js::Undefined),
             };
         }
-        if data.iterator_next.borrow().is_some() {
+        if let Js::Object(data) = value
+            && data.iterator_next.borrow().is_some()
+        {
             return Ok(Js::function("[Symbol.iterator]", |this, _| Ok(this)));
         }
-        if let Some(proto) = data.proto.borrow().clone() {
-            return iterator_method(&proto);
+        if let Some(proto) = value.prototype() {
+            return iterator_method_receiver(&proto, receiver);
         }
+        return Ok(Js::Undefined);
     }
     match value {
         Js::Map(_) => value.get("entries"),
         Js::Set(_) => value.get("values"),
-        Js::Array(_) | Js::String(_) => Ok(Js::function("values", |this, _| {
-            if !matches!(this, Js::Array(_) | Js::String(_)) {
-                return Err(Thrown::type_error("value is not iterable"));
-            }
-            let tag = if matches!(this, Js::String(_)) {
-                "String Iterator"
-            } else {
-                "Array Iterator"
-            };
-            let index = Cell::new(0usize);
-            let done = Cell::new(false);
-            let next: NativeFn = Rc::new(move |_, _| {
-                let at = index.get();
-                let item = if done.get() {
-                    None
-                } else {
-                    match &this {
-                        Js::Array(items) => items
-                            .borrow()
-                            .get(at)
-                            .map(|v| v.clone().unwrap_or(Js::Undefined)),
-                        Js::String(units) if at < units.len() => {
-                            let pair = (0xD800..=0xDBFF).contains(&units[at])
-                                && units
-                                    .get(at + 1)
-                                    .is_some_and(|u| (0xDC00..=0xDFFF).contains(u));
-                            let width = if pair { 2 } else { 1 };
-                            index.set(at + width - 1);
-                            Some(Js::utf16(&units[at..at + width]))
-                        }
-                        _ => None,
-                    }
-                };
-                if item.is_some() {
-                    index.set(index.get() + 1);
-                } else {
-                    done.set(true);
-                }
-                Ok(Js::object(vec![
-                    ("value", item.clone().unwrap_or(Js::Undefined)),
-                    ("done", Js::Bool(item.is_none())),
-                ]))
-            });
-            Ok(iterator_object(tag, next))
-        })),
+        Js::String(_) => Ok(array_iterator_method()),
         _ => Ok(Js::Undefined),
     }
 }
@@ -225,3 +188,48 @@ pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
 #[cfg(test)]
 #[path = "collection_contract_tests.rs"]
 pub(super) mod accepted_contract_tests;
+
+pub(crate) fn array_iterator_method() -> Js {
+    Js::function("values", |this, _| {
+        if !matches!(this, Js::Array(_) | Js::String(_)) {
+            return Err(Thrown::type_error("value is not iterable"));
+        }
+        let tag = if matches!(this, Js::String(_)) {
+            "String Iterator"
+        } else {
+            "Array Iterator"
+        };
+        let index = Cell::new(0usize);
+        let done = Cell::new(false);
+        let next: NativeFn = Rc::new(move |_, _| {
+            let at = index.get();
+            let item = if done.get() {
+                None
+            } else {
+                match &this {
+                    Js::Array(items) if at < items.len() => Some(this.get(&at.to_string())?),
+                    Js::String(units) if at < units.len() => {
+                        let pair = (0xD800..=0xDBFF).contains(&units[at])
+                            && units
+                                .get(at + 1)
+                                .is_some_and(|u| (0xDC00..=0xDFFF).contains(u));
+                        let width = if pair { 2 } else { 1 };
+                        index.set(at + width - 1);
+                        Some(Js::utf16(&units[at..at + width]))
+                    }
+                    _ => None,
+                }
+            };
+            if item.is_some() {
+                index.set(index.get() + 1);
+            } else {
+                done.set(true);
+            }
+            Ok(Js::object(vec![
+                ("value", item.clone().unwrap_or(Js::Undefined)),
+                ("done", Js::Bool(item.is_none())),
+            ]))
+        });
+        Ok(iterator_object(tag, next))
+    })
+}

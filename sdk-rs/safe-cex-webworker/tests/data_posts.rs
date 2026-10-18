@@ -23,7 +23,7 @@ use std::{
     future::Future,
     rc::Rc,
     sync::LazyLock,
-    task::{Context, Poll, Waker},
+    task::{Context, Waker},
 };
 
 static SOURCE: LazyLock<Value> = LazyLock::new(|| {
@@ -56,7 +56,13 @@ fn observe(value: &Js) -> Value {
         Js::Null => Value::Null,
         Js::Bool(v) => json!(v),
         Js::String(s) => json!(String::from_utf16(s).unwrap()),
-        Js::Array(_) => value.array_values().unwrap().iter().map(observe).collect(),
+        Js::Array(_) => value
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()
+            .iter()
+            .map(observe)
+            .collect(),
         Js::Object(_) => value
             .own_entries()
             .unwrap()
@@ -83,6 +89,7 @@ fn source_data(method: &str, data: &Js) {
 
 type CandleListener = Rc<RefCell<Option<Rc<dyn Fn(Candle)>>>>;
 struct Venue {
+    clock: Rc<runtime::Runtime>,
     base: BaseExchange,
     capabilities: ExchangeCapabilities,
     listener: CandleListener,
@@ -149,6 +156,7 @@ impl Exchange for Venue {
     }
 }
 fn venue() -> Rc<Venue> {
+    let clock = Rc::new(runtime::Runtime::default());
     let store = Rc::new(DefaultStore::new());
     let market=serde_json::from_value(json!({"id":"BTC","symbol":"BTC","base":"BTC","quote":"USD","active":true,"precision":{"amount":0.01,"price":0.1},"limits":{"amount":{"min":1,"max":100},"leverage":{"min":1,"max":100}}})).unwrap();
     Store::update(
@@ -161,24 +169,31 @@ fn venue() -> Rc<Venue> {
     )
     .unwrap();
     Rc::new(Venue {
+        clock: clock.clone(),
         base: BaseExchange::new(
             ExchangeName::Bybit,
             serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
             store,
-            Rc::new(runtime::Runtime::default()),
+            clock.clone(),
             Default::default(),
         ),
         capabilities: Default::default(),
         listener: Default::default(),
     })
 }
-fn ready(future: impl Future<Output = ()>) {
-    assert!(matches!(
-        std::pin::pin!(future)
+fn ready(clock: &runtime::Runtime, future: impl Future<Output = ()>) {
+    let mut future = std::pin::pin!(future);
+    for _ in 0..8 {
+        clock.advance(clock.now.get());
+        if future
             .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop())),
-        Poll::Ready(())
-    ));
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_ready()
+        {
+            return;
+        }
+    }
+    panic!("native DATA call did not settle");
 }
 fn number(value: &Js, expected: f64, field: &str) {
     let actual = value
@@ -198,24 +213,34 @@ fn number(value: &Js, expected: f64, field: &str) {
 fn call_method_candles_keep_native_numbers_and_both_rows() {
     let messages = Rc::new(RefCell::new(Vec::new()));
     let sink = messages.clone();
+    let venue = venue();
+    let clock = venue.clock.clone();
     let handler = CallMethodHandler::new(
-        venue(),
+        venue,
         WorkerDataPost::new(Rc::new(move |p| {
             sink.borrow_mut().push(p);
             Ok(())
         })),
         error_post_support::unexpected(),
     );
-    ready(handler.handle_call_method(
-        "fetchOHLCV".into(),
-        "fetchOHLCV".into(),
-        vec![json!({"symbol":"BTC","interval":"1m"})],
-    ));
+    ready(
+        &clock,
+        handler.handle_call_method(
+            "fetchOHLCV".into(),
+            "fetchOHLCV".into(),
+            vec![json!({"symbol":"BTC","interval":"1m"})],
+        ),
+    );
     assert_eq!(messages.borrow().len(), 1);
     let messages = messages.borrow();
     let data = &messages[0].data;
     assert!(matches!(data.get("success").unwrap(), Js::Bool(true)));
-    let rows = data.get("result").unwrap().array_values().unwrap();
+    let rows = data
+        .get("result")
+        .unwrap()
+        .array_values()
+        .expect("fixture array property reads")
+        .unwrap();
     assert_eq!(
         rows.len(),
         2,
@@ -242,25 +267,31 @@ fn call_method_candles_keep_native_numbers_and_both_rows() {
 fn call_method_orders_keep_own_undefined_and_native_numbers() {
     let messages = Rc::new(RefCell::new(Vec::new()));
     let sink = messages.clone();
+    let venue = venue();
+    let clock = venue.clock.clone();
     let handler = CallMethodHandler::new(
-        venue(),
+        venue,
         WorkerDataPost::new(Rc::new(move |p| {
             sink.borrow_mut().push(p);
             Ok(())
         })),
         error_post_support::unexpected(),
     );
-    ready(handler.handle_call_method(
-        "fetchOrders".into(),
-        "fetchOrders".into(),
-        vec![Value::Null],
-    ));
+    ready(
+        &clock,
+        handler.handle_call_method(
+            "fetchOrders".into(),
+            "fetchOrders".into(),
+            vec![Value::Null],
+        ),
+    );
     let messages = messages.borrow();
     let row = messages[0]
         .data
         .get("result")
         .unwrap()
         .array_values()
+        .expect("fixture array property reads")
         .unwrap()
         .remove(0);
     assert!(
@@ -332,20 +363,28 @@ fn candle_subscription_keeps_native_numbers_at_the_real_post_sink() {
 fn assigned_void_is_own_undefined_while_unknown_method_omits_result() {
     let messages = Rc::new(RefCell::new(Vec::new()));
     let sink = messages.clone();
+    let venue = venue();
+    let clock = venue.clock.clone();
     let handler = CallMethodHandler::new(
-        venue(),
+        venue,
         WorkerDataPost::new(Rc::new(move |p| {
             sink.borrow_mut().push(p);
             Ok(())
         })),
         error_post_support::unexpected(),
     );
-    ready(handler.handle_call_method(
-        "setLeverage".into(),
-        "setLeverage".into(),
-        vec![json!("BTC"), json!(3), Value::Null],
-    ));
-    ready(handler.handle_call_method("notAMethod".into(), "notAMethod".into(), vec![]));
+    ready(
+        &clock,
+        handler.handle_call_method(
+            "setLeverage".into(),
+            "setLeverage".into(),
+            vec![json!("BTC"), json!(3), Value::Null],
+        ),
+    );
+    ready(
+        &clock,
+        handler.handle_call_method("notAMethod".into(), "notAMethod".into(), vec![]),
+    );
     let messages = messages.borrow();
     assert_eq!(messages.len(), 2);
     assert!(
@@ -366,8 +405,10 @@ fn data_post_rejection_reaches_the_original_reply_catch() {
         failure.name = "TypeError".into();
         failure.stack = Some("native stack".into());
         failure.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(42)));
+        let venue = venue();
+        let clock = venue.clock.clone();
         let handler = CallMethodHandler::new(
-            venue(),
+            venue,
             WorkerDataPost::new(Rc::new(move |payload| {
                 let first = sink.borrow().is_empty();
                 sink.borrow_mut().push(payload);
@@ -375,7 +416,10 @@ fn data_post_rejection_reaches_the_original_reply_catch() {
             })),
             error_post_support::unexpected(),
         );
-        ready(handler.handle_call_method("failed-post".into(), method.into(), vec![Value::Null]));
+        ready(
+            &clock,
+            handler.handle_call_method("failed-post".into(), method.into(), vec![Value::Null]),
+        );
         let posts = posts.borrow();
         assert_eq!(
             posts.len(),

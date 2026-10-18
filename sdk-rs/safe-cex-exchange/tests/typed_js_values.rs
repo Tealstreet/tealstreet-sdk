@@ -35,7 +35,12 @@ fn typed_numbers_retain_native_bits_in_both_directions() {
             value.to_bits(),
             "native-to-JS scalar bits"
         );
-        let array = js.get("values").unwrap().array_values().unwrap();
+        let array = js
+            .get("values")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(
             array[0].as_f64().unwrap().to_bits(),
             value.to_bits(),

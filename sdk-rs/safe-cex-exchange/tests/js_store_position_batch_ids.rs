@@ -126,7 +126,7 @@ fn position_batch_ids_match_source_strict_and_indexed_lookup_modes() {
             row["mode"],
             row["tag"]
         );
-        let rows:Vec<Value>=facade.get("positions").unwrap().array_values().unwrap().iter().map(|value|json!({"id":value.get("id").unwrap().to_display(),"contracts":value.get("contracts").unwrap().to_display()})).collect();
+        let rows:Vec<Value>=facade.get("positions").unwrap().array_values().expect("fixture array property reads").unwrap().iter().map(|value|json!({"id":value.get("id").unwrap().to_display(),"contracts":value.get("contracts").unwrap().to_display()})).collect();
         assert_eq!(
             json!(rows),
             row["rows"],

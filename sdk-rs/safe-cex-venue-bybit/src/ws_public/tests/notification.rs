@@ -16,7 +16,11 @@ fn without_cause(mut error: ExchangeError) -> ExchangeError {
     error
 }
 fn expected_store_failure(store: &dyn Store) -> ExchangeError {
-    let error = store.update_socket_health(&Default::default()).unwrap_err();
+    let error = store
+        .update_socket_health(&safe_cex_types::retained_json::RetainedJsonInput::Object(
+            vec![],
+        ))
+        .unwrap_err();
     let safe_cex_store::StoreMutationError::Notification(notification) = error else {
         panic!("expected subscriber notification");
     };
@@ -141,7 +145,13 @@ fn notification_failure_from_no_socket_reconnect_reaches_owned_tail() {
             "one health publication"
         );
         assert_eq!(
-            parent.store.socket_health().unwrap().unwrap()["publicHealthy"],
+            parent
+                .store
+                .socket_health()
+                .unwrap()
+                .unwrap()
+                .into_value()
+                .unwrap()["publicHealthy"],
             true,
             "health commits before subscriber failure"
         );
@@ -249,7 +259,9 @@ fn notification_no_socket_send_retains_fallback_subscriber_identity() {
     );
     let error = parent
         .store
-        .update_socket_health(&Default::default())
+        .update_socket_health(&safe_cex_types::retained_json::RetainedJsonInput::Object(
+            vec![],
+        ))
         .unwrap_err();
     let safe_cex_store::StoreMutationError::Notification(notification) = error else {
         panic!("expected fallback subscriber notification");
